@@ -1,168 +1,268 @@
 import { useNavigate } from 'react-router-dom';
 import { 
-  Zap, 
-  Trophy, 
-  Shield, 
-  Code, 
-  CheckCircle, 
-  Bug, 
-  BarChart3, 
-  Users, 
-  FileSearch 
+  Sword, Shield, Zap, Trophy, Code, Bug, 
+  Lock, Users, BarChart3, Terminal, 
+  Sparkles, ChevronRight, Gamepad2, Crown 
 } from 'lucide-react';
 
 function LandingPage() {
   const navigate = useNavigate();
 
   return (
-    <div className="min-h-screen bg-[#0b1120] text-white overflow-x-hidden">
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 relative overflow-hidden">
       
-      {/* HERO SECTION */}
-      <section className="relative min-h-screen flex flex-col items-center justify-center px-4 py-20 text-center">
-        {/* Background Pattern (Optional subtle effect) */}
-        <div className="absolute inset-0 opacity-5 pointer-events-none">
-          <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAiIGhlaWdodD0iMjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGNpcmNsZSBjeD0iMSIgY3k9IjEiIHI9IjEiIGZpbGw9IiNmZmYiLz48L3N2Zz4=')]"></div>
+      {/* Animated Background Elements */}
+      <div className="absolute inset-0 overflow-hidden">
+        <div className="absolute top-10 left-10 w-96 h-96 bg-purple-500 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-blob"></div>
+        <div className="absolute top-10 right-10 w-96 h-96 bg-yellow-500 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-blob animation-delay-2000"></div>
+        <div className="absolute -bottom-8 left-20 w-96 h-96 bg-pink-500 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-blob animation-delay-4000"></div>
+        <div className="absolute top-1/2 left-1/2 w-96 h-96 bg-blue-500 rounded-full mix-blend-multiply filter blur-3xl opacity-10 animate-blob animation-delay-6000"></div>
+      </div>
+
+      {/* Navigation */}
+      <nav className="relative z-10 border-b border-white/10 backdrop-blur-sm">
+        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="relative">
+              <div className="absolute inset-0 bg-yellow-400 rounded-lg blur-lg opacity-50"></div>
+              <Gamepad2 size={32} className="relative text-yellow-400" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold text-white">Forge.Dev</h1>
+              <p className="text-xs text-slate-400">Adamson University Capstone</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-4">
+            <button 
+              onClick={() => navigate('/login')}
+              className="text-slate-300 hover:text-white font-medium transition"
+            >
+              Login
+            </button>
+            <button 
+              onClick={() => navigate('/register')}
+              className="px-6 py-2 bg-gradient-to-r from-yellow-500 to-purple-600 hover:from-yellow-400 hover:to-purple-500 text-white font-bold rounded-lg transition-all transform hover:scale-105 shadow-lg shadow-purple-500/30"
+            >
+              Start Quest
+            </button>
+          </div>
+        </div>
+      </nav>
+
+      {/* Hero Section */}
+      <div className="relative z-10 max-w-7xl mx-auto px-6 py-20 text-center">
+        <div className="inline-flex items-center gap-2 px-4 py-2 bg-yellow-500/10 border border-yellow-500/30 rounded-full mb-8">
+          <Crown size={16} className="text-yellow-400" />
+          <span className="text-yellow-400 text-sm font-semibold">Adamson University Capstone Project</span>
         </div>
 
-        {/* Badge */}
-        <div className="mb-6 inline-flex items-center gap-2 px-4 py-1.5 rounded-full border border-[#eab308]/30 bg-[#eab308]/10 text-[#eab308] text-sm font-medium">
-          <Zap size={16} />
-          <span>Adamson University Capstone Project</span>
-        </div>
-
-        {/* Main Title */}
-        <h1 className="text-5xl md:text-7xl font-bold mb-6 leading-tight">
-          <span className="block text-white">Master Code,</span>
-          <span className="block text-[#eab308]">Conquer Bugs.</span>
+        <h1 className="text-6xl md:text-7xl font-bold text-white mb-6 leading-tight">
+          Master Code,<br />
+          <span className="bg-gradient-to-r from-yellow-400 to-purple-600 bg-clip-text text-transparent">
+            Conquer Bugs.
+          </span>
         </h1>
 
-        {/* Subtitle */}
-        <p className="text-gray-400 text-lg md:text-xl max-w-2xl mb-10 leading-relaxed">
+        <p className="text-xl text-slate-300 mb-12 max-w-3xl mx-auto leading-relaxed">
           An automated code assessment and gamified debugging system for introductory programming courses. 
           Write code, get instant feedback, and level up your skills.
         </p>
 
-        {/* CTA Buttons */}
-        <div className="flex flex-col sm:flex-row gap-4 mb-16">
+        <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
           <button 
-            onClick={() => navigate('/login')} // UPDATED: Navigates to Role Selection
-            className="px-8 py-4 bg-[#eab308] hover:bg-yellow-500 text-black font-bold rounded-lg text-lg transition transform hover:scale-105 flex items-center justify-center gap-2 shadow-lg shadow-yellow-500/20"
+            onClick={() => navigate('/register')}
+            className="px-8 py-4 bg-gradient-to-r from-yellow-500 to-purple-600 hover:from-yellow-400 hover:to-purple-500 text-white font-bold rounded-xl transition-all transform hover:scale-105 shadow-2xl shadow-purple-500/30 flex items-center gap-3 text-lg"
           >
+            <Sword size={24} />
             Start Your Quest
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+            <ChevronRight size={24} />
           </button>
           <button 
-            onClick={() => navigate('/guest')}
-            className="px-8 py-4 bg-transparent border border-[#eab308] hover:bg-[#eab308]/10 text-white font-bold rounded-lg text-lg transition flex items-center justify-center"
+            onClick={() => navigate('/login')}
+            className="px-8 py-4 bg-slate-800/50 hover:bg-slate-700/50 border-2 border-purple-500/50 hover:border-purple-400 text-white font-bold rounded-xl transition-all backdrop-blur-sm flex items-center gap-3 text-lg"
           >
+            <Shield size={24} />
             Try a Challenge
           </button>
         </div>
 
-        {/* Top 3 Feature Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl w-full">
-          <FeatureCard 
-            icon={<Zap className="text-[#eab308]" size={32} />}
-            title="Instant Feedback"
-            description="Automated test case evaluation"
-          />
-          <FeatureCard 
-            icon={<Trophy className="text-[#eab308]" size={32} />}
-            title="Gamified Debugging"
-            description="Earn XP fixing real bugs"
-          />
-          <FeatureCard 
-            icon={<Shield className="text-[#eab308]" size={32} />}
-            title="Plagiarism Detection"
-            description="Code similarity checking"
-          />
-        </div>
-      </section>
+        {/* Stats */}
+        <div className="mt-20 grid grid-cols-1 md:grid-cols-3 gap-8 max-w-4xl mx-auto">
+          <div className="bg-slate-800/30 backdrop-blur-sm border border-white/10 rounded-2xl p-6 hover:border-yellow-500/50 transition-all group">
+            <div className="flex justify-center mb-4">
+              <div className="p-4 bg-yellow-500/10 rounded-xl group-hover:scale-110 transition-transform">
+                <Zap size={32} className="text-yellow-400" />
+              </div>
+            </div>
+            <h3 className="text-2xl font-bold text-white mb-2">Instant Feedback</h3>
+            <p className="text-slate-400">Automated test case evaluation</p>
+          </div>
 
-      {/* ADDITIONAL FEATURES SECTION */}
-      <section className="py-20 px-4 bg-[#0f172a]">
-        <div className="max-w-6xl mx-auto">
+          <div className="bg-slate-800/30 backdrop-blur-sm border border-white/10 rounded-2xl p-6 hover:border-purple-500/50 transition-all group">
+            <div className="flex justify-center mb-4">
+              <div className="p-4 bg-purple-500/10 rounded-xl group-hover:scale-110 transition-transform">
+                <Trophy size={32} className="text-purple-400" />
+              </div>
+            </div>
+            <h3 className="text-2xl font-bold text-white mb-2">Gamified Debugging</h3>
+            <p className="text-slate-400">Earn XP fixing real bugs</p>
+          </div>
+
+          <div className="bg-slate-800/30 backdrop-blur-sm border border-white/10 rounded-2xl p-6 hover:border-pink-500/50 transition-all group">
+            <div className="flex justify-center mb-4">
+              <div className="p-4 bg-pink-500/10 rounded-xl group-hover:scale-110 transition-transform">
+                <Lock size={32} className="text-pink-400" />
+              </div>
+            </div>
+            <h3 className="text-2xl font-bold text-white mb-2">Plagiarism Detection</h3>
+            <p className="text-slate-400">Code similarity checking</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Features Section */}
+      <div className="relative z-10 bg-slate-900/50 backdrop-blur-sm border-t border-white/10">
+        <div className="max-w-7xl mx-auto px-6 py-20">
           <div className="text-center mb-16">
-            <h2 className="text-3xl md:text-4xl font-bold mb-4">
-              Everything You Need to <span className="text-[#eab308]">Level Up</span>
+            <h2 className="text-4xl font-bold text-white mb-4">
+              Everything You Need to{' '}
+              <span className="bg-gradient-to-r from-yellow-400 to-purple-600 bg-clip-text text-transparent">
+                Level Up
+              </span>
             </h2>
-            <p className="text-gray-400 text-lg max-w-2xl mx-auto">
+            <p className="text-xl text-slate-400">
               A complete platform for programming education — from code submission to gamified practice.
             </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            <FeatureCardSmall 
-              icon={<Code className="text-[#eab308]" size={24} />}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+            <FeatureCard 
+              icon={<Code size={28} />}
               title="Web-Based Code Editor"
               description="Write and submit code directly in the browser with syntax highlighting."
+              color="blue"
             />
-            <FeatureCardSmall 
-              icon={<CheckCircle className="text-[#eab308]" size={24} />}
+            <FeatureCard 
+              icon={<Terminal size={28} />}
               title="Automated Assessment"
               description="Predefined test cases automatically evaluate submissions and provide instant results."
+              color="purple"
             />
-            <FeatureCardSmall 
-              icon={<Bug className="text-[#eab308]" size={24} />}
+            <FeatureCard 
+              icon={<Bug size={28} />}
               title="Debugging Challenges"
               description="Gamified bug-fixing exercises where students earn XP and climb leaderboards."
+              color="pink"
             />
-            <FeatureCardSmall 
-              icon={<BarChart3 className="text-[#eab308]" size={24} />}
+            <FeatureCard 
+              icon={<BarChart3 size={28} />}
               title="Performance Analytics"
               description="Instructors monitor student progress with detailed dashboards and reports."
+              color="yellow"
             />
-            <FeatureCardSmall 
-              icon={<Users className="text-[#eab308]" size={24} />}
+            <FeatureCard 
+              icon={<Users size={28} />}
               title="Multi-Role System"
               description="Dedicated interfaces for students, instructors, and administrators."
+              color="green"
             />
-            <FeatureCardSmall 
-              icon={<FileSearch className="text-[#eab308]" size={24} />}
+            <FeatureCard 
+              icon={<Shield size={28} />}
               title="Similarity Checking"
               description="Basic code plagiarism detection to maintain academic integrity."
+              color="red"
             />
           </div>
         </div>
-      </section>
+      </div>
 
-      {/* FOOTER */}
-      <footer className="py-12 px-4 border-t border-gray-800 text-center">
-        <div className="flex items-center justify-center gap-2 mb-4">
-          <div className="bg-[#eab308] p-2 rounded-lg">
-            <Code size={24} className="text-black" />
+      {/* CTA Section */}
+      <div className="relative z-10 max-w-7xl mx-auto px-6 py-20 text-center">
+        <div className="bg-gradient-to-r from-purple-600/20 to-yellow-600/20 border border-white/20 rounded-3xl p-12 backdrop-blur-sm">
+          <div className="flex justify-center mb-6">
+            <div className="relative">
+              <div className="absolute inset-0 bg-yellow-400 rounded-full blur-2xl opacity-30 animate-pulse"></div>
+              <Sparkles size={64} className="relative text-yellow-400" />
+            </div>
           </div>
-          <span className="text-2xl font-bold text-[#eab308]">FORGE.DEV</span>
+          <h2 className="text-4xl font-bold text-white mb-4">
+            Ready to Begin Your Journey?
+          </h2>
+          <p className="text-xl text-slate-300 mb-8 max-w-2xl mx-auto">
+            Join thousands of students mastering code through gamified learning. 
+            Create your adventurer and start coding today!
+          </p>
+          <button 
+            onClick={() => navigate('/register')}
+            className="px-10 py-4 bg-gradient-to-r from-yellow-500 to-purple-600 hover:from-yellow-400 hover:to-purple-500 text-white font-bold rounded-xl transition-all transform hover:scale-105 shadow-2xl shadow-purple-500/30 flex items-center gap-3 text-lg mx-auto"
+          >
+            <Gamepad2 size={24} />
+            Create Your Adventurer
+            <ChevronRight size={24} />
+          </button>
         </div>
-        <p className="text-gray-500 mb-2">Adamson University — College of Computing and Information Technology</p>
-        <p className="text-gray-600 text-sm">SDG 4 — Quality Education • Capstone Project 2026</p>
+      </div>
+
+      {/* Footer */}
+      <footer className="relative z-10 border-t border-white/10 bg-slate-900/50 backdrop-blur-sm">
+        <div className="max-w-7xl mx-auto px-6 py-8 text-center">
+          <div className="flex items-center justify-center gap-2 mb-4">
+            <div className="p-2 bg-yellow-500/10 rounded-lg">
+              <Code size={24} className="text-yellow-400" />
+            </div>
+            <span className="text-xl font-bold text-white">FORGE.DEV</span>
+          </div>
+          <p className="text-slate-400 text-sm">
+            Adamson University — College of Computing and Information Technology
+          </p>
+          <p className="text-slate-500 text-xs mt-2">
+            SDG 4 — Quality Education • Capstone Project 2026
+          </p>
+        </div>
       </footer>
+
+      {/* CSS for blob animation */}
+      <style>{`
+        @keyframes blob {
+          0%, 100% { transform: translate(0, 0) scale(1); }
+          33% { transform: translate(30px, -50px) scale(1.1); }
+          66% { transform: translate(-20px, 20px) scale(0.9); }
+        }
+        .animate-blob {
+          animation: blob 7s infinite;
+        }
+        .animation-delay-2000 {
+          animation-delay: 2s;
+        }
+        .animation-delay-4000 {
+          animation-delay: 4s;
+        }
+        .animation-delay-6000 {
+          animation-delay: 6s;
+        }
+      `}</style>
     </div>
   );
 }
 
-// Helper Component: Large Feature Card
-function FeatureCard({ icon, title, description }) {
-  return (
-    <div className="bg-[#1e293b] p-8 rounded-xl border border-gray-700 hover:border-[#eab308]/50 transition duration-300 group">
-      <div className="mb-4 p-3 bg-[#eab308]/10 rounded-lg inline-block group-hover:bg-[#eab308]/20 transition">
-        {icon}
-      </div>
-      <h3 className="text-xl font-bold mb-2 text-white">{title}</h3>
-      <p className="text-gray-400">{description}</p>
-    </div>
-  );
-}
+// Feature Card Component
+function FeatureCard({ icon, title, description, color }) {
+  const colorClasses = {
+    blue: 'bg-blue-500/10 text-blue-400 hover:border-blue-500/50',
+    purple: 'bg-purple-500/10 text-purple-400 hover:border-purple-500/50',
+    pink: 'bg-pink-500/10 text-pink-400 hover:border-pink-500/50',
+    yellow: 'bg-yellow-500/10 text-yellow-400 hover:border-yellow-500/50',
+    green: 'bg-green-500/10 text-green-400 hover:border-green-500/50',
+    red: 'bg-red-500/10 text-red-400 hover:border-red-500/50'
+  };
 
-// Helper Component: Small Feature Card
-function FeatureCardSmall({ icon, title, description }) {
   return (
-    <div className="bg-[#1e293b] p-6 rounded-xl border border-gray-700 hover:border-[#eab308]/50 transition duration-300">
-      <div className="mb-4 p-2 bg-[#eab308]/10 rounded-lg inline-block">
+    <div className="bg-slate-800/30 backdrop-blur-sm border border-white/10 rounded-2xl p-6 hover:scale-105 transition-all group hover:border-white/20">
+      <div className={`inline-flex p-3 rounded-xl mb-4 ${colorClasses[color]}`}>
         {icon}
       </div>
-      <h3 className="text-lg font-bold mb-2 text-white">{title}</h3>
-      <p className="text-gray-400 text-sm">{description}</p>
+      <h3 className="text-xl font-bold text-white mb-2">{title}</h3>
+      <p className="text-slate-400 leading-relaxed">{description}</p>
     </div>
   );
 }
