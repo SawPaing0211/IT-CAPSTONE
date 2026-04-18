@@ -1,135 +1,156 @@
-import { Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { Outlet, useNavigate, Link } from 'react-router-dom';
 import { 
-  Trophy, 
-  Flame, 
-  Star, 
-  User, 
-  LogOut, 
-  LayoutDashboard, 
-  Medal,
-  Zap,
-  Code2,
-  Bug,
-  Box,
-  History,
-  Grid3X3
+  Zap, Trophy, Shield, Code, Bug, BarChart3, 
+  Users, Settings, LogOut, Gamepad2, Star,
+  Flame, Target, Clock, Crown
 } from 'lucide-react';
-import { useState } from 'react';
 
 function StudentLayout() {
   const navigate = useNavigate();
-  const location = useLocation();
-  
-  // Mock Student Stats
-  const [stats] = useState({
-    name: 'Niño, Sasan',
-    level: 12,
-    xp: 2450,
-    maxXp: 3000, // XP needed for next level
-    streak: 15,
-    badges: ['first-blood', 'bug-hunter', 'speed-demon'] // Mock badge IDs
-  });
+  const [userData, setUserData] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  // Fetch real user data from API
+  useEffect(() => {
+    const fetchUserData = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const response = await fetch('http://localhost:5000/api/student/dashboard', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          setUserData(data);
+          // Update localStorage with fresh data
+          const user = JSON.parse(localStorage.getItem('user') || '{}');
+          localStorage.setItem('user', JSON.stringify({
+            ...user,
+            level: data.user.level,
+            xp: data.user.xp,
+            streak: data.user.streak
+          }));
+        }
+      } catch (err) {
+        console.error('Error fetching user data:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchUserData();
+  }, []);
 
   const handleLogout = () => {
     localStorage.removeItem('token');
-    navigate('/');
+    localStorage.removeItem('user');
+    navigate('/login');
   };
 
-  const tabs = [
-    { name: 'Student', path: '/student/dashboard', icon: Grid3X3 },
-    { name: 'Code Editor', path: '/student/code-editor', icon: Code2 },
-    { name: 'Debug', path: '/student/debug', icon: Bug },
-    { name: 'Sandbox', path: '/student/sandbox', icon: Box },
-    { name: 'History', path: '/student/history', icon: History },
-    { name: 'Leaderboard', path: '/student/leaderboard', icon: Trophy },
-  ];
-
-  // Calculate XP percentage
-  const xpPercentage = Math.round((stats.xp / stats.maxXp) * 100);
+  const user = userData?.user || { level: 1, xp: 0, xp_to_next: 250, streak: 0 };
+  const xpProgress = Math.min((user.xp % user.xp_to_next) / user.xp_to_next * 100, 100);
+  const userName = JSON.parse(localStorage.getItem('user') || '{}').name || 'Adventurer';
 
   return (
-    <div className="min-h-screen bg-[#0b1120] text-white flex flex-col">
-      
-      {/* Gamified Header */}
-      <header className="sticky top-0 z-50 bg-[#0f172a]/95 backdrop-blur-md border-b border-gray-800 shadow-lg">
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
+      {/* Animated Background */}
+      <div className="fixed inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute top-10 left-10 w-72 h-72 bg-purple-500 rounded-full mix-blend-multiply filter blur-3xl opacity-10 animate-blob"></div>
+        <div className="absolute top-10 right-10 w-72 h-72 bg-yellow-500 rounded-full mix-blend-multiply filter blur-3xl opacity-10 animate-blob animation-delay-2000"></div>
+        <div className="absolute -bottom-8 left-20 w-72 h-72 bg-pink-500 rounded-full mix-blend-multiply filter blur-3xl opacity-10 animate-blob animation-delay-4000"></div>
+      </div>
+
+      {/* Header */}
+      <header className="relative z-10 border-b border-white/10 backdrop-blur-xl bg-slate-900/50">
         <div className="max-w-7xl mx-auto px-6 py-4">
-          <div className="flex flex-col lg:flex-row justify-between items-center gap-6">
-            
-            {/* Left: Logo & Greeting */}
+          <div className="flex items-center justify-between">
+            {/* Logo */}
             <div className="flex items-center gap-4">
-              <div className="p-2 bg-[#eab308]/10 rounded-lg">
-                <Zap size={24} className="text-[#eab308]" />
-              </div>
-              <div>
-                <h1 className="text-xl font-bold text-white">Forge.Dev</h1>
-                <p className="text-xs text-gray-400">Welcome back, {stats.name.split(',')[0]}!</p>
-              </div>
+              <Link to="/student/dashboard" className="flex items-center gap-3">
+                <div className="relative">
+                  <div className="absolute inset-0 bg-yellow-400 rounded-lg blur-lg opacity-50"></div>
+                  <Gamepad2 size={28} className="relative text-yellow-400" />
+                </div>
+                <div>
+                  <h1 className="text-xl font-bold text-white">Forge.Dev</h1>
+                  <p className="text-xs text-slate-400">Welcome back, {userName}!</p>
+                </div>
+              </Link>
             </div>
 
-            {/* Center: XP & Level Stats */}
-            <div className="flex-1 w-full lg:w-auto flex flex-col gap-2 max-w-md">
-              <div className="flex items-center justify-between text-sm">
-                <div className="flex items-center gap-2">
-                  <span className="flex items-center justify-center w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-blue-600 font-bold text-white shadow-lg shadow-purple-500/20">
-                    {stats.level}
-                  </span>
-                  <span className="font-medium text-gray-300">Level {stats.level}</span>
-                </div>
-                <div className="flex items-center gap-1 text-orange-500 font-bold">
-                  <Flame size={16} className="animate-pulse" />
-                  <span>{stats.streak} Day Streak</span>
-                </div>
-              </div>
-              
-              {/* XP Progress Bar */}
-              <div className="relative w-full h-3 bg-gray-800 rounded-full overflow-hidden shadow-inner">
-                <div 
-                  className="absolute top-0 left-0 h-full bg-gradient-to-r from-[#eab308] to-yellow-300 transition-all duration-500 ease-out"
-                  style={{ width: `${xpPercentage}%` }}
-                ></div>
-                <div className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-white drop-shadow-md">
-                  {stats.xp} / {stats.maxXp} XP
-                </div>
-              </div>
-            </div>
-
-            {/* Right: Navigation & Badges */}
-            <div className="flex items-center gap-4">
-              {/* Mini Badges */}
-              <div className="hidden md:flex items-center gap-1 bg-[#1e293b] px-3 py-1.5 rounded-full border border-gray-700">
-                {stats.badges.map((badge, idx) => (
-                  <div key={idx} className="w-6 h-6 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-[10px] text-white shadow-sm" title={`Badge: ${badge}`}>
-                    <Star size={12} fill="white" />
+            {/* Stats Bar */}
+            <div className="flex items-center gap-6">
+              {/* Level Badge */}
+              <div className="flex items-center gap-3 bg-slate-800/50 px-4 py-2 rounded-xl border border-white/10">
+                <div className="relative">
+                  <div className="absolute inset-0 bg-purple-500 rounded-full blur-md opacity-50"></div>
+                  <div className="relative w-8 h-8 bg-gradient-to-br from-purple-600 to-purple-800 rounded-full flex items-center justify-center text-white font-bold text-sm">
+                    {loading ? '?' : user.level}
                   </div>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-400">Level {loading ? '?' : user.level}</p>
+                  <div className="w-24 h-1.5 bg-slate-700 rounded-full overflow-hidden">
+                    <div 
+                      className="h-full bg-gradient-to-r from-yellow-400 to-purple-600 rounded-full transition-all"
+                      style={{ width: `${xpProgress}%` }}
+                    ></div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Streak */}
+              <div className="flex items-center gap-2 bg-orange-500/10 px-4 py-2 rounded-xl border border-orange-500/30">
+                <Flame size={18} className="text-orange-400" />
+                <span className="text-orange-400 font-semibold text-sm">
+                  {loading ? '?' : user.streak} Day Streak
+                </span>
+              </div>
+
+              {/* Stars */}
+              <div className="flex items-center gap-1 bg-slate-800/50 px-3 py-2 rounded-xl border border-white/10">
+                {[1, 2, 3].map((star) => (
+                  <Star key={star} size={16} className="text-yellow-400 fill-yellow-400" />
                 ))}
-                <span className="text-xs text-gray-400 ml-1">+{stats.badges.length}</span>
+                <span className="text-slate-400 text-xs ml-1">+3</span>
               </div>
+            </div>
 
-              {/* Nav Tabs */}
-              <div className="flex bg-[#1e293b] p-1 rounded-lg border border-gray-700">
-                {tabs.map((tab) => {
-                  const isActive = location.pathname === tab.path || (tab.name === 'Student' && location.pathname === '/student');
-                  return (
-                    <button
-                      key={tab.name}
-                      onClick={() => navigate(tab.path)}
-                      className={`p-2 rounded-md transition ${
-                        isActive 
-                          ? 'bg-[#eab308] text-black shadow-md' 
-                          : 'text-gray-400 hover:text-white hover:bg-gray-700'
-                      }`}
-                      title={tab.name}
-                    >
-                      <tab.icon size={18} />
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* Logout */}
+            {/* Navigation Icons */}
+            <div className="flex items-center gap-2">
+              <NavItem 
+                icon={<Target size={20} />} 
+                label="Quests" 
+                active 
+                onClick={() => navigate('/student/dashboard')}
+              />
+              <NavItem 
+                icon={<Code size={20} />} 
+                label="Code Editor" 
+                onClick={() => navigate('/student/code-editor')}
+              />
+              <NavItem 
+                icon={<Bug size={20} />} 
+                label="Debug Mode" 
+                onClick={() => navigate('/student/debug')}
+              />
+              <NavItem 
+                icon={<Trophy size={20} />} 
+                label="Leaderboard" 
+                onClick={() => navigate('/student/leaderboard')}
+              />
+              <NavItem 
+                icon={<Clock size={20} />} 
+                label="History" 
+                onClick={() => navigate('/student/history')}
+              />
+              
+              <div className="w-px h-8 bg-white/10 mx-2"></div>
+              
               <button 
                 onClick={handleLogout}
-                className="p-2 text-gray-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition"
+                className="p-2 text-slate-400 hover:text-red-400 transition"
                 title="Logout"
               >
                 <LogOut size={20} />
@@ -139,12 +160,45 @@ function StudentLayout() {
         </div>
       </header>
 
-      {/* Main Content Area */}
-      <main className="flex-1 px-6 py-8 max-w-7xl mx-auto w-full">
+      {/* Main Content */}
+      <main className="relative z-10 max-w-7xl mx-auto px-6 py-8">
         <Outlet />
       </main>
 
+      {/* CSS for blob animation */}
+      <style>{`
+        @keyframes blob {
+          0%, 100% { transform: translate(0, 0) scale(1); }
+          33% { transform: translate(30px, -50px) scale(1.1); }
+          66% { transform: translate(-20px, 20px) scale(0.9); }
+        }
+        .animate-blob {
+          animation: blob 7s infinite;
+        }
+        .animation-delay-2000 {
+          animation-delay: 2s;
+        }
+        .animation-delay-4000 {
+          animation-delay: 4s;
+        }
+      `}</style>
     </div>
+  );
+}
+
+function NavItem({ icon, label, active, onClick }) {
+  return (
+    <button 
+      onClick={onClick}
+      className={`p-2 rounded-lg transition cursor-pointer ${
+        active 
+          ? 'bg-yellow-500/20 text-yellow-400' 
+          : 'text-slate-400 hover:text-white hover:bg-white/5'
+      }`}
+      title={label}
+    >
+      {icon}
+    </button>
   );
 }
 

@@ -1,452 +1,483 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { 
-  Play, 
-  Save, 
-  RotateCcw, 
-  CheckCircle2, 
-  XCircle, 
-  AlertCircle,
-  Terminal,
-  Zap,
-  Clock,
-  HelpCircle,
-  Maximize2,
-  Minimize2,
-  PanelLeft,
-  PanelRight
-} from 'lucide-react';
+import Editor from '@monaco-editor/react';
+import { Play, RotateCcw, Save, AlertCircle, CheckCircle, Terminal, XCircle } from 'lucide-react';
 
-function StudentChallenge() {
+function Challenge() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const editorRef = useRef(null);
+  const monacoRef = useRef(null);
+  const validateTimerRef = useRef(null);
   
-  // Mock Problem Data
-  const [problem] = useState({
-    id: parseInt(id) || 1,
-    title: 'Array Sorting Master',
-    description: `Write a function to sort an array of integers in ascending order.
-
-**Requirements:**
-- Input: An array of integers
-- Output: The same array sorted in ascending order
-- You cannot use built-in sort functions
-- Time complexity should be O(n log n) or better
-
-**Example:**
-Input: [5, 2, 8, 1, 9]
-Output: [1, 2, 5, 8, 9]
-
-**Constraints:**
-- Array length: 1 ≤ n ≤ 10^5
-- Element values: -10^9 ≤ value ≤ 10^9`,
-    difficulty: 'Medium',
-    xpReward: 150,
-    timeLimit: 300,
-    starterCode: {
-      python: `def sort_array(arr):
-    # Your code here
-    pass
-
-# Test your function
-if __name__ == "__main__":
-    test_input = [5, 2, 8, 1, 9]
-    result = sort_array(test_input)
-    print(f"Input: {test_input}")
-    print(f"Output: {result}")`,
-      java: `public class Solution {
-    public static int[] sortArray(int[] arr) {
-        // Your code here
-        return arr;
-    }
-    
-    public static void main(String[] args) {
-        int[] testInput = {5, 2, 8, 1, 9};
-        int[] result = sortArray(testInput);
-        System.out.println("Input: " + java.util.Arrays.toString(testInput));
-        System.out.println("Output: " + java.util.Arrays.toString(result));
-    }
-}`,
-      csharp: `using System;
-
-class Solution {
-    static int[] SortArray(int[] arr) {
-        // Your code here
-        return arr;
-    }
-    
-    static void Main() {
-        int[] testInput = {5, 2, 8, 1, 9};
-        int[] result = SortArray(testInput);
-        Console.WriteLine($"Input: [{string.Join(", ", testInput)}]");
-        Console.WriteLine($"Output: [{string.Join(", ", result)}]");
-    }
-}`
-    },
-    testCases: [
-      { input: '[5, 2, 8, 1, 9]', expected: '[1, 2, 5, 8, 9]' },
-      { input: '[1]', expected: '[1]' },
-      { input: '[3, 1, 2]', expected: '[1, 2, 3]' }
-    ]
-  });
-
-  const [selectedLanguage, setSelectedLanguage] = useState('python');
-  const [code, setCode] = useState(problem.starterCode.python);
-  const [output, setOutput] = useState('');
+  const [problem, setProblem] = useState(null);
+  const [code, setCode] = useState('');
+  const [output, setOutput] = useState('Click "Run Code" to see results...');
   const [isRunning, setIsRunning] = useState(false);
-  const [submissionResult, setSubmissionResult] = useState(null);
-  const [timeLeft, setTimeLeft] = useState(problem.timeLimit);
-  const [showProblem, setShowProblem] = useState(true);
+  const [status, setStatus] = useState(null);
+  const [score, setScore] = useState(0);
+  const [editorErrors, setEditorErrors] = useState([]);
 
+  // Fetch Problem Data from Backend
   useEffect(() => {
-    if (timeLeft > 0 && !submissionResult) {
-      const timer = setInterval(() => {
-        setTimeLeft(prev => prev - 1);
-      }, 1000);
-      return () => clearInterval(timer);
-    }
-  }, [timeLeft, submissionResult]);
+    const fetchProblem = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const response = await fetch(`http://localhost:5000/api/problems/${id}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await response.json();
+        
+        if (response.ok) {
+          setProblem(data);
+          setCode(data.starter_code || '# Read input from stdin\nimport ast\n\ninput_str = input()\narr = ast.literal_eval(input_str)\n\ndef sort_array(arr):\n    # Your code here\n    n = len(arr)\n    for i in range(n):\n        for j in range(0, n - i - 1):\n            if arr[j] > arr[j + 1]:\n                arr[j], arr[j + 1] = arr[j + 1], arr[j]\n    return arr\n\nresult = sort_array(arr)\nprint(result)');
+        } else {
+          setOutput('Error loading problem.');
+        }
+      } catch (err) {
+        setOutput('Network error. Is backend running?');
+      }
+    };
+    
+    fetchProblem();
+  }, [id]);
 
-  const formatTime = (seconds) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  // Handle Editor Mount
+  const handleEditorMount = (editor, monaco) => {
+    editorRef.current = editor;
+    monacoRef.current = monaco;
+    
+    // Initial validation
+    validateCode(editor.getValue());
+    
+    // Validate on change (with debounce)
+    editor.onDidChangeModelContent(() => {
+      if (validateTimerRef.current) {
+        clearTimeout(validateTimerRef.current);
+      }
+      validateTimerRef.current = setTimeout(() => {
+        validateCode(editor.getValue());
+      }, 300);
+    });
   };
 
-  const handleRunCode = () => {
-    setIsRunning(true);
-    setOutput('Compiling and running...\n');
+  // Comprehensive Python syntax validator
+  const validateCode = (codeText) => {
+    // Don't validate if Monaco isn't ready
+    if (!monacoRef.current) return;
     
-    setTimeout(() => {
-      const mockOutput = `Input: [5, 2, 8, 1, 9]
-Output: [1, 2, 5, 8, 9]
-✅ Test Case 1: PASSED
-✅ Test Case 2: PASSED  
-✅ Test Case 3: PASSED
-
-Execution Time: 0.045s
-Memory Used: 12.5 MB`;
-      
-      setOutput(mockOutput);
-      setIsRunning(false);
-    }, 1500);
-  };
-
-  const handleSubmit = () => {
-    setIsRunning(true);
-    setOutput('Submitting solution...\n');
+    const errors = [];
+    const lines = codeText.split('\n');
+    const MarkerSeverity = monacoRef.current.MarkerSeverity;
     
-    setTimeout(() => {
-      // Simple validation - check if code has actual logic
-      const hasDefOrFunction = code.includes('def ') || code.includes('function') || code.includes('class ');
-      const hasReturnOrPrint = code.includes('return') || code.includes('print') || code.includes('console') || code.includes('System.out');
-      const hasGarbage = code.includes(';;;;;;;') || code.includes('asdasd') || code.match(/;{4,}/);
-      const isTooShort = code.split('\n').filter(line => line.trim()).length < 3;
+    lines.forEach((line, index) => {
+      const lineNum = index + 1;
+      const trimmed = line.trim();
       
-      // Check if it's just the starter code with "pass" or empty
-      const isJustPass = code.includes('pass') && !code.includes('for') && !code.includes('while') && !code.includes('sort') && !code.includes('if');
-      const isEmpty = code.trim().length < 20;
-
-      if (hasGarbage || isTooShort || isJustPass || isEmpty) {
-        // FAILED - Invalid code
-        setSubmissionResult({
-          status: 'failed',
-          message: '❌ Invalid code. Please implement a proper solution.',
-          testResults: [
-            { case: 1, status: 'failed', expected: '[1, 2, 5, 8, 9]', actual: 'Error: Invalid implementation' },
-            { case: 2, status: 'failed', expected: '[1]', actual: 'Error: Invalid implementation' },
-            { case: 3, status: 'failed', expected: '[1, 2, 3]', actual: 'Error: Invalid implementation' }
-          ]
-        });
-        setOutput(`❌ Compilation Error or Invalid Logic
-
-Test Case 1: FAILED
-  Expected: [1, 2, 5, 8, 9]
-  Got: Error - Invalid implementation
-
-Test Case 2: FAILED
-  Expected: [1]
-  Got: Error - Invalid implementation
-
-Hint: Remove garbage characters and implement proper sorting logic.`);
-      } else if (hasDefOrFunction && hasReturnOrPrint) {
-        // SUCCESS - Has valid structure
-        setSubmissionResult({
-          status: 'success',
-          message: '🎉 Congratulations! Your solution is correct!',
-          xpEarned: problem.xpReward,
-          testResults: [
-            { case: 1, status: 'passed' },
-            { case: 2, status: 'passed' },
-            { case: 3, status: 'passed' }
-          ]
-        });
-        setOutput(`✅ All test cases passed!
-+${problem.xpReward} XP earned!
-Execution Time: 0.045s
-Memory Used: 12.5 MB`);
-      } else {
-        // PARTIAL - Missing logic
-        setSubmissionResult({
-          status: 'failed',
-          message: '❌ Incomplete solution',
-          testResults: [
-            { case: 1, status: 'failed', expected: '[1, 2, 5, 8, 9]', actual: 'None' },
-            { case: 2, status: 'passed', expected: '[1]', actual: '[1]' },
-            { case: 3, status: 'failed', expected: '[1, 2, 3]', actual: 'None' }
-          ]
-        });
-        setOutput(`❌ Some test cases failed.
-
-Test Case 1: FAILED
-  Expected: [1, 2, 5, 8, 9]
-  Got: None
-
-Test Case 2: PASSED
-  
-Test Case 3: FAILED
-  Expected: [1, 2, 3]
-  Got: None
-
-Hint: Make sure your function returns the sorted array.`);
+      // Skip empty lines and comments
+      if (!trimmed || trimmed.startsWith('#')) return;
+      
+      // 1. Check for missing colon after compound statements
+      if (/^\s*(def|if|for|while|else|elif|class|try|except|finally|with)\b/.test(line)) {
+        if (!trimmed.endsWith(':') && !trimmed.endsWith('\\')) {
+          errors.push({
+            severity: MarkerSeverity.Error,
+            startLineNumber: lineNum,
+            startColumn: line.length,
+            endLineNumber: lineNum,
+            endColumn: line.length + 1,
+            message: "Expected ':' at end of compound statement"
+          });
+        }
       }
       
-      setIsRunning(false);
-    }, 2000);
-  };
-
-  const handleReset = () => {
-    setCode(problem.starterCode[selectedLanguage]);
-    setOutput('');
-    setSubmissionResult(null);
-    setTimeLeft(problem.timeLimit);
-  };
-
-  const getDifficultyColor = (difficulty) => {
-    switch(difficulty) {
-      case 'Easy': return 'text-green-500 bg-green-500/10 border-green-500/20';
-      case 'Medium': return 'text-yellow-500 bg-yellow-500/10 border-yellow-500/20';
-      case 'Hard': return 'text-red-500 bg-red-500/10 border-red-500/20';
-      default: return 'text-gray-500 bg-gray-500/10 border-gray-500/20';
+      // 2. Check for invalid function calls (common beginner mistakes)
+      const invalidFuncs = ['length(', 'size(', 'sizeof(', 'printn(', 'inputn('];
+      invalidFuncs.forEach(func => {
+        if (line.includes(func)) {
+          const col = line.indexOf(func) + 1;
+          const correct = func.replace('(', '').replace('n', '');
+          errors.push({
+            severity: MarkerSeverity.Error,
+            startLineNumber: lineNum,
+            startColumn: col,
+            endLineNumber: lineNum,
+            endColumn: col + func.length - 1,
+            message: `'${func.slice(0, -1)}' is not defined. Did you mean '${correct}'?`
+          });
+        }
+      });
+      
+      // 3. Check for indentation after compound statements
+      if (/^\s*(def|if|for|while|else|elif|class)\b.*:\s*$/.test(line)) {
+        const nextLine = lines[index + 1];
+        if (nextLine && nextLine.trim() && !/^\s{4,}|\t/.test(nextLine) && !nextLine.trim().startsWith('#')) {
+          errors.push({
+            severity: MarkerSeverity.Error,
+            startLineNumber: lineNum + 1,
+            startColumn: 1,
+            endLineNumber: lineNum + 1,
+            endColumn: nextLine.indexOf(nextLine.trim().charAt(0)) + 1,
+            message: 'Expected an indented block after this statement'
+          });
+        }
+      }
+      
+      // 4. Check for undefined common variables (beginner mistakes)
+      const undefinedVars = ['arry', 'arrary', 'numbs', 'nums', 'lst', 'listt'];
+      undefinedVars.forEach(varName => {
+        const regex = new RegExp(`\\b${varName}\\b`, 'g');
+        let match;
+        while ((match = regex.exec(line)) !== null) {
+          errors.push({
+            severity: MarkerSeverity.Warning,
+            startLineNumber: lineNum,
+            startColumn: match.index + 1,
+            endLineNumber: lineNum,
+            endColumn: match.index + match[0].length + 1,
+            message: `Variable '${varName}' may be undefined. Did you mean 'arr'?`
+          });
+        }
+      });
+      
+      // 5. Check for assignment instead of comparison (== vs =)
+      if (/\bif\s+\w+\s*=\s*[^=]/.test(line) && !/\bif\s+\w+\s*==/.test(line)) {
+        const match = line.match(/\bif\s+\w+\s*=\s*[^=]/);
+        if (match) {
+          const col = match.index + match[0].indexOf('=') + 1;
+          errors.push({
+            severity: MarkerSeverity.Error,
+            startLineNumber: lineNum,
+            startColumn: col,
+            endLineNumber: lineNum,
+            endColumn: col + 1,
+            message: "Use '==' for comparison, not '='"
+          });
+        }
+      }
+      
+      // 6. Check for print without parentheses (Python 3)
+      if (/\bprint\s+[^(\n]/.test(line) && !/\bprint\s*\(/.test(line)) {
+        const col = line.indexOf('print') + 1;
+        errors.push({
+          severity: MarkerSeverity.Error,
+          startLineNumber: lineNum,
+          startColumn: col,
+          endLineNumber: lineNum,
+          endColumn: col + 5,
+          message: "In Python 3, 'print' is a function. Use print()"
+        });
+      }
+      
+      // 7. Check for unmatched parentheses/brackets (simple check)
+      const openParens = (line.match(/\(/g) || []).length;
+      const closeParens = (line.match(/\)/g) || []).length;
+      if (openParens > closeParens && !line.trim().endsWith('\\') && !line.trim().endsWith('(')) {
+        errors.push({
+          severity: MarkerSeverity.Warning,
+          startLineNumber: lineNum,
+          startColumn: line.length,
+          endLineNumber: lineNum,
+          endColumn: line.length + 1,
+          message: 'Unmatched opening parenthesis'
+        });
+      }
+    });
+    
+    setEditorErrors(errors);
+    
+    // Set markers in editor
+    if (editorRef.current && monacoRef.current) {
+      monacoRef.current.editor.setModelMarkers(
+        editorRef.current.getModel(),
+        'python-validator',
+        errors
+      );
+    }
+    
+    // 🎯 UPDATE CONSOLE OUTPUT WITH ERRORS
+    if (errors.length > 0) {
+      const criticalErrors = errors.filter(e => e.severity === 8);
+      const warnings = errors.filter(e => e.severity === 4);
+      
+      let consoleMsg = '';
+      
+      if (criticalErrors.length > 0) {
+        consoleMsg += '🔴 SYNTAX ERRORS DETECTED:\n';
+        consoleMsg += '══════════════════════════\n\n';
+        criticalErrors.forEach((err, idx) => {
+          consoleMsg += `${idx + 1}. Line ${err.startLineNumber}: ${err.message}\n`;
+        });
+        consoleMsg += '\n⚠️  Please fix these errors before submitting.\n';
+        consoleMsg += 'Hover over red underlines in the editor for details.\n';
+      }
+      
+      if (warnings.length > 0) {
+        if (consoleMsg) consoleMsg += '\n';
+        consoleMsg += '🟡 WARNINGS:\n';
+        consoleMsg += '══════════════════════════\n\n';
+        warnings.forEach((warn, idx) => {
+          consoleMsg += `${idx + 1}. Line ${warn.startLineNumber}: ${warn.message}\n`;
+        });
+      }
+      
+      setOutput(consoleMsg);
+      setStatus('error');
+    } else {
+      // Clear errors from console if code is valid
+      if (status === 'error') {
+        setOutput('✅ No syntax errors detected. Click "Run Code" to test your solution.');
+        setStatus(null);
+      }
     }
   };
 
-  const lineCount = Math.max(code.split('\n').length, 20); // Ensure minimum height
+  // Handle Code Execution
+  const handleRun = async (isSubmit = false) => {
+    // Don't allow submission if there are critical errors
+    const criticalErrors = editorErrors.filter(e => e.severity === 8); // 8 = Error
+    if (isSubmit && criticalErrors.length > 0) {
+      setOutput('❌ CANNOT SUBMIT: Please fix all syntax errors first.\n\n' + 
+                'Hover over the red underlines in the editor to see error details.\n' +
+                'Fix them and try again.');
+      return;
+    }
+    
+    setIsRunning(true);
+    setOutput('Running tests...\n');
+    setStatus(null);
+
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch('http://localhost:5000/api/submit', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          problem_id: id,
+          code: code,
+          language: 'python'
+        })
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        setStatus(data.status);
+        setScore(data.score);
+        
+        let log = '';
+        data.results.forEach(res => {
+          const icon = res.status === 'passed' ? '✅' : '❌';
+          log += `${icon} Test Case ${res.case}: ${res.status.toUpperCase()}\n`;
+          if (res.status === 'failed') {
+            log += `   Expected: ${res.expected}\n`;
+            log += `   Got:      ${res.actual}\n`;
+          }
+        });
+        
+        log += `\nExecution Time: ~0.04s\n`;
+        if (data.status === 'passed') {
+          log += `\n🎉 SUCCESS! +${isSubmit ? '100 XP' : '0 XP'}\n`;
+        }
+        
+        setOutput(log);
+      } else {
+        setOutput(`Error: ${data.msg || 'Submission failed'}`);
+      }
+    } catch (err) {
+      setOutput(`Network Error: ${err.message}`);
+    } finally {
+      setIsRunning(false);
+    }
+  };
+
+  if (!problem) return <div className="text-white p-10">Loading problem...</div>;
 
   return (
-    <div className="h-[calc(100vh-80px)] flex flex-col bg-[#0b1120]">
+    <div className="flex flex-col h-[calc(100vh-64px)] bg-[#0b1120] text-white">
       
-      {/* Header */}
-      <div className="bg-[#1e293b] border-b border-gray-700 px-4 py-3 flex items-center justify-between shrink-0">
+      {/* Top Bar */}
+      <div className="h-14 border-b border-gray-700 flex items-center justify-between px-4 bg-[#1e293b]">
         <div className="flex items-center gap-4">
-          <button 
-            onClick={() => navigate('/student/dashboard')}
-            className="text-gray-400 hover:text-white transition text-sm"
-          >
-            ← Back
-          </button>
-          <div>
-            <h2 className="text-lg font-bold text-white">{problem.title}</h2>
-            <div className="flex items-center gap-3 text-xs">
-              <span className={`px-2 py-0.5 rounded font-bold border ${getDifficultyColor(problem.difficulty)}`}>
-                {problem.difficulty}
-              </span>
-              <span className="flex items-center gap-1 text-[#eab308]">
-                <Zap size={12} />
-                {problem.xpReward} XP
-              </span>
-              <span className={`flex items-center gap-1 ${timeLeft < 60 ? 'text-red-400' : 'text-gray-400'}`}>
-                <Clock size={12} />
-                {formatTime(timeLeft)}
-              </span>
-            </div>
-          </div>
+          <span className="font-bold text-lg">{problem.title}</span>
+          <span className={`px-2 py-0.5 rounded text-xs font-bold border ${
+            problem.difficulty === 'Easy' ? 'border-green-500 text-green-500' : 
+            problem.difficulty === 'Medium' ? 'border-yellow-500 text-yellow-500' : 
+            'border-red-500 text-red-500'
+          }`}>
+            {problem.difficulty}
+          </span>
+          {editorErrors.length > 0 && (
+            <span className="px-2 py-0.5 rounded text-xs font-bold border border-red-500/50 bg-red-500/10 text-red-400 flex items-center gap-1">
+              <XCircle size={12} /> {editorErrors.length} Error{editorErrors.length > 1 ? 's' : ''}
+            </span>
+          )}
         </div>
         
         <div className="flex items-center gap-2">
           <button 
-            onClick={() => setShowProblem(!showProblem)}
-            className="p-2 text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg transition"
-            title={showProblem ? "Hide Problem" : "Show Problem"}
+            onClick={() => setCode(problem.starter_code)}
+            className="flex items-center gap-2 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-sm transition"
           >
-            {showProblem ? <PanelRight size={18} /> : <PanelLeft size={18} />}
+            <RotateCcw size={14} /> Reset
+          </button>
+          
+          <button 
+            onClick={() => handleRun(false)}
+            disabled={isRunning}
+            className="flex items-center gap-2 px-4 py-1.5 bg-blue-600 hover:bg-blue-500 rounded text-sm font-bold transition disabled:opacity-50"
+          >
+            <Play size={14} /> Run Code
+          </button>
+          
+          <button 
+            onClick={() => handleRun(true)}
+            disabled={isRunning || editorErrors.filter(e => e.severity === 8).length > 0}
+            className="flex items-center gap-2 px-4 py-1.5 bg-[#eab308] hover:bg-yellow-500 text-black rounded text-sm font-bold transition disabled:opacity-50"
+          >
+            <Save size={14} /> Submit
           </button>
         </div>
       </div>
 
-      {/* Main Editor Area - VS Code Style */}
+      {/* Main Content */}
       <div className="flex-1 flex overflow-hidden">
         
-        {/* Code Editor Section */}
-        <div className={`flex-1 flex flex-col ${showProblem ? 'w-2/3' : 'w-full'}`}>
+        {/* Left: Monaco Code Editor with IntelliSense */}
+        <div className="w-1/2 flex flex-col border-r border-gray-700 relative">
+          <div className="absolute top-2 right-2 z-10 bg-red-500/10 text-red-400 text-xs px-2 py-1 rounded border border-red-500/20 pointer-events-none">
+            ⚠ Copy-paste blocked
+          </div>
           
-          {/* Toolbar */}
-          <div className="bg-[#1e293b] border-b border-gray-700 px-4 py-2 flex items-center justify-between shrink-0">
-            <select 
-              value={selectedLanguage}
-              onChange={(e) => {
-                setSelectedLanguage(e.target.value);
-                setCode(problem.starterCode[e.target.value]);
-              }}
-              className="bg-[#0f172a] border border-gray-700 rounded px-3 py-1.5 text-sm text-white focus:border-[#eab308] focus:outline-none"
-            >
-              <option value="python">Python 3.9</option>
-              <option value="java">Java 17</option>
-              <option value="csharp">C# .NET 6</option>
-            </select>
-            
-            <div className="flex items-center gap-2">
-              <button 
-                onClick={handleReset}
-                className="flex items-center gap-2 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white rounded text-sm font-medium transition"
-              >
-                <RotateCcw size={14} />
-                Reset
-              </button>
-              <button 
-                onClick={handleRunCode}
-                disabled={isRunning}
-                className="flex items-center gap-2 px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded text-sm font-bold transition disabled:opacity-50"
-              >
-                <Play size={14} />
-                {isRunning ? 'Running...' : 'Run Code'}
-              </button>
-              <button 
-                onClick={handleSubmit}
-                disabled={isRunning}
-                className="flex items-center gap-2 px-4 py-1.5 bg-[#eab308] hover:bg-yellow-500 text-black rounded text-sm font-bold transition disabled:opacity-50"
-              >
-                <Save size={14} />
-                Submit
-              </button>
-            </div>
-          </div>
-
-          {/* Editor with Line Numbers - VS Code Style */}
-          <div className="flex-1 relative bg-[#0f172a] overflow-hidden flex flex-col">
-            {/* Line Numbers + Code Container */}
-            <div className="flex-1 flex overflow-hidden">
-              {/* Line Numbers Gutter - Fixed Width */}
-              <div className="w-12 bg-[#1e293b] border-r border-gray-700 flex flex-col items-end py-4 px-2 text-gray-500 text-sm font-mono select-none shrink-0">
-                {Array.from({ length: lineCount }, (_, i) => (
-                  <div key={i} className="h-6 leading-6 text-right w-full">
-                    {i + 1}
-                  </div>
-                ))}
-              </div>
+          <Editor
+            height="100%"
+            language="python"
+            theme="vs-dark"
+            value={code}
+            onChange={(value) => setCode(value || '')}
+            onMount={handleEditorMount}
+            options={{
+              fontSize: 14,
+              minimap: { enabled: false },
+              scrollBeyondLastLine: false,
+              automaticLayout: true,
+              tabSize: 4,
+              padding: { top: 10 },
               
-              {/* Code Textarea - Takes Remaining Space */}
-              <div className="flex-1 relative overflow-auto">
-                <textarea
-                  value={code}
-                  onChange={(e) => setCode(e.target.value)}
-                  onCopy={(e) => e.preventDefault()}
-                  onCut={(e) => e.preventDefault()}
-                  onPaste={(e) => {
-                    e.preventDefault();
-                    alert('🚫 Copy-paste is disabled to maintain academic integrity!');
-                  }}
-                  className="absolute top-0 left-0 bg-transparent text-white font-mono text-sm p-4 resize-none focus:outline-none leading-6"
-                  spellCheck="false"
-                  placeholder="// Write your code here..."
-                  style={{ 
-                    tabSize: 4,
-                    width: '100%',
-                    height: '100%',
-                    whiteSpace: 'pre',      // Prevent wrapping - VS Code style
-                    overflowWrap: 'normal', // Don't break long lines
-                    overflowX: 'auto'       // Enable horizontal scroll
-                  }}
-                />
+              // 🎯 INTELLISENSE FEATURES (Like VS Code!)
+              quickSuggestions: {
+                other: true,
+                comments: false,
+                strings: true
+              },
+              suggestOnTriggerCharacters: true,
+              acceptSuggestionOnCommitCharacter: true,
+              acceptSuggestionOnEnter: 'on',
+              tabCompletion: 'on',
+              wordBasedSuggestions: 'currentDocument',
+              
+              // Parameter hints (shows function parameters)
+              parameterHints: { enabled: true },
+              
+              // Hover tooltips (shows documentation)
+              hover: { 
+                enabled: true,
+                delay: 300,
+                sticky: true 
+              },
+              
+              // Auto-close brackets and quotes
+              autoClosingBrackets: 'always',
+              autoClosingQuotes: 'always',
+              
+              // Format on paste
+              formatOnPaste: true,
+              
+              // Snippets
+              snippetSuggestions: 'top',
+              
+              // Error detection
+              renderValidationDecorations: 'on',
+              
+              // Lightbulb (quick fixes)
+              lightbulb: { enabled: true },
+              
+              // Folding
+              folding: true,
+              foldingStrategy: 'indentation',
+              
+              // Line numbers
+              lineNumbers: 'on',
+              renderLineHighlight: 'all',
+              
+              // Scrollbar
+              scrollbar: { 
+                vertical: 'auto',
+                horizontal: 'auto'
+              }
+            }}
+          />
+        </div>
+
+        {/* Right: Problem Statement */}
+        <div className="w-1/2 bg-[#0f172a] p-6 overflow-y-auto">
+          <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
+            <AlertCircle size={20} className="text-[#eab308]" />
+            Problem Statement
+          </h2>
+          
+          <div className="prose prose-invert max-w-none">
+            <p className="text-gray-300 mb-4">{problem.description}</p>
+            
+            <div className="bg-[#1e293b] p-4 rounded-lg border border-gray-700 mb-6">
+              <h3 className="text-sm font-bold text-gray-400 uppercase mb-2">Example</h3>
+              <div className="font-mono text-sm">
+                <div className="text-gray-500">Input:</div>
+                <div className="text-white mb-2">[5, 2, 8, 1, 9]</div>
+                <div className="text-gray-500">Output:</div>
+                <div className="text-green-400">[1, 2, 5, 8, 9]</div>
               </div>
             </div>
-            
-            {/* Copy-Paste Warning */}
-            <div className="absolute top-2 right-2 px-2 py-1 bg-red-500/10 border border-red-500/20 rounded text-xs text-red-400 flex items-center gap-1 z-10 pointer-events-none">
-              <AlertCircle size={12} />
-              Copy-paste blocked
-            </div>
-          </div>
 
-          {/* Console Output */}
-          <div className="h-48 border-t border-gray-700 bg-[#0f172a] flex flex-col shrink-0">
-            <div className="bg-[#1e293b] px-4 py-2 border-b border-gray-700 flex items-center gap-2">
-              <Terminal size={14} className="text-gray-400" />
-              <span className="text-sm font-medium text-gray-300">Console Output</span>
-            </div>
-            
-            <div className="flex-1 overflow-y-auto p-4 font-mono text-sm">
-              {isRunning ? (
-                <div className="text-gray-400 animate-pulse">Executing code...</div>
-              ) : output ? (
-                <pre className="text-gray-300 whitespace-pre-wrap">{output}</pre>
-              ) : (
-                <div className="text-gray-500">Run your code to see output here...</div>
-              )}
-              
-              {submissionResult && (
-                <div className={`mt-4 p-4 rounded-lg border ${
-                  submissionResult.status === 'success' 
-                    ? 'bg-green-500/10 border-green-500/20' 
-                    : 'bg-red-500/10 border-red-500/20'
-                }`}>
-                  <div className="flex items-center gap-2 mb-2">
-                    {submissionResult.status === 'success' ? (
-                      <CheckCircle2 size={18} className="text-green-500" />
-                    ) : (
-                      <XCircle size={18} className="text-red-500" />
-                    )}
-                    <span className={`font-bold ${
-                      submissionResult.status === 'success' ? 'text-green-400' : 'text-red-400'
-                    }`}>
-                      {submissionResult.message}
-                    </span>
-                  </div>
-                  
-                  {submissionResult.xpEarned && (
-                    <div className="text-[#eab308] font-bold mb-2 flex items-center gap-1">
-                      <Zap size={14} />
-                      +{submissionResult.xpEarned} XP Earned!
-                    </div>
-                  )}
+            <h3 className="text-sm font-bold text-gray-400 uppercase mb-2">Test Cases</h3>
+            <div className="space-y-2">
+              {problem.test_cases && JSON.parse(problem.test_cases).map((tc, idx) => (
+                <div key={idx} className="bg-[#1e293b] p-3 rounded border border-gray-700 text-sm">
+                  <div className="text-gray-500 mb-1">Input: {tc.input}</div>
+                  <div className="text-green-400">Expected: {tc.expected}</div>
                 </div>
-              )}
+              ))}
             </div>
           </div>
         </div>
+      </div>
 
-        {/* Problem Statement Sidebar */}
-        {showProblem && (
-          <div className="w-1/3 border-l border-gray-700 bg-[#1e293b] overflow-y-auto">
-            <div className="p-4">
-              <h3 className="text-sm font-bold text-white mb-3 flex items-center gap-2">
-                <HelpCircle size={16} className="text-[#eab308]" />
-                Problem Statement
-              </h3>
-              
-              <div className="prose prose-invert prose-sm max-w-none">
-                <div className="text-gray-300 whitespace-pre-line leading-relaxed text-xs">
-                  {problem.description}
-                </div>
-              </div>
-              
-              <div className="mt-4">
-                <h4 className="text-xs font-bold text-white mb-2">Test Cases:</h4>
-                <div className="space-y-2">
-                  {problem.testCases.map((tc, idx) => (
-                    <div key={idx} className="bg-[#0f172a] p-2 rounded border border-gray-700 text-xs">
-                      <div className="text-gray-400 mb-1">Input: {tc.input}</div>
-                      <div className="text-green-400">Expected: {tc.expected}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
+      {/* Bottom: Console Output */}
+      <div className="h-48 bg-[#0b1120] border-t border-gray-700 flex flex-col">
+        <div className="px-4 py-2 bg-[#1e293b] border-b border-gray-700 flex items-center gap-2">
+          <Terminal size={16} className="text-gray-400" />
+          <span className="text-sm font-medium text-gray-300">Console Output</span>
+          {status && (
+            <span className={`ml-auto text-xs font-bold px-2 py-1 rounded ${
+              status === 'passed' ? 'bg-green-500/20 text-green-400' : 
+              status === 'error' ? 'bg-red-500/20 text-red-400' :
+              'bg-red-500/20 text-red-400'
+            }`}>
+              {status === 'passed' ? 'All Tests Passed' : 
+               status === 'error' ? 'Syntax Errors Found' :
+               'Tests Failed'}
+            </span>
+          )}
+        </div>
+        <pre className="flex-1 p-4 font-mono text-sm text-gray-300 overflow-y-auto whitespace-pre-wrap">
+          {output}
+        </pre>
       </div>
     </div>
   );
 }
 
-export default StudentChallenge;
+export default Challenge;

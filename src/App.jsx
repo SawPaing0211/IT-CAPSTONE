@@ -2,6 +2,8 @@ import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 
 // Page Imports
 import LandingPage from './pages/LandingPage';
+import Login from './pages/Login';
+import Register from './pages/Register';  // ✅ ADD THIS
 import RoleSelection from './pages/RoleSelection';
 import GuestDashboard from './pages/GuestDashboard';
 
@@ -23,7 +25,7 @@ import InstructorPlagiarism from './pages/instructor/Plagiarism';
 import InstructorAnalytics from './pages/instructor/Analytics';
 import InstructorAnnouncements from './pages/instructor/Announcements';
 
-// Student Imports (New - Placeholders for now)
+// Student Imports
 import StudentLayout from './pages/student/Layout';
 import StudentDashboard from './pages/student/Dashboard';
 import StudentChallenge from './pages/student/Challenge';
@@ -70,21 +72,22 @@ function App() {
       <Routes>
         {/* Public Routes */}
         <Route path="/" element={<LandingPage />} />
-        <Route path="/login" element={<RoleSelection />} />
+        <Route path="/login" element={<Login />} />
+        <Route path="/register" element={<Register />} />  {/* ✅ ADD THIS ROUTE */}
         <Route path="/guest" element={<GuestDashboard />} />
 
         {/* Student Routes - Wrapped in Layout */}
         <Route path="/student" element={<StudentLayout />}>
-        <Route index element={<StudentDashboard />} />
-        <Route path="dashboard" element={<StudentDashboard />} />
-        <Route path="code-editor" element={<CodeEditor />} />
-        <Route path="debug" element={<DebugMode />} />
-        <Route path="sandbox" element={<Sandbox />} />
-        <Route path="history" element={<SubmissionHistory />} /> {/* ← Change this */}
-        <Route path="challenge/:id" element={<StudentChallenge />} />
-        <Route path="leaderboard" element={<StudentLeaderboard />} />
-        <Route path="profile" element={<StudentProfile />} />
-      </Route>
+          <Route index element={<StudentDashboard />} />
+          <Route path="dashboard" element={<StudentDashboard />} />
+          <Route path="code-editor" element={<CodeEditor />} />
+          <Route path="debug" element={<DebugMode />} />
+          <Route path="sandbox" element={<Sandbox />} />
+          <Route path="history" element={<SubmissionHistory />} />
+          <Route path="challenge/:id" element={<StudentChallenge />} />
+          <Route path="leaderboard" element={<StudentLeaderboard />} />
+          <Route path="profile" element={<StudentProfile />} />
+        </Route>
         
         {/* Instructor Routes - Wrapped in Layout */}
         <Route path="/instructor" element={<InstructorLayout />}>
