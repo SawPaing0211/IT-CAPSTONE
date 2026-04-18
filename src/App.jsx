@@ -26,9 +26,13 @@ import InstructorAnnouncements from './pages/instructor/Announcements';
 // Student Imports (New - Placeholders for now)
 import StudentLayout from './pages/student/Layout';
 import StudentDashboard from './pages/student/Dashboard';
-import StudentChallenge from './pages/student/Challenge'; // The Code Editor page
+import StudentChallenge from './pages/student/Challenge';
 import StudentLeaderboard from './pages/student/Leaderboard';
 import StudentProfile from './pages/student/Profile';
+import CodeEditor from './pages/student/CodeEditor';
+import DebugMode from './pages/student/DebugMode';
+import Sandbox from './pages/student/Sandbox';
+import SubmissionHistory from './pages/student/SubmissionHistory';
 
 // Placeholder Component
 function ComingSoon({ role }) {
@@ -71,16 +75,16 @@ function App() {
 
         {/* Student Routes - Wrapped in Layout */}
         <Route path="/student" element={<StudentLayout />}>
-          <Route index element={<StudentDashboard />} />
-          <Route path="dashboard" element={<StudentDashboard />} />
-          <Route path="code-editor" element={<ComingSoon role="Code Editor" />} />
-          <Route path="debug" element={<ComingSoon role="Debug Mode" />} />
-          <Route path="sandbox" element={<ComingSoon role="Sandbox" />} />
-          <Route path="history" element={<ComingSoon role="Submission History" />} />
-          <Route path="challenge/:id" element={<StudentChallenge />} />
-          <Route path="leaderboard" element={<StudentLeaderboard />} />
-          <Route path="profile" element={<StudentProfile />} />
-        </Route>
+        <Route index element={<StudentDashboard />} />
+        <Route path="dashboard" element={<StudentDashboard />} />
+        <Route path="code-editor" element={<CodeEditor />} />
+        <Route path="debug" element={<DebugMode />} />
+        <Route path="sandbox" element={<Sandbox />} />
+        <Route path="history" element={<SubmissionHistory />} /> {/* ← Change this */}
+        <Route path="challenge/:id" element={<StudentChallenge />} />
+        <Route path="leaderboard" element={<StudentLeaderboard />} />
+        <Route path="profile" element={<StudentProfile />} />
+      </Route>
         
         {/* Instructor Routes - Wrapped in Layout */}
         <Route path="/instructor" element={<InstructorLayout />}>
