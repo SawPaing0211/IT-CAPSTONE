@@ -1,564 +1,610 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { 
-  Plus, 
-  Search, 
-  Filter, 
-  Edit2, 
-  Trash2, 
-  MessageSquare, 
-  Bell, 
-  AlertCircle,
-  CheckCircle2,
-  Calendar,
-  Users,
-  Eye,
-  X,
-  Pin,
-  Bold,
-  Italic,
-  List,
-  Link as LinkIcon,
-  FileText,
-  Clock,
-  Archive,
-  Send,
-  LayoutTemplate // Fixed: Changed from 'Template' to 'LayoutTemplate'
+  Plus, Trash2, Edit, Search, Filter, Calendar, Clock, 
+  Users, MessageSquare, Eye, Download, Upload, Link, Image,
+  FileText, AlertCircle, CheckCircle, XCircle, Info, Star,
+  Send, Save, EyeOff, Bold, Italic, List, Link as LinkIcon,
+  ChevronDown, MoreVertical, Pin, Archive, Bell
 } from 'lucide-react';
 
 function InstructorAnnouncements() {
-  const [activeTab, setActiveTab] = useState('active'); // active, archived
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [editingId, setEditingId] = useState(null);
+  const [announcements, setAnnouncements] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [editingAnnouncement, setEditingAnnouncement] = useState(null);
   const [previewMode, setPreviewMode] = useState(false);
-  const [filterBlock, setFilterBlock] = useState('all');
-  const [filterPriority, setFilterPriority] = useState('all');
+  
+  // Filter states
   const [searchTerm, setSearchTerm] = useState('');
+  const [typeFilter, setTypeFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [dateFilter, setDateFilter] = useState('all');
 
-  // Form State
+  // Form data
   const [formData, setFormData] = useState({
     title: '',
-    message: '',
-    priority: 'Normal',
-    targetBlock: 'all',
-    publishDate: new Date().toISOString().split('T')[0],
-    isScheduled: false,
-    sendEmail: true,
+    content: '',
+    type: 'update', // important, update, reminder, event
+    priority: 'normal', // low, normal, high, urgent
+    targetAudience: 'all', // all, specific_blocks, specific_students
+    selectedBlocks: [],
+    selectedStudents: [],
+    scheduledDate: '',
     attachments: []
   });
 
-  // Mock Data
-  const [announcements, setAnnouncements] = useState([
-    { 
-      id: 1, 
-      title: 'Midterm Exam Schedule Released', 
-      message: '<b>Important:</b> The midterm exam will be held on <i>April 25th</i>. Please review the study guide.', 
-      priority: 'Important', 
-      block: '301', 
-      author: 'Prof. Sasan', 
-      date: '2026-04-15', 
-      views: 42, 
-      readCount: 38,
-      totalStudents: 45,
-      pinned: true,
-      archived: false,
-      scheduled: false,
-      attachments: ['study_guide.pdf']
-    },
-    { 
-      id: 2, 
-      title: 'Assignment #3 Deadline Extended', 
-      message: 'Due to high demand, the deadline has been extended to next Friday.', 
-      priority: 'Normal', 
-      block: 'all', 
-      author: 'Prof. Sasan', 
-      date: '2026-04-14', 
-      views: 38, 
-      readCount: 30,
-      totalStudents: 142,
-      pinned: false,
-      archived: false,
-      scheduled: false,
-      attachments: []
-    },
-    { 
-      id: 3, 
-      title: 'Lab Session Cancelled', 
-      message: 'Tomorrow\'s lab session is cancelled due to maintenance.', 
-      priority: 'Urgent', 
-      block: '302', 
-      author: 'Prof. Sasan', 
-      date: '2026-04-20', // Future date
-      views: 0, 
-      readCount: 0,
-      totalStudents: 28,
-      pinned: false,
-      archived: false,
-      scheduled: true,
-      attachments: []
-    },
-    { 
-      id: 4, 
-      title: 'Old Welcome Message', 
-      message: 'Welcome to the new semester!', 
-      priority: 'Normal', 
-      block: 'all', 
-      author: 'Prof. Sasan', 
-      date: '2026-01-10', 
-      views: 120, 
-      readCount: 115,
-      totalStudents: 142,
-      pinned: false,
-      archived: true,
-      scheduled: false,
-      attachments: []
-    },
-  ]);
+  useEffect(() => {
+    fetchAnnouncements();
+  }, []);
 
-  // Templates
-  const templates = [
-    { title: 'Exam Schedule', message: 'The upcoming exam for [Subject] will be held on [Date]. Please prepare accordingly.' },
-    { title: 'Deadline Extension', message: 'The deadline for [Assignment] has been extended to [New Date].' },
-    { title: 'Class Cancellation', message: 'Please note that the class scheduled for [Date] is cancelled due to [Reason].' },
-  ];
-
-  // Filter Logic
-  const filteredAnnouncements = announcements.filter(ann => {
-    if (activeTab === 'archived' && !ann.archived) return false;
-    if (activeTab === 'active' && ann.archived) return false;
-    
-    const matchesSearch = ann.title.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                          ann.message.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesBlock = filterBlock === 'all' || ann.block === filterBlock;
-    const matchesPriority = filterPriority === 'all' || ann.priority === filterPriority;
-    return matchesSearch && matchesBlock && matchesPriority;
-  });
-
-  // Sort: Pinned first, then by date
-  const sortedAnnouncements = [...filteredAnnouncements].sort((a, b) => {
-    if (a.pinned && !b.pinned) return -1;
-    if (!a.pinned && b.pinned) return 1;
-    return new Date(b.date) - new Date(a.date);
-  });
-
-  const handleOpenModal = (id = null) => {
-    if (id) {
-      const ann = announcements.find(a => a.id === id);
-      setFormData({
-        title: ann.title,
-        message: ann.message.replace(/<[^>]*>?/gm, ''), // Strip HTML for edit
-        priority: ann.priority,
-        targetBlock: ann.block,
-        publishDate: ann.date,
-        isScheduled: ann.scheduled,
-        sendEmail: true,
-        attachments: ann.attachments
+  const fetchAnnouncements = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch('http://localhost:5000/api/instructor/announcements', {
+        headers: { 'Authorization': `Bearer ${token}` }
       });
-      setEditingId(id);
-    } else {
-      setFormData({
-        title: '',
-        message: '',
-        priority: 'Normal',
-        targetBlock: 'all',
-        publishDate: new Date().toISOString().split('T')[0],
-        isScheduled: false,
-        sendEmail: true,
-        attachments: []
-      });
-      setEditingId(null);
+      
+      if (response.ok) {
+        const data = await response.json();
+        setAnnouncements(data.announcements || []);
+      }
+    } catch (err) {
+      console.error('Error fetching announcements:', err);
+    } finally {
+      setLoading(false);
     }
-    setPreviewMode(false);
-    setIsModalOpen(true);
   };
 
-  const applyTemplate = (template) => {
-    setFormData({...formData, title: template.title, message: template.message});
-  };
-
-  const insertFormat = (tag) => {
-    const textarea = document.getElementById('announcement-message');
-    if (!textarea) return;
-    
-    const start = textarea.selectionStart;
-    const end = textarea.selectionEnd;
-    const text = formData.message;
-    const selectedText = text.substring(start, end);
-    
-    let formattedText = '';
-    if (tag === 'bold') formattedText = `<b>${selectedText || 'bold text'}</b>`;
-    if (tag === 'italic') formattedText = `<i>${selectedText || 'italic text'}</i>`;
-    if (tag === 'list') formattedText = `<ul><li>${selectedText || 'list item'}</li></ul>`;
-    
-    const newText = text.substring(0, start) + formattedText + text.substring(end);
-    setFormData({...formData, message: newText});
-  };
-
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    if (editingId) {
-      setAnnouncements(announcements.map(a => 
-        a.id === editingId ? { ...a, ...formData, message: formData.message } : a
-      ));
-    } else {
-      const newAnn = {
-        id: Date.now(),
-        ...formData,
-        author: 'Prof. Sasan',
-        views: 0,
-        readCount: 0,
-        totalStudents: formData.targetBlock === 'all' ? 142 : 25, // Mock count
-        pinned: false,
-        archived: false
-      };
-      setAnnouncements([newAnn, ...announcements]);
+    
+    try {
+      const token = localStorage.getItem('token');
+      const url = editingAnnouncement 
+        ? `http://localhost:5000/api/instructor/announcements/${editingAnnouncement.id}`
+        : 'http://localhost:5000/api/instructor/announcements';
+      
+      const method = editingAnnouncement ? 'PUT' : 'POST';
+      
+      const response = await fetch(url, {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(formData)
+      });
+      
+      if (response.ok) {
+        fetchAnnouncements();
+        setShowForm(false);
+        setEditingAnnouncement(null);
+        setFormData({
+          title: '',
+          content: '',
+          type: 'update',
+          priority: 'normal',
+          targetAudience: 'all',
+          selectedBlocks: [],
+          selectedStudents: [],
+          scheduledDate: '',
+          attachments: []
+        });
+        setPreviewMode(false);
+        showNotification('success', editingAnnouncement ? 'Announcement updated successfully!' : 'Announcement posted successfully!');
+      } else {
+        const errorData = await response.json();
+        showNotification('error', `Error: ${errorData.msg}`);
+      }
+    } catch (err) {
+      console.error('Error:', err);
+      showNotification('error', 'Failed to post announcement');
     }
-    setIsModalOpen(false);
   };
 
-  const handleDelete = (id) => {
-    if (window.confirm('Are you sure you want to delete this announcement?')) {
-      setAnnouncements(announcements.filter(a => a.id !== id));
+  const handleDelete = async (id) => {
+    if (!confirm('Are you sure you want to delete this announcement?')) return;
+    
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`http://localhost:5000/api/instructor/announcements/${id}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (response.ok) {
+        fetchAnnouncements();
+        showNotification('success', 'Announcement deleted successfully!');
+      } else {
+        showNotification('error', 'Failed to delete announcement');
+      }
+    } catch (err) {
+      console.error('Error:', err);
+      showNotification('error', 'An error occurred while deleting the announcement');
     }
   };
 
-  const handleArchive = (id) => {
-    setAnnouncements(announcements.map(a => 
-      a.id === id ? { ...a, archived: !a.archived } : a
-    ));
+  const handleEdit = (announcement) => {
+    setEditingAnnouncement(announcement);
+    setFormData({
+      title: announcement.title,
+      content: announcement.content,
+      type: announcement.type || 'update',
+      priority: announcement.priority || 'normal',
+      targetAudience: announcement.target_audience || 'all',
+      selectedBlocks: announcement.selected_blocks || [],
+      selectedStudents: announcement.selected_students || [],
+      scheduledDate: announcement.scheduled_date || '',
+      attachments: announcement.attachments || []
+    });
+    setShowForm(true);
   };
 
-  const togglePin = (id) => {
-    setAnnouncements(announcements.map(a => 
-      a.id === id ? { ...a, pinned: !a.pinned } : a
-    ));
+  const showNotification = (type, message) => {
+    const notification = document.createElement('div');
+    notification.className = `fixed top-4 right-4 p-4 rounded-lg shadow-lg z-50 transition-all duration-300 ${
+      type === 'success' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'
+    }`;
+    notification.innerHTML = `
+      <div class="flex items-center gap-2">
+        ${type === 'success' ? '<CheckCircle size={20} />' : '<AlertCircle size={20} />'}
+        <span>${message}</span>
+      </div>
+    `;
+    document.body.appendChild(notification);
+    
+    setTimeout(() => {
+      notification.remove();
+    }, 3000);
   };
 
-  const blocks = ['all', '301', '302', '303', '304', '305', '306', '307'];
-  const priorities = ['all', 'Normal', 'Important', 'Urgent'];
+  const getTypeIcon = (type) => {
+    switch(type) {
+      case 'important': return <AlertCircle size={16} className="text-red-400" />;
+      case 'update': return <Info size={16} className="text-blue-400" />;
+      case 'reminder': return <Clock size={16} className="text-yellow-400" />;
+      case 'event': return <Calendar size={16} className="text-purple-400" />;
+      default: return <MessageSquare size={16} className="text-slate-400" />;
+    }
+  };
 
   const getPriorityColor = (priority) => {
     switch(priority) {
-      case 'Urgent': return 'bg-red-500/10 text-red-500 border-red-500/20';
-      case 'Important': return 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20';
-      default: return 'bg-blue-500/10 text-blue-500 border-blue-500/20';
+      case 'urgent': return 'bg-red-500/10 text-red-400 border-red-500/20';
+      case 'high': return 'bg-orange-500/10 text-orange-400 border-orange-500/20';
+      case 'normal': return 'bg-blue-500/10 text-blue-400 border-blue-500/20';
+      case 'low': return 'bg-slate-500/10 text-slate-400 border-slate-500/20';
+      default: return 'bg-slate-500/10 text-slate-400 border-slate-500/20';
     }
   };
 
-  const getReadPercentage = (read, total) => {
-    if (total === 0) return 0;
-    return Math.round((read / total) * 100);
+  const getTypeColor = (type) => {
+    switch(type) {
+      case 'important': return 'border-red-500/30 bg-red-500/5';
+      case 'update': return 'border-blue-500/30 bg-blue-500/5';
+      case 'reminder': return 'border-yellow-500/30 bg-yellow-500/5';
+      case 'event': return 'border-purple-500/30 bg-purple-500/5';
+      default: return 'border-slate-500/30 bg-slate-500/5';
+    }
   };
 
+  // Filter announcements
+  const filteredAnnouncements = announcements.filter(ann => {
+    const matchesSearch = ann.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         ann.content.toLowerCase().includes(searchTerm.toLowerCase());
+    
+    const matchesType = typeFilter === 'all' || ann.type === typeFilter;
+    const matchesStatus = statusFilter === 'all' || 
+                         (statusFilter === 'published' && !ann.scheduled_date) ||
+                         (statusFilter === 'scheduled' && ann.scheduled_date);
+    
+    const matchesDate = dateFilter === 'all' || 
+                       (dateFilter === 'today' && new Date(ann.created_at).toDateString() === new Date().toDateString()) ||
+                       (dateFilter === 'week' && new Date(ann.created_at) >= new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)) ||
+                       (dateFilter === 'month' && new Date(ann.created_at).getMonth() === new Date().getMonth());
+    
+    return matchesSearch && matchesType && matchesStatus && matchesDate;
+  });
+
+  if (loading) {
+    return (
+      <div className="p-8">
+        <div className="animate-pulse space-y-4">
+          <div className="h-8 bg-slate-800 rounded w-1/4"></div>
+          <div className="h-64 bg-slate-800 rounded"></div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="space-y-6">
-      
+    <div className="p-8">
       {/* Header */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div className="flex items-center gap-3">
-          <div className="p-3 bg-[#eab308]/10 rounded-xl">
-            <MessageSquare size={24} className="text-[#eab308]" />
-          </div>
-          <div>
-            <h2 className="text-2xl font-bold text-white">Announcements</h2>
-            <p className="text-gray-400 text-sm">Communicate with your students effectively</p>
-          </div>
-        </div>
-        
-        <button 
-          onClick={() => handleOpenModal()}
-          className="flex items-center gap-2 px-4 py-2 bg-[#eab308] hover:bg-yellow-500 text-black rounded-lg text-sm font-bold transition shadow-lg shadow-yellow-500/20"
+      <div className="mb-8">
+        <h1 className="text-3xl font-bold text-white mb-2 flex items-center gap-3">
+          <Bell className="text-blue-400" size={32} />
+          Announcements
+        </h1>
+        <p className="text-slate-400">Communicate important updates to your students</p>
+      </div>
+
+      {/* Action Bar */}
+      <div className="flex items-center justify-between mb-6">
+        <button
+          onClick={() => {
+            setShowForm(!showForm);
+            setEditingAnnouncement(null);
+            setFormData({
+              title: '',
+              content: '',
+              type: 'update',
+              priority: 'normal',
+              targetAudience: 'all',
+              selectedBlocks: [],
+              selectedStudents: [],
+              scheduledDate: '',
+              attachments: []
+            });
+            setPreviewMode(false);
+          }}
+          className="flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold transition shadow-lg shadow-blue-500/20"
         >
-          <Plus size={16} /> New Announcement
+          {showForm ? (
+            <>
+              <XCircle size={20} />
+              Cancel
+            </>
+          ) : (
+            <>
+              <Plus size={20} />
+              New Announcement
+            </>
+          )}
         </button>
-      </div>
 
-      {/* Tabs & Filters */}
-      <div className="bg-gradient-to-br from-[#1e293b] to-[#0f172a] p-4 rounded-xl border border-gray-700">
-        <div className="flex flex-col md:flex-row gap-4 items-center justify-between mb-4">
-          {/* Tabs */}
-          <div className="flex gap-2 bg-[#0f172a] p-1 rounded-lg">
-            <button 
-              onClick={() => setActiveTab('active')}
-              className={`px-4 py-1.5 rounded-md text-sm font-medium transition ${
-                activeTab === 'active' ? 'bg-[#eab308] text-black' : 'text-gray-400 hover:text-white'
-              }`}
-            >
-              Active
-            </button>
-            <button 
-              onClick={() => setActiveTab('archived')}
-              className={`px-4 py-1.5 rounded-md text-sm font-medium transition ${
-                activeTab === 'archived' ? 'bg-[#eab308] text-black' : 'text-gray-400 hover:text-white'
-              }`}
-            >
-              Archived
-            </button>
+        <div className="flex items-center gap-3">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" size={16} />
+            <input
+              type="text"
+              placeholder="Search announcements..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="pl-10 pr-4 py-2 bg-slate-900 border border-slate-800 rounded-lg text-white placeholder-slate-500 focus:border-blue-500 outline-none transition-colors w-64"
+            />
           </div>
+          
+          <select
+            value={typeFilter}
+            onChange={(e) => setTypeFilter(e.target.value)}
+            className="bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-white focus:border-blue-500 outline-none transition-colors"
+          >
+            <option value="all">All Types</option>
+            <option value="important">Important</option>
+            <option value="update">Update</option>
+            <option value="reminder">Reminder</option>
+            <option value="event">Event</option>
+          </select>
 
-          {/* Filters */}
-          <div className="flex flex-wrap gap-3 w-full md:w-auto">
-            <div className="relative flex-1 md:flex-none min-w-[200px]">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500" size={16} />
-              <input 
-                type="text" 
-                placeholder="Search..." 
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full bg-[#0f172a] border border-gray-700 rounded-lg pl-9 pr-4 py-1.5 text-sm text-white focus:border-[#eab308] focus:outline-none"
-              />
-            </div>
-            
-            <select 
-              value={filterBlock}
-              onChange={(e) => setFilterBlock(e.target.value)}
-              className="bg-[#0f172a] border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-white focus:border-[#eab308]"
-            >
-              {blocks.map(b => <option key={b} value={b}>{b === 'all' ? 'All Blocks' : `Block ${b}`}</option>)}
-            </select>
-
-            <select 
-              value={filterPriority}
-              onChange={(e) => setFilterPriority(e.target.value)}
-              className="bg-[#0f172a] border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-white focus:border-[#eab308]"
-            >
-              {priorities.map(p => <option key={p} value={p}>{p === 'all' ? 'All Priorities' : p}</option>)}
-            </select>
-          </div>
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-white focus:border-blue-500 outline-none transition-colors"
+          >
+            <option value="all">All Status</option>
+            <option value="published">Published</option>
+            <option value="scheduled">Scheduled</option>
+          </select>
         </div>
       </div>
 
-      {/* Announcements List */}
-      <div className="space-y-4">
-        {sortedAnnouncements.length > 0 ? (
-          sortedAnnouncements.map((ann) => (
-            <div key={ann.id} className={`bg-gradient-to-br from-[#1e293b] to-[#0f172a] rounded-xl border p-6 transition hover:border-gray-600 ${ann.pinned ? 'border-[#eab308]/50 shadow-lg shadow-yellow-500/5' : 'border-gray-700'}`}>
-              
-              {/* Header Row */}
-              <div className="flex justify-between items-start mb-4">
-                <div className="flex-1">
-                  <div className="flex items-center gap-3 mb-2">
-                    {ann.pinned && <Pin size={14} className="text-[#eab308]" />}
-                    {ann.scheduled && !ann.archived && (
-                      <span className="flex items-center gap-1 text-xs bg-purple-500/10 text-purple-400 px-2 py-0.5 rounded border border-purple-500/20">
-                        <Clock size={12} /> Scheduled
-                      </span>
-                    )}
-                    {ann.archived && (
-                      <span className="flex items-center gap-1 text-xs bg-gray-500/10 text-gray-400 px-2 py-0.5 rounded border border-gray-500/20">
-                        <Archive size={12} /> Archived
-                      </span>
-                    )}
-                    <h3 className="text-lg font-bold text-white">{ann.title}</h3>
-                    <span className={`px-2 py-0.5 rounded text-xs font-bold border ${getPriorityColor(ann.priority)}`}>
-                      {ann.priority}
-                    </span>
-                  </div>
-                  
-                  <div className="flex flex-wrap items-center gap-4 text-sm text-gray-400">
-                    <div className="flex items-center gap-1">
-                      <Users size={14} />
-                      <span>{ann.block === 'all' ? 'All Blocks' : `Block ${ann.block}`}</span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <Calendar size={14} />
-                      <span>{ann.date}</span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <Eye size={14} />
-                      <span>{ann.views} views</span>
-                    </div>
-                    
-                    {/* Read Receipt Badge */}
-                    <div className="flex items-center gap-1 text-green-400">
-                      <CheckCircle2 size={14} />
-                      <span>{getReadPercentage(ann.readCount, ann.totalStudents)}% read ({ann.readCount}/{ann.totalStudents})</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Actions */}
-                <div className="flex items-center gap-2">
-                  {!ann.archived && (
-                    <>
-                      <button onClick={() => togglePin(ann.id)} className={`p-2 rounded-lg transition ${ann.pinned ? 'text-[#eab308] bg-[#eab308]/10' : 'text-gray-400 hover:text-gray-300 hover:bg-gray-800'}`} title="Pin"><Pin size={18} /></button>
-                      <button onClick={() => handleOpenModal(ann.id)} className="p-2 text-gray-400 hover:text-blue-500 hover:bg-blue-500/10 rounded-lg transition" title="Edit"><Edit2 size={18} /></button>
-                      <button onClick={() => handleArchive(ann.id)} className="p-2 text-gray-400 hover:text-purple-500 hover:bg-purple-500/10 rounded-lg transition" title="Archive"><Archive size={18} /></button>
-                    </>
-                  )}
-                  <button onClick={() => handleDelete(ann.id)} className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition" title="Delete"><Trash2 size={18} /></button>
-                </div>
-              </div>
-
-              {/* Message Body (Render HTML safely in real app) */}
-              <div className="bg-[#0f172a]/50 p-4 rounded-lg border border-gray-800 text-gray-300 leading-relaxed" dangerouslySetInnerHTML={{ __html: ann.message }} />
-              
-              {/* Attachments */}
-              {ann.attachments.length > 0 && (
-                <div className="mt-4 flex gap-2">
-                  {ann.attachments.map((file, idx) => (
-                    <div key={idx} className="flex items-center gap-2 px-3 py-1.5 bg-[#0f172a] border border-gray-700 rounded text-xs text-gray-300">
-                      <FileText size={14} className="text-blue-400" />
-                      {file}
-                    </div>
-                  ))}
-                </div>
-              )}
+      {/* Create/Edit Form */}
+      {showForm && (
+        <div className="mb-8 bg-slate-900 border border-slate-800 rounded-xl p-6">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-2xl font-bold text-white">
+              {editingAnnouncement ? 'Edit Announcement' : 'Create New Announcement'}
+            </h2>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setPreviewMode(!previewMode)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg transition flex items-center gap-2"
+              >
+                {previewMode ? <EyeOff size={16} /> : <Eye size={16} />}
+                {previewMode ? 'Edit' : 'Preview'}
+              </button>
             </div>
-          ))
-        ) : (
-          <div className="text-center py-12 bg-[#1e293b] rounded-xl border border-gray-700">
-            <MessageSquare size={48} className="mx-auto mb-4 text-gray-600" />
-            <h3 className="text-lg font-bold text-white mb-2">No Announcements Found</h3>
-            <p className="text-gray-400 mb-6">Try adjusting your filters or create a new announcement.</p>
-            <button onClick={() => handleOpenModal()} className="px-4 py-2 bg-[#eab308] hover:bg-yellow-500 text-black rounded-lg text-sm font-bold transition">Create First Announcement</button>
           </div>
-        )}
-      </div>
 
-      {/* Create/Edit Modal with Rich Text & Preview */}
-      {isModalOpen && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-          <div className="bg-[#1e293b] rounded-xl border border-gray-700 max-w-3xl w-full max-h-[90vh] overflow-hidden flex flex-col">
-            
-            {/* Modal Header */}
-            <div className="p-4 border-b border-gray-800 flex justify-between items-center bg-[#0f172a]">
-              <h3 className="text-lg font-bold text-white">
-                {editingId ? 'Edit Announcement' : 'New Announcement'}
-              </h3>
-              <div className="flex items-center gap-2">
-                <button 
-                  onClick={() => setPreviewMode(!previewMode)}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded text-xs font-medium transition ${previewMode ? 'bg-[#eab308] text-black' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}
-                >
-                  {previewMode ? <Edit2 size={14} /> : <Eye size={14} />}
-                  {previewMode ? 'Edit' : 'Preview'}
-                </button>
-                <button onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-white"><X size={20} /></button>
-              </div>
-            </div>
-
-            {/* Modal Body */}
-            <div className="p-6 overflow-y-auto flex-1">
-              {previewMode ? (
-                // PREVIEW MODE
-                <div className="bg-white text-gray-900 p-6 rounded-lg min-h-[300px]">
-                  <div className="flex items-center justify-between mb-4 border-b pb-2">
-                    <h2 className="text-2xl font-bold text-gray-900">{formData.title || 'Title Preview'}</h2>
-                    <span className={`px-2 py-0.5 rounded text-xs font-bold border ${getPriorityColor(formData.priority).replace('/10', '/20').replace('bg-', 'bg-opacity-20 bg-')}`}>
-                      {formData.priority}
-                    </span>
-                  </div>
-                  <div className="text-sm text-gray-600 mb-4 flex gap-4">
-                    <span>📅 {formData.publishDate}</span>
-                    <span> {formData.targetBlock === 'all' ? 'All Blocks' : `Block ${formData.targetBlock}`}</span>
-                  </div>
-                  <div className="prose max-w-none" dangerouslySetInnerHTML={{ __html: formData.message || '<p class="text-gray-400">Message content will appear here...</p>' }} />
-                  {formData.attachments.length > 0 && (
-                    <div className="mt-6 pt-4 border-t">
-                      <p className="text-sm font-bold mb-2">Attachments:</p>
-                      <div className="flex gap-2">
-                        {formData.attachments.map((f, i) => <span key={i} className="text-xs bg-gray-100 px-2 py-1 rounded border">{f}</span>)}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ) : (
-                // EDIT MODE
-                <form onSubmit={handleSubmit} className="space-y-4">
-                  
-                  {/* Templates */}
+          <form onSubmit={handleSubmit} className="space-y-6">
+            {!previewMode ? (
+              <>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
-                    <label className="block text-xs font-bold text-gray-400 mb-2 uppercase tracking-wide">Quick Templates</label>
-                    <div className="flex gap-2">
-                      {templates.map((t, i) => (
-                        <button key={i} type="button" onClick={() => applyTemplate(t)} className="flex items-center gap-1 px-3 py-1.5 bg-[#0f172a] border border-gray-700 rounded text-xs text-gray-300 hover:border-[#eab308] hover:text-[#eab308] transition">
-                          <LayoutTemplate size={12} /> {t.title} {/* Fixed icon */}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm text-gray-400 mb-2">Title *</label>
-                    <input type="text" required value={formData.title} onChange={(e) => setFormData({...formData, title: e.target.value})} className="w-full bg-[#0f172a] border border-gray-700 rounded-lg px-4 py-2 text-white focus:border-[#eab308] focus:outline-none" />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm text-gray-400 mb-2">Message *</label>
-                    {/* Fake Rich Text Toolbar */}
-                    <div className="flex gap-1 mb-2 p-1 bg-[#0f172a] border border-gray-700 rounded-t-lg w-fit">
-                      <button type="button" onClick={() => insertFormat('bold')} className="p-1.5 hover:bg-gray-700 rounded text-gray-300" title="Bold"><Bold size={16} /></button>
-                      <button type="button" onClick={() => insertFormat('italic')} className="p-1.5 hover:bg-gray-700 rounded text-gray-300" title="Italic"><Italic size={16} /></button>
-                      <button type="button" onClick={() => insertFormat('list')} className="p-1.5 hover:bg-gray-700 rounded text-gray-300" title="List"><List size={16} /></button>
-                      <button type="button" onClick={() => insertFormat('link')} className="p-1.5 hover:bg-gray-700 rounded text-gray-300" title="Link"><LinkIcon size={16} /></button>
-                    </div>
-                    <textarea 
-                      id="announcement-message"
-                      required rows={6}
-                      value={formData.message}
-                      onChange={(e) => setFormData({...formData, message: e.target.value})}
-                      className="w-full bg-[#0f172a] border border-gray-700 rounded-b-lg px-4 py-3 text-white focus:border-[#eab308] focus:outline-none resize-none font-mono text-sm"
-                      placeholder="Type your message here. Use the toolbar above for formatting..."
+                    <label className="block text-sm font-medium text-slate-300 mb-2">Title *</label>
+                    <input
+                      type="text"
+                      value={formData.title}
+                      onChange={(e) => setFormData({...formData, title: e.target.value})}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white focus:border-blue-500 outline-none"
+                      required
+                      placeholder="Enter announcement title"
                     />
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-sm text-gray-400 mb-2">Priority *</label>
-                      <select required value={formData.priority} onChange={(e) => setFormData({...formData, priority: e.target.value})} className="w-full bg-[#0f172a] border border-gray-700 rounded-lg px-4 py-2 text-white focus:border-[#eab308] focus:outline-none">
-                        <option value="Normal">Normal</option>
-                        <option value="Important">Important</option>
-                        <option value="Urgent">Urgent</option>
+                      <label className="block text-sm font-medium text-slate-300 mb-2">Type *</label>
+                      <select
+                        value={formData.type}
+                        onChange={(e) => setFormData({...formData, type: e.target.value})}
+                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white focus:border-blue-500 outline-none"
+                        required
+                      >
+                        <option value="update">Update</option>
+                        <option value="important">Important</option>
+                        <option value="reminder">Reminder</option>
+                        <option value="event">Event</option>
                       </select>
                     </div>
+
                     <div>
-                      <label className="block text-sm text-gray-400 mb-2">Target Block *</label>
-                      <select required value={formData.targetBlock} onChange={(e) => setFormData({...formData, targetBlock: e.target.value})} className="w-full bg-[#0f172a] border border-gray-700 rounded-lg px-4 py-2 text-white focus:border-[#eab308] focus:outline-none">
-                        {blocks.map(b => <option key={b} value={b}>{b === 'all' ? 'All Blocks' : `Block ${b}`}</option>)}
+                      <label className="block text-sm font-medium text-slate-300 mb-2">Priority *</label>
+                      <select
+                        value={formData.priority}
+                        onChange={(e) => setFormData({...formData, priority: e.target.value})}
+                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white focus:border-blue-500 outline-none"
+                        required
+                      >
+                        <option value="low">Low</option>
+                        <option value="normal">Normal</option>
+                        <option value="high">High</option>
+                        <option value="urgent">Urgent</option>
                       </select>
                     </div>
                   </div>
+                </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm text-gray-400 mb-2">Publish Date</label>
-                      <input type="date" value={formData.publishDate} onChange={(e) => setFormData({...formData, publishDate: e.target.value})} className="w-full bg-[#0f172a] border border-gray-700 rounded-lg px-4 py-2 text-white focus:border-[#eab308] focus:outline-none" />
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-2">Content *</label>
+                  <div className="bg-slate-800 border border-slate-700 rounded-lg overflow-hidden">
+                    {/* Rich Text Toolbar */}
+                    <div className="flex items-center gap-2 p-2 bg-slate-700/50 border-b border-slate-700">
+                      <button type="button" className="p-2 hover:bg-slate-600 rounded transition">
+                        <Bold size={16} className="text-slate-300" />
+                      </button>
+                      <button type="button" className="p-2 hover:bg-slate-600 rounded transition">
+                        <Italic size={16} className="text-slate-300" />
+                      </button>
+                      <button type="button" className="p-2 hover:bg-slate-600 rounded transition">
+                        <List size={16} className="text-slate-300" />
+                      </button>
+                      <button type="button" className="p-2 hover:bg-slate-600 rounded transition">
+                        <LinkIcon size={16} className="text-slate-300" />
+                      </button>
+                      <button type="button" className="p-2 hover:bg-slate-600 rounded transition">
+                        <Image size={16} className="text-slate-300" />
+                      </button>
+                      <div className="flex-1"></div>
+                      <button type="button" className="p-2 hover:bg-slate-600 rounded transition">
+                        <Upload size={16} className="text-slate-300" />
+                      </button>
                     </div>
-                    <div className="flex items-end">
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input type="checkbox" checked={formData.isScheduled} onChange={(e) => setFormData({...formData, isScheduled: e.target.checked})} className="w-4 h-4 accent-[#eab308]" />
-                        <span className="text-sm text-gray-300">Schedule for later</span>
-                      </label>
-                    </div>
+                    <textarea
+                      rows="8"
+                      value={formData.content}
+                      onChange={(e) => setFormData({...formData, content: e.target.value})}
+                      className="w-full bg-slate-800 px-4 py-3 text-white focus:border-blue-500 outline-none resize-none"
+                      required
+                      placeholder="Write your announcement content here..."
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-300 mb-2">Target Audience *</label>
+                    <select
+                      value={formData.targetAudience}
+                      onChange={(e) => setFormData({...formData, targetAudience: e.target.value})}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white focus:border-blue-500 outline-none"
+                      required
+                    >
+                      <option value="all">All Students</option>
+                      <option value="specific_blocks">Specific Blocks</option>
+                      <option value="specific_students">Specific Students</option>
+                    </select>
                   </div>
 
                   <div>
-                    <label className="block text-sm text-gray-400 mb-2">Attachments (Mock)</label>
-                    <div className="border-2 border-dashed border-gray-700 rounded-lg p-4 text-center hover:border-[#eab308] transition cursor-pointer">
-                      <FileText size={24} className="mx-auto text-gray-500 mb-2" />
-                      <p className="text-sm text-gray-400">Click to upload files (PDF, Images)</p>
+                    <label className="block text-sm font-medium text-slate-300 mb-2">Schedule (Optional)</label>
+                    <input
+                      type="datetime-local"
+                      value={formData.scheduledDate}
+                      onChange={(e) => setFormData({...formData, scheduledDate: e.target.value})}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white focus:border-blue-500 outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-300 mb-2">Attachments</label>
+                  <div className="border-2 border-dashed border-slate-700 rounded-lg p-8 text-center hover:border-blue-500/50 transition cursor-pointer">
+                    <Upload size={32} className="mx-auto text-slate-500 mb-2" />
+                    <p className="text-slate-400 text-sm">Drag and drop files here, or click to select</p>
+                    <p className="text-slate-500 text-xs mt-1">Supports: PDF, DOC, JPG, PNG (Max 10MB)</p>
+                  </div>
+                </div>
+              </>
+            ) : (
+              /* Preview Mode */
+              <div className={`p-6 rounded-lg border ${getTypeColor(formData.type)}`}>
+                <div className="flex items-start gap-3 mb-4">
+                  {getTypeIcon(formData.type)}
+                  <div className="flex-1">
+                    <h3 className="text-xl font-bold text-white mb-2">{formData.title || 'Untitled Announcement'}</h3>
+                    <div className="flex items-center gap-4 text-sm text-slate-400 mb-4">
+                      <span className={`px-2 py-1 rounded text-xs font-semibold border ${getPriorityColor(formData.priority)}`}>
+                        {formData.priority.toUpperCase()}
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <Users size={14} />
+                        {formData.targetAudience === 'all' ? 'All Students' : 
+                         formData.targetAudience === 'specific_blocks' ? 'Selected Blocks' : 'Selected Students'}
+                      </span>
+                      {formData.scheduledDate && (
+                        <span className="flex items-center gap-1">
+                          <Clock size={14} />
+                          Scheduled: {new Date(formData.scheduledDate).toLocaleString()}
+                        </span>
+                      )}
+                    </div>
+                    <div className="prose prose-invert max-w-none">
+                      <p className="text-slate-300 whitespace-pre-wrap">{formData.content || 'No content yet...'}</p>
                     </div>
                   </div>
+                </div>
+              </div>
+            )}
 
-                  <div className="pt-4 border-t border-gray-800">
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input type="checkbox" checked={formData.sendEmail} onChange={(e) => setFormData({...formData, sendEmail: e.target.checked})} className="w-4 h-4 accent-[#eab308]" />
-                      <span className="text-sm text-gray-300 flex items-center gap-2"><Send size={14} /> Send email notification to students</span>
-                    </label>
-                  </div>
-
-                  <div className="flex gap-4 pt-2">
-                    <button type="submit" className="flex-1 px-6 py-3 bg-[#eab308] hover:bg-yellow-500 text-black rounded-lg font-bold transition">
-                      {editingId ? 'Update Announcement' : 'Post Announcement'}
-                    </button>
-                    <button type="button" onClick={() => setIsModalOpen(false)} className="px-6 py-3 bg-[#1e293b] hover:bg-[#2a3850] border border-gray-700 rounded-lg font-medium transition">Cancel</button>
-                  </div>
-                </form>
-              )}
+            <div className="flex gap-3 pt-4">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowForm(false);
+                  setEditingAnnouncement(null);
+                  setPreviewMode(false);
+                }}
+                className="flex-1 px-6 py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-lg transition font-medium"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="flex-1 px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition font-bold flex items-center justify-center gap-2"
+              >
+                <Send size={18} />
+                {editingAnnouncement ? 'Update Announcement' : 'Post Announcement'}
+              </button>
             </div>
-          </div>
+          </form>
         </div>
       )}
+
+      {/* Announcements List */}
+      <div className="space-y-4">
+        {filteredAnnouncements.length === 0 ? (
+          <div className="text-center py-20 bg-slate-900/50 rounded-2xl border border-dashed border-slate-800">
+            <MessageSquare size={64} className="mx-auto text-slate-600 mb-4" />
+            <h3 className="text-xl font-bold text-white mb-2">No Announcements Found</h3>
+            <p className="text-slate-400 mb-4">
+              {searchTerm || typeFilter !== 'all' || statusFilter !== 'all'
+                ? 'Try adjusting your search or filters' 
+                : 'Create your first announcement to communicate with students'}
+            </p>
+            {(searchTerm || typeFilter !== 'all' || statusFilter !== 'all') && (
+              <button
+                onClick={() => {
+                  setSearchTerm('');
+                  setTypeFilter('all');
+                  setStatusFilter('all');
+                }}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
+              >
+                Clear Filters
+              </button>
+            )}
+          </div>
+        ) : (
+          filteredAnnouncements.map((ann) => (
+            <div key={ann.id} className={`bg-slate-900 border rounded-xl p-6 transition-all duration-200 hover:shadow-lg ${getTypeColor(ann.type)}`}>
+              <div className="flex items-start justify-between mb-4">
+                <div className="flex items-start gap-3 flex-1">
+                  {getTypeIcon(ann.type)}
+                  <div className="flex-1">
+                    <div className="flex items-center gap-3 mb-2">
+                      <h3 className="text-xl font-bold text-white">{ann.title}</h3>
+                      <span className={`px-2 py-1 rounded text-xs font-semibold border ${getPriorityColor(ann.priority)}`}>
+                        {ann.priority.toUpperCase()}
+                      </span>
+                      {ann.scheduled_date && (
+                        <span className="px-2 py-1 bg-yellow-500/10 text-yellow-400 text-xs font-semibold rounded-full border border-yellow-500/20 flex items-center gap-1">
+                          <Clock size={12} />
+                          Scheduled
+                        </span>
+                      )}
+                    </div>
+                    
+                    <div className="flex items-center gap-4 text-sm text-slate-400 mb-3">
+                      <span className="flex items-center gap-1">
+                        <Users size={14} />
+                        {ann.target_audience === 'all' ? 'All Students' : 
+                         ann.target_audience === 'specific_blocks' ? 'Selected Blocks' : 'Selected Students'}
+                      </span>
+                      <span>•</span>
+                      <span>{new Date(ann.created_at).toLocaleDateString()}</span>
+                      <span>•</span>
+                      <span>By {ann.author_name}</span>
+                    </div>
+                    
+                    <div className="prose prose-invert max-w-none mb-4">
+                      <p className="text-slate-300 whitespace-pre-wrap line-clamp-3">{ann.content}</p>
+                    </div>
+
+                    {ann.attachments && ann.attachments.length > 0 && (
+                      <div className="flex items-center gap-2 mb-4">
+                        <FileText size={16} className="text-slate-400" />
+                        <span className="text-sm text-slate-400">{ann.attachments.length} attachment(s)</span>
+                        <button className="text-blue-400 hover:text-blue-300 text-sm flex items-center gap-1">
+                          <Download size={14} />
+                          Download All
+                        </button>
+                      </div>
+                    )}
+
+                    <div className="flex items-center gap-4 text-xs text-slate-500">
+                      <span className="flex items-center gap-1">
+                        <Eye size={14} />
+                        {ann.read_count || 0} reads
+                      </span>
+                      {ann.scheduled_date && (
+                        <span className="flex items-center gap-1">
+                          <Clock size={14} />
+                          Posts: {new Date(ann.scheduled_date).toLocaleString()}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                
+                <div className="flex items-center gap-2 ml-4">
+                  <button 
+                    onClick={() => handleEdit(ann)}
+                    className="p-2 text-blue-400 hover:bg-blue-500/10 rounded-lg transition"
+                    title="Edit Announcement"
+                  >
+                    <Edit size={18} />
+                  </button>
+                  <button 
+                    onClick={() => handleDelete(ann.id)}
+                    className="p-2 text-red-400 hover:bg-red-500/10 rounded-lg transition"
+                    title="Delete Announcement"
+                  >
+                    <Trash2 size={18} />
+                  </button>
+                  <button 
+                    className="p-2 text-slate-400 hover:bg-slate-700 rounded-lg transition"
+                    title="More Options"
+                  >
+                    <MoreVertical size={18} />
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
     </div>
   );
 }

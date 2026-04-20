@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { 
   TrendingUp, 
   BarChart3, 
@@ -15,7 +15,8 @@ import {
   Clock,
   ChevronDown,
   HelpCircle,
-  Zap
+  Zap,
+  Loader2
 } from 'lucide-react';
 
 function InstructorAnalytics() {
@@ -24,55 +25,120 @@ function InstructorAnalytics() {
   const [timeRange, setTimeRange] = useState('month');
   const [showTooltips, setShowTooltips] = useState(true);
   const [exportFormat, setExportFormat] = useState('pdf');
+  
+  // Real Data States
+  const [loading, setLoading] = useState(true);
+  const [analyticsData, setAnalyticsData] = useState(null);
+  const [blocks, setBlocks] = useState(['all']);
+  const [error, setError] = useState(null);
 
-  // Mock Data
-  const performanceData = [
-    { date: 'Week 1', avgScore: 65, submissions: 45, block301: 68, block302: 62 },
-    { date: 'Week 2', avgScore: 72, submissions: 52, block301: 75, block302: 69 },
-    { date: 'Week 3', avgScore: 68, submissions: 48, block301: 70, block302: 66 },
-    { date: 'Week 4', avgScore: 75, submissions: 58, block301: 78, block302: 72 },
-    { date: 'Week 5', avgScore: 78, submissions: 62, block301: 82, block302: 74 },
-    { date: 'Week 6', avgScore: 82, submissions: 65, block301: 85, block302: 79 },
-  ];
+  useEffect(() => {
+    fetchAnalyticsData();
+    fetchAvailableBlocks();
+  }, [selectedBlock, timeRange]);
 
-  const topStudents = [
-    { rank: 1, name: 'Niño, Sasan', block: '301', avgScore: 96, trend: 'up', badge: '🏆 Top Performer' },
-    { rank: 2, name: 'Guzman, Iverson', block: '303', avgScore: 94, trend: 'up', badge: '⭐ Consistent' },
-    { rank: 3, name: 'Kakazu, King', block: '302', avgScore: 91, trend: 'stable', badge: ' Rising Star' },
-    { rank: 4, name: 'Rejano, Caleb', block: '304', avgScore: 89, trend: 'up', badge: null },
-    { rank: 5, name: 'Santos, John', block: '305', avgScore: 87, trend: 'down', badge: null },
-  ];
+  const fetchAnalyticsData = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const token = localStorage.getItem('token');
+      // This endpoint needs to be created in app.py
+      const response = await fetch(`http://localhost:5000/api/instructor/analytics?block=${selectedBlock}&range=${timeRange}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setAnalyticsData(data);
+      } else {
+        throw new Error('Failed to fetch analytics data');
+      }
+    } catch (err) {
+      console.error('Error fetching analytics:', err);
+      setError('Unable to load analytics data. Please try again later.');
+      // Fallback to mock data for demonstration
+      setAnalyticsData(getMockData());
+    } finally {
+      setLoading(false);
+    }
+  };
 
-  const strugglingStudents = [
-    { name: 'Flores, Maria', block: '301', avgScore: 42, lastSubmission: '5 days ago', issue: 'Low engagement' },
-    { name: 'Dela Cruz, Juan', block: '302', avgScore: 38, lastSubmission: '1 week ago', issue: 'Missing assignments' },
-    { name: 'Reyes, Ana', block: '303', avgScore: 45, lastSubmission: '3 days ago', issue: 'Concept gaps' },
-  ];
+  const fetchAvailableBlocks = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch('http://localhost:5000/api/instructor/courses', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        const blockNumbers = data.courses.map(c => c.block_number);
+        setBlocks(['all', ...blockNumbers]);
+      }
+    } catch (err) {
+      console.error('Error fetching blocks:', err);
+    }
+  };
 
-  const aiInsights = [
-    { type: 'positive', icon: TrendingUp, title: 'Strong Improvement', message: 'Block 303 shows 15% higher engagement than average. Consider sharing their study strategies.' },
-    { type: 'warning', icon: AlertCircle, title: 'Attention Needed', message: '"Binary Search" has only 34% pass rate. Consider adding a review session or extra practice problems.' },
-    { type: 'info', icon: Clock, title: 'Peak Activity', message: 'Most submissions occur between 7-9 PM. Consider extending deadlines to accommodate this pattern.' },
-    { type: 'success', icon: Trophy, title: 'Milestone Reached', message: 'Class average has crossed 75% for the first time this semester!' },
-  ];
+  // Mock data fallback (keep this for demonstration or when API fails)
+  const getMockData = () => ({
+    performanceData: [
+      { date: 'Week 1', avgScore: 65, submissions: 45, block301: 68, block302: 62 },
+      { date: 'Week 2', avgScore: 72, submissions: 52, block301: 75, block302: 69 },
+      { date: 'Week 3', avgScore: 68, submissions: 48, block301: 70, block302: 66 },
+      { date: 'Week 4', avgScore: 75, submissions: 58, block301: 78, block302: 72 },
+      { date: 'Week 5', avgScore: 78, submissions: 62, block301: 82, block302: 74 },
+      { date: 'Week 6', avgScore: 82, submissions: 65, block301: 85, block302: 79 },
+    ],
+    topStudents: [
+      { rank: 1, name: 'Niño, Sasan', block: '301', avgScore: 96, trend: 'up', badge: '🏆 Top Performer' },
+      { rank: 2, name: 'Guzman, Iverson', block: '303', avgScore: 94, trend: 'up', badge: '⭐ Consistent' },
+      { rank: 3, name: 'Kakazu, King', block: '302', avgScore: 91, trend: 'stable', badge: ' Rising Star' },
+      { rank: 4, name: 'Rejano, Caleb', block: '304', avgScore: 89, trend: 'up', badge: null },
+      { rank: 5, name: 'Santos, John', block: '305', avgScore: 87, trend: 'down', badge: null },
+    ],
+    strugglingStudents: [
+      { name: 'Flores, Maria', block: '301', avgScore: 42, lastSubmission: '5 days ago', issue: 'Low engagement' },
+      { name: 'Dela Cruz, Juan', block: '302', avgScore: 38, lastSubmission: '1 week ago', issue: 'Missing assignments' },
+      { name: 'Reyes, Ana', block: '303', avgScore: 45, lastSubmission: '3 days ago', issue: 'Concept gaps' },
+    ],
+    aiInsights: [
+      { type: 'positive', icon: TrendingUp, title: 'Strong Improvement', message: 'Block 303 shows 15% higher engagement than average. Consider sharing their study strategies.' },
+      { type: 'warning', icon: AlertCircle, title: 'Attention Needed', message: '"Binary Search" has only 34% pass rate. Consider adding a review session or extra practice problems.' },
+      { type: 'info', icon: Clock, title: 'Peak Activity', message: 'Most submissions occur between 7-9 PM. Consider extending deadlines to accommodate this pattern.' },
+      { type: 'success', icon: Trophy, title: 'Milestone Reached', message: 'Class average has crossed 75% for the first time this semester!' },
+    ],
+    challengingProblems: [
+      { name: 'Binary Search', passRate: 34, attempts: 120, avgTime: '45 min' },
+      { name: 'Recursion Basics', passRate: 42, attempts: 98, avgTime: '38 min' },
+      { name: 'Dynamic Programming', passRate: 28, attempts: 45, avgTime: '62 min' },
+    ],
+    heatmapData: [
+      { day: 'Mon', hours: [2, 5, 8, 12, 15, 18, 22, 25, 20, 15, 10, 5, 3, 2, 1, 1, 2, 4, 8, 12, 18, 22, 25, 20] },
+      { day: 'Tue', hours: [3, 6, 9, 14, 18, 22, 28, 32, 25, 18, 12, 6, 4, 3, 2, 2, 3, 5, 10, 15, 20, 25, 28, 22] },
+      { day: 'Wed', hours: [2, 4, 7, 11, 14, 17, 21, 24, 19, 14, 9, 4, 2, 1, 1, 1, 2, 4, 7, 11, 16, 20, 23, 18] },
+      { day: 'Thu', hours: [3, 7, 10, 15, 19, 24, 30, 35, 28, 20, 14, 7, 5, 3, 2, 2, 4, 6, 12, 17, 23, 28, 32, 25] },
+      { day: 'Fri', hours: [4, 8, 12, 18, 24, 30, 38, 45, 35, 25, 18, 10, 6, 4, 3, 3, 5, 8, 15, 22, 30, 38, 42, 32] },
+      { day: 'Sat', hours: [1, 2, 3, 5, 8, 12, 18, 25, 32, 28, 22, 15, 10, 6, 4, 3, 4, 6, 10, 16, 24, 32, 38, 30] },
+      { day: 'Sun', hours: [1, 1, 2, 4, 6, 10, 15, 22, 30, 35, 30, 22, 15, 8, 5, 3, 4, 6, 12, 20, 28, 35, 40, 32] },
+    ],
+    metrics: {
+      totalStudents: 142,
+      classAverage: 78,
+      completionRate: 85,
+      activeProblems: 48
+    }
+  });
 
-  const challengingProblems = [
-    { name: 'Binary Search', passRate: 34, attempts: 120, avgTime: '45 min' },
-    { name: 'Recursion Basics', passRate: 42, attempts: 98, avgTime: '38 min' },
-    { name: 'Dynamic Programming', passRate: 28, attempts: 45, avgTime: '62 min' },
-  ];
+  const data = analyticsData || getMockData();
+  const performanceData = data.performanceData || [];
+  const topStudents = data.topStudents || [];
+  const strugglingStudents = data.strugglingStudents || [];
+  const aiInsights = data.aiInsights || [];
+  const challengingProblems = data.challengingProblems || [];
+  const heatmapData = data.heatmapData || [];
+  const metrics = data.metrics || { totalStudents: 0, classAverage: 0, completionRate: 0, activeProblems: 0 };
 
-  const heatmapData = [
-    { day: 'Mon', hours: [2, 5, 8, 12, 15, 18, 22, 25, 20, 15, 10, 5, 3, 2, 1, 1, 2, 4, 8, 12, 18, 22, 25, 20] },
-    { day: 'Tue', hours: [3, 6, 9, 14, 18, 22, 28, 32, 25, 18, 12, 6, 4, 3, 2, 2, 3, 5, 10, 15, 20, 25, 28, 22] },
-    { day: 'Wed', hours: [2, 4, 7, 11, 14, 17, 21, 24, 19, 14, 9, 4, 2, 1, 1, 1, 2, 4, 7, 11, 16, 20, 23, 18] },
-    { day: 'Thu', hours: [3, 7, 10, 15, 19, 24, 30, 35, 28, 20, 14, 7, 5, 3, 2, 2, 4, 6, 12, 17, 23, 28, 32, 25] },
-    { day: 'Fri', hours: [4, 8, 12, 18, 24, 30, 38, 45, 35, 25, 18, 10, 6, 4, 3, 3, 5, 8, 15, 22, 30, 38, 42, 32] },
-    { day: 'Sat', hours: [1, 2, 3, 5, 8, 12, 18, 25, 32, 28, 22, 15, 10, 6, 4, 3, 4, 6, 10, 16, 24, 32, 38, 30] },
-    { day: 'Sun', hours: [1, 1, 2, 4, 6, 10, 15, 22, 30, 35, 30, 22, 15, 8, 5, 3, 4, 6, 12, 20, 28, 35, 40, 32] },
-  ];
-
-  const blocks = ['all', '301', '302', '303', '304', '305', '306', '307'];
   const timeRanges = [
     { value: 'week', label: 'Last Week' },
     { value: 'month', label: 'Last Month' },
@@ -92,9 +158,24 @@ function InstructorAnalytics() {
     return 'bg-[#eab308]';
   };
 
+  const handleExport = () => {
+    // Implement export functionality based on selected format
+    alert(`Exporting analytics as ${exportFormat.toUpperCase()}... (Feature to be implemented)`);
+  };
+
+  if (loading && !analyticsData) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <Loader2 size={48} className="animate-spin text-[#eab308] mx-auto mb-4" />
+          <p className="text-white text-lg">Loading analytics data...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
-      
       {/* Header with Advanced Controls */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div className="flex items-center gap-3">
@@ -128,11 +209,22 @@ function InstructorAnalytics() {
             <Download size={16} className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 pointer-events-none" />
           </div>
           
-          <button className="flex items-center gap-2 px-4 py-2 bg-[#eab308] hover:bg-yellow-500 text-black rounded-lg text-sm font-bold transition shadow-lg shadow-yellow-500/20">
+          <button 
+            onClick={handleExport}
+            className="flex items-center gap-2 px-4 py-2 bg-[#eab308] hover:bg-yellow-500 text-black rounded-lg text-sm font-bold transition shadow-lg shadow-yellow-500/20"
+          >
             <Download size={16} /> Export
           </button>
         </div>
       </div>
+
+      {/* Error Message */}
+      {error && (
+        <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-4 flex items-center gap-3">
+          <AlertCircle className="text-red-400" size={20} />
+          <p className="text-red-400 text-sm">{error}</p>
+        </div>
+      )}
 
       {/* Advanced Filters */}
       <div className="bg-gradient-to-br from-[#1e293b] to-[#0f172a] p-4 rounded-xl border border-gray-700 flex flex-wrap gap-4 items-center">
@@ -203,7 +295,7 @@ function InstructorAnalytics() {
             <ArrowUpRight size={16} className="text-green-400" />
           </div>
           <h3 className="text-gray-400 text-sm mb-1">Total Students</h3>
-          <p className="text-3xl font-bold text-white">142</p>
+          <p className="text-3xl font-bold text-white">{metrics.totalStudents}</p>
           <p className="text-xs text-green-400 mt-1">+5 this week</p>
         </div>
 
@@ -215,7 +307,7 @@ function InstructorAnalytics() {
             <ArrowUpRight size={16} className="text-green-400" />
           </div>
           <h3 className="text-gray-400 text-sm mb-1">Class Average</h3>
-          <p className="text-3xl font-bold text-white">78%</p>
+          <p className="text-3xl font-bold text-white">{metrics.classAverage}%</p>
           <p className="text-xs text-green-400 mt-1">+2% vs last week</p>
         </div>
 
@@ -227,7 +319,7 @@ function InstructorAnalytics() {
             <ArrowDownRight size={16} className="text-red-400" />
           </div>
           <h3 className="text-gray-400 text-sm mb-1">Completion Rate</h3>
-          <p className="text-3xl font-bold text-white">85%</p>
+          <p className="text-3xl font-bold text-white">{metrics.completionRate}%</p>
           <p className="text-xs text-red-400 mt-1">-3% vs last week</p>
         </div>
 
@@ -239,7 +331,7 @@ function InstructorAnalytics() {
             <ArrowUpRight size={16} className="text-green-400" />
           </div>
           <h3 className="text-gray-400 text-sm mb-1">Active Problems</h3>
-          <p className="text-3xl font-bold text-white">48</p>
+          <p className="text-3xl font-bold text-white">{metrics.activeProblems}</p>
           <p className="text-xs text-green-400 mt-1">+2 new this week</p>
         </div>
       </div>
@@ -502,7 +594,6 @@ function InstructorAnalytics() {
           </div>
         </div>
       </div>
-
     </div>
   );
 }
