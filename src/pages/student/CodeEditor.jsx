@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { 
   ArrowLeft, Play, CheckCircle, AlertCircle, 
   Terminal, Code, Zap, Trophy, Clock,
-  ChevronRight, Sparkles, Loader2
+  ChevronRight, Sparkles, Loader2, Languages, RefreshCw
 } from 'lucide-react';
 import Editor from '@monaco-editor/react';
 
@@ -12,16 +12,33 @@ function CodeEditor() {
   const navigate = useNavigate();
   const [problem, setProblem] = useState(null);
   const [code, setCode] = useState('');
+  const [language, setLanguage] = useState('python');
   const [output, setOutput] = useState(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [activeTab, setActiveTab] = useState('description'); // description, testcases
+  const [activeTab, setActiveTab] = useState('description');
+  const [error, setError] = useState(null);
+
+  // ✅ UPDATED: Language configuration (Python, Java, C# ONLY)
+  const languages = [
+    { value: 'python', label: 'Python', ext: '.py' },
+    { value: 'java', label: 'Java', ext: '.java' },
+    { value: 'csharp', label: 'C#', ext: '.cs' },
+  ];
 
   useEffect(() => {
-    fetchProblem();
+    if (id) {
+      fetchProblem();
+    } else {
+      setLoading(false);
+      setError('No problem selected');
+    }
   }, [id]);
 
   const fetchProblem = async () => {
+    setLoading(true);
+    setError(null);
+    
     try {
       const token = localStorage.getItem('token');
       const response = await fetch(`http://localhost:5000/api/problems/${id}`, {
@@ -31,16 +48,43 @@ function CodeEditor() {
       if (response.ok) {
         const data = await response.json();
         setProblem(data);
-        setCode(data.starter_code || '');
+        // Set default language from problem or fallback to python
+        const defaultLang = data.language || 'python';
+        setLanguage(defaultLang);
+        setCode(data.starter_code || getDefaultStarterCode(defaultLang));
+      } else {
+        setError('Problem not found or you don\'t have access');
+        setProblem(null);
       }
     } catch (err) {
       console.error('Error fetching problem:', err);
+      setError('Failed to load problem. Please check your connection.');
     } finally {
       setLoading(false);
     }
   };
 
+  const getDefaultStarterCode = (lang) => {
+    switch(lang) {
+      case 'java': 
+        return `public class Main {\n    public static void main(String[] args) {\n        // Write your code here\n    }\n}`;
+      case 'csharp': 
+        return `using System;\n\nclass Program {\n    static void Main(string[] args) {\n        // Write your code here\n    }\n}`;
+      default: 
+        return `# Write your code here\ndef solve():\n    pass\n\nsolve()`;
+    }
+  };
+
   const handleSubmit = async () => {
+    if (!code.trim()) {
+      setOutput({ 
+        error: 'Please write some code before submitting', 
+        status: 'error', 
+        results: [] 
+      });
+      return;
+    }
+
     setSubmitting(true);
     setOutput(null);
     
@@ -54,17 +98,42 @@ function CodeEditor() {
         },
         body: JSON.stringify({
           problem_id: parseInt(id),
-          code: code
+          code: code,
+          language: language // ✅ Ensure language is sent
         })
       });
       
       const data = await response.json();
       setOutput(data);
     } catch (err) {
-      setOutput({ error: 'Failed to submit code' });
+      setOutput({ 
+        error: 'Failed to submit code. Please try again.', 
+        status: 'error', 
+        results: [] 
+      });
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const handleLanguageChange = (newLang) => {
+    setLanguage(newLang);
+    // Optional: Ask user before resetting code
+    if (window.confirm(`Switching to ${newLang} will reset your code. Continue?`)) {
+      setCode(getDefaultStarterCode(newLang));
+    } else {
+      // Revert to previous language if user cancels
+      setLanguage(language);
+    }
+  };
+
+  const getCurrentLangLabel = () => {
+    return languages.find(l => l.value === language)?.label || 'Python';
+  };
+
+  const handleRetry = () => {
+    setOutput(null);
+    setCode(problem?.starter_code || getDefaultStarterCode(language));
   };
 
   if (loading) {
@@ -78,21 +147,38 @@ function CodeEditor() {
     );
   }
 
-  if (!problem) {
+  if (error || !problem) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center p-6">
         <div className="max-w-md text-center">
           <div className="inline-flex p-4 bg-slate-800/50 rounded-2xl mb-4">
             <AlertCircle size={48} className="text-red-400" />
           </div>
-          <h2 className="text-2xl font-bold text-white mb-2">Quest Not Found</h2>
-          <p className="text-slate-400 mb-6">This problem doesn't exist or has been removed.</p>
-          <button 
-            onClick={() => navigate('/student/dashboard')}
-            className="px-6 py-3 bg-gradient-to-r from-yellow-500 to-purple-600 text-white font-bold rounded-lg transition-all"
-          >
-            Return to Dashboard
-          </button>
+          <h2 className="text-2xl font-bold text-white mb-2">
+            {error === 'No problem selected' ? 'No Quest Selected' : 'Quest Not Found'}
+          </h2>
+          <p className="text-slate-400 mb-6">
+            {error === 'No problem selected' 
+              ? 'Please select a problem from your dashboard to start coding.' 
+              : error || 'This problem doesn\'t exist or has been removed.'}
+          </p>
+          <div className="flex gap-3 justify-center">
+            <button 
+              onClick={() => navigate('/student/dashboard')}
+              className="px-6 py-3 bg-gradient-to-r from-yellow-500 to-purple-600 text-white font-bold rounded-lg transition-all hover:shadow-lg"
+            >
+              Return to Dashboard
+            </button>
+            {id && (
+              <button 
+                onClick={fetchProblem}
+                className="px-6 py-3 bg-slate-700 hover:bg-slate-600 text-white font-bold rounded-lg transition-all flex items-center gap-2"
+              >
+                <RefreshCw size={18} />
+                Retry
+              </button>
+            )}
+          </div>
         </div>
       </div>
     );
@@ -101,12 +187,13 @@ function CodeEditor() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
       {/* Header */}
-      <header className="border-b border-white/10 bg-slate-900/50 backdrop-blur-sm">
+      <header className="border-b border-white/10 bg-slate-900/50 backdrop-blur-sm sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-4">
             <button 
               onClick={() => navigate('/student/dashboard')}
-              className="p-2 text-slate-400 hover:text-white transition"
+              className="p-2 text-slate-400 hover:text-white transition rounded-lg hover:bg-slate-800"
+              title="Back to Dashboard"
             >
               <ArrowLeft size={20} />
             </button>
@@ -120,13 +207,17 @@ function CodeEditor() {
                 <span className="text-slate-400 flex items-center gap-1">
                   <Zap size={14} className="text-yellow-400" /> {problem.xp_reward} XP
                 </span>
+                <span className="text-slate-500">•</span>
+                <span className="flex items-center gap-1 text-blue-400">
+                  <Languages size={14} /> {getCurrentLangLabel()}
+                </span>
               </div>
             </div>
           </div>
           <button 
             onClick={handleSubmit}
             disabled={submitting}
-            className="px-6 py-2 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-400 hover:to-green-500 text-white font-bold rounded-lg transition-all flex items-center gap-2 disabled:opacity-50"
+            className="px-6 py-2 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-400 hover:to-green-500 text-white font-bold rounded-lg transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-green-500/20"
           >
             {submitting ? <Loader2 size={18} className="animate-spin" /> : <Play size={18} />}
             {submitting ? 'Testing...' : 'Submit Code'}
@@ -146,7 +237,7 @@ function CodeEditor() {
                 className={`px-6 py-3 text-sm font-medium transition ${
                   activeTab === 'description' 
                     ? 'bg-yellow-500/10 text-yellow-400 border-b-2 border-yellow-400' 
-                    : 'text-slate-400 hover:text-white'
+                    : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
                 }`}
               >
                 <Terminal size={16} className="inline mr-2" />
@@ -157,7 +248,7 @@ function CodeEditor() {
                 className={`px-6 py-3 text-sm font-medium transition ${
                   activeTab === 'testcases' 
                     ? 'bg-purple-500/10 text-purple-400 border-b-2 border-purple-400' 
-                    : 'text-slate-400 hover:text-white'
+                    : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
                 }`}
               >
                 <Code size={16} className="inline mr-2" />
@@ -171,7 +262,7 @@ function CodeEditor() {
                 <div>
                   <h2 className="text-lg font-bold text-white mb-4">Problem Description</h2>
                   <div className="prose prose-invert max-w-none">
-                    <p className="text-slate-300 whitespace-pre-wrap">{problem.description}</p>
+                    <p className="text-slate-300 whitespace-pre-wrap leading-relaxed">{problem.description}</p>
                   </div>
                 </div>
               ) : (
@@ -179,19 +270,19 @@ function CodeEditor() {
                   <h2 className="text-lg font-bold text-white mb-4">Test Cases</h2>
                   <div className="space-y-4">
                     {problem.test_cases && JSON.parse(problem.test_cases).map((test, idx) => (
-                      <div key={idx} className="bg-slate-900/50 p-4 rounded-lg border border-white/5">
+                      <div key={idx} className="bg-slate-900/50 p-4 rounded-lg border border-white/5 hover:border-white/10 transition">
                         <div className="flex items-center gap-2 mb-2">
                           <Sparkles size={16} className="text-purple-400" />
                           <span className="text-sm font-semibold text-white">Test Case {idx + 1}</span>
                         </div>
                         <div className="space-y-2 text-sm">
                           <div>
-                            <span className="text-slate-500">Input:</span>
-                            <code className="ml-2 text-green-400">{test.input}</code>
+                            <span className="text-slate-500 font-medium">Input:</span>
+                            <code className="ml-2 text-green-400 bg-green-900/20 px-2 py-1 rounded">{test.input}</code>
                           </div>
                           <div>
-                            <span className="text-slate-500">Expected Output:</span>
-                            <code className="ml-2 text-yellow-400">{test.expected}</code>
+                            <span className="text-slate-500 font-medium">Expected Output:</span>
+                            <code className="ml-2 text-yellow-400 bg-yellow-900/20 px-2 py-1 rounded">{test.expected}</code>
                           </div>
                         </div>
                       </div>
@@ -204,18 +295,41 @@ function CodeEditor() {
 
           {/* Right Panel - Code Editor */}
           <div className="bg-slate-800/50 backdrop-blur-sm rounded-2xl border border-white/10 overflow-hidden flex flex-col">
-            <div className="border-b border-white/10 px-4 py-3 flex items-center justify-between">
+            {/* Toolbar with Language Selector */}
+            <div className="border-b border-white/10 px-4 py-3 flex items-center justify-between bg-slate-900/50">
               <div className="flex items-center gap-2">
                 <Code size={18} className="text-blue-400" />
-                <span className="text-sm font-medium text-white">Solution.py</span>
+                <span className="text-sm font-medium text-white">Solution</span>
+              </div>
+              
+              {/* Language Selector */}
+              <div className="relative group">
+                <select 
+                  value={language}
+                  onChange={(e) => handleLanguageChange(e.target.value)}
+                  className="appearance-none bg-slate-800 border border-slate-700 text-white text-sm rounded-lg px-3 py-1.5 pr-8 focus:border-blue-500 outline-none cursor-pointer hover:bg-slate-700 transition"
+                >
+                  {languages.map((lang) => (
+                    <option key={lang.value} value={lang.value}>
+                      {lang.label}
+                    </option>
+                  ))}
+                </select>
+                <ChevronRight size={14} className="absolute right-2 top-1/2 transform -translate-y-1/2 rotate-90 text-slate-400 pointer-events-none" />
               </div>
             </div>
-            <div className="flex-1">
+
+            <div className="flex-1 relative">
               <Editor
                 height="100%"
-                defaultLanguage="python"
+                // ✅ UPDATED: Language Mapping for Monaco (Python, Java, C#)
+                language={
+                  language === 'csharp' ? 'csharp' : 
+                  language === 'java' ? 'java' : 
+                  'python'
+                }
                 value={code}
-                onChange={(value) => setCode(value)}
+                onChange={(value) => setCode(value || '')}
                 theme="vs-dark"
                 options={{
                   minimap: { enabled: false },
@@ -223,6 +337,9 @@ function CodeEditor() {
                   lineNumbers: 'on',
                   scrollBeyondLastLine: false,
                   automaticLayout: true,
+                  tabSize: language === 'python' ? 4 : 2,
+                  quickSuggestions: true,
+                  suggestOnTriggerCharacters: true,
                 }}
               />
             </div>
@@ -231,60 +348,72 @@ function CodeEditor() {
 
         {/* Output Panel */}
         {output && (
-          <div className="mt-6 bg-slate-800/50 backdrop-blur-sm rounded-2xl border border-white/10 overflow-hidden">
+          <div className="mt-6 bg-slate-800/50 backdrop-blur-sm rounded-2xl border border-white/10 overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-300">
             <div className="border-b border-white/10 px-6 py-4 flex items-center justify-between">
               <h3 className="font-bold text-white flex items-center gap-2">
                 <Terminal size={18} className="text-green-400" />
                 Submission Results
               </h3>
-              {output.status === 'passed' ? (
-                <div className="flex items-center gap-2 px-4 py-2 bg-green-500/10 border border-green-500/30 rounded-lg">
-                  <CheckCircle size={18} className="text-green-400" />
-                  <span className="text-green-400 font-semibold">All Tests Passed!</span>
-                </div>
-              ) : (
-                <div className="flex items-center gap-2 px-4 py-2 bg-red-500/10 border border-red-500/30 rounded-lg">
-                  <AlertCircle size={18} className="text-red-400" />
-                  <span className="text-red-400 font-semibold">Some Tests Failed</span>
-                </div>
-              )}
+              <div className="flex items-center gap-3">
+                {output.status === 'passed' ? (
+                  <div className="flex items-center gap-2 px-4 py-2 bg-green-500/10 border border-green-500/30 rounded-lg">
+                    <CheckCircle size={18} className="text-green-400" />
+                    <span className="text-green-400 font-semibold">All Tests Passed!</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 px-4 py-2 bg-red-500/10 border border-red-500/30 rounded-lg">
+                    <AlertCircle size={18} className="text-red-400" />
+                    <span className="text-red-400 font-semibold">Some Tests Failed</span>
+                  </div>
+                )}
+                <button 
+                  onClick={handleRetry}
+                  className="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-white text-sm rounded-lg transition flex items-center gap-2"
+                >
+                  <RefreshCw size={14} />
+                  Reset Code
+                </button>
+              </div>
             </div>
             <div className="p-6">
-              {output.results && (
+              {output.results && output.results.length > 0 ? (
                 <div className="space-y-3">
                   {output.results.map((result, idx) => (
                     <div key={idx} className={`p-4 rounded-lg border ${
                       result.status === 'passed' 
                         ? 'bg-green-500/10 border-green-500/30' 
-                        : result.status === 'error'
-                        ? 'bg-red-500/10 border-red-500/30'
                         : 'bg-red-500/10 border-red-500/30'
                     }`}>
                       <div className="flex items-center justify-between mb-2">
                         <span className="text-sm font-semibold text-white">Test Case {idx + 1}</span>
                         {result.status === 'passed' ? (
                           <CheckCircle size={16} className="text-green-400" />
-                        ) : result.status === 'error' ? (
-                          <AlertCircle size={16} className="text-red-400" />
                         ) : (
                           <AlertCircle size={16} className="text-red-400" />
                         )}
                       </div>
                       {result.error ? (
-                        <p className="text-red-400 text-sm">{result.error}</p>
+                        <div className="text-red-400 text-sm font-mono bg-red-900/20 p-3 rounded">
+                          <strong className="text-red-300">Error:</strong> {result.error}
+                        </div>
                       ) : (
-                        <div className="text-sm text-slate-300">
-                          <p>Expected: <code className="text-yellow-400">{result.expected}</code></p>
-                          <p>Got: <code className={result.actual === result.expected ? 'text-green-400' : 'text-red-400'}>{result.actual}</code></p>
+                        <div className="text-sm text-slate-300 font-mono space-y-1">
+                          <p>Expected: <code className="text-yellow-400 bg-yellow-900/20 px-2 py-1 rounded">{result.expected}</code></p>
+                          <p>Got: <code className={`${result.actual === result.expected ? 'text-green-400 bg-green-900/20' : 'text-red-400 bg-red-900/20'} px-2 py-1 rounded`}>{result.actual}</code></p>
                         </div>
                       )}
                     </div>
                   ))}
                 </div>
+              ) : (
+                <div className="text-center py-8 text-slate-400">
+                  <AlertCircle size={48} className="mx-auto mb-4 opacity-50" />
+                  <p>No test results available.</p>
+                </div>
               )}
               
               {output.xp_earned > 0 && (
-                <div className="mt-6 p-4 bg-yellow-500/10 border border-yellow-500/30 rounded-lg flex items-center justify-between">
+                <div className="mt-6 p-4 bg-yellow-500/10 border border-yellow-500/30 rounded-lg flex items-center justify-between animate-pulse-once">
                   <div className="flex items-center gap-3">
                     <Trophy size={24} className="text-yellow-400" />
                     <div>
@@ -294,7 +423,7 @@ function CodeEditor() {
                   </div>
                   <button 
                     onClick={() => navigate('/student/dashboard')}
-                    className="px-4 py-2 bg-yellow-500 hover:bg-yellow-400 text-black font-bold rounded-lg transition"
+                    className="px-4 py-2 bg-yellow-500 hover:bg-yellow-400 text-black font-bold rounded-lg transition shadow-lg shadow-yellow-500/20"
                   >
                     Back to Dashboard
                   </button>

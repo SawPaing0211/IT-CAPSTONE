@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { 
   ArrowLeft, Play, CheckCircle, AlertCircle, 
   Terminal, Bug, Zap, Trophy, Clock,
-  ChevronRight, Sparkles, Loader2, Wrench
+  ChevronRight, Sparkles, Loader2, Wrench, Languages
 } from 'lucide-react';
 import Editor from '@monaco-editor/react';
 
@@ -12,6 +12,7 @@ function DebugMode() {
   const navigate = useNavigate();
   const [problem, setProblem] = useState(null);
   const [code, setCode] = useState('');
+  const [language, setLanguage] = useState('python'); // ✅ Added language state
   const [output, setOutput] = useState(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -32,12 +33,25 @@ function DebugMode() {
         const data = await response.json();
         setProblem(data);
         // For debug mode, we might want to provide buggy code
-        setCode(data.starter_code || '');
+        const defaultLang = data.language || 'python';
+        setLanguage(defaultLang);
+        setCode(data.starter_code || getDefaultStarterCode(defaultLang));
       }
     } catch (err) {
       console.error('Error fetching problem:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const getDefaultStarterCode = (lang) => {
+    switch(lang) {
+      case 'java': 
+        return `public class Main {\n    public static void main(String[] args) {\n        // BUG: Fix this code\n    }\n}`;
+      case 'csharp': 
+        return `using System;\n\nclass Program {\n    static void Main(string[] args) {\n        // BUG: Fix this code\n    }\n}`;
+      default: 
+        return `# BUG: Fix this code\ndef solve():\n    pass\n\nsolve()`;
     }
   };
 
@@ -55,7 +69,8 @@ function DebugMode() {
         },
         body: JSON.stringify({
           problem_id: parseInt(id),
-          code: code
+          code: code,
+          language: language // ✅ Added language to submission
         })
       });
       
@@ -127,6 +142,9 @@ function DebugMode() {
                   <span className="text-slate-400 flex items-center gap-1">
                     <Zap size={14} className="text-yellow-400" /> {problem.xp_reward} XP
                   </span>
+                  <span className="text-slate-500">•</span>
+                  <span className="flex items-center gap-1 text-blue-400">
+                    <Languages size={14} /> {language === 'csharp' ? 'C#' : language === 'java' ? 'Java' : 'Python'}</span>
                 </div>
               </div>
             </div>
@@ -233,14 +251,19 @@ function DebugMode() {
             <div className="border-b border-white/10 px-4 py-3 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Bug size={18} className="text-pink-400" />
-                <span className="text-sm font-medium text-white">BuggyCode.py</span>
+                <span className="text-sm font-medium text-white">BuggyCode.{language === 'csharp' ? 'cs' : language === 'java' ? 'java' : 'py'}</span>
               </div>
               <span className="text-xs text-pink-400 bg-pink-500/10 px-2 py-1 rounded">Contains Bugs</span>
             </div>
             <div className="flex-1">
               <Editor
                 height="100%"
-                defaultLanguage="python"
+                // ✅ UPDATED: Language Mapping for Monaco
+                language={
+                  language === 'csharp' ? 'csharp' : 
+                  language === 'java' ? 'java' : 
+                  'python'
+                }
                 value={code}
                 onChange={(value) => setCode(value)}
                 theme="vs-dark"

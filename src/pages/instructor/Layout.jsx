@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { Outlet, useNavigate, Link, useLocation } from 'react-router-dom';
 import { 
   LogOut, LayoutDashboard, BookOpen, PlusCircle, 
-  Users, BarChart3, ShieldCheck, Gamepad2
+  Users, BarChart3, ShieldCheck, Gamepad2, 
+  Megaphone, AlertTriangle, School, FileText // ✅ Added FileText here
 } from 'lucide-react';
 
 function InstructorLayout() {
@@ -17,17 +18,20 @@ function InstructorLayout() {
   };
 
   const navItems = [
-    { path: '/instructor', label: 'Dashboard', icon: LayoutDashboard },
-    { path: '/instructor/problems', label: 'Quest Log', icon: BookOpen },
-    { path: '/instructor/create', label: 'Forge Quest', icon: PlusCircle },
-    { path: '/instructor/students', label: 'Students', icon: Users }, // Placeholder
-    { path: '/instructor/analytics', label: 'Analytics', icon: BarChart3 }, // Placeholder
+    { path: '/instructor/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { path: '/instructor/courses', label: 'My Classes', icon: School },
+    { path: '/instructor/problems', label: 'Problem Management', icon: BookOpen },
+    { path: '/instructor/problems/create', label: 'Create Problem', icon: PlusCircle },
+    { path: '/instructor/announcements', label: 'Announcements', icon: Megaphone },
+    { path: '/instructor/plagiarism', label: 'Plagiarism Check', icon: AlertTriangle },
+    { path: '/instructor/analytics', label: 'Analytics', icon: BarChart3 },
+    { path: '/instructor/lessons', label: 'Course Materials', icon: FileText }, // ✅ Now this works
   ];
 
   return (
     <div className="min-h-screen bg-slate-950 flex text-slate-100">
       {/* Sidebar */}
-      <aside className="w-64 bg-slate-900 border-r border-slate-800 flex flex-col">
+      <aside className="w-64 bg-slate-900 border-r border-slate-800 flex flex-col fixed h-full z-10">
         <div className="p-6 border-b border-slate-800">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-blue-600 rounded-lg">
@@ -40,9 +44,9 @@ function InstructorLayout() {
           </div>
         </div>
 
-        <nav className="flex-1 p-4 space-y-2">
+        <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
           {navItems.map((item) => {
-            const isActive = location.pathname === item.path;
+            const isActive = location.pathname.startsWith(item.path);
             return (
               <Link 
                 key={item.path} 
@@ -81,7 +85,7 @@ function InstructorLayout() {
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 overflow-y-auto bg-slate-950">
+      <main className="flex-1 ml-64 overflow-y-auto bg-slate-950 min-h-screen">
         <Outlet />
       </main>
     </div>
