@@ -15,16 +15,27 @@ function Dashboard() {
     const fetchDashboard = async () => {
       try {
         const token = localStorage.getItem('token');
+        console.log("🔍 Dashboard fetching with token:", token ? token.substring(0, 50) + "..." : "NO TOKEN");
+        
         const response = await fetch('http://localhost:5000/api/student/dashboard', {
-          headers: { 'Authorization': `Bearer ${token}` }
+          headers: { 
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
         });
+        
+        console.log("📡 Response status:", response.status);
         
         if (response.ok) {
           const result = await response.json();
+          console.log("✅ Dashboard data loaded:", result);
           setData(result);
+        } else {
+          const errorData = await response.json().catch(() => ({}));
+          console.error("❌ Dashboard fetch failed:", response.status, errorData);
         }
       } catch (err) {
-        console.error('Error loading dashboard:', err);
+        console.error('💥 Error loading dashboard:', err);
       } finally {
         setLoading(false);
       }
@@ -50,6 +61,7 @@ function Dashboard() {
       <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
         <AlertCircle size={48} className="text-red-400" />
         <p className="text-red-400 text-lg">Failed to load quest data</p>
+        <p className="text-slate-500 text-sm">Check console for details (F12)</p>
         <button 
           onClick={() => window.location.reload()}
           className="px-6 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg transition"

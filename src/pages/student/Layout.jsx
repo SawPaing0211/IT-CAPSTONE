@@ -3,13 +3,16 @@ import { Outlet, useNavigate, Link } from 'react-router-dom';
 import { 
   Zap, Trophy, Shield, Code, Bug, BarChart3, 
   Users, Settings, LogOut, Gamepad2, Star,
-  Flame, Target, Clock, Crown
+  Flame, Target, Clock, Crown, Award
 } from 'lucide-react';
+import BadgesModal from '../../components/BadgesModal';
 
 function StudentLayout() {
   const navigate = useNavigate();
   const [userData, setUserData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [badges, setBadges] = useState({});
+  const [showBadges, setShowBadges] = useState(false);
 
   // Fetch real user data from API
   useEffect(() => {
@@ -23,6 +26,8 @@ function StudentLayout() {
         if (response.ok) {
           const data = await response.json();
           setUserData(data);
+          if (data.badges) setBadges(data.badges);
+          
           // Update localStorage with fresh data
           const user = JSON.parse(localStorage.getItem('user') || '{}');
           localStorage.setItem('user', JSON.stringify({
@@ -51,6 +56,9 @@ function StudentLayout() {
   const user = userData?.user || { level: 1, xp: 0, xp_to_next: 250, streak: 0 };
   const xpProgress = Math.min((user.xp % user.xp_to_next) / user.xp_to_next * 100, 100);
   const userName = JSON.parse(localStorage.getItem('user') || '{}').name || 'Adventurer';
+
+  // Count earned badges
+  const badgeCount = Object.keys(badges).filter(key => badges[key]).length;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
@@ -108,51 +116,27 @@ function StudentLayout() {
                 </span>
               </div>
 
-              {/* Stars */}
-              <div className="flex items-center gap-1 bg-slate-800/50 px-3 py-2 rounded-xl border border-white/10">
-                {[1, 2, 3].map((star) => (
-                  <Star key={star} size={16} className="text-yellow-400 fill-yellow-400" />
-                ))}
-                <span className="text-slate-400 text-xs ml-1">+3</span>
-              </div>
+              {/* ✅ NEW: Achievements / Badges */}
+              <button 
+                onClick={() => setShowBadges(true)}
+                className="flex items-center gap-2 bg-yellow-500/10 px-3 py-2 rounded-xl border border-yellow-500/30 hover:bg-yellow-500/20 transition group"
+              >
+                <Award size={18} className="text-yellow-400 group-hover:scale-110 transition" />
+                <span className="text-yellow-400 font-semibold text-sm">+{badgeCount}</span>
+              </button>
             </div>
 
             {/* Navigation Icons */}
             <div className="flex items-center gap-2">
-              <NavItem 
-                icon={<Target size={20} />} 
-                label="Quests" 
-                active 
-                onClick={() => navigate('/student/dashboard')}
-              />
-              <NavItem 
-                icon={<Code size={20} />} 
-                label="Code Editor" 
-                onClick={() => navigate('/student/code-editor')}
-              />
-              <NavItem 
-                icon={<Bug size={20} />} 
-                label="Debug Mode" 
-                onClick={() => navigate('/student/debug')}
-              />
-              <NavItem 
-                icon={<Trophy size={20} />} 
-                label="Leaderboard" 
-                onClick={() => navigate('/student/leaderboard')}
-              />
-              <NavItem 
-                icon={<Clock size={20} />} 
-                label="History" 
-                onClick={() => navigate('/student/history')}
-              />
+              <NavItem icon={<Target size={20} />} label="Quests" active onClick={() => navigate('/student/dashboard')} />
+              <NavItem icon={<Code size={20} />} label="Code Editor" onClick={() => navigate('/student/code-editor')} />
+              <NavItem icon={<Bug size={20} />} label="Debug Mode" onClick={() => navigate('/student/debug')} />
+              <NavItem icon={<Trophy size={20} />} label="Leaderboard" onClick={() => navigate('/student/leaderboard')} />
+              <NavItem icon={<Clock size={20} />} label="History" onClick={() => navigate('/student/history')} />
               
               <div className="w-px h-8 bg-white/10 mx-2"></div>
               
-              <button 
-                onClick={handleLogout}
-                className="p-2 text-slate-400 hover:text-red-400 transition"
-                title="Logout"
-              >
+              <button onClick={handleLogout} className="p-2 text-slate-400 hover:text-red-400 transition" title="Logout">
                 <LogOut size={20} />
               </button>
             </div>
@@ -164,6 +148,9 @@ function StudentLayout() {
       <main className="relative z-10 max-w-7xl mx-auto px-6 py-8">
         <Outlet />
       </main>
+
+      {/* Badge Modal */}
+      <BadgesModal isOpen={showBadges} onClose={() => setShowBadges(false)} userBadges={badges} />
 
       {/* CSS for blob animation */}
       <style>{`
@@ -191,9 +178,7 @@ function NavItem({ icon, label, active, onClick }) {
     <button 
       onClick={onClick}
       className={`p-2 rounded-lg transition cursor-pointer ${
-        active 
-          ? 'bg-yellow-500/20 text-yellow-400' 
-          : 'text-slate-400 hover:text-white hover:bg-white/5'
+        active ? 'bg-yellow-500/20 text-yellow-400' : 'text-slate-400 hover:text-white hover:bg-white/5'
       }`}
       title={label}
     >

@@ -1,108 +1,89 @@
-import { Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { Bell, Plus, LogOut, MessageSquare, Filter } from 'lucide-react';
 import { useState } from 'react';
+import { Outlet, useNavigate, Link, useLocation } from 'react-router-dom';
+import { 
+  LogOut, LayoutDashboard, BookOpen, PlusCircle, 
+  Users, BarChart3, ShieldCheck, Gamepad2
+} from 'lucide-react';
 
 function InstructorLayout() {
   const navigate = useNavigate();
   const location = useLocation();
-  
-  // Global State for Block Filter (Visual only for now, pages handle their own logic)
-  const [selectedBlock, setSelectedBlock] = useState('all');
-
-  const tabs = [
-    { name: 'Overview', path: '/instructor/overview' },
-    { name: 'Courses', path: '/instructor/courses' },
-    { name: 'Problems', path: '/instructor/problems' },
-    { name: 'Plagiarism', path: '/instructor/plagiarism' },
-    { name: 'Analytics', path: '/instructor/analytics' },
-    { name: 'Announcements', path: '/instructor/announcements' },
-  ];
-
-  const blocks = ['all', '301', '302', '303', '304', '305', '306', '307'];
+  const userName = JSON.parse(localStorage.getItem('user') || '{}').name || 'Instructor';
 
   const handleLogout = () => {
     localStorage.removeItem('token');
-    navigate('/');
+    localStorage.removeItem('user');
+    navigate('/login');
   };
 
+  const navItems = [
+    { path: '/instructor', label: 'Dashboard', icon: LayoutDashboard },
+    { path: '/instructor/problems', label: 'Quest Log', icon: BookOpen },
+    { path: '/instructor/create', label: 'Forge Quest', icon: PlusCircle },
+    { path: '/instructor/students', label: 'Students', icon: Users }, // Placeholder
+    { path: '/instructor/analytics', label: 'Analytics', icon: BarChart3 }, // Placeholder
+  ];
+
   return (
-    <div className="min-h-screen bg-[#0b1120] text-white">
-      <div className="px-6 pt-6 pb-0">
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
-          <div>
-            <h1 className="text-2xl font-bold text-white">Welcome, Prof. Sasan!</h1>
-            <p className="text-gray-400 text-sm">Course management & student monitoring</p>
-          </div>
-          
-          <div className="flex gap-3">
-            <button 
-              onClick={() => navigate('/instructor/announcements')}
-              className="flex items-center gap-2 px-4 py-2 bg-[#1e293b] hover:bg-[#2a3850] border border-gray-700 rounded-lg text-sm font-medium transition"
-            >
-              <MessageSquare size={16} /> Announcements
-            </button>
-            
-            <button 
-              onClick={() => navigate('/instructor/create-problem')}
-              className="flex items-center gap-2 px-4 py-2 bg-[#eab308] hover:bg-yellow-500 text-black rounded-lg text-sm font-bold transition"
-            >
-              <Plus size={16} /> Create Problem
-            </button>
-
-            <button 
-              onClick={handleLogout}
-              className="flex items-center gap-2 px-4 py-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 hover:text-red-300 rounded-lg text-sm font-medium transition"
-            >
-              <LogOut size={16} /> Logout
-            </button>
+    <div className="min-h-screen bg-slate-950 flex text-slate-100">
+      {/* Sidebar */}
+      <aside className="w-64 bg-slate-900 border-r border-slate-800 flex flex-col">
+        <div className="p-6 border-b border-slate-800">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-blue-600 rounded-lg">
+              <ShieldCheck size={24} className="text-white" />
+            </div>
+            <div>
+              <h1 className="font-bold text-lg">Forge.Instructor</h1>
+              <p className="text-xs text-slate-500">Command Center</p>
+            </div>
           </div>
         </div>
 
-        {/* Tabs & Global Filter Row */}
-        <div className="flex flex-col md:flex-row gap-4 items-center justify-between mb-8 pb-2 border-b border-gray-800">
-          {/* Navigation Tabs */}
-          <div className="flex overflow-x-auto gap-2">
-            {tabs.map((tab) => {
-              const isActive = location.pathname === tab.path || (tab.name === 'Overview' && location.pathname === '/instructor');
-              
-              return (
-                <button 
-                  key={tab.name}
-                  onClick={() => navigate(tab.path)}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition cursor-pointer ${
-                    isActive
-                      ? 'bg-[#eab308] text-black' 
-                      : 'bg-[#1e293b] text-gray-400 hover:text-white hover:bg-[#2a3850]'
-                  }`}
-                >
-                  {tab.name}
-                </button>
-              );
-            })}
-          </div>
+        <nav className="flex-1 p-4 space-y-2">
+          {navItems.map((item) => {
+            const isActive = location.pathname === item.path;
+            return (
+              <Link 
+                key={item.path} 
+                to={item.path}
+                className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${
+                  isActive 
+                    ? 'bg-blue-600/20 text-blue-400 border border-blue-500/30' 
+                    : 'text-slate-400 hover:bg-slate-800 hover:text-white'
+                }`}
+              >
+                <item.icon size={20} />
+                <span className="font-medium">{item.label}</span>
+              </Link>
+            );
+          })}
+        </nav>
 
-          {/* Global Block Filter Indicator */}
-          <div className="flex items-center gap-2 bg-[#1e293b] p-1.5 rounded-lg border border-gray-700">
-            <Filter size={16} className="text-gray-400" />
-            <select 
-              value={selectedBlock}
-              onChange={(e) => setSelectedBlock(e.target.value)}
-              className="bg-transparent text-sm text-white focus:outline-none cursor-pointer"
-              title="Global Block Filter (Visual Demo)"
-            >
-              {blocks.map(block => (
-                <option key={block} value={block} className="bg-[#0b1120]">
-                  {block === 'all' ? 'All Blocks' : `Block ${block}`}
-                </option>
-              ))}
-            </select>
+        <div className="p-4 border-t border-slate-800">
+          <div className="flex items-center gap-3 mb-4 px-4">
+            <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center text-xs font-bold">
+              {userName.charAt(0)}
+            </div>
+            <div className="overflow-hidden">
+              <p className="text-sm font-semibold truncate">{userName}</p>
+              <p className="text-xs text-slate-500">Instructor</p>
+            </div>
           </div>
+          <button 
+            onClick={handleLogout}
+            className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg transition text-sm font-medium"
+          >
+            <LogOut size={16} />
+            Sign Out
+          </button>
         </div>
-      </div>
+      </aside>
 
-      <div className="px-6 pb-6 max-w-7xl mx-auto">
+      {/* Main Content */}
+      <main className="flex-1 overflow-y-auto bg-slate-950">
         <Outlet />
-      </div>
+      </main>
     </div>
   );
 }
