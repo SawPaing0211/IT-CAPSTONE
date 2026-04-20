@@ -3,7 +3,7 @@ import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 // Page Imports
 import LandingPage from './pages/LandingPage';
 import Login from './pages/Login';
-import Register from './pages/Register';  // ✅ ADD THIS
+import Register from './pages/Register';  
 import RoleSelection from './pages/RoleSelection';
 import GuestDashboard from './pages/GuestDashboard';
 
@@ -11,19 +11,14 @@ import GuestDashboard from './pages/GuestDashboard';
 import AdminLayout from './pages/admin/Layout';
 import AdminOverview from './pages/admin/Overview';
 import AdminUsers from './pages/admin/Users';
-import AdminLogs from './pages/admin/Logs'; 
+import AdminBlocks from './pages/admin/Blocks';
+import AdminLogs from './pages/admin/Logs';
 import AdminSettings from './pages/admin/Settings';
 
 // Instructor Imports
 import InstructorLayout from './pages/instructor/Layout';
-import InstructorOverview from './pages/instructor/Overview';
 import InstructorProblems from './pages/instructor/Problems';
 import CreateProblem from './pages/instructor/CreateProblem';
-import InstructorCourses from './pages/instructor/Courses';
-import CourseDetail from './pages/instructor/CourseDetail';
-import InstructorPlagiarism from './pages/instructor/Plagiarism';
-import InstructorAnalytics from './pages/instructor/Analytics';
-import InstructorAnnouncements from './pages/instructor/Announcements';
 
 // Student Imports
 import StudentLayout from './pages/student/Layout';
@@ -73,7 +68,7 @@ function App() {
         {/* Public Routes */}
         <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={<Login />} />
-        <Route path="/register" element={<Register />} />  {/* ✅ ADD THIS ROUTE */}
+        <Route path="/register" element={<Register />} />  
         <Route path="/guest" element={<GuestDashboard />} />
 
         {/* Student Routes - Wrapped in Layout */}
@@ -91,25 +86,19 @@ function App() {
         
         {/* Instructor Routes - Wrapped in Layout */}
         <Route path="/instructor" element={<InstructorLayout />}>
-          <Route index element={<InstructorOverview />} />
-          <Route path="overview" element={<InstructorOverview />} />
-          <Route path="courses" element={<InstructorCourses />} />
-          <Route path="courses/:id" element={<CourseDetail />} />
-          <Route path="problems" element={<InstructorProblems />} />
-          <Route path="create-problem" element={<CreateProblem />} />
-          <Route path="plagiarism" element={<InstructorPlagiarism />} />
-          <Route path="analytics" element={<InstructorAnalytics />} />
-          <Route path="announcements" element={<InstructorAnnouncements />} />
-        </Route>
+        <Route index element={<InstructorProblems />} />
+        <Route path="problems" element={<InstructorProblems />} />
+        <Route path="create" element={<CreateProblem />} />
+      </Route>
 
         {/* Admin Routes - Wrapped in Layout */}
         <Route path="/admin" element={<AdminLayout />}>
-          <Route index element={<AdminOverview />} />
-          <Route path="overview" element={<AdminOverview />} />
-          <Route path="users" element={<AdminUsers />} />
-          <Route path="logs" element={<AdminLogs />} />
-          <Route path="settings" element={<AdminSettings />} />
-        </Route>
+        <Route index element={<AdminOverview />} />
+        <Route path="users" element={<AdminUsers />} />
+        <Route path="blocks" element={<AdminBlocks />} />
+        <Route path="activity" element={<AdminLogs />} />      
+        <Route path="settings" element={<AdminSettings />} />  
+      </Route>
 
         {/* Catch-all */}
         <Route path="*" element={<LandingPage />} />

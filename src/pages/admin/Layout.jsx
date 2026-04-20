@@ -1,88 +1,91 @@
-import { Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { Download, UserPlus, LogOut } from 'lucide-react'; // Added LogOut icon
+import { useState } from 'react';
+import { Outlet, useNavigate, Link, useLocation } from 'react-router-dom';
+import { 
+  LayoutDashboard, Users, BookOpen, FileText, 
+  Activity, Settings, LogOut, Shield, Crown
+} from 'lucide-react';
 
 function AdminLayout() {
   const navigate = useNavigate();
   const location = useLocation();
-
-  // Define tabs
-  const tabs = [
-    { name: 'Overview', path: '/admin/overview' },
-    { name: 'Users', path: '/admin/users' },
-    { name: 'System Logs', path: '/admin/logs' },
-    { name: 'Settings', path: '/admin/settings' },
-  ];
+  const userName = JSON.parse(localStorage.getItem('user') || '{}').name || 'Admin';
 
   const handleLogout = () => {
-    // Clear any stored auth data (mock)
     localStorage.removeItem('token');
     localStorage.removeItem('user');
-    
-    // Redirect to Landing Page or Login
-    navigate('/'); 
-    // Optional: alert('Logged out successfully!');
+    navigate('/login');
   };
 
-  return (
-    <div className="min-h-screen bg-[#0b1120] text-white">
-      
-      {/* Shared Header */}
-      <div className="px-6 pt-6 pb-0">
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
-          <div>
-            <h1 className="text-2xl font-bold text-white">Welcome, Admin Rejano!</h1>
-            <p className="text-gray-400 text-sm">System administration & management</p>
-          </div>
-          
-          <div className="flex gap-3">
-            {/* Export Report Button */}
-            <button className="flex items-center gap-2 px-4 py-2 bg-[#1e293b] hover:bg-[#2a3850] border border-gray-700 rounded-lg text-sm font-medium transition">
-              <Download size={16} /> Export Report
-            </button>
-            
-            {/* Add User Button */}
-            <button className="flex items-center gap-2 px-4 py-2 bg-[#eab308] hover:bg-yellow-500 text-black rounded-lg text-sm font-bold transition">
-              <UserPlus size={16} /> Add User
-            </button>
+  const navItems = [
+    { path: '/admin', label: 'Dashboard', icon: LayoutDashboard },
+    { path: '/admin/users', label: 'User Management', icon: Users },
+    { path: '/admin/blocks', label: 'Blocks & Sections', icon: BookOpen },
+    { path: '/admin/activity', label: 'Activity Logs', icon: Activity },
+    { path: '/admin/settings', label: 'Settings', icon: Settings },
+  ];
 
-            {/* NEW: Logout Button */}
-            <button 
-              onClick={handleLogout}
-              className="flex items-center gap-2 px-4 py-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 hover:text-red-300 rounded-lg text-sm font-medium transition"
-              title="Log Out"
-            >
-              <LogOut size={16} /> Logout
-            </button>
+  return (
+    <div className="min-h-screen bg-slate-950 flex text-slate-100">
+      {/* Sidebar */}
+      <aside className="w-64 bg-slate-900 border-r border-slate-800 flex flex-col">
+        <div className="p-6 border-b border-slate-800">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-purple-600 rounded-lg">
+              <Crown size={24} className="text-white" />
+            </div>
+            <div>
+              <h1 className="font-bold text-lg">Forge.Admin</h1>
+              <p className="text-xs text-slate-500">System Control</p>
+            </div>
           </div>
         </div>
 
-        {/* Shared Navigation Tabs */}
-        <div className="flex overflow-x-auto gap-2 mb-8 pb-2 border-b border-gray-800">
-          {tabs.map((tab) => {
-            const isActive = location.pathname === tab.path || (tab.name === 'Overview' && location.pathname === '/admin');
-            
+        <nav className="flex-1 p-4 space-y-2">
+          {navItems.map((item) => {
+            const isActive = location.pathname === item.path;
             return (
-              <button 
-                key={tab.name}
-                onClick={() => navigate(tab.path)}
-                className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition cursor-pointer ${
-                  isActive
-                    ? 'bg-[#eab308] text-black' 
-                    : 'bg-[#1e293b] text-gray-400 hover:text-white hover:bg-[#2a3850]'
+              <Link 
+                key={item.path} 
+                to={item.path}
+                className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${
+                  isActive 
+                    ? 'bg-purple-600/20 text-purple-400 border border-purple-500/30' 
+                    : 'text-slate-400 hover:bg-slate-800 hover:text-white'
                 }`}
               >
-                {tab.name}
-              </button>
+                <item.icon size={20} />
+                <span className="font-medium">{item.label}</span>
+              </Link>
             );
           })}
+        </nav>
+
+        <div className="p-4 border-t border-slate-800">
+          <div className="flex items-center gap-3 mb-4 px-4">
+            <div className="w-8 h-8 bg-gradient-to-br from-purple-500 to-pink-600 rounded-full flex items-center justify-center text-xs font-bold">
+              {userName.charAt(0)}
+            </div>
+            <div className="overflow-hidden">
+              <p className="text-sm font-semibold truncate">{userName}</p>
+              <p className="text-xs text-slate-500 flex items-center gap-1">
+                <Shield size={12} /> Administrator
+              </p>
+            </div>
+          </div>
+          <button 
+            onClick={handleLogout}
+            className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg transition text-sm font-medium"
+          >
+            <LogOut size={16} />
+            Sign Out
+          </button>
         </div>
-      </div>
+      </aside>
 
-      {/* Page Content */}
-      <div className="px-6 pb-6 max-w-7xl mx-auto">
+      {/* Main Content */}
+      <main className="flex-1 overflow-y-auto bg-slate-950">
         <Outlet />
-      </div>
-
+      </main>
     </div>
   );
 }
