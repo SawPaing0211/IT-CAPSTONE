@@ -1,3 +1,148 @@
+﻿
+========== backend/routes/sandbox.py ==========
+
+from flask import Blueprint, request, jsonify
+from flask_jwt_extended import jwt_required, get_jwt_identity
+import subprocess, tempfile, os, time
+import sys
+
+# â”€â”€â”€ Platform-Specific Resource Limits â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# 'resource' module only works on Unix/Linux/Mac, not Windows
+if sys.platform != 'win32':
+    import resource
+    HAS_RESOURCE = True
+else:
+    HAS_RESOURCE = False
+
+sandbox_bp = Blueprint('sandbox', __name__)
+
+# â”€â”€â”€ Language Configurations â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+LANGUAGE_CONFIG = {
+    'python': {'ext': 'py',   'cmd': ['python', '-u']},
+    'java':   {'ext': 'java', 'cmd': ['java', '-cp']}, 
+    'csharp': {'ext': 'cs',   'cmd': ['dotnet', 'run']},
+}
+
+# â”€â”€â”€ Resource Limits â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+LIMITS = {
+    'time_seconds': 5,
+    'memory_mb': 128,
+    'output_bytes': 65536,
+}
+
+# â”€â”€â”€ Simple In-Memory Rate Limiting â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+_rate_store = {}
+
+def check_rate_limit(user_id):
+    now = time.time()
+    window = _rate_store.get(user_id, [])
+    window = [t for t in window if now - t < 3600]
+    if len(window) >= 30:
+        return False
+    window.append(now)
+    _rate_store[user_id] = window
+    return True
+
+# â”€â”€â”€ Sandbox Execution Endpoint â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+@sandbox_bp.route('/api/sandbox/run', methods=['POST'])
+@jwt_required()
+def run_sandbox():
+    user_id = get_jwt_identity()
+
+    if not check_rate_limit(user_id):
+        return jsonify({'error': 'âš ï¸ Rate limit exceeded. Max 30 sandbox runs per hour.'}), 429
+
+    data = request.get_json()
+    code = data.get('code', '')
+    language = data.get('language', 'python')
+
+    if language not in LANGUAGE_CONFIG:
+        return jsonify({'error': f'ðŸš« Language "{language}" not supported in sandbox.'}), 400
+
+    if len(code) > 10_000:
+        return jsonify({'error': 'ðŸ“œ Code too long (max 10,000 characters).'}), 400
+
+    config = LANGUAGE_CONFIG[language]
+    start = time.time()
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        try:
+            # â”€â”€â”€ PYTHON EXECUTION â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            if language == 'python':
+                filepath = os.path.join(tmpdir, f'solution.{config["ext"]}')
+                # âœ… FIX: Added encoding='utf-8'
+                with open(filepath, 'w', encoding='utf-8') as f:
+                    f.write(code)
+
+                def set_limits():
+                    if HAS_RESOURCE:
+                        resource.setrlimit(resource.RLIMIT_CPU, (LIMITS['time_seconds'], LIMITS['time_seconds']))
+                        mem = LIMITS['memory_mb'] * 1024 * 1024
+                        resource.setrlimit(resource.RLIMIT_AS, (mem, mem))
+                        resource.setrlimit(resource.RLIMIT_NPROC, (10, 10))
+
+                # âœ… FIX: Added encoding='utf-8'
+                proc = subprocess.run(
+                    config['cmd'] + [filepath],
+                    capture_output=True,
+                    text=True,
+                    encoding='utf-8',
+                    timeout=LIMITS['time_seconds'],
+                    preexec_fn=set_limits if HAS_RESOURCE else None,
+                    cwd=tmpdir,
+                    env={'PYTHONUNBUFFERED': '1'}
+                )
+
+            # â”€â”€â”€ C# EXECUTION â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            elif language == 'csharp':
+                # Create a simple .csproj file (minimal project file)
+                csproj_content = '''<Project Sdk="Microsoft.NET.Sdk">
+                    <PropertyGroup>
+                        <OutputType>Exe</OutputType>
+                        <TargetFramework>net10.0</TargetFramework>
+                    </PropertyGroup>
+                    </Project>'''
+                
+                # âœ… FIX: Added encoding='utf-8'
+                with open(os.path.join(tmpdir, 'sandbox.csproj'), 'w', encoding='utf-8') as f:
+                    f.write(csproj_content)
+                
+                # Write user code to Program.cs
+                # âœ… FIX: Added encoding='utf-8'
+                with open(os.path.join(tmpdir, 'Program.cs'), 'w', encoding='utf-8') as f:
+                    f.write(code)
+                
+                # Build and Run
+                # âœ… FIX: Added encoding='utf-8'
+                proc = subprocess.run(
+                    ['dotnet', 'run', '--project', tmpdir],
+                    capture_output=True,
+                    text=True,
+                    encoding='utf-8',
+                    timeout=LIMITS['time_seconds'] + 10,
+                    cwd=tmpdir
+                )
+
+            # â”€â”€â”€ JAVA EXECUTION (Placeholder) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            else:
+                return jsonify({'error': f'ðŸš§ {language} sandbox coming soon!'}), 501
+
+            elapsed_ms = int((time.time() - start) * 1000)
+            
+            return jsonify({
+                'stdout': proc.stdout[:LIMITS['output_bytes']],
+                'stderr': proc.stderr[:LIMITS['output_bytes']],
+                'returncode': proc.returncode,
+                'elapsed': elapsed_ms,
+            })
+
+        except subprocess.TimeoutExpired:
+            return jsonify({'error': f'â± Time limit exceeded ({language} takes longer to compile!)', 'elapsed': (LIMITS['time_seconds'] + 10) * 1000})
+        except Exception as e:
+            return jsonify({'error': f'ðŸ’¥ {str(e)}', 'elapsed': 0})
+
+========== backend/app.py ==========
+
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity, decode_token
@@ -263,13 +408,13 @@ def login():
     if not user.is_active: 
         return jsonify({"error": "Account disabled"}), 403
     
-    # 🔒 ADD THESE TWO LINES:
+    # ðŸ”’ ADD THESE TWO LINES:
     refresh_token = create_access_token(identity=str(user.id), expires_delta=timedelta(days=7))
     
     return jsonify({
         "message": "Login successful", 
         "access_token": create_access_token(identity=str(user.id)),
-        "refresh_token": refresh_token,  # 🔒 ADD THIS LINE
+        "refresh_token": refresh_token,  # ðŸ”’ ADD THIS LINE
         "user": {
             "id": user.id, 
             "username": user.username, 
@@ -294,7 +439,7 @@ def get_current_user():
         "level": user.level
     }), 200
 
-# 🔒 NEW: Token Refresh Endpoint
+# ðŸ”’ NEW: Token Refresh Endpoint
 @app.route('/api/auth/refresh', methods=['POST'])
 def refresh():
     data = request.get_json()
@@ -442,8 +587,8 @@ def get_problems():
             "partial_credit": p.partial_credit,
             "auto_grade": p.auto_grade,
             "due_date": p.due_date.isoformat() if p.due_date else None,
-            "instructor_name": instructor_name,  # ✅ NEW: For quest cards
-            "block_names": block_names,  # ✅ NEW: For quest cards
+            "instructor_name": instructor_name,  # âœ… NEW: For quest cards
+            "block_names": block_names,  # âœ… NEW: For quest cards
             "created_at": p.created_at.isoformat()
         })
     
@@ -493,8 +638,8 @@ def get_problem_detail(problem_id):
         "test_cases": problem.test_cases,
         "estimated_time": problem.estimated_time,
         "due_date": problem.due_date.isoformat() if problem.due_date else None,
-        "instructor_name": instructor_name,  # ✅ NEW
-        "block_names": block_names  # ✅ NEW
+        "instructor_name": instructor_name,  # âœ… NEW
+        "block_names": block_names  # âœ… NEW
     }), 200
 
 # ===== SUBMISSION ROUTES =====
@@ -850,7 +995,7 @@ def get_announcements():
         "instructor": User.query.get(a.instructor_id).username if a.instructor_id else "System"
     } for a in q.order_by(Announcement.is_pinned.desc(), Announcement.created_at.desc()).all()]), 200
 
-# ✅ NEW: Student-specific announcements endpoint
+# âœ… NEW: Student-specific announcements endpoint
 @app.route('/api/student/announcements', methods=['GET'])
 @jwt_required()
 def get_student_announcements():
@@ -942,12 +1087,12 @@ def admin_update_user(admin, user_id):
     if 'role' in data and data['role'] in ['student','instructor','admin']:
         if target.role != data['role']: changes.append(f"Role: {target.role} -> {data['role']}")
         target.role = data['role']
-    if 'is_active' in data:  # ✅ FIXED: was missing 'data:'
+    if 'is_active' in data:  # âœ… FIXED: was missing 'data:'
         if target.is_active != data['is_active']: 
             changes.append(f"Status: {'Active' if target.is_active else 'Inactive'} -> {'Active' if data['is_active'] else 'Inactive'}")
         target.is_active = data['is_active']
-    if 'xp' in data: target.xp = int(data['xp'])  # ✅ FIXED
-    if 'level' in data: target.level = int(data['level'])  # ✅ FIXED
+    if 'xp' in data: target.xp = int(data['xp'])  # âœ… FIXED
+    if 'level' in data: target.level = int(data['level'])  # âœ… FIXED
     
     if 'block_id' in data:
         block_id = data['block_id']
@@ -1117,8 +1262,8 @@ def admin_update_block(admin, block_id):
     block = Class.query.get_or_404(block_id)
     data = request.get_json()
     changes = []
-    if 'name' in data: changes.append(f"Name: {block.name} → {data['name']}"); block.name = data['name']
-    if 'section_code' in data: changes.append(f"Code: {block.section_code} → {data['section_code']}"); block.section_code = data['section_code']
+    if 'name' in data: changes.append(f"Name: {block.name} â†’ {data['name']}"); block.name = data['name']
+    if 'section_code' in data: changes.append(f"Code: {block.section_code} â†’ {data['section_code']}"); block.section_code = data['section_code']
     if 'semester' in data: block.semester = data['semester']; changes.append(f"Semester: {data['semester']}")
     if 'instructor_id' in data: block.instructor_id = data['instructor_id']; changes.append(f"Instructor ID: {data['instructor_id']}")
     db.session.commit()
@@ -1153,7 +1298,7 @@ with app.app_context():
                 with db.engine.connect() as conn:
                     conn.execute(text(f"ALTER TABLE problems ADD COLUMN {col_name} {col_def}"))
                     conn.commit()
-                    print(f"✅ Added column '{col_name}' to problems table")
+                    print(f"âœ… Added column '{col_name}' to problems table")
 
         add_col_if_missing('problem_type', "ENUM('coding', 'debugging') DEFAULT 'coding'")
         add_col_if_missing('languages', "JSON DEFAULT ('[\"python\"]')")
@@ -1166,9 +1311,9 @@ with app.app_context():
         add_col_if_missing('partial_credit', "INTEGER DEFAULT 100")
         add_col_if_missing('auto_grade', "BOOLEAN DEFAULT 1")
         add_col_if_missing('plagiarism_threshold', "FLOAT DEFAULT 0.85")
-        add_col_if_missing('due_date', "DATETIME DEFAULT NULL")  # ✅ NEW
+        add_col_if_missing('due_date', "DATETIME DEFAULT NULL")  # âœ… NEW
     except Exception as e:
-        print(f"⚠️ Migration check skipped: {e}")
+        print(f"âš ï¸ Migration check skipped: {e}")
     
     # Seed default config
     if not SystemConfig.query.first():
@@ -1176,8 +1321,719 @@ with app.app_context():
             db.session.add(SystemConfig(key=k, value=v))
         db.session.commit()
     
-    print("✅ DB Initialized | 🔐 JWT | 🎮 Gamification | 📚 Sections | 🛡️ Admin System")
+    print("âœ… DB Initialized | ðŸ” JWT | ðŸŽ® Gamification | ðŸ“š Sections | ðŸ›¡ï¸ Admin System")
 
 if __name__ == '__main__':
-    print("🚀 Forge.dev Backend | 📊 System-Ready | 🧪 Sandbox Active")
+    print("ðŸš€ Forge.dev Backend | ðŸ“Š System-Ready | ðŸ§ª Sandbox Active")
     app.run(debug=True, host='0.0.0.0', port=5000)
+
+========== frontend/src/pages/Student/Sandbox.jsx ==========
+
+import { useState, useEffect, useRef } from 'react'
+import Editor from '@monaco-editor/react'
+import { api } from '../../api/client'
+
+// â”€â”€â”€ Starter spell templates â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+const SPELL_TEMPLATES = {
+  python: {
+    blank: '# âœ¨ The Arcane Sandbox â€” write anything, cast freely\n\n',
+    hello: '# ðŸª„ Hello World Spell\nprint("Greetings, brave coder!")\n',
+    loop: '# ðŸ”„ Loop Incantation\nfor i in range(1, 6):\n    print(f"Casting spell #{i}...")\n',
+    function: '# âš¡ Function Ritual\ndef power_of(base, exp):\n    return base ** exp\n\nresult = power_of(2, 10)\nprint(f"2 to the 10th power: {result}")\n',
+    list: '# ðŸ“œ List Sorcery\nhero_spells = ["Fireball", "Ice Lance", "Lightning Bolt"]\n\nfor spell in hero_spells:\n    print(f"ðŸ”¥ Casting: {spell}")\n\n# Sort and filter\npowerful = [s for s in hero_spells if len(s) > 8]\nprint(f"\\nPowerful spells: {powerful}")\n',
+    recursion: '# ðŸŒ€ Recursive Dragon (Fibonacci)\ndef dragon_sequence(n):\n    if n <= 1:\n        return n\n    return dragon_sequence(n-1) + dragon_sequence(n-2)\n\nfor i in range(10):\n    print(f"Dragon scale {i}: {dragon_sequence(i)}")\n',
+  },
+  java: {
+    blank: '// âœ¨ The Arcane Sandbox â€” write anything, cast freely\npublic class Main {\n    public static void main(String[] args) {\n        \n    }\n}\n',
+    hello: '// ðŸª„ Hello World Spell\npublic class Main {\n    public static void main(String[] args) {\n        System.out.println("Greetings, brave coder!");\n    }\n}\n',
+    loop: '// ðŸ”„ Loop Incantation\npublic class Main {\n    public static void main(String[] args) {\n        for (int i = 1; i <= 5; i++) {\n            System.out.println("Casting spell #" + i + "...");\n        }\n    }\n}\n',
+    function: '// âš¡ Function Ritual\npublic class Main {\n    static int powerOf(int base, int exp) {\n        return (int) Math.pow(base, exp);\n    }\n    \n    public static void main(String[] args) {\n        int result = powerOf(2, 10);\n        System.out.println("2 to the 10th power: " + result);\n    }\n}\n',
+  },
+  csharp: {
+    blank: '// âœ¨ The Arcane Sandbox â€” write anything, cast freely\nusing System;\n\npublic class Program\n{\n    public static void Main()\n    {\n        \n    }\n}\n',
+    hello: '// ðŸª„ Hello World Spell\nusing System;\n\npublic class Program\n{\n    public static void Main()\n    {\n        Console.WriteLine("Greetings, brave coder!");\n    }\n}\n',
+    loop: '// ðŸ”„ Loop Incantation\nusing System;\n\npublic class Program\n{\n    public static void Main()\n    {\n        for (int i = 1; i <= 5; i++)\n        {\n            Console.WriteLine($"Casting spell #{i}...");\n        }\n    }\n}\n',
+    function: '// âš¡ Function Ritual\nusing System;\n\npublic class Program\n{\n    static int PowerOf(int baseNum, int exp)\n    {\n        return (int)Math.Pow(baseNum, exp);\n    }\n    \n    public static void Main()\n    {\n        int result = PowerOf(2, 10);\n        Console.WriteLine($"2 to the 10th power: {result}");\n    }\n}\n',
+  },
+}
+
+const LANG_META = {
+  python: { icon: 'ðŸ', label: 'Python', ext: 'py', color: 'from-cyan-500 to-blue-600' },
+  java:   { icon: 'â˜•', label: 'Java',   ext: 'java', color: 'from-orange-500 to-red-600' },
+  csharp: { icon: 'ðŸ”·', label: 'C#',     ext: 'cs', color: 'from-purple-500 to-pink-600' }, 
+}
+
+const TEMPLATE_LABELS = {
+  blank:     { icon: 'ðŸ“„', label: 'Blank Scroll' },
+  hello:     { icon: 'ðŸ‘‹', label: 'Hello World' },
+  loop:      { icon: 'ðŸ”„', label: 'Loop Magic' },
+  function:  { icon: 'âš¡', label: 'Functions' },
+  list:      { icon: 'ðŸ“œ', label: 'List Sorcery' },
+  recursion: { icon: 'ðŸŒ€', label: 'Recursion Dragon' },
+}
+
+// â”€â”€â”€ Execution time formatter â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function formatTime(ms) {
+  if (ms < 1000) return `${ms}ms`
+  return `${(ms / 1000).toFixed(2)}s`
+}
+
+// â”€â”€â”€ Main Component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+export default function Sandbox({ onClose, initialCode = null, initialLanguage = 'python' }) {
+  const [language, setLanguage]           = useState(initialLanguage)
+  const [code, setCode]                   = useState(initialCode || SPELL_TEMPLATES.python.blank)
+  const [output, setOutput]               = useState(null)
+  const [isRunning, setIsRunning]         = useState(false)
+  const [runCount, setRunCount]           = useState(0)
+  const [history, setHistory]             = useState([])   // [{code, output, lang, ts}]
+  const [showHistory, setShowHistory]     = useState(false)
+  const [showTemplates, setShowTemplates] = useState(false)
+  const [showSettings, setShowSettings]  = useState(false)
+  const [fontSize, setFontSize]           = useState(14)
+  const [savedScrolls, setSavedScrolls]  = useState(() => {
+    try { return JSON.parse(localStorage.getItem('sandbox_saved') || '[]') } catch { return [] }
+  })
+  const [saveNameInput, setSaveNameInput] = useState('')
+  const [showSaveDialog, setShowSaveDialog] = useState(false)
+  const [particles, setParticles]         = useState([])
+
+  const editorRef        = useRef(null)
+  const editorContainerRef = useRef(null)
+  const outputRef        = useRef(null)
+
+  // â”€â”€ Particle burst on run â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  const burstParticles = (success) => {
+    const count = success ? 12 : 6
+    const newP = Array.from({ length: count }, (_, i) => ({
+      id: Date.now() + i,
+      x: Math.random() * 100,
+      emoji: success
+        ? ['âœ¨', 'âš¡', 'ðŸ”®', 'ðŸ’«', 'ðŸŒŸ'][Math.floor(Math.random() * 5)]
+        : ['ðŸ’¥', 'âš ï¸', 'ðŸ”¥'][Math.floor(Math.random() * 3)],
+    }))
+    setParticles(newP)
+    setTimeout(() => setParticles([]), 1500)
+  }
+
+  // â”€â”€ Language switch â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  const handleLanguageChange = (lang) => {
+    setLanguage(lang)
+    if (!initialCode) {
+      setCode(SPELL_TEMPLATES[lang]?.blank || '')
+    }
+    setOutput(null)
+  }
+
+  // â”€â”€ Template select â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  const applyTemplate = (key) => {
+    const tpl = SPELL_TEMPLATES[language]?.[key]
+    if (tpl) {
+      setCode(tpl)
+      setOutput(null)
+      setShowTemplates(false)
+    }
+  }
+
+  // â”€â”€ Run code â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+   const handleRun = async () => {
+    if (isRunning) return
+    setIsRunning(true)
+    setOutput(null)
+    const start = Date.now()
+
+    try {
+      // âœ… Centralized API client handles auth & auto-refresh
+      const data = await api.post('/api/sandbox/run', { code, language })
+      const elapsed = Date.now() - start
+      const result = { ...data, elapsed }
+
+      setOutput(result)
+      setRunCount(c => c + 1)
+      burstParticles(!data.error)
+
+      // Add to history
+      setHistory(prev => [
+        { code, output: result, lang: language, ts: new Date().toLocaleTimeString() },
+        ...prev.slice(0, 9),
+      ])
+    } catch (err) {
+      const elapsed = Date.now() - start
+      setOutput({ error: err.message || 'Execution failed', elapsed })
+      burstParticles(false)
+    } finally {
+      setIsRunning(false)
+      setTimeout(() => outputRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
+    }
+  }
+
+  // â”€â”€ Keyboard shortcut â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  useEffect(() => {
+    const handler = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        e.preventDefault()
+        handleRun()
+      }
+      if (e.key === 'Escape' && onClose) onClose()
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [code, language])
+
+  // â”€â”€ Persist sandbox code across refreshes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  useEffect(() => {
+    if (!initialCode) {
+      const saved = localStorage.getItem(`sandbox_code_${language}`)
+      if (saved) setCode(saved)
+    }
+  }, [language])
+
+  useEffect(() => {
+    if (!initialCode && code !== SPELL_TEMPLATES[language]?.blank) {
+      localStorage.setItem(`sandbox_code_${language}`, code)
+    }
+  }, [code, language])
+
+  // â”€â”€ ResizeObserver for Monaco â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  useEffect(() => {
+    if (!editorContainerRef.current) return
+    const obs = new ResizeObserver(() => editorRef.current?.layout())
+    obs.observe(editorContainerRef.current)
+    return () => obs.disconnect()
+  }, [])
+
+  // â”€â”€ Save a scroll â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  const handleSave = () => {
+    if (!saveNameInput.trim()) return
+    const scroll = {
+      id: Date.now(),
+      name: saveNameInput.trim(),
+      code,
+      language,
+      ts: new Date().toLocaleDateString(),
+    }
+    const updated = [scroll, ...savedScrolls.slice(0, 7)]
+    setSavedScrolls(updated)
+    localStorage.setItem('sandbox_saved', JSON.stringify(updated))
+    setSaveNameInput('')
+    setShowSaveDialog(false)
+  }
+
+  const loadScroll = (scroll) => {
+    setLanguage(scroll.language)
+    setCode(scroll.code)
+    setOutput(null)
+  }
+
+  const deleteScroll = (id) => {
+    const updated = savedScrolls.filter(s => s.id !== id)
+    setSavedScrolls(updated)
+    localStorage.setItem('sandbox_saved', JSON.stringify(updated))
+  }
+
+  // â”€â”€ Download code â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  const handleDownload = () => {
+    const ext = LANG_META[language].ext
+    const blob = new Blob([code], { type: 'text/plain' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `arcane_sandbox.${ext}`
+    a.click()
+  }
+
+  const editorOptions = {
+    minimap: { enabled: false },
+    fontSize,
+    lineHeight: 1.7,
+    fontFamily: "'Fira Code', 'JetBrains Mono', 'Cascadia Code', monospace",
+    fontLigatures: true,
+    automaticLayout: false,
+    scrollBeyondLastLine: false,
+    wordWrap: 'on',
+    tabSize: 4,
+    padding: { top: 16, bottom: 16 },
+    cursorBlinking: 'smooth',
+    cursorSmoothCaretAnimation: 'on',
+    smoothScrolling: true,
+    scrollbar: { verticalScrollbarSize: 6, horizontalScrollbarSize: 6 },
+    glyphMargin: false,
+    lineNumbersMinChars: 3,
+  }
+
+  const langMeta = LANG_META[language]
+
+  return (
+    <div
+      style={{ position: 'fixed', inset: 0, zIndex: 99998, overflow: 'hidden' }}
+      className="flex flex-col bg-slate-950"
+    >
+      {/* â”€â”€ Particle burst overlay â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      <div className="fixed inset-0 pointer-events-none z-[99999]">
+        {particles.map(p => (
+          <div
+            key={p.id}
+            className="absolute text-2xl animate-bounce"
+            style={{
+              left: `${p.x}%`,
+              top: '40%',
+              animation: 'sandboxParticle 1.2s ease-out forwards',
+            }}
+          >
+            {p.emoji}
+          </div>
+        ))}
+      </div>
+
+      {/* â”€â”€ Header â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      <header className="h-14 shrink-0 bg-slate-900/95 border-b border-emerald-600/30 flex items-center justify-between px-4 gap-3">
+
+        {/* Left: identity */}
+        <div className="flex items-center gap-3 min-w-0">
+          {onClose && (
+            <button
+              onClick={onClose}
+              className="text-slate-400 hover:text-white transition text-sm flex items-center gap-1"
+            >
+              â† Back
+            </button>
+          )}
+          <div className="h-6 w-px bg-slate-700 hidden sm:block" />
+          <div className="flex items-center gap-2">
+            <span className="text-xl">ðŸ§ª</span>
+            <div>
+              <h1 className="font-black text-white text-sm leading-none">Arcane Sandbox</h1>
+              <p className="text-[10px] text-emerald-400 leading-none mt-0.5">Free experimentation zone</p>
+            </div>
+          </div>
+          {initialCode && (
+            <span className="hidden sm:flex items-center gap-1 px-2 py-0.5 bg-purple-600/20 border border-purple-600/40 rounded-full text-[10px] text-purple-300 font-bold">
+              ðŸ”— Carried from Quest
+            </span>
+          )}
+        </div>
+
+        {/* Center: language selector */}
+        <div className="flex gap-1">
+          {Object.entries(LANG_META).map(([key, meta]) => (
+            <button
+              key={key}
+              onClick={() => handleLanguageChange(key)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 border ${
+                language === key
+                  ? `bg-gradient-to-r ${meta.color} text-white border-white/20 shadow-lg`
+                  : 'text-slate-400 hover:text-white border-slate-700 hover:border-slate-500'
+              }`}
+            >
+              {meta.icon} {meta.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Right: actions */}
+        <div className="flex items-center gap-1.5">
+          {/* Spell count badge */}
+          <div className="hidden sm:flex items-center gap-1 px-2 py-1 bg-slate-800 rounded-lg border border-slate-700">
+            <span className="text-[10px] text-slate-400">Spells cast:</span>
+            <span className="text-emerald-400 font-black text-xs">{runCount}</span>
+          </div>
+
+          {/* Templates */}
+          <div className="relative">
+            <button
+              onClick={() => { setShowTemplates(!showTemplates); setShowHistory(false); setShowSettings(false) }}
+              className="px-2 py-1.5 text-xs text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition border border-transparent hover:border-slate-700 flex items-center gap-1"
+            >
+              ðŸ“œ <span className="hidden sm:inline">Scrolls</span>
+            </button>
+            {showTemplates && (
+              <div className="absolute right-0 top-full mt-1 w-52 bg-slate-900 border border-emerald-600/30 rounded-xl shadow-2xl z-50 overflow-hidden">
+                <p className="text-[10px] text-slate-500 uppercase tracking-wider px-3 pt-3 pb-1">Spell Templates</p>
+                {Object.entries(TEMPLATE_LABELS).map(([key, meta]) => {
+                  const available = SPELL_TEMPLATES[language]?.[key]
+                  return (
+                    <button
+                      key={key}
+                      onClick={() => available && applyTemplate(key)}
+                      disabled={!available}
+                      className={`w-full flex items-center gap-2 px-3 py-2 text-sm transition text-left ${
+                        available
+                          ? 'text-slate-300 hover:text-white hover:bg-slate-800'
+                          : 'text-slate-600 cursor-not-allowed'
+                      }`}
+                    >
+                      <span>{meta.icon}</span> {meta.label}
+                      {!available && <span className="ml-auto text-[9px] text-slate-600">Python only</span>}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Saved scrolls */}
+          <div className="relative">
+            <button
+              onClick={() => { setShowHistory(!showHistory); setShowTemplates(false); setShowSettings(false) }}
+              className="px-2 py-1.5 text-xs text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition border border-transparent hover:border-slate-700 flex items-center gap-1"
+            >
+              ðŸ—‚ï¸ <span className="hidden sm:inline">Saved</span>
+              {savedScrolls.length > 0 && (
+                <span className="w-4 h-4 bg-emerald-600 text-white text-[8px] rounded-full flex items-center justify-center">
+                  {savedScrolls.length}
+                </span>
+              )}
+            </button>
+            {showHistory && (
+              <div className="absolute right-0 top-full mt-1 w-64 bg-slate-900 border border-emerald-600/30 rounded-xl shadow-2xl z-50 overflow-hidden">
+                <p className="text-[10px] text-slate-500 uppercase tracking-wider px-3 pt-3 pb-1">Saved Scrolls</p>
+                {savedScrolls.length === 0 ? (
+                  <p className="px-3 pb-3 text-xs text-slate-500">No saved scrolls yet.</p>
+                ) : (
+                  savedScrolls.map(s => (
+                    <div key={s.id} className="flex items-center gap-2 px-3 py-2 hover:bg-slate-800 group">
+                      <button onClick={() => { loadScroll(s); setShowHistory(false) }} className="flex-1 text-left">
+                        <p className="text-sm text-slate-300 group-hover:text-white truncate">{s.name}</p>
+                        <p className="text-[10px] text-slate-500">{LANG_META[s.language]?.icon} {s.ts}</p>
+                      </button>
+                      <button onClick={() => deleteScroll(s.id)} className="text-slate-600 hover:text-red-400 text-xs transition">âœ•</button>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Settings */}
+          <div className="relative">
+            <button
+              onClick={() => { setShowSettings(!showSettings); setShowTemplates(false); setShowHistory(false) }}
+              className="px-2 py-1.5 text-xs text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition border border-transparent hover:border-slate-700"
+            >
+              âš™ï¸
+            </button>
+            {showSettings && (
+              <div className="absolute right-0 top-full mt-1 w-48 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-50 p-3 space-y-3">
+                <div>
+                  <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-2">Font Size</p>
+                  <div className="flex gap-1">
+                    {[12, 14, 16, 18].map(s => (
+                      <button
+                        key={s}
+                        onClick={() => setFontSize(s)}
+                        className={`flex-1 py-1 rounded text-xs font-bold transition ${
+                          fontSize === s ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <button
+            onClick={handleDownload}
+            className="px-2 py-1.5 text-xs text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition border border-transparent hover:border-slate-700"
+            title="Download code"
+          >
+            ðŸ“¥
+          </button>
+
+          <button
+            onClick={() => setShowSaveDialog(true)}
+            className="px-2 py-1.5 text-xs text-slate-400 hover:text-emerald-400 hover:bg-slate-800 rounded-lg transition border border-transparent hover:border-emerald-600/40"
+            title="Save scroll"
+          >
+            ðŸ’¾
+          </button>
+
+          {/* Run button */}
+          <button
+            onClick={handleRun}
+            disabled={isRunning}
+            className={`px-4 py-1.5 rounded-lg text-xs font-black transition flex items-center gap-2 border ${
+              isRunning
+                ? 'bg-slate-700 border-slate-600 text-slate-400 cursor-not-allowed'
+                : 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 border-emerald-400/30 text-white shadow-lg shadow-emerald-600/20'
+            }`}
+          >
+            {isRunning ? (
+              <>
+                <span className="w-3 h-3 border-2 border-slate-400 border-t-transparent rounded-full animate-spin" />
+                Casting...
+              </>
+            ) : (
+              <>â–¶ Cast <span className="hidden sm:inline text-emerald-200 font-normal">(Ctrl+Enter)</span></>
+            )}
+          </button>
+        </div>
+      </header>
+
+      {/* â”€â”€ Save dialog overlay â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      {showSaveDialog && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[99999] flex items-center justify-center">
+          <div className="bg-slate-900 border-2 border-emerald-600/50 rounded-2xl p-6 w-80 shadow-2xl">
+            <h3 className="font-bold text-white mb-4 flex items-center gap-2">ðŸ’¾ Name Your Scroll</h3>
+            <input
+              autoFocus
+              type="text"
+              value={saveNameInput}
+              onChange={e => setSaveNameInput(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleSave()}
+              placeholder="e.g. My Fibonacci Spell"
+              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm outline-none focus:border-emerald-500 mb-4"
+            />
+            <div className="flex gap-2">
+              <button onClick={() => { setShowSaveDialog(false); setSaveNameInput('') }} className="flex-1 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 text-sm transition">
+                Cancel
+              </button>
+              <button onClick={handleSave} disabled={!saveNameInput.trim()} className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 rounded-lg text-white font-bold text-sm transition">
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* â”€â”€ Body: editor + output â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      <div className="flex-1 flex overflow-hidden" style={{ minHeight: 0 }}>
+
+        {/* Editor pane */}
+        <div
+          ref={editorContainerRef}
+          style={{ flex: output ? '1 1 55%' : '1 1 100%', minWidth: 0, position: 'relative', transition: 'flex 0.3s ease' }}
+          className="overflow-hidden"
+        >
+          {/* Decorative top strip */}
+          <div className={`h-0.5 w-full bg-gradient-to-r ${langMeta.color} opacity-60`} />
+
+          <Editor
+            height="100%"
+            width="100%"
+            language={language}
+            value={code}
+            onChange={v => setCode(v || '')}
+            theme="vs-dark"
+            options={editorOptions}
+            onMount={(editor, monaco) => {
+              editorRef.current = editor
+
+              // Custom sand box theme â€” emerald tinted
+              monaco.editor.defineTheme('arcane-sandbox', {
+                base: 'vs-dark',
+                inherit: true,
+                rules: [
+                  { token: 'keyword',  foreground: '34d399' },  // emerald
+                  { token: 'string',   foreground: 'a3e635' },  // lime
+                  { token: 'comment',  foreground: '4b5563', fontStyle: 'italic' },
+                  { token: 'number',   foreground: 'fb923c' },  // orange
+                  { token: 'function', foreground: '38bdf8' },  // sky
+                ],
+                colors: {
+                  'editor.background':               '#020617',
+                  'editor.lineHighlightBackground':  '#064e3b22',
+                  'editorCursor.foreground':         '#34d399',
+                  'editor.selectionBackground':      '#05966940',
+                  'editorLineNumber.foreground':     '#1f2937',
+                  'editorLineNumber.activeForeground': '#34d399',
+                },
+              })
+              monaco.editor.setTheme('arcane-sandbox')
+              setTimeout(() => editor.layout(), 100)
+            }}
+          />
+
+          {/* Overlay hint when output is empty */}
+          {!output && !isRunning && runCount === 0 && (
+            <div className="absolute bottom-6 left-1/2 -translate-x-1/2 pointer-events-none">
+              <div className="flex items-center gap-2 px-4 py-2 bg-slate-900/80 border border-emerald-600/20 rounded-full text-xs text-slate-400 backdrop-blur">
+                <span className="text-emerald-400">â–¶</span> Press Ctrl+Enter to cast your spell
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Output pane â€” slides in when output exists */}
+        {(output || isRunning) && (
+          <div
+            ref={outputRef}
+            className="flex flex-col border-l border-emerald-600/20 bg-slate-950"
+            style={{ flex: '1 1 45%', minWidth: 0, minHeight: 0 }}
+          >
+            {/* Output header */}
+            <div className="shrink-0 flex items-center justify-between px-4 py-2 bg-slate-900/80 border-b border-emerald-600/20">
+              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
+                ðŸ”® Crystal Output
+                {output && !output.error && (
+                  <span className="text-emerald-400 font-normal normal-case tracking-normal">
+                    âœ“ {formatTime(output.elapsed)}
+                    {output.memory_mb && ` Â· ${output.memory_mb}MB`}
+                  </span>
+                )}
+                {output?.error && (
+                  <span className="text-red-400 font-normal normal-case tracking-normal">
+                    Error Â· {formatTime(output.elapsed)}
+                  </span>
+                )}
+              </span>
+              <button
+                onClick={() => setOutput(null)}
+                className="text-slate-600 hover:text-slate-400 text-xs transition"
+                title="Clear output"
+              >
+                âœ• Clear
+              </button>
+            </div>
+
+            {/* Output body */}
+            <div className="flex-1 overflow-y-auto p-4 font-mono text-sm" style={{ minHeight: 0 }}>
+              {isRunning && !output && (
+                <div className="flex flex-col items-center justify-center h-full gap-4 text-slate-500">
+                  <div className="w-10 h-10 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin" />
+                  <p className="text-emerald-400 animate-pulse text-xs">Consulting the oracle...</p>
+                </div>
+              )}
+
+              {output && (
+                <>
+                  {/* Status banner */}
+                  <div className={`flex items-center gap-2 mb-4 pb-3 border-b ${
+                    output.error ? 'border-red-800' : 'border-emerald-900'
+                  }`}>
+                    <span className="text-xl">{output.error ? 'ðŸ’¥' : 'âœ¨'}</span>
+                    <span className={`text-xs font-bold ${output.error ? 'text-red-400' : 'text-emerald-400'}`}>
+                      {output.error ? 'Spell fizzled' : 'Spell cast successfully!'}
+                    </span>
+                  </div>
+
+                  {/* stdout */}
+                  {output.stdout && (
+                    <div className="mb-4">
+                      <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-2">Output</p>
+                      <pre className="text-emerald-300 whitespace-pre-wrap break-all text-xs leading-relaxed bg-emerald-950/30 border border-emerald-900/50 rounded-lg p-3">
+                        {output.stdout}
+                      </pre>
+                    </div>
+                  )}
+
+                  {/* stderr / error */}
+                  {(output.stderr || output.error) && (
+                    <div>
+                      <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-2">Error</p>
+                      <pre className="text-red-300 whitespace-pre-wrap break-all text-xs leading-relaxed bg-red-950/30 border border-red-900/50 rounded-lg p-3">
+                        {output.stderr || output.error}
+                      </pre>
+                    </div>
+                  )}
+
+                  {/* Stats row */}
+                  <div className="mt-4 pt-3 border-t border-slate-800 flex gap-4 text-[10px] text-slate-500">
+                    <span>â± {formatTime(output.elapsed)}</span>
+                    {output.memory_mb && <span>ðŸ’¾ {output.memory_mb}MB</span>}
+                    <span>ðŸ”¢ Run #{runCount}</span>
+                    <span className="capitalize">{LANG_META[language]?.icon} {language}</span>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Run history strip at bottom */}
+            {history.length > 1 && (
+              <div className="shrink-0 border-t border-slate-800 px-4 py-2 flex gap-2 overflow-x-auto">
+                <span className="text-[9px] text-slate-600 uppercase tracking-wider self-center whitespace-nowrap mr-1">History</span>
+                {history.slice(1).map((h, i) => (
+                  <button
+                    key={i}
+                    onClick={() => { setCode(h.code); setLanguage(h.lang); setOutput(h.output) }}
+                    className={`shrink-0 px-2 py-1 rounded text-[9px] border transition ${
+                      h.output.error
+                        ? 'bg-red-900/20 border-red-800/40 text-red-400 hover:bg-red-900/40'
+                        : 'bg-emerald-900/20 border-emerald-800/40 text-emerald-400 hover:bg-emerald-900/40'
+                    }`}
+                    title={`Restore run at ${h.ts}`}
+                  >
+                    {h.output.error ? 'ðŸ’¥' : 'âœ¨'} {h.ts}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* â”€â”€ CSS for particle animation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      <style>{`
+        @keyframes sandboxParticle {
+          0%   { opacity: 1; transform: translateY(0) scale(1); }
+          100% { opacity: 0; transform: translateY(-120px) scale(1.5); }
+        }
+      `}</style>
+    </div>
+  )
+}
+
+========== frontend/src/api/client.js ==========
+
+// src/api/client.js
+const BASE = 'http://localhost:5000'
+
+async function request(path, options = {}) {
+  const token = localStorage.getItem('token')
+  const headers = {
+    'Content-Type': 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...options.headers,
+  }
+
+  let res = await fetch(`${BASE}${path}`, { ...options, headers })
+
+  // Attempt one silent refresh on 401
+  if (res.status === 401) {
+    const refreshToken = localStorage.getItem('refresh_token')
+    if (!refreshToken) {
+      localStorage.clear()
+      window.location.href = '/'
+      return
+    }
+
+    const refreshRes = await fetch(`${BASE}/api/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    })
+
+    if (refreshRes.ok) {
+      const { access_token } = await refreshRes.json()
+      localStorage.setItem('token', access_token)
+      // Retry original request with new token
+      res = await fetch(`${BASE}${path}`, {
+        ...options,
+        headers: { ...headers, Authorization: `Bearer ${access_token}` },
+      })
+    } else {
+      localStorage.clear()
+      window.location.href = '/'
+      return
+    }
+  }
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: 'Unknown error' }))
+    throw new Error(err.error || `HTTP ${res.status}`)
+  }
+
+  return res.json()
+}
+
+export const api = {
+  get:    (path)         => request(path),
+  post:   (path, body)   => request(path, { method: 'POST',   body: JSON.stringify(body) }),
+  put:    (path, body)   => request(path, { method: 'PUT',    body: JSON.stringify(body) }),
+  delete: (path)         => request(path, { method: 'DELETE' }),
+}
+
+========== backend/requirements.txt ==========
+
+FILE NOT FOUND

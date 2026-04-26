@@ -1,0 +1,24 @@
+# ─── Adventure Realm: Python Sandbox ────────────────────────────────────────
+# Minimal Alpine image keeps attack surface tiny and startup fast (~0.3s)
+FROM python:3.11-alpine
+
+# ── Security: run as unprivileged user, never root ────────────────────────────
+RUN addgroup -S sandbox && adduser -S -G sandbox sandbox
+
+# ── Pre-install common student libraries ─────────────────────────────────────
+#    (Add more here as your curriculum expands)
+RUN pip install --no-cache-dir \
+    numpy==1.26.4 \
+    requests==2.31.0
+
+# ── Filesystem: only /tmp is writable, everything else read-only ─────────────
+#    This is enforced at docker run time via --read-only --tmpfs /tmp
+#    but we prepare the tmp dir here
+RUN mkdir -p /tmp/sandbox && chown sandbox:sandbox /tmp/sandbox
+
+# ── Drop to non-root ──────────────────────────────────────────────────────────
+USER sandbox
+WORKDIR /tmp/sandbox
+
+# ── The entrypoint just runs whatever .py file we inject ─────────────────────
+ENTRYPOINT ["python", "-u"]

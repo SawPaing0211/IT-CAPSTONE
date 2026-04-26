@@ -1,7 +1,11 @@
 import { useState, useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom'
+
+// Public Components
 import Landing from './components/Landing'
 import Auth from './components/Auth'
+
+// Dashboard Components
 import InstructorDashboard from './pages/Instructor/InstructorDashboard'
 import StudentDashboard from './pages/Student/StudentDashboard'
 import AdminDashboard from './pages/Admin/AdminDashboard'
@@ -16,6 +20,18 @@ import Announcements from './pages/Instructor/Announcements'
 import PlagiarismCheck from './pages/Instructor/PlagiarismCheck'
 import Analytics from './pages/Instructor/Analytics'
 import CourseMaterials from './pages/Instructor/CourseMaterials'
+
+// Student Pages
+import StudentCodeEditor from './pages/Student/StudentCodeEditor'
+import ProblemList from './pages/Student/ProblemList'
+import Leaderboard from './pages/Student/components/Leaderboard'
+import ProgressStats from './pages/Student/components/ProgressStats'
+
+// Admin Pages
+import UserManagement from './pages/Admin/UserManagement'
+import BlocksSections from './pages/Admin/BlocksSections'
+import SystemSettings from './pages/Admin/SystemSettings'
+import ActivityLogs from './pages/Admin/ActivityLogs'
 
 function AppContent() {
   const [user, setUser] = useState(null)
@@ -112,7 +128,12 @@ function AppContent() {
             <StudentDashboard user={user} onLogout={handleLogout} />
           </ProtectedRoute>
         }
-      />
+      >
+        <Route index element={<ProblemList />} />
+        <Route path="problem/:problemId" element={<StudentCodeEditor />} />
+        <Route path="leaderboard" element={<Leaderboard />} />
+        <Route path="stats" element={<ProgressStats />} />
+      </Route>
 
       {/* Admin Routes */}
       <Route 
@@ -122,7 +143,13 @@ function AppContent() {
             <AdminDashboard user={user} onLogout={handleLogout} />
           </ProtectedRoute>
         }
-      />
+      >
+        <Route index element={<UserManagement />} />
+        <Route path="users" element={<UserManagement />} />
+        <Route path="blocks" element={<BlocksSections />} />
+        <Route path="settings" element={<SystemSettings />} />
+        <Route path="logs" element={<ActivityLogs />} />
+      </Route>
 
       {/* Catch All */}
       <Route path="*" element={<Navigate to="/" replace />} />
