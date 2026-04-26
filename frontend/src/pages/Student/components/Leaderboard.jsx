@@ -1,131 +1,272 @@
 import { useState, useEffect } from 'react'
 
 export default function Leaderboard({ currentUsername }) {
-  const [champions, setChampions] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [hoveredRank, setHoveredRank] = useState(null)
+  const [filter, setFilter] = useState('block')
+  const [animated, setAnimated] = useState(false)
 
-  useEffect(() => { fetchHall() }, [])
+  // Trigger animations on mount
+  useEffect(() => {
+    setAnimated(true)
+  }, [])
 
-  const fetchHall = async () => {
-    try {
-      const res = await fetch('http://localhost:5000/api/leaderboard')
-      if (!res.ok) throw new Error('Failed to fetch champions')
-      setChampions(await res.json())
-    } catch (err) { console.error('Failed to load champions:', err) }
-    finally { setLoading(false) }
-  }
+  // MOCK DATA for Panel Demo
+  const mockLeaders = [
+    { id: 1, rank: 1, username: 'Gojo Satoru', xp: 2450, level: 12, avatar: 'G', color: 'from-purple-600 to-blue-600' },
+    { id: 2, rank: 2, username: 'Levi Ackerman', xp: 2100, level: 11, avatar: 'L', color: 'from-slate-600 to-slate-700' },
+    { id: 3, rank: 3, username: 'Naruto Uzumaki', xp: 1850, level: 10, avatar: 'N', color: 'from-orange-500 to-yellow-500' },
+    { id: 4, rank: 4, username: 'Zoro Roronoa', xp: 1620, level: 9, avatar: 'Z', color: 'from-green-600 to-emerald-600' },
+    { id: 5, rank: 5, username: 'Mikasa Ackerman', xp: 1450, level: 8, avatar: 'M', color: 'from-red-600 to-pink-600' },
+    { id: 6, rank: 6, username: 'Luffy Monkey', xp: 1280, level: 8, avatar: 'L', color: 'from-red-500 to-orange-500' },
+    { id: 7, rank: 7, username: 'Tanjiro Kamado', xp: 1150, level: 7, avatar: 'T', color: 'from-green-500 to-teal-500' },
+    { id: 8, rank: 8, username: 'Eren Yeager', xp: 980, level: 6, avatar: 'E', color: 'from-amber-700 to-yellow-700' },
+    { id: 9, rank: 9, username: 'Light Yagami', xp: 850, level: 6, avatar: 'L', color: 'from-purple-700 to-indigo-700' },
+    { id: 10, rank: 10, username: currentUsername, xp: 0, level: 1, avatar: currentUsername?.[0] || 'S', color: 'from-purple-600 to-pink-600' }
+  ]
 
-  const getThrone = (rank) => {
-    switch(rank) {
-      case 1: return {title:'👑 Grand Champion',gradient:'from-yellow-600/35 via-amber-500/25 to-orange-600/35',border:'border-yellow-500',glow:'shadow-yellow-500/60',crown:'👑',aura:'animate-pulse-gold'}
-      case 2: return {title:'⚔️ Vice Champion',gradient:'from-slate-400/35 via-gray-300/25 to-slate-500/35',border:'border-slate-400',glow:'shadow-slate-400/60',crown:'🥈',aura:'animate-pulse-silver'}
-      case 3: return {title:'🛡️ Third Champion',gradient:'from-orange-700/35 via-amber-600/25 to-orange-800/35',border:'border-orange-600',glow:'shadow-orange-600/60',crown:'🥉',aura:'animate-pulse-bronze'}
-      default: return {title:`Rank #${rank}`,gradient:'from-slate-800/35 to-slate-900/35',border:'border-slate-700',glow:'shadow-slate-700/40',crown:`#${rank}`,aura:''}
-    }
-  }
+  // Sort by XP
+  const sortedLeaders = [...mockLeaders].sort((a, b) => b.xp - a.xp).map((leader, idx) => ({
+    ...leader,
+    rank: idx + 1
+  }))
+
+  const topThree = sortedLeaders.slice(0, 3)
+  const currentUser = sortedLeaders.find(u => u.username === currentUsername) || sortedLeaders[9]
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="text-center pb-4 border-b border-purple-600/40">
-        <h2 className="text-3xl font-black bg-gradient-to-r from-yellow-300 via-pink-300 to-purple-300 bg-clip-text text-transparent drop-shadow-lg">👑 Hall of Champions</h2>
-        <p className="text-slate-300 text-sm mt-1 font-medium">The mightiest coders of the realm</p>
+      {/* Header with Animation */}
+      <div className={`text-center mb-8 transition-all duration-700 ${animated ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4'}`}>
+        <h2 className="text-3xl font-bold bg-gradient-to-r from-pink-400 to-purple-400 bg-clip-text text-transparent mb-2 animate-pulse">
+          👑 Hall of Champions
+        </h2>
+        <p className="text-slate-400">The mightiest coders of the realm</p>
       </div>
 
-      {/* Loading */}
-      {loading ? (
-        <div className="text-center py-16">
-          <div className="relative mx-auto mb-6"><div className="animate-spin rounded-full h-16 w-16 border-4 border-yellow-600 border-t-transparent"></div><div className="absolute inset-0 flex items-center justify-center"><span className="text-2xl animate-pulse">👑</span></div></div>
-          <p className="text-yellow-300 font-mono animate-pulse drop-shadow">Consulting the ancient scrolls...</p>
-          <p className="text-slate-400 text-sm mt-2 font-medium">The oracle is determining the realm's champions</p>
-        </div>
-      ) : champions.length === 0 ? (
-        <div className="text-center py-16 bg-gradient-to-b from-slate-900/90 to-purple-900/50 rounded-2xl border border-purple-600/40 backdrop-blur-sm">
-          <div className="text-6xl mb-4 animate-bounce">🏆</div>
-          <p className="text-white text-lg font-bold mb-2 drop-shadow-lg">The hall awaits its first champions</p>
-          <p className="text-slate-300 text-sm font-medium">Be the first to earn XP and claim your throne!</p>
-        </div>
-      ) : (
-        <div className="space-y-4">
-          {/* Top 3 Thrones */}
-          <div className="grid md:grid-cols-3 gap-4 mb-8">
-            {champions[1] && <ChampionThrone champion={champions[1]} rank={2} style={getThrone(2)} isCurrent={champions[1].username===currentUsername} isHovered={hoveredRank===2} onHover={setHoveredRank} position="left"/>}
-            {champions[0] && <ChampionThrone champion={champions[0]} rank={1} style={getThrone(1)} isCurrent={champions[0].username===currentUsername} isHovered={hoveredRank===1} onHover={setHoveredRank} position="center"/>}
-            {champions[2] && <ChampionThrone champion={champions[2]} rank={3} style={getThrone(3)} isCurrent={champions[2].username===currentUsername} isHovered={hoveredRank===3} onHover={setHoveredRank} position="right"/>}
+      {/* Filter Tabs */}
+      <div className={`flex justify-center gap-2 mb-8 transition-all duration-700 delay-100 ${animated ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4'}`}>
+        <button
+          onClick={() => setFilter('block')}
+          className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-300 ${
+            filter === 'block'
+              ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-lg scale-105'
+              : 'bg-slate-800/60 text-slate-300 hover:text-white hover:scale-105'
+          }`}
+        >
+          🏰 My Block
+        </button>
+        <button
+          onClick={() => setFilter('global')}
+          className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-300 ${
+            filter === 'global'
+              ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-lg scale-105'
+              : 'bg-slate-800/60 text-slate-300 hover:text-white hover:scale-105'
+          }`}
+        >
+          🌍 Global
+        </button>
+      </div>
+
+      {/* Top 3 Champions Podium */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        {/* 2nd Place - Vice Champion */}
+        {topThree[1] && (
+          <div className={`md:order-1 bg-gradient-to-br from-slate-700/40 to-slate-800/40 border-2 border-slate-500/40 rounded-2xl p-6 text-center relative overflow-hidden transition-all duration-700 delay-200 hover:scale-105 ${animated ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-10'}`}>
+            <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-slate-500/10 to-transparent pointer-events-none"></div>
+            <div className="relative z-10">
+              <div className="text-slate-300 text-sm font-semibold mb-2 flex items-center justify-center gap-1 animate-bounce">
+                <span>⚔️</span> Vice Champion
+              </div>
+              <div className="w-20 h-20 mx-auto mb-3 rounded-2xl bg-gradient-to-br from-slate-400 to-slate-600 flex items-center justify-center text-3xl font-bold text-white shadow-lg shadow-slate-500/30 animate-pulse">
+                {topThree[1].avatar}
+              </div>
+              <p className="text-white font-bold text-lg mb-1">{topThree[1].username}</p>
+              <div className="flex justify-center gap-4 mt-4">
+                <div className="bg-slate-800/60 rounded-lg px-4 py-2 transform hover:scale-110 transition-transform">
+                  <p className="text-slate-400 text-xs">Level</p>
+                  <p className="text-slate-200 font-bold">{topThree[1].level}</p>
+                </div>
+                <div className="bg-slate-800/60 rounded-lg px-4 py-2 transform hover:scale-110 transition-transform">
+                  <p className="text-slate-400 text-xs">XP</p>
+                  <p className="text-yellow-400 font-bold">{topThree[1].xp}</p>
+                </div>
+              </div>
+            </div>
           </div>
+        )}
 
-          {/* Guild Members */}
-          {champions.length>3 && (
-            <div className="bg-gradient-to-b from-slate-900/90 to-purple-900/30 rounded-2xl border border-purple-600/50 p-4 shadow-lg shadow-purple-600/15">
-              <h3 className="font-bold text-lg mb-4 flex items-center gap-2 text-slate-300 drop-shadow"><span>📜</span> Guild Members</h3>
-              <div className="space-y-2">
-                {champions.slice(3).map((champ,index)=>{
-                  const rank=index+4, style=getThrone(rank), isCurrent=champ.username===currentUsername
-                  return (
-                    <div key={champ.rank} className={`flex items-center justify-between p-3 rounded-xl border transition-all cursor-pointer ${isCurrent?'bg-purple-600/25 border-purple-500/60 ring-2 ring-purple-400/60':'bg-slate-800/40 border-slate-700 hover:border-purple-500/60 hover:bg-slate-800/60'}`} onMouseEnter={()=>setHoveredRank(rank)} onMouseLeave={()=>setHoveredRank(null)}>
-                      <div className="flex items-center gap-4">
-                        <span className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${isCurrent?'bg-purple-600 text-white':'bg-slate-700 text-slate-400'}`}>#{rank}</span>
-                        <div className="flex items-center gap-3">
-                          <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold border-2 ${isCurrent?'bg-gradient-to-br from-purple-600 to-pink-600 border-purple-400 text-white':'bg-slate-700 border-slate-600 text-slate-300'}`}>{champ.username[0].toUpperCase()}</div>
-                          <div><p className={`font-semibold ${isCurrent?'text-purple-300 drop-shadow':'text-slate-300 drop-shadow'}`}>{champ.username}{isCurrent && <span className="ml-2 text-xs text-purple-400 font-medium">(You)</span>}</p><p className="text-xs text-slate-500 font-medium">Guild Member</p></div>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-4">
-                        <span className="px-3 py-1 bg-purple-600/25 text-purple-300 rounded-lg text-sm font-bold drop-shadow">Lv.{champ.level}</span>
-                        <span className="text-yellow-300 font-bold font-mono drop-shadow">{champ.xp} XP</span>
-                      </div>
-                    </div>
-                  )
-                })}
+        {/* 1st Place - Grand Champion */}
+        {topThree[0] && (
+          <div className={`md:order-2 bg-gradient-to-br from-yellow-600/30 to-amber-700/30 border-2 border-yellow-500/60 rounded-2xl p-8 text-center relative overflow-hidden transition-all duration-700 delay-300 hover:scale-105 ${animated ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-10'}`}>
+            <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-yellow-500/20 to-transparent pointer-events-none animate-pulse"></div>
+            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent -translate-x-full animate-[shimmer_2s_infinite]"></div>
+            <div className="relative z-10">
+              <div className="text-yellow-300 text-sm font-semibold mb-2 flex items-center justify-center gap-1 animate-bounce">
+                <span>👑</span> Grand Champion
+              </div>
+              <div className="w-24 h-24 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-yellow-400 to-amber-600 flex items-center justify-center text-4xl font-bold text-white shadow-lg shadow-yellow-500/50 animate-[pulse_2s_ease-in-out_infinite]">
+                {topThree[0].avatar}
+              </div>
+              <p className="text-white font-bold text-xl mb-1">{topThree[0].username}</p>
+              <div className="flex justify-center gap-4 mt-6">
+                <div className="bg-slate-900/60 rounded-lg px-6 py-3 border border-yellow-600/30 transform hover:scale-110 transition-transform duration-300">
+                  <p className="text-slate-400 text-xs">Level</p>
+                  <p className="text-yellow-300 font-bold text-lg">{topThree[0].level}</p>
+                </div>
+                <div className="bg-slate-900/60 rounded-lg px-6 py-3 border border-yellow-600/30 transform hover:scale-110 transition-transform duration-300">
+                  <p className="text-slate-400 text-xs">XP</p>
+                  <p className="text-yellow-400 font-bold text-lg">{topThree[0].xp}</p>
+                </div>
               </div>
             </div>
-          )}
+          </div>
+        )}
 
-          {/* Your Rank */}
-          {currentUsername && (
-            <div className="bg-gradient-to-r from-purple-600/25 to-pink-600/25 rounded-xl border border-purple-600/50 p-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <span className="text-2xl">🎯</span>
-                  <div><p className="font-semibold text-purple-300 drop-shadow">Your Standing</p><p className="text-sm text-slate-400 font-medium">{currentUsername}</p></div>
+        {/* 3rd Place */}
+        {topThree[2] && (
+          <div className={`md:order-3 bg-gradient-to-br from-amber-800/30 to-orange-900/30 border-2 border-orange-600/40 rounded-2xl p-6 text-center relative overflow-hidden transition-all duration-700 delay-200 hover:scale-105 ${animated ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-10'}`}>
+            <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-orange-500/10 to-transparent pointer-events-none"></div>
+            <div className="relative z-10">
+              <div className="text-orange-300 text-sm font-semibold mb-2 flex items-center justify-center gap-1 animate-bounce">
+                <span>🥉</span> Third Place
+              </div>
+              <div className="w-20 h-20 mx-auto mb-3 rounded-2xl bg-gradient-to-br from-orange-500 to-amber-700 flex items-center justify-center text-3xl font-bold text-white shadow-lg shadow-orange-500/30 animate-pulse">
+                {topThree[2].avatar}
+              </div>
+              <p className="text-white font-bold text-lg mb-1">{topThree[2].username}</p>
+              <div className="flex justify-center gap-4 mt-4">
+                <div className="bg-slate-800/60 rounded-lg px-4 py-2 transform hover:scale-110 transition-transform">
+                  <p className="text-slate-400 text-xs">Level</p>
+                  <p className="text-orange-300 font-bold">{topThree[2].level}</p>
                 </div>
+                <div className="bg-slate-800/60 rounded-lg px-4 py-2 transform hover:scale-110 transition-transform">
+                  <p className="text-slate-400 text-xs">XP</p>
+                  <p className="text-yellow-400 font-bold">{topThree[2].xp}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Full Rankings List */}
+      <div className={`bg-slate-800/40 border border-slate-700 rounded-2xl p-6 transition-all duration-700 delay-500 ${animated ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-10'}`}>
+        <h3 className="text-lg font-bold text-white mb-4">Full Rankings</h3>
+        <div className="space-y-2">
+          {sortedLeaders.map((player, index) => {
+            const isCurrentUser = player.username === currentUsername
+            return (
+              <div 
+                key={player.id}
+                className={`flex items-center gap-4 p-4 rounded-xl border transition-all duration-500 hover:scale-[1.02] cursor-pointer ${
+                  isCurrentUser 
+                    ? 'bg-gradient-to-r from-purple-900/60 to-pink-900/60 border-purple-500 shadow-lg shadow-purple-600/20' 
+                    : player.rank <= 3
+                      ? 'bg-slate-800/60 border-slate-600 hover:border-purple-500/60'
+                      : 'bg-slate-800/40 border-slate-700 hover:border-purple-500/40'
+                }`}
+                style={{
+                  animationDelay: `${600 + index * 100}ms`,
+                  animation: animated ? 'slideIn 0.5s ease-out forwards' : 'none',
+                  opacity: 0,
+                  transform: 'translateX(-20px)'
+                }}
+              >
+                {/* Rank */}
+                <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-lg transition-transform duration-300 hover:scale-125 ${
+                  player.rank === 1 ? 'bg-yellow-500 text-white animate-[pulse_2s_ease-in-out_infinite]' :
+                  player.rank === 2 ? 'bg-slate-400 text-white' :
+                  player.rank === 3 ? 'bg-orange-600 text-white' :
+                  'bg-slate-700 text-slate-300'
+                }`}>
+                  {player.rank}
+                </div>
+                
+                {/* Avatar */}
+                <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${player.color} flex items-center justify-center text-xl font-bold text-white shadow-lg transform transition-transform duration-300 hover:scale-110 hover:rotate-3`}>
+                  {player.avatar}
+                </div>
+                
+                {/* Name & Level */}
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <p className={`font-bold transition-all duration-300 ${isCurrentUser ? 'text-purple-300' : 'text-white'}`}>
+                      {player.username}
+                      {isCurrentUser && (
+                        <span className="ml-2 px-2 py-0.5 bg-purple-600/40 text-purple-200 text-[10px] rounded-full animate-pulse">
+                          You
+                        </span>
+                      )}
+                    </p>
+                  </div>
+                  <p className="text-xs text-slate-400">Level {player.level}</p>
+                </div>
+                
+                {/* XP */}
                 <div className="text-right">
-                  {(()=>{const r=champions.findIndex(c=>c.username===currentUsername)+1;return r>0?<><p className="text-2xl font-bold text-yellow-300 drop-shadow">#{r}</p><p className="text-xs text-slate-400 font-medium">Keep climbing!</p></>:<><p className="text-lg font-bold text-slate-400 drop-shadow">Unranked</p><p className="text-xs text-slate-400 font-medium">Complete quests to rank up!</p></>})()}
+                  <p className="text-yellow-400 font-bold text-lg animate-[pulse_2s_ease-in-out_infinite]">{player.xp} XP</p>
                 </div>
               </div>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* Your Standing Card */}
+      {currentUser && (
+        <div className={`bg-gradient-to-r from-purple-900/40 to-pink-900/40 border border-purple-600/40 rounded-2xl p-6 transition-all duration-700 delay-700 hover:scale-105 ${animated ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-10'}`}>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 rounded-full bg-gradient-to-br from-purple-600 to-pink-600 flex items-center justify-center text-xl font-bold text-white animate-[bounce_2s_ease-in-out_infinite]">
+                {currentUser.rank}
+              </div>
+              <div>
+                <p className="text-white font-bold text-lg">Your Standing</p>
+                <p className="text-slate-400 text-sm">{currentUser.username}</p>
+              </div>
             </div>
-          )}
+            <div className="text-right">
+              <p className="text-yellow-400 font-bold text-2xl animate-[pulse_1.5s_ease-in-out_infinite]">#{currentUser.rank}</p>
+              <p className="text-slate-400 text-sm">{currentUser.xp} XP</p>
+            </div>
+          </div>
         </div>
       )}
 
+      {/* Custom CSS Animations */}
       <style>{`
-        @keyframes pulse-gold{0%,100%{box-shadow:0 0 12px rgba(234,179,8,0.4)}50%{box-shadow:0 0 35px rgba(234,179,8,0.9),0 0 60px rgba(251,191,36,0.6)}}.animate-pulse-gold{animation:pulse-gold 2.5s ease-in-out infinite}
-        @keyframes pulse-silver{0%,100%{box-shadow:0 0 12px rgba(148,163,184,0.4)}50%{box-shadow:0 0 30px rgba(148,163,184,0.9),0 0 50px rgba(203,213,225,0.5)}}.animate-pulse-silver{animation:pulse-silver 2.5s ease-in-out infinite}
-        @keyframes pulse-bronze{0%,100%{box-shadow:0 0 12px rgba(180,83,9,0.4)}50%{box-shadow:0 0 30px rgba(180,83,9,0.9),0 0 50px rgba(234,88,12,0.5)}}.animate-pulse-bronze{animation:pulse-bronze 2.5s ease-in-out infinite}
-        @keyframes float-throne{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}.animate-float-throne{animation:float-throne 3s ease-in-out infinite}
-        @keyframes sparkle{0%,100%{opacity:0.4;transform:scale(1)}50%{opacity:1;transform:scale(1.4)}}.animate-sparkle{animation:sparkle 1.5s ease-in-out infinite}
+        @keyframes slideIn {
+          from {
+            opacity: 0;
+            transform: translateX(-20px);
+          }
+          to {
+            opacity: 1;
+            transform: translateX(0);
+          }
+        }
+        
+        @keyframes shimmer {
+          0% {
+            transform: translateX(-100%);
+          }
+          100% {
+            transform: translateX(100%);
+          }
+        }
+        
+        @keyframes float {
+          0%, 100% {
+            transform: translateY(0);
+          }
+          50% {
+            transform: translateY(-10px);
+          }
+        }
+        
+        .animate-float {
+          animation: float 3s ease-in-out infinite;
+        }
       `}</style>
-    </div>
-  )
-}
-
-function ChampionThrone({champion,rank,style,isCurrent,isHovered,onHover,position}){
-  const isCenter=position==='center'
-  return (
-    <div className={`relative bg-gradient-to-b ${style.gradient} backdrop-blur-sm rounded-2xl border-2 ${style.border} p-5 transition-all duration-300 cursor-pointer ${style.aura||''} ${isHovered?'transform scale-105 ring-2 ring-purple-400/60':''} ${isCenter?'md:-mt-4 shadow-2xl':''}`} onMouseEnter={()=>onHover(rank)} onMouseLeave={()=>onHover(null)}>
-      {rank<=3 && <div className="absolute inset-0 pointer-events-none overflow-hidden rounded-2xl">{[...Array(5)].map((_,i)=><div key={i} className="absolute w-2 h-2 bg-yellow-400/70 rounded-full animate-sparkle" style={{left:`${20+i*15}%`,top:`${10+Math.random()*20}%`,animationDelay:`${i*0.3}s`}}/>)}</div>}
-      <div className="absolute -top-3 left-1/2 -translate-x-1/2"><span className={`text-3xl ${rank===1?'animate-bounce':''}`}>{style.crown}</span></div>
-      <div className="text-center mb-4 pt-2"><p className={`font-black text-sm ${rank===1?'text-yellow-300 drop-shadow':rank===2?'text-slate-300 drop-shadow':rank===3?'text-orange-300 drop-shadow':'text-slate-400 drop-shadow'}`}>{style.title}</p></div>
-      <div className="flex flex-col items-center mb-4">
-        <div className={`w-20 h-20 rounded-2xl flex items-center justify-center text-3xl font-black border-4 mb-3 ${isCurrent?'bg-gradient-to-br from-purple-600 to-pink-600 border-purple-400 text-white shadow-lg shadow-purple-600/60':rank===1?'bg-gradient-to-br from-yellow-500 to-amber-400 border-yellow-300 text-slate-900':rank===2?'bg-gradient-to-br from-slate-300 to-gray-200 border-slate-200 text-slate-800':rank===3?'bg-gradient-to-br from-orange-500 to-amber-600 border-orange-400 text-slate-900':'bg-slate-700 border-slate-500 text-slate-300'}`}>{champion.username[0].toUpperCase()}</div>
-        <p className={`font-bold text-lg text-center drop-shadow ${isCurrent?'text-purple-300':'text-white'}`}>{champion.username}{isCurrent && <span className="block text-xs text-purple-400 mt-1 font-medium">(You)</span>}</p>
-      </div>
-      <div className="grid grid-cols-2 gap-3 text-center">
-        <div className="bg-slate-900/70 backdrop-blur-sm rounded-lg p-2 border border-slate-700/60"><p className="text-xs text-slate-400 font-medium mb-1">Level</p><p className="font-bold text-purple-300 drop-shadow text-lg">{champion.level}</p></div>
-        <div className="bg-slate-900/70 backdrop-blur-sm rounded-lg p-2 border border-slate-700/60"><p className="text-xs text-slate-400 font-medium mb-1">XP</p><p className="font-bold text-yellow-300 drop-shadow text-lg">{champion.xp}</p></div>
-      </div>
-      {isHovered && rank<=3 && <div className="absolute inset-0 rounded-2xl bg-gradient-to-r from-purple-600/15 to-pink-600/15 animate-pulse pointer-events-none"></div>}
     </div>
   )
 }
