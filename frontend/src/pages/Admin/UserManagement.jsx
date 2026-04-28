@@ -350,8 +350,23 @@ function UserSection({ title, icon, users, onManage, onRecover, onDelete }) {
                     </div>
                   </div>
                 </td>
-                <td className="p-4 text-slate-300">
-                  {user.block_name || 'Unassigned'}
+                <td className="p-4">
+                  {user.blocks && user.blocks.length > 0 ? (
+                    <div className="flex flex-wrap gap-1">
+                      {/* ✅ Deduplicate by section_code so we don't see [101] [101] */}
+                      {[...new Set(user.blocks.map(b => b.section_code))].map((code, idx) => (
+                        <span 
+                          key={idx}
+                          className="px-2.5 py-1 bg-purple-600/20 text-purple-300 rounded-lg text-sm font-bold border border-purple-600/40 shadow-sm"
+                          title={`Section ${code}`}
+                        >
+                          {code}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="text-slate-500 text-sm italic">Unassigned</span>
+                  )}
                 </td>
                 <td className="p-4 text-white font-mono">{user.level}</td>
                 <td className="p-4 text-yellow-400 font-mono">{user.xp}</td>

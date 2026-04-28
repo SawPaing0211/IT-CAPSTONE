@@ -4,6 +4,8 @@ import ProblemList from './ProblemList'
 import StudentCodeEditor from './StudentCodeEditor'
 import Leaderboard from './components/Leaderboard'
 import ProgressStats from './components/ProgressStats'
+import QuestLog from './QuestLog'
+import MySubjects from './MySubjects'
 import { api } from '../../api/client'
 
 // ─── Spell templates per language ─────────────────────────────────────────
@@ -138,8 +140,8 @@ function ArcaneSandbox({ seedCode = null, seedLanguage = 'python', sandboxHealth
 
   const burstParticles = (success) => {
     const emojis = success
-      ? ['✨', '⚡', '🔮', '💫', '🌟', '🎯', '🏆']
-      : ['💥', '⚠️', '🔥', '❌']
+      ? ['✨', '⚡', '🔮', '💫', '🌟', '🎯', '']
+      : ['', '⚠️', '🔥', '❌']
     const newP = Array.from({ length: success ? 14 : 7 }, (_, i) => ({
       id: Date.now() + i,
       x: 20 + Math.random() * 60,
@@ -536,7 +538,7 @@ function ArcaneSandbox({ seedCode = null, seedLanguage = 'python', sandboxHealth
 //  Main StudentDashboard
 // ═══════════════════════════════════════════════════════════════════════════
 export default function StudentDashboard({ user, onLogout }) {
-  const [activeTab, setActiveTab]             = useState('quests')
+  const [activeTab, setActiveTab]             = useState('subjects')  // ✅ Changed from 'quests'
   const [selectedQuest, setSelectedQuest]     = useState(null)
   const [heroStats, setHeroStats]             = useState(null)
   const [loading, setLoading]                 = useState(true)
@@ -544,6 +546,8 @@ export default function StudentDashboard({ user, onLogout }) {
   const [showNotifications, setShowNotifications] = useState(false)
   const [sandboxSeed, setSandboxSeed]         = useState(null)   // { code, language }
   const [sandboxHealth, setSandboxHealth]     = useState(null)   // Docker health data
+  const [selectedBlock, setSelectedBlock]   = useState(null)   // Tracks which subject is open
+  const [courseTab, setCourseTab]           = useState('board') // Tracks tabs inside a subject
 
   const profileRef      = useRef(null)
   const notificationRef = useRef(null)
@@ -612,6 +616,16 @@ export default function StudentDashboard({ user, onLogout }) {
     setActiveTab('sandbox')
   }
   const handleLogoutClick = () => { setShowProfileMenu(false); onLogout() }
+  
+  // Navigation handlers for nested subject view
+  const handleEnterSubject = (block) => {
+    setSelectedBlock(block)
+    setCourseTab('board')
+  }
+
+  const handleExitSubject = () => {
+    setSelectedBlock(null)
+  }
 
   const notifications = [
     { id: 1, title: 'Midterm Exam Tomorrow', content: 'Remember to review Array and Looping problems. Exam starts at 9 AM in Block 301.', priority: 'urgent', instructor: 'Prof. Johnson', block: 'Block 301', date: 'Apr 24, 2024', time: '2:30 PM', read: false },
@@ -640,11 +654,10 @@ export default function StudentDashboard({ user, onLogout }) {
   }
 
   const tabs = [
-    { id: 'quests',     label: '🗺️ Quest Board' },
-    { id: 'spellforge', label: '🔮 Spellforge', disabled: !selectedQuest },
-    { id: 'sandbox',    label: '🧪 Sandbox' },
+    { id: 'subjects',   label: '🎓 My Subjects' },
     { id: 'hall',       label: '👑 Hall of Champions' },
     { id: 'hero',       label: '🧙 Hero Sheet' },
+    { id: 'sandbox',    label: '🧪 Sandbox' },
   ]
 
   return (
@@ -774,25 +787,27 @@ export default function StudentDashboard({ user, onLogout }) {
       {/* ── Main Content ── */}
       <main className="relative z-10 container mx-auto px-4 py-6">
 
-        {/* Tabs */}
-        <div className="flex gap-2 mb-6 border-b border-purple-600/40 pb-2 overflow-x-auto">
-          {tabs.map(tab => (
-            <button key={tab.id} onClick={() => !tab.disabled && setActiveTab(tab.id)} disabled={tab.disabled}
-              className={`px-4 sm:px-5 py-2.5 rounded-lg font-semibold transition-all duration-300 whitespace-nowrap border-2 ${
-                tab.disabled
-                  ? 'text-slate-500 border-slate-800 cursor-not-allowed opacity-50'
-                  : activeTab === tab.id
-                    ? tab.id === 'sandbox'
-                      ? 'bg-gradient-to-r from-emerald-600 to-teal-600 border-emerald-400 text-white shadow-lg shadow-emerald-600/40 transform scale-105 font-bold'
-                      : 'bg-gradient-to-r from-purple-600 to-pink-600 border-purple-400 text-white shadow-lg shadow-purple-600/50 transform scale-105 font-bold'
-                    : tab.id === 'sandbox'
-                      ? 'text-emerald-300 border-emerald-800/50 hover:text-white hover:border-emerald-500/60 hover:bg-emerald-900/20 hover:scale-105'
-                      : 'text-slate-300 border-slate-700 hover:text-white hover:border-purple-500/60 hover:bg-slate-800/80 hover:scale-105'
-              }`}>
-              {tab.label}
-            </button>
-          ))}
-        </div>
+        {/* Tabs - Only show when NOT in a subject (Dashboard mode) */}
+        {!selectedBlock && (
+          <div className="flex gap-2 mb-6 border-b border-purple-600/40 pb-2 overflow-x-auto">
+            {tabs.map(tab => (
+              <button key={tab.id} onClick={() => !tab.disabled && setActiveTab(tab.id)} disabled={tab.disabled}
+                className={`px-4 sm:px-5 py-2.5 rounded-lg font-semibold transition-all duration-300 whitespace-nowrap border-2 ${
+                  tab.disabled
+                    ? 'text-slate-500 border-slate-800 cursor-not-allowed opacity-50'
+                    : activeTab === tab.id
+                      ? tab.id === 'sandbox'
+                        ? 'bg-gradient-to-r from-emerald-600 to-teal-600 border-emerald-400 text-white shadow-lg shadow-emerald-600/40 transform scale-105 font-bold'
+                        : 'bg-gradient-to-r from-purple-600 to-pink-600 border-purple-400 text-white shadow-lg shadow-purple-600/50 transform scale-105 font-bold'
+                      : tab.id === 'sandbox'
+                        ? 'text-emerald-300 border-emerald-800/50 hover:text-white hover:border-emerald-500/60 hover:bg-emerald-900/20 hover:scale-105'
+                        : 'text-slate-300 border-slate-700 hover:text-white hover:border-purple-500/60 hover:bg-slate-800/80 hover:scale-105'
+                }`}>
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* Sandbox tab */}
         {activeTab === 'sandbox' && (
@@ -809,23 +824,94 @@ export default function StudentDashboard({ user, onLogout }) {
           </div>
         )}
 
-        {/* Other tabs */}
-        {activeTab !== 'sandbox' && (
-          <div className="relative min-h-[500px]">
-            {['quests', 'hall', 'hero'].map(tabId => (
-              <div key={tabId} className={`absolute inset-0 transition-all duration-500 ease-out ${
-                activeTab === tabId ? 'opacity-100 translate-y-0 pointer-events-auto' : 'opacity-0 translate-y-4 pointer-events-none'
-              }`}>
-                {activeTab === tabId && (
-                  <>
-                    {tabId === 'quests' && <ProblemList onSelectQuest={handleQuestSelect} currentLevel={heroStats?.level || 1} />}
-                    {tabId === 'hall'   && <Leaderboard currentUsername={user.username} />}
-                    {tabId === 'hero'   && heroStats && <ProgressStats stats={heroStats} username={user.username} />}
-                  </>
-                )}
+                {/* ================= MODE 1: DASHBOARD (No Subject Selected) ================= */}
+        {!selectedBlock ? (
+          <div className="animate-fade-in">
+            {activeTab === 'subjects' && <MySubjects onSelectSubject={handleEnterSubject} />}
+            {activeTab === 'hall' && <Leaderboard currentUsername={user.username} />}
+            {activeTab === 'hero' && heroStats && <ProgressStats stats={heroStats} username={user.username} />}
+            {activeTab === 'sandbox' && (
+              <div>
+                <SandboxHealthBanner health={sandboxHealth} />
+                <div className="rounded-2xl overflow-hidden border border-emerald-600/30 shadow-2xl shadow-emerald-900/20" style={{ height: 'calc(100vh - 240px)', minHeight: 480 }}>
+                  <ArcaneSandbox sandboxHealth={sandboxHealth} />
+                </div>
               </div>
-            ))}
+            )}
           </div>
+        ) : (
+          <>
+            {/* ================= MODE 2: COURSE VIEW (Subject Selected) ================= */}
+            <div className="animate-fade-in space-y-6">
+            
+            {/* Course Header */}
+            <div className="flex items-center justify-between bg-slate-900/50 p-4 rounded-xl border border-purple-600/30">
+              <div className="flex items-center gap-4">
+                <button 
+                  onClick={handleExitSubject}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-sm font-bold transition flex items-center gap-2"
+                >
+                  ← Back to Subjects
+                </button>
+                <div>
+                  <h2 className="text-xl font-bold text-white">{selectedBlock.section_code}</h2>
+                  <p className="text-sm text-slate-400">{selectedBlock.name}</p>
+                </div>
+              </div>
+              <div className="text-right">
+                <span className="px-3 py-1 bg-purple-600/20 text-purple-300 rounded-full text-xs font-bold border border-purple-600/40">
+                  {selectedBlock.semester}
+                </span>
+              </div>
+            </div>
+
+            {/* Course Navigation Tabs */}
+            <div className="flex gap-2 border-b border-purple-600/40 pb-2">
+              {[
+                { id: 'board', label: '🗺️ Quest Board' },
+                { id: 'log', label: '📜 Quest Log' },
+                { id: 'sandbox', label: '🧪 Sandbox' },
+                { id: 'hero', label: '🧙 Hero Sheet' },
+              ].map(tab => (
+                <button
+                  key={tab.id}
+                  onClick={() => setCourseTab(tab.id)}
+                  className={`px-4 py-2 rounded-lg font-semibold transition ${
+                    courseTab === tab.id 
+                      ? 'bg-purple-600 text-white shadow-lg shadow-purple-600/50' 
+                      : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Course Content Area */}
+            <div className="min-h-[500px]">
+              {courseTab === 'board' && (
+                <ProblemList 
+                  onSelectQuest={handleQuestSelect} 
+                  currentLevel={heroStats?.level || 1}
+                  blockId={selectedBlock.id}
+                />
+              )}
+              {courseTab === 'log' && (
+                <QuestLog 
+                  blockId={selectedBlock.id}
+                />
+              )}
+              {courseTab === 'sandbox' && (
+                 <div className="h-[600px] rounded-xl overflow-hidden border border-emerald-600/30">
+                    <ArcaneSandbox sandboxHealth={sandboxHealth} />
+                 </div>
+              )}
+              {courseTab === 'hero' && heroStats && (
+                <ProgressStats stats={heroStats} username={user.username} />
+              )}
+            </div>
+          </div>
+          </>
         )}
 
         {loading && (

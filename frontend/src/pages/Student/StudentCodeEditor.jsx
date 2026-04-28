@@ -9,7 +9,7 @@ export default function StudentCodeEditor({
   heroLevel,
   onOpenSandbox  // ← NEW: Added onOpenSandbox prop
 }) {
-  const LANG_LINE_OFFSET = { python: 3, java: 3, csharp: 4 }
+  const LANG_LINE_OFFSET = { python: 2, java: 1, csharp: 0 }
 
   const [code, setCode] = useState('')
   const [language, setLanguage] = useState('python')
@@ -73,11 +73,10 @@ const parseAndHighlightErrors = (errorText, language) => {
 
   else if (language === 'python') {
     const lineMatches = [...errorText.matchAll(/line (\d+)/g)]
-    const errorDesc = errorText
-      .split('\n')
-      .map(l => l.trim())
-      .filter(l => /^(\w+Error|Exception)/.test(l))
-      .pop() || 'Syntax error'
+    const lines = errorText.split('\n').map(l => l.trim()).filter(Boolean)
+    const errorDesc = lines.find(l => /^(\w+Error|NameError|TypeError|ValueError|SyntaxError|AttributeError|Exception)/.test(l))
+      || lines.filter(l => !l.startsWith('Traceback') && !l.startsWith('File ') && !l.startsWith('line ') && !l.includes('most recent')).pop()
+      || 'Runtime error'
 
     if (lineMatches.length > 0) {
       const rawLine = parseInt(lineMatches[lineMatches.length - 1][1])
@@ -775,7 +774,7 @@ const formatErrorOutput = (rawOutput, language) => {
                           {tc.message && (
                             <div>
                               <p className="text-slate-500 mb-1">Error:</p>
-                              <code className="text-red-400...">{formatErrorOutput(tc.message, language)}</code>
+                              <code className="text-red-400 font-mono block bg-slate-950 p-2 rounded whitespace-pre-wrap">{formatErrorOutput(tc.output, language)}</code>
                             </div>
                           )}
                         </div>

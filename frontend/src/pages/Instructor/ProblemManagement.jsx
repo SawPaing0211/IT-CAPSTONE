@@ -25,6 +25,35 @@ export default function ProblemManagement() {
     }
   }
 
+  // ✅ Delete handler - OUTSIDE fetchProblems
+  const handleDelete = async (problemId, problemTitle) => {
+    if (!confirm(`Are you sure you want to delete "${problemTitle}"? This cannot be undone.`)) return
+    
+    try {
+      const token = localStorage.getItem('token')
+      const res = await fetch(`http://localhost:5000/api/problems/${problemId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      
+      if (res.ok) {
+        setProblems(problems.filter(p => p.id !== problemId))
+        alert('Problem deleted successfully!')
+      } else {
+        const error = await res.json()
+        alert(`Failed to delete: ${error.error}`)
+      }
+    } catch (err) {
+      console.error('Failed to delete problem:', err)
+      alert('Failed to delete problem')
+    }
+  }
+
+  // ✅ Edit handler - OUTSIDE fetchProblems
+  const handleEdit = (problemId) => {
+    navigate(`/instructor/create-problem?edit=${problemId}`)
+  }
+
   const filteredProblems = filter === 'All' ? problems : problems.filter(p => p.problem_type === filter)
 
   return (
@@ -146,8 +175,20 @@ export default function ProblemManagement() {
                     </span>
                   </td>
                   <td className="p-4 text-right">
-                    <button className="text-slate-400 hover:text-white transition px-2">✏️</button>
-                    <button className="text-slate-400 hover:text-red-400 transition px-2">🗑️</button>
+                    <button 
+                      onClick={() => handleEdit(prob.id)}
+                      className="text-slate-400 hover:text-white transition px-2"
+                      title="Edit Problem"
+                    >
+                      ✏️
+                    </button>
+                    <button 
+                      onClick={() => handleDelete(prob.id, prob.title)}
+                      className="text-slate-400 hover:text-red-400 transition px-2"
+                      title="Delete Problem"
+                    >
+                      🗑️
+                    </button>
                   </td>
                 </tr>
               ))

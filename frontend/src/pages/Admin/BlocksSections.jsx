@@ -3,391 +3,625 @@ import { useState, useEffect } from 'react'
 export default function BlocksSections() {
   const [blocks, setBlocks] = useState([])
   const [loading, setLoading] = useState(true)
-  const [createModal, setCreateModal] = useState(false)
-  const [editModal, setEditModal] = useState(null)
+  const [searchTerm, setSearchTerm] = useState('')
+  const [semesterFilter, setSemesterFilter] = useState('all')
+  const [sortBy, setSortBy] = useState('section_code')
+  const [sortOrder, setSortOrder] = useState('asc')
+  const [viewMode, setViewMode] = useState('list') // 'list' or 'grid'
+  const [showCreateModal, setShowCreateModal] = useState(false)
+  const [newBlock, setNewBlock] = useState({
+    section_code: '',
+    semester: '',
+    subjects: []  
+  })
+
+  const [showEditModal, setShowEditModal] = useState(false)
+  const [editingBlock, setEditingBlock] = useState(null)
+  const [editForm, setEditForm] = useState({
+    section_code: '',
+    semester: '',
+    instructor_id: null
+  })
+
+    // ✅ NEW: State for subjects management
+  const [subjects, setSubjects] = useState([]) // Available subjects from API
+  const [inputSubject, setInputSubject] = useState('') // Temp input for adding subjects
 
   useEffect(() => {
     fetchBlocks()
+    fetchSubjects() // ✅ Also fetch subjects on load
   }, [])
+
+  // ✅ NEW: Fetch available subjects for the modal
+  const fetchSubjects = async () => {
+    try {
+      const token = localStorage.getItem('token')
+      const res = await fetch('http://localhost:5000/api/admin/subjects', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setSubjects(Array.isArray(data) ? data : [])
+      }
+    } catch (err) {
+      console.error('Failed to fetch subjects:', err)
+    }
+  }
 
   const fetchBlocks = async () => {
     try {
       const token = localStorage.getItem('token')
-      
-      // Check if token exists
-      if (!token) {
-        console.warn('⚠️ No token found, redirecting to login')
-        window.location.href = '/'
-        return
-      }
-      
       const res = await fetch('http://localhost:5000/api/admin/blocks', {
         headers: { 'Authorization': `Bearer ${token}` }
       })
-      
-      if (res.status === 401) {
-        console.error('❌ Token expired or invalid')
-        localStorage.removeItem('token')
-        window.location.href = '/'
-        return
-      }
-      
-      if (res.ok) {
-        const data = await res.json()
-        setBlocks(Array.isArray(data) ? data : [])
-      } else {
-        console.error('Failed to fetch blocks:', await res.text())
-      }
+      const data = await res.json()
+      setBlocks(data)
+      setLoading(false)
     } catch (err) {
       console.error('Failed to fetch blocks:', err)
-      if (err.message.includes('Failed to fetch')) {
-        console.error('💡 Tip: Make sure backend is running on http://localhost:5000')
-      }
-    } finally {
       setLoading(false)
     }
   }
 
-  const handleCreateBlock = async (blockData) => {
+  // ✅ NEW: Add subject to the list (tag style)
+  const handleAddSubject = () => {
+    if (inputSubject.trim() && !newBlock.subjects.includes(inputSubject.trim())) {
+      setNewBlock({ ...newBlock, subjects: [...newBlock.subjects, inputSubject.trim()] })
+      setInputSubject('')
+    }
+  }
+
+  // ✅ NEW: Remove subject from list
+  const handleRemoveSubject = (sub) => {
+    setNewBlock({ ...newBlock, subjects: newBlock.subjects.filter(s => s !== sub) })
+  }
+
+  const handleCreateBlock = async () => {
     try {
       const token = localStorage.getItem('token')
-      
-      // Debug: Log what we're sending
-      console.log('📦 Creating block with data:', blockData)
-      console.log('🔑 Token:', token ? `${token.substring(0, 20)}...` : 'MISSING')
-      
-      // Check if token exists
-      if (!token) {
-        alert('Session expired. Please login again.')
-        window.location.href = '/'
-        return
-      }
-      
       const res = await fetch('http://localhost:5000/api/admin/blocks', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify(blockData)
+                // ✅ Send subjects array instead of single name
+        body: JSON.stringify({
+          section_code: newBlock.section_code,
+          semester: newBlock.semester,
+          subjects: newBlock.subjects || [] // ✅ Array of subject names
+        })
       })
-      
-      console.log('📡 Response status:', res.status)
-      
-      if (res.status === 401) {
-        // Token expired
-        alert('Your session has expired. Please login again.')
-        localStorage.removeItem('token')
-        window.location.href = '/'
-        return
-      }
-      
       if (res.ok) {
-        await fetchBlocks()
-        setCreateModal(false)
-        alert('✅ Block created successfully!')
+        setShowCreateModal(false)
+        setNewBlock({ section_code: '', semester: '', subjects: [] }) // ✅ Reset subjects too
+        fetchBlocks()
       } else {
-        // Try to get error message from response
-        const errorData = await res.json().catch(() => ({}))
-        const errorMessage = errorData.error || `Server error: ${res.status}`
-        console.error('❌ Create block failed:', errorData)
-        alert(`Failed to create block: ${errorMessage}`)
+        const error = await res.json()
+        alert(`Failed to create block: ${error.error}`)
       }
     } catch (err) {
       console.error('Failed to create block:', err)
-      
-      // Check if it's a network error
-      if (err.message.includes('Failed to fetch') || err.message.includes('NetworkError')) {
-        alert('❌ Cannot connect to server. Make sure backend is running on port 5000.')
-        console.log('💡 Troubleshooting:')
-        console.log('  1. Run: cd backend && .\\venv\\Scripts\\Activate && python app.py')
-        console.log('  2. Check: http://localhost:5000/api/health')
-        console.log('  3. Verify CORS allows http://localhost:5173')
-      } else {
-        alert(`Failed to create block: ${err.message}`)
-      }
+      alert('Failed to create block')
     }
   }
 
-  const handleUpdateBlock = async (blockId, blockData) => {
+  const handleDeleteBlock = async (blockId) => {
+    if (!confirm('Are you sure you want to delete this block?')) return
     try {
       const token = localStorage.getItem('token')
-      
-      if (!token) {
-        alert('Session expired. Please login again.')
-        window.location.href = '/'
-        return
-      }
-      
       const res = await fetch(`http://localhost:5000/api/admin/blocks/${blockId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      if (res.ok) {
+        fetchBlocks()
+      } else {
+        const error = await res.json()
+        alert(`Failed to delete block: ${error.error}`)
+      }
+    } catch (err) {
+      console.error('Failed to delete block:', err)
+      alert('Failed to delete block')
+    }
+  }
+
+    // ✅ Edit block handlers
+  const handleEditBlock = (block) => {
+    setEditingBlock(block)
+    setEditForm({
+      section_code: block.section_code,
+      semester: block.semester || '',
+      instructor_id: block.instructor_id
+    })
+    setShowEditModal(true)
+  }
+
+  const handleSaveEdit = async () => {
+    try {
+      const token = localStorage.getItem('token')
+      const res = await fetch(`http://localhost:5000/api/admin/blocks/${editingBlock.id}`, {
         method: 'PUT',
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify(blockData)
+        body: JSON.stringify(editForm)
       })
       
-      if (res.status === 401) {
-        alert('Your session has expired. Please login again.')
-        localStorage.removeItem('token')
-        window.location.href = '/'
-        return
-      }
-      
       if (res.ok) {
-        await fetchBlocks()
-        setEditModal(null)
-        alert('✅ Block updated successfully!')
+        setShowEditModal(false)
+        setEditingBlock(null)
+        fetchBlocks()
       } else {
-        const errorData = await res.json().catch(() => ({}))
-        const errorMessage = errorData.error || `Server error: ${res.status}`
-        alert(`Failed to update block: ${errorMessage}`)
+        const error = await res.json()
+        alert(`Failed to update block: ${error.error}`)
       }
     } catch (err) {
       console.error('Failed to update block:', err)
-      if (err.message.includes('Failed to fetch')) {
-        alert('Cannot connect to server. Make sure backend is running.')
-      } else {
-        alert(`Failed to update block: ${err.message}`)
-      }
+      alert('Failed to update block')
     }
   }
 
-  const handleDeleteBlock = async (blockId) => {
-    if (!confirm('Are you sure you want to delete this block? This action cannot be undone.')) return
-    
-    try {
-      const token = localStorage.getItem('token')
-      
-      if (!token) {
-        alert('Session expired. Please login again.')
-        window.location.href = '/'
-        return
-      }
-      
-      const res = await fetch(`http://localhost:5000/api/admin/blocks/${blockId}`, {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}` }
-      })
-      
-      if (res.status === 401) {
-        alert('Your session has expired. Please login again.')
-        localStorage.removeItem('token')
-        window.location.href = '/'
-        return
-      }
-      
-      if (res.ok) {
-        await fetchBlocks()
-        alert('✅ Block deleted successfully!')
-      } else {
-        const errorData = await res.json().catch(() => ({}))
-        const errorMessage = errorData.error || `Server error: ${res.status}`
-        alert(`Failed to delete block: ${errorMessage}`)
-      }
-    } catch (err) {
-      console.error('Failed to delete block:', err)
-      if (err.message.includes('Failed to fetch')) {
-        alert('Cannot connect to server. Make sure backend is running.')
-      } else {
-        alert(`Failed to delete block: ${err.message}`)
-      }
+  // Filter and sort blocks
+  const getFilteredAndSortedBlocks = () => {
+    let filtered = [...blocks]
+
+    // Search filter - now includes subject names
+    if (searchTerm) {
+      const term = searchTerm.toLowerCase()
+      filtered = filtered.filter(block =>
+        block.section_code.toLowerCase().includes(term) ||
+        (block.subjects && block.subjects.some(s => s.toLowerCase().includes(term))) ||
+        (block.instructor && block.instructor.toLowerCase().includes(term))
+      )
     }
+
+    // Semester filter
+    if (semesterFilter !== 'all') {
+      filtered = filtered.filter(block => block.semester === semesterFilter)
+    }
+
+    // Sort
+    filtered.sort((a, b) => {
+      let aVal = a[sortBy]
+      let bVal = b[sortBy]
+      
+      // Handle null/undefined
+      if (aVal === null || aVal === undefined) aVal = ''
+      if (bVal === null || bVal === undefined) bVal = ''
+
+      // Case-insensitive string comparison
+      if (typeof aVal === 'string') {
+        aVal = aVal.toLowerCase()
+        bVal = bVal.toLowerCase()
+      }
+
+      if (sortOrder === 'asc') {
+        return aVal > bVal ? 1 : -1
+      } else {
+        return aVal < bVal ? 1 : -1
+      }
+    })
+
+    return filtered
+  }
+
+  // Get unique semesters for filter dropdown
+  const getUniqueSemesters = () => {
+    const semesters = [...new Set(blocks.map(b => b.semester).filter(Boolean))]
+    return semesters.sort()
+  }
+
+  // Calculate stats
+  const stats = {
+    total: blocks.length,
+    totalStudents: blocks.reduce((sum, b) => sum + (b.student_count || 0), 0),
+    totalInstructors: blocks.reduce((sum, b) => sum + (b.instructor_count || 0), 0),
+    avgStudents: blocks.length > 0 ? Math.round(blocks.reduce((sum, b) => sum + (b.student_count || 0), 0) / blocks.length) : 0
+  }
+
+  const filteredBlocks = getFilteredAndSortedBlocks()
+  const semesters = getUniqueSemesters()
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-16 w-16 border-4 border-purple-600 border-t-transparent mx-auto mb-4"></div>
+          <p className="text-purple-300 font-mono text-lg">Loading blocks...</p>
+        </div>
+      </div>
+    )
   }
 
   return (
-    <div className="space-y-6">
+    <div className="p-6 space-y-6">
       {/* Header */}
-      <div className="flex justify-between items-center">
+      <div className="flex items-center justify-between">
         <div>
-          <p className="text-slate-400">Manage class blocks and course assignments</p>
+          <h1 className="text-3xl font-bold text-white">Blocks & Sections</h1>
+          <p className="text-slate-400 mt-1">Manage class blocks and course assignments</p>
         </div>
         <div className="flex gap-3">
-          <button className="px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg transition flex items-center gap-2">
-            <span>📥</span> Export CSV
-          </button>
-          <button 
-            onClick={() => setCreateModal(true)}
-            className="px-4 py-2 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-lg transition flex items-center gap-2 font-bold"
+          <button
+            onClick={fetchBlocks}
+            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-white font-bold transition flex items-center gap-2"
           >
-            <span>📚</span> Create Block
+            <span>🔄</span> Refresh
+          </button>
+          <button
+            onClick={() => setShowCreateModal(true)}
+            className="px-4 py-2 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-lg text-white font-bold transition shadow-lg shadow-purple-600/30"
+          >
+            <span className="text-xl">+</span> Create Block
           </button>
         </div>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="bg-slate-900/80 rounded-xl border border-purple-600/30 p-4">
-          <p className="text-slate-400 text-sm mb-1">Total Blocks</p>
-          <p className="text-2xl font-black text-purple-400">{blocks.length}</p>
+      {/* Stats Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="bg-gradient-to-br from-purple-900/30 to-slate-900 border border-purple-600/30 rounded-xl p-4">
+          <p className="text-slate-400 text-sm">Total Blocks</p>
+          <p className="text-3xl font-bold text-purple-300 mt-1">{stats.total}</p>
         </div>
-        <div className="bg-slate-900/80 rounded-xl border border-green-600/30 p-4">
-          <p className="text-slate-400 text-sm mb-1">Total Students</p>
-          <p className="text-2xl font-black text-green-400">1</p>
+        <div className="bg-gradient-to-br from-green-900/30 to-slate-900 border border-green-600/30 rounded-xl p-4">
+          <p className="text-slate-400 text-sm">Total Students</p>
+          <p className="text-3xl font-bold text-green-300 mt-1">{stats.totalStudents}</p>
         </div>
-        <div className="bg-slate-900/80 rounded-xl border border-blue-600/30 p-4">
-          <p className="text-slate-400 text-sm mb-1">Total Instructors</p>
-          <p className="text-2xl font-black text-blue-400">2</p>
+        <div className="bg-gradient-to-br from-blue-900/30 to-slate-900 border border-blue-600/30 rounded-xl p-4">
+          <p className="text-slate-400 text-sm">Total Instructors</p>
+          <p className="text-3xl font-bold text-blue-300 mt-1">{stats.totalInstructors}</p>
         </div>
-        <div className="bg-slate-900/80 rounded-xl border border-yellow-600/30 p-4">
-          <p className="text-slate-400 text-sm mb-1">Avg Students/Block</p>
-          <p className="text-2xl font-black text-yellow-400">1</p>
+        <div className="bg-gradient-to-br from-yellow-900/30 to-slate-900 border border-yellow-600/30 rounded-xl p-4">
+          <p className="text-slate-400 text-sm">Avg Students/Block</p>
+          <p className="text-3xl font-bold text-yellow-300 mt-1">{stats.avgStudents}</p>
         </div>
       </div>
 
-      {/* Blocks List */}
-      {loading ? (
-        <div className="flex justify-center py-12">
-          <div className="animate-spin rounded-full h-12 w-12 border-4 border-purple-600 border-t-transparent"></div>
+      {/* Filters & Search */}
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-4">
+        <div className="flex flex-col md:flex-row gap-4">
+          {/* Search */}
+          <div className="flex-1">
+            <input
+              type="text"
+              placeholder="🔍 Search by block code, course name, or instructor..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white placeholder-slate-500 outline-none focus:border-purple-500"
+            />
+          </div>
+
+          {/* Semester Filter */}
+          <div className="w-full md:w-48">
+            <select
+              value={semesterFilter}
+              onChange={(e) => setSemesterFilter(e.target.value)}
+              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white outline-none focus:border-purple-500"
+            >
+              <option value="all">All Semesters</option>
+              {semesters.map(sem => (
+                <option key={sem} value={sem}>{sem}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Sort */}
+          <div className="w-full md:w-48">
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value)}
+              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white outline-none focus:border-purple-500"
+            >
+              <option value="section_code">Sort by Code</option>
+              <option value="name">Sort by Name</option>
+              <option value="semester">Sort by Semester</option>
+              <option value="student_count">Sort by Students</option>
+              <option value="created_at">Sort by Date</option>
+            </select>
+          </div>
+
+          {/* Sort Order Toggle */}
+          <button
+            onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
+            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-white font-bold transition"
+            title={`Sort ${sortOrder === 'asc' ? 'Descending' : 'Ascending'}`}
+          >
+            {sortOrder === 'asc' ? '↑' : '↓'}
+          </button>
+
+          {/* View Mode Toggle */}
+          <div className="flex bg-slate-800 rounded-lg p-1">
+            <button
+              onClick={() => setViewMode('list')}
+              className={`px-3 py-1 rounded ${viewMode === 'list' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-white'}`}
+            >
+              ☰
+            </button>
+            <button
+              onClick={() => setViewMode('grid')}
+              className={`px-3 py-1 rounded ${viewMode === 'grid' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-white'}`}
+            >
+              ⊞
+            </button>
+          </div>
         </div>
-      ) : (
-        <div className="space-y-4">
-          {blocks.map(block => (
-            <div key={block.id} className="bg-slate-900/80 rounded-2xl border border-purple-600/30 p-6">
-              <div className="flex justify-between items-start">
-                <div className="flex items-start gap-4">
-                  <div className="w-12 h-12 bg-purple-600/30 rounded-xl flex items-center justify-center text-2xl">
+
+        {/* Results count */}
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-slate-400">
+            Showing <span className="text-white font-bold">{filteredBlocks.length}</span> of <span className="text-white font-bold">{blocks.length}</span> blocks
+          </span>
+          {(searchTerm || semesterFilter !== 'all') && (
+            <button
+              onClick={() => { setSearchTerm(''); setSemesterFilter('all') }}
+              className="text-purple-400 hover:text-purple-300"
+            >
+              Clear filters
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Blocks List/Grid */}
+      {filteredBlocks.length === 0 ? (
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-12 text-center">
+          <div className="text-6xl mb-4">📦</div>
+          <h3 className="text-xl font-bold text-white mb-2">No blocks found</h3>
+          <p className="text-slate-400">
+            {blocks.length === 0 ? 'Create your first block to get started!' : 'Try adjusting your filters'}
+          </p>
+        </div>
+      ) : viewMode === 'list' ? (
+        /* List View */
+        <div className="space-y-3">
+          {filteredBlocks.map(block => (
+            <div key={block.id} className="bg-slate-900 border border-slate-800 rounded-xl p-4 hover:border-purple-600/40 transition group">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4 flex-1">
+                  <div className="w-12 h-12 bg-gradient-to-br from-purple-600 to-pink-600 rounded-lg flex items-center justify-center text-2xl">
                     📚
                   </div>
-                  <div>
-                    <h3 className="text-xl font-bold text-white mb-1">{block.section_code}</h3>
-                    <p className="text-slate-400 mb-3">{block.name}</p>
-                    <div className="flex gap-2">
-                      <span className="px-3 py-1 bg-green-600/20 text-green-300 rounded-lg text-sm border border-green-600/30">
-                        👥 {block.student_count || 0} Students
+                  <div className="flex-1">
+                    <div className="flex items-center gap-3">
+                      <h3 className="text-lg font-bold text-white">{block.section_code}</h3>
+                      <span className="px-2 py-0.5 bg-purple-600/20 text-purple-300 rounded text-xs font-bold border border-purple-600/30">
+                        {block.semester || 'No Semester'}
                       </span>
-                      <span className="px-3 py-1 bg-blue-600/20 text-blue-300 rounded-lg text-sm border border-blue-600/30">
-                        👨‍🏫 {block.instructor_count || 0} Instructors
-                      </span>
+                    </div>
+                    {/* ✅ Show subjects as tags instead of single name */}
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {block.subjects && block.subjects.length > 0 ? (
+                        block.subjects.map((sub, idx) => (
+                          <span key={idx} className="px-2 py-0.5 bg-slate-800 border border-slate-700 rounded text-[10px] text-slate-300">
+                            {sub}
+                          </span>
+                        ))
+                      ) : (
+                        <span className="text-slate-500 text-xs">No subjects</span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-4 mt-2 text-xs text-slate-500">
+                      <span>👨‍🏫 {block.instructor || 'No instructor'}</span>
+                      <span>👥 {block.student_count || 0} students</span>
+                      <span>📅 {new Date(block.created_at).toLocaleDateString()}</span>
                     </div>
                   </div>
                 </div>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => setEditModal(block)}
-                    className="px-3 py-1 bg-purple-600/30 hover:bg-purple-600/50 rounded-lg text-sm transition text-purple-300"
+                <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition">
+                <button 
+                  onClick={() => handleEditBlock(block)}
+                  className="px-3 py-1.5 bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 rounded-lg text-sm font-bold transition"
+                >
+                  ✏️ Edit
+                </button>
+                <button
+                  onClick={() => handleDeleteBlock(block.id)}
+                  className="px-3 py-1.5 bg-red-600/20 hover:bg-red-600/30 text-red-300 rounded-lg text-sm font-bold transition"
+                >
+                  🗑️ Delete
+                </button>
+              </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        /* Grid View */
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {filteredBlocks.map(block => (
+            <div key={block.id} className="bg-slate-900 border border-slate-800 rounded-xl p-5 hover:border-purple-600/40 transition group">
+              <div className="flex items-start justify-between mb-3">
+                <div className="w-12 h-12 bg-gradient-to-br from-purple-600 to-pink-600 rounded-lg flex items-center justify-center text-2xl">
+                  📚
+                </div>
+                <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition">
+                  <button 
+                    onClick={() => handleEditBlock(block)}
+                    className="px-2 py-1 bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 rounded text-xs font-bold"
                   >
-                    ✏️ Edit
+                    ✏️
                   </button>
                   <button
                     onClick={() => handleDeleteBlock(block.id)}
-                    className="px-3 py-1 bg-red-600/30 hover:bg-red-600/50 rounded-lg text-sm transition text-red-300"
+                    className="px-2 py-1 bg-red-600/20 hover:bg-red-600/30 text-red-300 rounded text-xs font-bold"
                   >
-                    🗑️ Delete
+                    🗑️
                   </button>
+                </div>
+              </div>
+              <div className="mb-3">
+                <div className="flex items-center gap-2 mb-1">
+                  <h3 className="text-xl font-bold text-white">{block.section_code}</h3>
+                  <span className="px-2 py-0.5 bg-purple-600/20 text-purple-300 rounded text-xs font-bold border border-purple-600/30">
+                    {block.semester || 'N/A'}
+                  </span>
+                </div>
+                {/* ✅ Show subjects as tags in Grid View too */}
+                <div className="flex flex-wrap gap-1 mt-1">
+                  {block.subjects && block.subjects.length > 0 ? (
+                    block.subjects.map((sub, idx) => (
+                      <span key={idx} className="px-2 py-0.5 bg-slate-800 border border-slate-700 rounded text-[10px] text-slate-300">
+                        {sub}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="text-slate-500 text-xs">No subjects</span>
+                  )}
+                </div>
+              </div>
+              <div className="space-y-2 text-xs text-slate-500 border-t border-slate-800 pt-3">
+                <div className="flex items-center justify-between">
+                  <span>👨‍🏫 Instructor</span>
+                  <span className="text-slate-300">{block.instructor || 'None'}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span>👥 Students</span>
+                  <span className="text-slate-300">{block.student_count || 0}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span>📅 Created</span>
+                  <span className="text-slate-300">{new Date(block.created_at).toLocaleDateString()}</span>
                 </div>
               </div>
             </div>
           ))}
-          
-          {blocks.length === 0 && (
-            <div className="text-center py-12 bg-slate-900/80 rounded-2xl border border-dashed border-slate-700">
-              <div className="text-4xl mb-3">📭</div>
-              <p className="text-slate-400 text-lg">No blocks found</p>
-              <p className="text-slate-500 text-sm mt-2">Create your first block to get started</p>
-            </div>
-          )}
         </div>
       )}
 
-      {/* Create/Edit Modal */}
-      {(createModal || editModal) && (
-        <BlockModal
-          block={editModal || {}}
-          onClose={() => {
-            setCreateModal(false)
-            setEditModal(null)
-          }}
-          onSave={editModal ? handleUpdateBlock : handleCreateBlock}
-        />
+            {/* ✅ Edit Block Modal */}
+      {showEditModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50">
+          <div className="bg-slate-900 border-2 border-purple-600/50 rounded-2xl p-6 w-full max-w-md shadow-2xl">
+            <h2 className="text-2xl font-bold text-white mb-4 flex items-center gap-2">
+              <span>✏️</span> Edit Block
+            </h2>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-slate-400 text-sm mb-2">Block Code</label>
+                <input
+                  type="text"
+                  value={editForm.section_code}
+                  onChange={(e) => setEditForm({...editForm, section_code: e.target.value})}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white outline-none focus:border-purple-500"
+                />
+              </div>
+              <div>
+                <label className="block text-slate-400 text-sm mb-2">Semester</label>
+                <input
+                  type="text"
+                  value={editForm.semester}
+                  onChange={(e) => setEditForm({...editForm, semester: e.target.value})}
+                  placeholder="e.g., 1st Semester 2024-2025"
+                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white outline-none focus:border-purple-500"
+                />
+              </div>
+            </div>
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={() => { setShowEditModal(false); setEditingBlock(null) }}
+                className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-white font-bold transition"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveEdit}
+                className="flex-1 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-lg text-white font-bold transition shadow-lg shadow-purple-600/30"
+              >
+                Save Changes
+              </button>
+            </div>
+          </div>
+        </div>
       )}
-    </div>
-  )
-}
 
-function BlockModal({ block, onClose, onSave }) {
-  const [form, setForm] = useState({
-    section_code: block.section_code || '',
-    name: block.name || '',
-    semester: block.semester || ''
-  })
+      {/* Create Block Modal */}
+      {showCreateModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50">
+          <div className="bg-slate-900 border-2 border-purple-600/50 rounded-2xl p-6 w-full max-w-md shadow-2xl">
+            <h2 className="text-2xl font-bold text-white mb-4 flex items-center gap-2">
+              <span>📦</span> Create Block
+            </h2>
+                        <div className="space-y-4">
+              {/* Block Code */}
+              <div>
+                <label className="block text-slate-400 text-sm mb-2">Block Code *</label>
+                <input
+                  type="text"
+                  value={newBlock.section_code}
+                  onChange={(e) => setNewBlock({...newBlock, section_code: e.target.value})}
+                  placeholder="e.g., 101"
+                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white outline-none focus:border-purple-500"
+                />
+              </div>
 
-  const handleSubmit = (e) => {
-    e.preventDefault()
-    
-    // Validate required fields
-    if (!form.section_code.trim()) {
-      alert('Block Number is required')
-      return
-    }
-    
-    if (block.id) {
-      onSave(block.id, form)
-    } else {
-      onSave(form)
-    }
-  }
+              {/* Semester */}
+              <div>
+                <label className="block text-slate-400 text-sm mb-2">Semester</label>
+                <input
+                  type="text"
+                  value={newBlock.semester}
+                  onChange={(e) => setNewBlock({...newBlock, semester: e.target.value})}
+                  placeholder="e.g., 1st Semester"
+                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white outline-none focus:border-purple-500"
+                />
+              </div>
 
-  return (
-    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-slate-900 rounded-2xl border-2 border-purple-600/50 w-full max-w-lg p-6 shadow-2xl">
-        <h3 className="text-2xl font-bold text-white mb-6">
-          {block.id ? '✏️ Edit Block' : '📚 Create Block'}
-        </h3>
-        
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-slate-400 text-sm mb-2 font-medium">Block Number *</label>
-            <input
-              type="text"
-              value={form.section_code}
-              onChange={(e) => setForm({...form, section_code: e.target.value})}
-              placeholder="301"
-              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white focus:border-purple-500 outline-none transition"
-              required
-            />
+              {/* ✅ NEW: Subjects Multi-Select with Tags */}
+              <div>
+                <label className="block text-slate-400 text-sm mb-2">Assign Subjects</label>
+                <div className="bg-slate-800 border border-slate-700 rounded-lg p-2 flex gap-2">
+                  <input
+                    type="text"
+                    value={inputSubject}
+                    onChange={(e) => setInputSubject(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAddSubject() }}}
+                    placeholder="Type subject & press Enter..."
+                    list="subjects-list"
+                    className="flex-1 bg-transparent border-none text-white outline-none text-sm"
+                  />
+                  <button onClick={handleAddSubject} className="px-3 py-1 bg-purple-600 hover:bg-purple-500 text-white text-xs rounded font-bold">
+                    Add
+                  </button>
+                </div>
+                
+                {/* Subject Tags Display */}
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {newBlock.subjects && newBlock.subjects.map((sub, idx) => (
+                    <span key={idx} className="px-2 py-1 bg-purple-600/20 text-purple-300 rounded text-xs flex items-center gap-1 border border-purple-600/40">
+                      {sub}
+                      <button onClick={() => handleRemoveSubject(sub)} className="hover:text-white">×</button>
+                    </span>
+                  ))}
+                  {(!newBlock.subjects || newBlock.subjects.length === 0) && (
+                    <span className="text-xs text-slate-500">No subjects added yet.</span>
+                  )}
+                </div>
+                
+                {/* Datalist for autocomplete suggestions */}
+                <datalist id="subjects-list">
+                  {subjects.map((s, idx) => <option key={idx} value={s} />)}
+                </datalist>
+              </div>
+            </div>
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={() => setShowCreateModal(false)}
+                className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-white font-bold transition"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleCreateBlock}
+                className="flex-1 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-lg text-white font-bold transition shadow-lg shadow-purple-600/30"
+              >
+                Create Block
+              </button>
+            </div>
           </div>
-
-          <div>
-            <label className="block text-slate-400 text-sm mb-2 font-medium">Course Name</label>
-            <input
-              type="text"
-              value={form.name}
-              onChange={(e) => setForm({...form, name: e.target.value})}
-              placeholder="Introduction to Programming"
-              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white focus:border-purple-500 outline-none transition"
-            />
-          </div>
-
-          <div>
-            <label className="block text-slate-400 text-sm mb-2 font-medium">Semester</label>
-            <input
-              type="text"
-              value={form.semester}
-              onChange={(e) => setForm({...form, semester: e.target.value})}
-              placeholder="1st Sem 2024-2025"
-              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white focus:border-purple-500 outline-none transition"
-            />
-          </div>
-
-          <div className="flex gap-3 pt-4">
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg transition text-slate-300 font-medium border border-slate-700"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="flex-1 px-4 py-2 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-lg transition font-bold text-white shadow-lg"
-            >
-              {block.id ? 'Update Block' : 'Create Block'}
-            </button>
-          </div>
-        </form>
-      </div>
+        </div>
+      )}
     </div>
   )
 }

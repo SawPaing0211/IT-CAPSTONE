@@ -22,10 +22,12 @@ import Analytics from './pages/Instructor/Analytics'
 import CourseMaterials from './pages/Instructor/CourseMaterials'
 
 // Student Pages
+import MySubjects from './pages/Student/MySubjects'
 import StudentCodeEditor from './pages/Student/StudentCodeEditor'
 import ProblemList from './pages/Student/ProblemList'
 import Leaderboard from './pages/Student/components/Leaderboard'
 import ProgressStats from './pages/Student/components/ProgressStats'
+import QuestLog from './pages/Student/QuestLog'
 
 // Admin Pages
 import UserManagement from './pages/Admin/UserManagement'
@@ -129,10 +131,12 @@ function AppContent() {
           </ProtectedRoute>
         }
       >
+        <Route path="subjects" element={<MySubjects />} />
         <Route index element={<ProblemList />} />
         <Route path="problem/:problemId" element={<StudentCodeEditor />} />
         <Route path="leaderboard" element={<Leaderboard />} />
         <Route path="stats" element={<ProgressStats />} />
+        <Route path="quest-log" element={<QuestLog />} />
       </Route>
 
       {/* Admin Routes */}

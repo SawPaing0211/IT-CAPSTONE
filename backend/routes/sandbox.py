@@ -375,10 +375,11 @@ def run_sandbox():
             error_lines = []
             seen = set()
              # Handle Python tracebacks first (multi-line pattern)
-            py_line = re.search(r'line (\d+)', raw)
+            py_lines = re.findall(r'line (\d+)', raw)
             py_err = re.search(r'(\w+Error[^\n]*)', raw)
-            if py_line and py_err and 'File "/tmp/' in raw:
-                result['stderr'] = f"Line {py_line.group(1)}: {py_err.group(1)}"
+            if py_lines and py_err and 'File "/tmp/' in raw:
+                # ✅ Grab the LAST line number (actual error, not the caller)
+                result['stderr'] = f"Line {py_lines[-1]}: {py_err.group(1)}"
                 result['stdout'] = ''
                 result['error'] = f'💥 Process exited with code {result["returncode"]}'
                 return jsonify({
@@ -391,7 +392,7 @@ def run_sandbox():
                 line = line.strip()
                 m = re.search(r'Program\.cs\((\d+),(\d+)\):\s*error\s+(\w+):\s*([^\[]+)', line)
                 if m:
-                    student_line = max(1, int(m.group(1)) - 4)
+                    student_line = int(m.group(1))
                     msg = f'Line {student_line}, Col {m.group(2)}: {m.group(4).strip()} ({m.group(3)})'
                     if msg not in seen:
                         seen.add(msg)
@@ -403,7 +404,8 @@ def run_sandbox():
                     if 'reached end of file' in error_msg or 'class, interface' in error_msg:
                         msg = f'unexpected end of file: check for missing braces or semicolons'
                     else:
-                        student_line = max(1, int(m2.group(1)) - 4)
+                        # ✅ no lines injected, use exact line number
+                        student_line = int(m2.group(1))
                         msg = f'Line {student_line}: {error_msg}'
                     if msg not in seen:
                         seen.add(msg)
