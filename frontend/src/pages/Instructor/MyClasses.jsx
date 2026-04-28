@@ -1,33 +1,39 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 export default function MyClasses() {
   const navigate = useNavigate()
   const [searchTerm, setSearchTerm] = useState('')
 
-  // Mock Data - Replace with API call
-  const classes = [
-    {
-      id: 1,
-      name: 'Block 301',
-      title: 'Introduction to Programming',
-      description: 'Introduction to Programming 1',
-      students: 15,
-      problems: 8,
-      status: 'Active',
-      color: 'bg-blue-600'
-    },
-    {
-      id: 2,
-      name: 'Block 302',
-      title: 'Data Structures',
-      description: 'Advanced data structures and algorithms',
-      students: 12,
-      problems: 5,
-      status: 'Active',
-      color: 'bg-purple-600'
+  const [classes, setClasses] = useState([])
+const [loading, setLoading] = useState(true)
+
+useEffect(() => {
+  const fetchClasses = async () => {
+    try {
+      const token = localStorage.getItem('token')
+      const res = await fetch('http://localhost:5000/api/instructor/classes', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      const data = await res.json()
+      setClasses(data.map(c => ({
+        id: c.id,
+        name: c.section_code,
+        title: c.name,
+        description: c.semester || 'No description',
+        students: c.student_count || 0,
+        problems: 0,
+        status: 'Active',
+        color: 'bg-blue-600'
+      })))
+    } catch (err) {
+      console.error('Failed to fetch classes:', err)
+    } finally {
+      setLoading(false)
     }
-  ]
+  }
+  fetchClasses()
+}, [])
 
   const filteredClasses = classes.filter(c => 
     c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -58,6 +64,12 @@ export default function MyClasses() {
         />
         <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 text-xl">🔍</span>
       </div>
+
+        {loading && (
+          <div className="text-center py-12 text-slate-400">
+            Loading classes...
+          </div>
+        )}
 
       {/* Classes Grid */}
       <div className="grid grid-cols-1 gap-6">

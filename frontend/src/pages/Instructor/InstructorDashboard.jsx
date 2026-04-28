@@ -12,14 +12,9 @@ import PlagiarismCheck from './PlagiarismCheck'
 import Analytics from './Analytics'
 import CourseMaterials from './CourseMaterials'
 
-// Mock User Data (Replace with real context later)
-const currentUser = {
-  name: 'TheGreatMage',
-  email: 'instructor@gmail.com',
-  avatar: 'T'
-}
+// No mock data here anymore - use props
 
-export default function InstructorDashboard() {
+export default function InstructorDashboard({ user, onLogout }) {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const navigate = useNavigate()
   const location = useLocation()
@@ -78,11 +73,11 @@ export default function InstructorDashboard() {
         <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-slate-800">
           <div className={`flex items-center gap-3 ${!sidebarOpen && 'justify-center'}`}>
             <div className="w-10 h-10 bg-gradient-to-br from-purple-600 to-pink-600 rounded-full flex items-center justify-center font-bold text-sm flex-shrink-0">
-              {currentUser.avatar}
+              {(user?.username || 'U')[0].toUpperCase()}
             </div>
             {sidebarOpen && (
               <div className="flex-1 min-w-0">
-                <p className="font-semibold text-sm truncate">{currentUser.name}</p>
+                <p className="font-semibold text-sm truncate">{user?.username || 'Unknown'}</p>
                 <p className="text-xs text-slate-500 truncate">Instructor</p>
               </div>
             )}

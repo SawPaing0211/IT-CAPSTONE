@@ -33,6 +33,7 @@ export default function Auth({ onLogin, initialMode = 'login' }) {
       
       if (isLogin) {
         localStorage.setItem('token', data.access_token)
+        localStorage.setItem('user', JSON.stringify(data.user))
         // Store refresh token if backend provides it
         if (data.refresh_token) {
           localStorage.setItem('refresh_token', data.refresh_token)
