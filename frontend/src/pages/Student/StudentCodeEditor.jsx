@@ -9,6 +9,8 @@ export default function StudentCodeEditor({
   heroLevel,
   onOpenSandbox  // ← NEW: Added onOpenSandbox prop
 }) {
+  const LANG_LINE_OFFSET = { python: 3, java: 3, csharp: 4 }
+
   const [code, setCode] = useState('')
   const [language, setLanguage] = useState('python')
   const [output, setOutput] = useState(null)
@@ -23,6 +25,130 @@ export default function StudentCodeEditor({
   const [autoSaveTimer, setAutoSaveTimer] = useState(null)
   const editorRef = useRef(null)
   const editorContainerRef = useRef(null)
+  const monacoRef = useRef(null)
+
+  // ── Parse compiler errors into Monaco markers ─────────────────────────
+const parseAndHighlightErrors = (errorText, language) => {
+  if (!editorRef.current || !monacoRef.current || !errorText) return
+
+  const model = editorRef.current.getModel()
+  if (!model) return
+
+  const offset = LANG_LINE_OFFSET[language] ?? 0
+  const markers = []
+
+  if (language === 'csharp') {
+    const csRegex = /\((\d+),(\d+)\):\s*(error|warning)\s+(\w+):\s*(.+?)(?:\s*\[.*?\])?$/gm
+    let match
+    while ((match = csRegex.exec(errorText)) !== null) {
+      const studentLine = Math.max(1, parseInt(match[1]) - offset)
+      markers.push({
+        startLineNumber: studentLine,
+        startColumn:     parseInt(match[2]),
+        endLineNumber:   studentLine,
+        endColumn:       parseInt(match[2]) + 10,
+        message:  `${match[4]}: ${match[5]}`,
+        severity: match[3] === 'error'
+          ? monacoRef.current.MarkerSeverity.Error
+          : monacoRef.current.MarkerSeverity.Warning,
+      })
+    }
+  }
+
+  else if (language === 'java') {
+    const javaRegex = /(?:[\w/.-]+\.java|Main\.java):(\d+):\s*(?:error|warning):\s*(.+)/g
+    let match
+    while ((match = javaRegex.exec(errorText)) !== null) {
+      const studentLine = Math.max(1, parseInt(match[1]) - offset)
+      markers.push({
+        startLineNumber: studentLine,
+        startColumn:     1,
+        endLineNumber:   studentLine,
+        endColumn:       100,
+        message:  match[2],
+        severity: monacoRef.current.MarkerSeverity.Error,
+      })
+    }
+  }
+
+  else if (language === 'python') {
+    const lineMatches = [...errorText.matchAll(/line (\d+)/g)]
+    const errorDesc = errorText
+      .split('\n')
+      .map(l => l.trim())
+      .filter(l => /^(\w+Error|Exception)/.test(l))
+      .pop() || 'Syntax error'
+
+    if (lineMatches.length > 0) {
+      const rawLine = parseInt(lineMatches[lineMatches.length - 1][1])
+      const studentLine = Math.max(1, rawLine - offset)
+      markers.push({
+        startLineNumber: studentLine,
+        startColumn:     1,
+        endLineNumber:   studentLine,
+        endColumn:       200,
+        message:  errorDesc,
+        severity: monacoRef.current.MarkerSeverity.Error,
+      })
+    }
+  }
+
+  monacoRef.current.editor.setModelMarkers(model, 'forge', markers)
+}
+
+// ── Format raw compiler output into clean readable message ────────────
+const formatErrorOutput = (rawOutput, language) => {
+  if (!rawOutput) return rawOutput
+  const offset = LANG_LINE_OFFSET[language] ?? 0
+
+  if (language === 'csharp') {
+    const csErrors = []
+    const csRegex = /\((\d+),(\d+)\):\s*(error|warning)\s+(\w+):\s*(.+?)(?:\s*\[.*?\])?$/gm
+    let match
+    while ((match = csRegex.exec(rawOutput)) !== null) {
+      const studentLine = parseInt(match[1]) - offset
+      csErrors.push(`Line ${studentLine}, Col ${match[2]}: ${match[5].trim()} (${match[4]})`)
+    }
+    if (csErrors.length > 0) return csErrors.join('\n')
+  }
+
+  if (language === 'java') {
+    const javaErrors = []
+    const javaRegex = /(?:[\w/.-]+\.java|Main\.java):(\d+):\s*(?:error|warning):\s*(.+)/g
+    let match
+    while ((match = javaRegex.exec(rawOutput)) !== null) {
+      const studentLine = parseInt(match[1]) - offset
+      javaErrors.push(`Line ${studentLine}: ${match[2]}`)
+    }
+    if (javaErrors.length > 0) return javaErrors.join('\n')
+  }
+
+  if (language === 'python') {
+    const lineMatches = [...rawOutput.matchAll(/line (\d+)/g)]
+    const errorLine = rawOutput
+      .split('\n')
+      .map(l => l.trim())
+      .filter(l => /^(\w+Error|Traceback|Exception)/.test(l))
+      .pop() || ''
+
+    if (lineMatches.length > 0) {
+      const rawLine = parseInt(lineMatches[lineMatches.length - 1][1])
+      const studentLine = Math.max(1, rawLine - offset)
+      return errorLine
+        ? `Line ${studentLine}: ${errorLine}`
+        : `Line ${studentLine}: Runtime error`
+    }
+
+    const lastMeaningful = rawOutput
+      .split('\n')
+      .map(l => l.trim())
+      .filter(Boolean)
+      .pop()
+    return lastMeaningful || rawOutput
+  }
+
+  return rawOutput
+}
 
   // Load saved code on mount
   useEffect(() => {
@@ -107,23 +233,34 @@ export default function StudentCodeEditor({
 
   // 🔒 UPDATED: Using api.post instead of fetch
   const handleRunCode = async () => {
-    setIsLoading(true)
-    setOutput(null)
-    try {
-      const data = await api.post('/api/submissions', { problem_id: quest.id, code, language })
-      setOutput(data)
-      if (data.status === 'accepted') {
-        playSuccessSound()
-        setCombo(c => c + 1)
-      } else {
-        setCombo(0)
-      }
-    } catch (err) {
-      setOutput({ error: err.message, status: 'error' })
-    } finally {
-      setIsLoading(false)
-    }
+  setIsLoading(true)
+  setOutput(null)
+  // Clear previous markers
+  if (monacoRef.current && editorRef.current) {
+    monacoRef.current.editor.setModelMarkers(
+      editorRef.current.getModel(), 'forge', []
+    )
   }
+  try {
+    const data = await api.post('/api/submissions', { problem_id: quest.id, code, language })
+    setOutput(data)
+    // Highlight errors in editor if tests failed
+    if (data.test_results) {
+      const errorOutput = data.test_results.find(t => !t.passed)?.output || ''
+      parseAndHighlightErrors(errorOutput, language)
+    }
+    if (data.status === 'accepted') {
+      playSuccessSound()
+      setCombo(c => c + 1)
+    } else {
+      setCombo(0)
+    }
+  } catch (err) {
+    setOutput({ error: err.message, status: 'error' })
+  } finally {
+    setIsLoading(false)
+  }
+}
 
   // 🔒 UPDATED: Using api.post instead of fetch
   const handleSubmit = async () => {
@@ -411,9 +548,9 @@ export default function StudentCodeEditor({
                       </div>
                       {output?.test_results?.[idx] && !output.test_results[idx].passed && (
                         <div>
-                          <p className="text-slate-500 mb-1">Your Output:</p>
-                          <code className="text-red-400 font-mono block bg-slate-950 p-2 rounded">
-                            {output.test_results[idx].output}
+                           <p className="text-slate-500 mb-1">Your Output:</p>
+                           <code className="text-red-400 font-mono block bg-slate-950 p-2 rounded whitespace-pre-wrap">
+                            {formatErrorOutput(tc.output)}
                           </code>
                         </div>
                       )}
@@ -527,8 +664,9 @@ export default function StudentCodeEditor({
               onChange={(value) => setCode(value || '')}
               theme="vs-dark"
               options={editorOptions}
-              onMount={(editor) => {
+              onMount={(editor, monaco) => {
                 editorRef.current = editor
+                monacoRef.current = monaco   // ← ADD THIS
                 setTimeout(() => editor.layout(), 100)
               }}
             />
@@ -630,12 +768,14 @@ export default function StudentCodeEditor({
                           </div>
                           <div>
                             <p className="text-slate-500 mb-1">Your Output:</p>
-                            <code className="text-red-400 font-mono block bg-slate-950 p-2 rounded">{tc.output}</code>
+                            <code className="text-red-400 font-mono block bg-slate-950 p-2 rounded whitespace-pre-wrap">
+                              {formatErrorOutput(tc.output, language)}
+                            </code>
                           </div>
                           {tc.message && (
                             <div>
                               <p className="text-slate-500 mb-1">Error:</p>
-                              <code className="text-red-400 font-mono block bg-slate-950 p-2 rounded">{tc.message}</code>
+                              <code className="text-red-400...">{formatErrorOutput(tc.message, language)}</code>
                             </div>
                           )}
                         </div>

@@ -1,25 +1,70 @@
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 export default function DashboardOverview() {
   const navigate = useNavigate()
+  const [classes, setClasses] = useState([])
+  const [totalStudents, setTotalStudents] = useState(0)
+  const [loading, setLoading] = useState(true)
 
-  // Mock Data
-  const stats = [
-    { label: 'Total Students', value: '42', change: '+5 this week', icon: '👥', color: 'blue' },
+  useEffect(() => {
+    const fetchDashboardData = async () => {
+      try {
+        const token = localStorage.getItem('token')
+        if (!token) throw new Error('Not authenticated')
+
+        // Fetch classes from backend
+        const res = await fetch('http://localhost:5000/api/instructor/classes', {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        })
+
+        if (!res.ok) throw new Error('Failed to fetch data')
+        
+        const data = await res.json()
+        setClasses(data)
+        
+        // Calculate total students from all classes
+        const total = data.reduce((sum, cls) => sum + (cls.student_count || 0), 0)
+        setTotalStudents(total)
+        
+      } catch (err) {
+        console.error('Dashboard fetch error:', err)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchDashboardData()
+  }, [])
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <div className="text-gray-400 text-lg animate-pulse">Loading dashboard...</div>
+      </div>
+    )
+  }
+
+  // Mock data for other sections
+  const mockStats = [
     { label: 'Avg Class Score', value: '84%', change: '+2% vs last week', icon: '📊', color: 'green' },
     { label: 'Pending Reviews', value: '8', change: 'Critical attention needed', icon: '⏳', color: 'orange' },
     { label: 'Active Problems', value: '12', change: '3 new this week', icon: '📝', color: 'purple' },
-  ]
-
-  const classes = [
-    { id: 1, name: 'Block 301', title: 'Intro to Programming', students: 15, problems: 5, color: 'bg-blue-600' },
-    { id: 2, name: 'Block 302', title: 'Data Structures', students: 12, problems: 3, color: 'bg-purple-600' },
   ]
 
   const recentActivity = [
     { id: 1, user: 'Ohma', action: 'submitted', target: 'Reverse String', time: '2 mins ago', status: 'Accepted' },
     { id: 2, user: 'Ganryu', action: 'failed', target: 'Fibonacci', time: '15 mins ago', status: 'Wrong Answer' },
     { id: 3, user: 'Admin', action: 'posted', target: 'Midterm Announcement', time: '1 hour ago', status: 'Info' },
+  ]
+
+  const topPerformers = [
+    { rank: 1, username: 'Ohma', xp: 1250, initial: 'O' },
+    { rank: 2, username: 'Ganryu', xp: 980, initial: 'G' },
+    { rank: 3, username: 'NewUser', xp: 450, initial: 'N' },
   ]
 
   return (
@@ -32,11 +77,25 @@ export default function DashboardOverview() {
 
       {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {stats.map((stat, idx) => (
+        {/* Real Data: Total Students */}
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 hover:border-slate-700 transition group">
+          <div className="flex justify-between items-start mb-4">
+            <div className="w-12 h-12 rounded-xl flex items-center justify-center text-2xl bg-blue-600/20 text-blue-400">
+              👥
+            </div>
+            <span className="text-xs font-bold px-2 py-1 rounded-full text-green-400 bg-green-600/10">
+              +5 this week
+            </span>
+          </div>
+          <h3 className="text-3xl font-bold text-white mb-1">{totalStudents}</h3>
+          <p className="text-slate-400 text-sm">Total Students</p>
+        </div>
+
+        {/* Mock Data: Other Stats */}
+        {mockStats.map((stat, idx) => (
           <div key={idx} className="bg-slate-900 border border-slate-800 rounded-2xl p-6 hover:border-slate-700 transition group">
             <div className="flex justify-between items-start mb-4">
               <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-2xl ${
-                stat.color === 'blue' ? 'bg-blue-600/20 text-blue-400' :
                 stat.color === 'green' ? 'bg-green-600/20 text-green-400' :
                 stat.color === 'orange' ? 'bg-orange-600/20 text-orange-400' :
                 'bg-purple-600/20 text-purple-400'
@@ -61,7 +120,7 @@ export default function DashboardOverview() {
         {/* Left Column: Classes & Activity */}
         <div className="lg:col-span-2 space-y-8">
           
-          {/* My Classes */}
+          {/* My Classes - Real Data */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-xl font-bold text-white">My Classes</h2>
@@ -70,33 +129,41 @@ export default function DashboardOverview() {
               </button>
             </div>
             <div className="space-y-4">
-              {classes.map(cls => (
-                <div key={cls.id} className="flex items-center justify-between p-4 bg-slate-800/50 rounded-xl hover:bg-slate-800 transition cursor-pointer border border-transparent hover:border-slate-700">
-                  <div className="flex items-center gap-4">
-                    <div className={`w-12 h-12 ${cls.color} rounded-xl flex items-center justify-center text-xl`}>
-                      🏫
+              {classes.length === 0 ? (
+                <p className="text-gray-500 text-center py-8">No classes assigned yet.</p>
+              ) : (
+                classes.map(cls => (
+                  <div 
+                    key={cls.id} 
+                    onClick={() => navigate(`/instructor/class/${cls.id}`)}
+                    className="flex items-center justify-between p-4 bg-slate-800/50 rounded-xl hover:bg-slate-800 transition cursor-pointer border border-transparent hover:border-slate-700"
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className={`w-12 h-12 ${cls.id % 2 === 0 ? 'bg-purple-600' : 'bg-blue-600'} rounded-xl flex items-center justify-center text-xl`}>
+                        🏫
+                      </div>
+                      <div>
+                        <h3 className="font-bold text-white">Block {cls.section_code}</h3>
+                        <p className="text-slate-400 text-sm">{cls.name}</p>
+                      </div>
                     </div>
-                    <div>
-                      <h3 className="font-bold text-white">{cls.name}</h3>
-                      <p className="text-slate-400 text-sm">{cls.title}</p>
+                    <div className="flex gap-6 text-sm">
+                      <div className="text-right">
+                        <p className="text-white font-bold">{cls.student_count || 0}</p>
+                        <p className="text-slate-500">Students</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-white font-bold">5</p>
+                        <p className="text-slate-500">Problems</p>
+                      </div>
                     </div>
                   </div>
-                  <div className="flex gap-6 text-sm">
-                    <div className="text-right">
-                      <p className="text-white font-bold">{cls.students}</p>
-                      <p className="text-slate-500">Students</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-white font-bold">{cls.problems}</p>
-                      <p className="text-slate-500">Problems</p>
-                    </div>
-                  </div>
-                </div>
-              ))}
+                ))
+              )}
             </div>
           </div>
 
-          {/* Recent Activity */}
+          {/* Recent Activity - Mock Data */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
             <h2 className="text-xl font-bold text-white mb-6">Recent Activity</h2>
             <div className="space-y-4">
@@ -127,7 +194,7 @@ export default function DashboardOverview() {
         {/* Right Column: Quick Actions & Top Performers */}
         <div className="space-y-8">
           
-          {/* Quick Actions */}
+          {/* Quick Actions - Mock Data */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
             <h2 className="text-xl font-bold text-white mb-6">Quick Actions</h2>
             <div className="space-y-3">
@@ -155,34 +222,28 @@ export default function DashboardOverview() {
             </div>
           </div>
 
-          {/* Top Performers */}
+          {/* Top Performers - Mock Data */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
             <h2 className="text-xl font-bold text-white mb-6">Top Performers</h2>
             <div className="space-y-4">
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 bg-yellow-600/20 text-yellow-400 rounded-full flex items-center justify-center font-bold text-xs">1</div>
-                <div className="w-8 h-8 bg-purple-600 rounded-full flex items-center justify-center text-xs font-bold">O</div>
-                <div className="flex-1">
-                  <p className="text-white text-sm font-bold">Ohma</p>
+              {topPerformers.map((student) => (
+                <div key={student.rank} className="flex items-center gap-3">
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs ${
+                    student.rank === 1 ? 'bg-yellow-600/20 text-yellow-400' :
+                    student.rank === 2 ? 'bg-slate-600/20 text-slate-400' :
+                    'bg-orange-600/20 text-orange-400'
+                  }`}>
+                    {student.rank}
+                  </div>
+                  <div className="w-8 h-8 bg-purple-600 rounded-full flex items-center justify-center text-xs font-bold">
+                    {student.initial}
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-white text-sm font-bold">{student.username}</p>
+                  </div>
+                  <span className="text-yellow-400 font-bold text-sm">{student.xp} XP</span>
                 </div>
-                <span className="text-yellow-400 font-bold text-sm">1250 XP</span>
-              </div>
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 bg-slate-600/20 text-slate-400 rounded-full flex items-center justify-center font-bold text-xs">2</div>
-                <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-xs font-bold">G</div>
-                <div className="flex-1">
-                  <p className="text-white text-sm font-bold">Ganryu</p>
-                </div>
-                <span className="text-slate-400 font-bold text-sm">980 XP</span>
-              </div>
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 bg-orange-600/20 text-orange-400 rounded-full flex items-center justify-center font-bold text-xs">3</div>
-                <div className="w-8 h-8 bg-pink-600 rounded-full flex items-center justify-center text-xs font-bold">N</div>
-                <div className="flex-1">
-                  <p className="text-white text-sm font-bold">NewUser</p>
-                </div>
-                <span className="text-slate-400 font-bold text-sm">450 XP</span>
-              </div>
+              ))}
             </div>
           </div>
 

@@ -62,6 +62,30 @@ LIMITS = {
     'code_max_chars':  10_000,      # Reject absurdly long submissions early
 }
 
+LANGUAGE_TIMEOUTS = {
+    'python': 10,
+    'java':   15,
+    'csharp': 60, 
+}
+
+MEM_LIMITS = {
+    'python': 128 * 1024 * 1024,   # 128MB
+    'java':   256 * 1024 * 1024,   # 256MB
+    'csharp': 512 * 1024 * 1024,   # 512MB
+}
+
+CAP_DROP = {
+    'python': ['ALL'],
+    'java':   ['ALL'],
+    'csharp': ['ALL'],  # ← restore ALL for csharp, seccomp handles the mutex
+}
+
+SECURITY_OPTS = {
+    'python': ['no-new-privileges:true', 'seccomp=unconfined'],
+    'java':   ['no-new-privileges:true', 'seccomp=unconfined'],
+    'csharp': ['no-new-privileges:true', 'seccomp=unconfined'],
+}
+
 # ─── Rate limiting: 30 sandbox runs per user per hour ─────────────────────
 _rate_store: dict[str, list[float]] = {}
 _rate_lock = threading.Lock()
@@ -70,7 +94,7 @@ def _check_rate_limit(user_id: str) -> bool:
     now = time.time()
     with _rate_lock:
         window = [t for t in _rate_store.get(user_id, []) if now - t < 3600]
-        if len(window) >= 30:
+        if len(window) >= 200:
             return False
         window.append(now)
         _rate_store[user_id] = window
@@ -148,54 +172,59 @@ def _run_in_docker(code: str, language: str) -> dict:
         try:
             container = client.containers.run(
                 image=image,
-
-                # ── Pass filename as argument to the entrypoint ────────────
                 command=[container_src],
 
-                # ── Inject the source file via bind mount (read-only) ─────
                 volumes={
                     tmpdir: {
                         'bind': '/tmp/sandbox',
-                        'mode': 'ro',   # Container can READ the source
+                        'mode': 'ro',
                     }
                 },
 
-                # ── Writable scratch space via tmpfs (in-memory only) ─────
-                tmpfs={'/tmp/work': 'size=32m,mode=1777'},
+                tmpfs={
+                    '/tmp':          'size=256m,mode=1777',  # MSBuild needs writable /tmp
+                    '/tmp/work':     'size=256m,mode=1777',
+                },
 
-                # ── Security flags ─────────────────────────────────────────
-                network_disabled=True,          # No internet access
-                read_only=True,                 # Root FS is read-only
-                no_new_privileges=True,         # Prevent privilege escalation
-                cap_drop=['ALL'],               # Drop ALL Linux capabilities
-                security_opt=['no-new-privileges:true'],
+                network_disabled=True,
+                read_only=True,
 
-                # ── Resource limits ────────────────────────────────────────
-                mem_limit=LIMITS['memory_bytes'],
-                memswap_limit=LIMITS['memory_bytes'],  # Disable swap
+                cap_drop=CAP_DROP[language],
+                security_opt=SECURITY_OPTS[language],
+
+                mem_limit=MEM_LIMITS[language],
+                memswap_limit=MEM_LIMITS[language],
                 cpu_period=LIMITS['cpu_period'],
                 cpu_quota=LIMITS['cpu_quota'],
                 pids_limit=LIMITS['pids_limit'],
 
-                # ── Lifecycle ─────────────────────────────────────────────
-                detach=True,            # Non-blocking start
-                remove=False,           # We remove manually after reading logs
+                detach=True,
+                remove=False,
                 stdout=True,
                 stderr=True,
 
-                # ── Env: disable Python buffering so print() shows immediately
                 environment={
-                    'PYTHONUNBUFFERED': '1',
-                    'DOTNET_CLI_TELEMETRY_OPTOUT': '1',
-                    'JAVA_OPTS': '-XX:TieredStopAtLevel=1',  # Faster JVM startup
+                    'PYTHONUNBUFFERED':              '1',
+                    'DOTNET_CLI_TELEMETRY_OPTOUT':   '1',
+                    'JAVA_OPTS':                     '-XX:TieredStopAtLevel=1',
+                    'HOME':                          '/dotnet-sentinel',
+                    'DOTNET_CLI_HOME':               '/dotnet-sentinel/.dotnet',
+                    'NUGET_PACKAGES':                '/dotnet-sentinel/.nuget/packages',
+                    'NUGET_HTTP_CACHE_PATH':         '/tmp/work/.nuget-http-cache',
+                    'NUGET_SCRATCH':                 '/tmp/work/.nuget-scratch',
+                    'DOTNET_NOLOGO':                 '1',
+                    'DOTNET_SKIP_FIRST_TIME_EXPERIENCE': '1',
+                    'DOTNET_MULTILEVEL_LOOKUP':      '0',
                 },
             )
 
             # ── Wait with timeout ─────────────────────────────────────────
             try:
-                result = container.wait(timeout=LIMITS['timeout_seconds'])
+                # Use language-specific timeout (C# gets 60s, Python gets 10s)
+                timeout = LANGUAGE_TIMEOUTS.get(language, LIMITS['timeout_seconds'])
+                result = container.wait(timeout=timeout)
                 timed_out  = False
-                returncode = result.get('StatusCode', -1)
+                returncode = result.get('StatusCode', -1)   
             except Exception:
                 # Timeout or Docker error — kill the container
                 try:
@@ -238,6 +267,7 @@ def _run_in_docker(code: str, language: str) -> dict:
                 'returncode': returncode,
                 'elapsed':    elapsed_ms,
                 'timed_out':  timed_out,
+                'timeout_used': timeout,
             }
 
         except docker.errors.ImageNotFound:
@@ -326,13 +356,68 @@ def run_sandbox():
     result = _run_in_docker(code, language)
 
     # ── Enrich response for the frontend ─────────────────────────────────
+            # ── Enrich response for the frontend ─────────────────────────────────
     if result.get('timed_out'):
+        # Use the timeout that was actually used for this language
+        timeout_used = result.get('timeout_used', LIMITS['timeout_seconds'])
         result['error'] = (
-            f'⏱️ Time limit exceeded ({LIMITS["timeout_seconds"]}s). '
+            f'⏱️ Time limit exceeded ({timeout_used}s). '
             f'Your spell took too long to cast! Check for infinite loops.'
         )
 
-    elif result.get('returncode', 0) != 0 and not result.get('stderr') and not result.get('error'):
+    elif result.get('returncode', 0) != 0 and not result.get('error'):
+        import re
+        raw = result.get('stdout', '') + result.get('stderr', '')
+        if raw.strip():
+            cleaned = raw
+            cleaned = re.sub(r'[^\s\[]*[/\\](?=Program\.cs|Main\.java)', '', cleaned)
+            cleaned = re.sub(r'\[/tmp/[^\]]*\]', '', cleaned)
+            error_lines = []
+            seen = set()
+             # Handle Python tracebacks first (multi-line pattern)
+            py_line = re.search(r'line (\d+)', raw)
+            py_err = re.search(r'(\w+Error[^\n]*)', raw)
+            if py_line and py_err and 'File "/tmp/' in raw:
+                result['stderr'] = f"Line {py_line.group(1)}: {py_err.group(1)}"
+                result['stdout'] = ''
+                result['error'] = f'💥 Process exited with code {result["returncode"]}'
+                return jsonify({
+                    'stdout': '', 'stderr': result['stderr'],
+                    'returncode': result['returncode'],
+                    'elapsed': result.get('elapsed', 0),
+                    'error': result['error'],
+                }), 200
+            for line in cleaned.split('\n'):
+                line = line.strip()
+                m = re.search(r'Program\.cs\((\d+),(\d+)\):\s*error\s+(\w+):\s*([^\[]+)', line)
+                if m:
+                    student_line = max(1, int(m.group(1)) - 4)
+                    msg = f'Line {student_line}, Col {m.group(2)}: {m.group(4).strip()} ({m.group(3)})'
+                    if msg not in seen:
+                        seen.add(msg)
+                        error_lines.append(msg)
+                    continue
+                m2 = re.search(r'Main\.java:(\d+):\s*error:\s*(.+)', line)
+                if m2:
+                    error_msg = m2.group(2).strip()
+                    if 'reached end of file' in error_msg or 'class, interface' in error_msg:
+                        msg = f'unexpected end of file: check for missing braces or semicolons'
+                    else:
+                        student_line = max(1, int(m2.group(1)) - 4)
+                        msg = f'Line {student_line}: {error_msg}'
+                    if msg not in seen:
+                        seen.add(msg)
+                        error_lines.append(msg)
+                    continue
+                m3 = re.search(r'line (\d+)', line)
+                m4 = re.search(r'(\w+Error[^\n]*)', line)
+                if m3 and m4:
+                    msg = f'Line {m3.group(1)}: {m4.group(1)}'
+                    if msg not in seen:
+                        seen.add(msg)
+                        error_lines.append(msg)
+            result['stderr'] = '\n'.join(error_lines) if error_lines else cleaned.strip()
+            result['stdout'] = ''
         result['error'] = f'💥 Process exited with code {result["returncode"]}'
 
     # Always return 200 — errors are part of the payload, not HTTP errors

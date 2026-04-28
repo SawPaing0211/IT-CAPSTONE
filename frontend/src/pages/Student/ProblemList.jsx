@@ -12,109 +12,34 @@ export default function ProblemList({ onSelectQuest, currentLevel }) {
   }, [filter])
 
   const fetchQuests = async () => {
-    // MOCK DATA for panel demo - No backend connection needed
-    const mockQuests = [
-      {
-        id: 1,
-        title: 'The Lost Array',
-        description: 'Find the missing element in a sorted array using binary search techniques.',
-        difficulty: 'Medium',
-        xp_reward: 150,
-        problem_type: 'coding',
-        is_event_quest: false,
-        languages: ['python', 'java'],
-        rarity: 'rare',
-        completed: false,
-        instructor_name: 'Prof. Johnson',
-        block_names: ['Block 301'],
-        due_date: '2024-04-30'
-      },
-      {
-        id: 2,
-        title: 'Dragon\'s Loop',
-        description: 'Tame the infinite loop dragon by implementing proper exit conditions.',
-        difficulty: 'Hard',
-        xp_reward: 250,
-        problem_type: 'debugging',
-        is_event_quest: true,
-        languages: ['python', 'java', 'csharp'],
-        rarity: 'legendary',
-        completed: false,
-        instructor_name: 'Prof. Smith',
-        block_names: ['Block 301', 'Block 302'],
-        due_date: '2024-05-05'
-      },
-      {
-        id: 3,
-        title: 'Crystal Sum',
-        description: 'Combine magical crystals by summing array elements with special rules.',
-        difficulty: 'Easy',
-        xp_reward: 75,
-        problem_type: 'coding',
-        is_event_quest: false,
-        languages: ['python'],
-        rarity: 'common',
-        completed: false,
-        instructor_name: 'Prof. Martinez',
-        block_names: ['Block 301'],
-        due_date: '2024-04-28'
-      },
-      {
-        id: 4,
-        title: 'Shadow String',
-        description: 'Manipulate strings to reveal hidden messages in the shadow realm.',
-        difficulty: 'Medium',
-        xp_reward: 125,
-        problem_type: 'coding',
-        is_event_quest: false,
-        languages: ['java', 'csharp'],
-        rarity: 'rare',
-        completed: false,
-        instructor_name: 'Prof. Johnson',
-        block_names: ['Block 302'],
-        due_date: '2024-05-01'
-      },
-      {
-        id: 5,
-        title: 'Phoenix Sort',
-        description: 'Rise from the ashes by implementing an efficient sorting algorithm.',
-        difficulty: 'Hard',
-        xp_reward: 300,
-        problem_type: 'coding',
-        is_event_quest: true,
-        languages: ['python', 'java', 'csharp'],
-        rarity: 'legendary',
-        completed: false,
-        instructor_name: 'Prof. Smith',
-        block_names: ['Block 301', 'Block 302'],
-        due_date: '2024-05-10'
-      },
-      {
-        id: 6,
-        title: 'Goblin\'s If-Else',
-        description: 'Outsmart the goblin by mastering conditional logic puzzles.',
-        difficulty: 'Easy',
-        xp_reward: 50,
-        problem_type: 'coding',
-        is_event_quest: false,
-        languages: ['python', 'java'],
-        rarity: 'common',
-        completed: false,
-        instructor_name: 'Prof. Martinez',
-        block_names: ['Block 301'],
-        due_date: '2024-04-26'
+    try {
+      const token = localStorage.getItem('token')
+      let url = 'http://localhost:5000/api/problems'
+      if (filter === 'coding' || filter === 'debugging') {
+        url += `?type=${filter}`
       }
-    ]
-    
-    // Filter by type
-    const filtered = filter === 'all' 
-      ? mockQuests 
-      : filter === 'event'
-        ? mockQuests.filter(q => q.is_event_quest)
-        : mockQuests.filter(q => q.problem_type === filter)
-    
-    setQuests(filtered)
-    setLoading(false)
+      const res = await fetch(url, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      if (res.ok) {
+        const data = await res.json()
+        const filtered = filter === 'event'
+          ? data.filter(q => q.is_event_quest)
+          : data
+        // Add rarity based on difficulty
+        const withRarity = filtered.map(q => ({
+          ...q,
+          rarity: q.difficulty === 'Easy' ? 'common' :
+                  q.difficulty === 'Medium' ? 'rare' : 'legendary',
+          completed: false
+        }))
+        setQuests(withRarity)
+      }
+    } catch (err) {
+      console.error('Failed to fetch quests:', err)
+    } finally {
+      setLoading(false)
+    }
   }
 
   // Rarity styling

@@ -8,7 +8,7 @@ from functools import wraps
 import subprocess, sys, time, csv, json
 from io import StringIO
 from sqlalchemy import text, inspect
-from routes.sandbox import sandbox_bp
+from routes.sandbox import sandbox_bp, _run_in_docker
 
 app = Flask(__name__)
 app.register_blueprint(sandbox_bp)
@@ -173,58 +173,60 @@ def sanitize_code(code, language):
     return True
 
 def evaluate_code(code, test_cases, language):
-    """Execute code in sandbox and compare against test cases"""
-    if language != 'python':
-        return [{"test_case": tc.get('input','')[:50], "expected": tc.get('expected','')[:50], 
-                 "passed": False, "output": f"{language.upper()} sandbox pending", "runtime": "0.00s"} for tc in test_cases]
-    
-    if not sanitize_code(code, language):
-        return [{"test_case": "N/A", "expected": "N/A", "passed": False, "output": "Security Error: Disallowed operation", "runtime": "0.00s"}]
-    
+    """Execute code in Docker sandbox and compare against test cases"""
     results = []
     for tc in test_cases:
-        try:
-            start = time.time()
-            proc = subprocess.run(
-                [sys.executable, '-c', code], 
-                input=tc.get('input',''), 
-                capture_output=True, 
-                text=True, 
-                timeout=5, 
-                cwd='/', 
-                env={'PATH': '/usr/bin:/bin'}
+        input_val = tc.get('input', '').strip()
+        expected = tc.get('expected', '').strip()
+
+        # Inject input into code for each language
+        if language == 'python':
+            full_code = f"import sys\nsys.stdin = __import__('io').StringIO({repr(input_val)})\n" + code
+        elif language == 'java':
+            full_code = code.replace(
+                'public static void main(String[] args)',
+                f'public static void main(String[] args) throws Exception'
             )
-            elapsed = time.time() - start
-            actual = proc.stdout.strip()
-            expected = tc.get('expected','').strip()
-            passed = actual == expected and proc.returncode == 0
-            
+            full_code = f"import java.util.Scanner;\n" + full_code
+        else:
+            full_code = code
+
+        result = _run_in_docker(full_code, language)
+
+        actual = result.get('stdout', '').strip()
+        stderr = result.get('stderr', '').strip()
+        timed_out = result.get('timed_out', False)
+        error = result.get('error', '')
+
+        if timed_out:
             results.append({
-                "test_case": tc.get('input','')[:50], 
-                "expected": expected[:50], 
-                "passed": passed, 
-                "output": actual[:100] if not passed else expected[:50], 
-                "runtime": f"{elapsed:.2f}s", 
-                "message": "Passed" if passed else f"Exit {proc.returncode}: {proc.stderr.strip()[:80]}"
-            })
-        except subprocess.TimeoutExpired:
-            results.append({
-                "test_case": tc.get('input','')[:50], 
-                "expected": tc.get('expected','')[:50], 
-                "passed": False, 
-                "output": "Timeout: >5s", 
-                "runtime": "5.00s", 
+                "test_case": input_val[:50],
+                "expected": expected[:50],
+                "passed": False,
+                "output": "Timeout: >10s",
+                "runtime": "10.00s",
                 "message": "Execution timeout"
             })
-        except Exception as e:
+        elif error or (result.get('returncode', 0) != 0 and not actual):
             results.append({
-                "test_case": tc.get('input','')[:50], 
-                "expected": tc.get('expected','')[:50], 
-                "passed": False, 
-                "output": str(e)[:100], 
-                "runtime": "0.00s", 
-                "message": "System error"
+                "test_case": input_val[:50],
+                "expected": expected[:50],
+                "passed": False,
+                "output": (stderr or error)[:100],
+                "runtime": f"{result.get('elapsed', 0)/1000:.2f}s",
+                "message": stderr[:80] if stderr else error[:80]
             })
+        else:
+            passed = actual == expected
+            results.append({
+                "test_case": input_val[:50],
+                "expected": expected[:50],
+                "passed": passed,
+                "output": actual[:100],
+                "runtime": f"{result.get('elapsed', 0)/1000:.2f}s",
+                "message": "Passed" if passed else f"Expected: {expected[:50]}"
+            })
+
     return results
 
 # ===== AUTH ROUTES =====
@@ -516,12 +518,12 @@ def create_submission():
         return jsonify({"error": "Problem unavailable"}), 404
     
     sub = Submission(
-        user_id=user.id, 
-        problem_id=prob.id, 
-        code=data['code'], 
-        language=data['language'], 
-        status='evaluating', 
-        score=0
+         user_id=user.id, 
+         problem_id=prob.id, 
+         code=data['code'], 
+         language=data['language'], 
+         status='error',        # ← valid ENUM value as placeholder
+         score=0
     )
     db.session.add(sub)
     db.session.flush()
@@ -738,7 +740,7 @@ def get_instructor_classes():
         "name": c.name, 
         "section_code": c.section_code, 
         "semester": c.semester, 
-        "student_count": 0  # Would calculate from class_students in production
+        "student_count": db.session.query(class_students.c.student_id).filter_by(class_id=c.id).count()
     } for c in classes]), 200
 
 @app.route('/api/classes', methods=['POST'])
@@ -1124,6 +1126,32 @@ def admin_update_block(admin, block_id):
     db.session.commit()
     log_admin_action(admin.id, "UPDATE_BLOCK", f"Updated block {block.section_code}: {', '.join(changes)}", block_id)
     return jsonify({"message": "Block updated", "changes": changes}), 200
+
+@app.route('/api/admin/blocks/<int:block_id>/students', methods=['GET'])
+@jwt_required()
+def get_block_students(block_id):
+    token_user_id = int(get_jwt_identity())
+    token_user = User.query.get(token_user_id)
+    if not is_instructor_or_admin(token_user):
+        return jsonify({"error": "Unauthorized"}), 403
+    
+    student_ids = db.session.query(class_students.c.student_id)\
+        .filter_by(class_id=block_id).all()
+    student_ids = [s[0] for s in student_ids]
+    
+    students = User.query.filter(
+        User.id.in_(student_ids),
+        User.role == 'student'
+    ).all() if student_ids else []
+    
+    return jsonify([{
+        "id": s.id,
+        "username": s.username,
+        "email": s.email,
+        "xp": s.xp,
+        "level": s.level,
+        "is_active": s.is_active
+    } for s in students]), 200
 
 @app.route('/api/admin/blocks/<int:block_id>', methods=['DELETE'])
 @admin_required

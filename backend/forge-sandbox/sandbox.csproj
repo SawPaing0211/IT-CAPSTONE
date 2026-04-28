@@ -4,9 +4,10 @@
     <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <!-- Deterministic build: faster, reproducible -->
     <Deterministic>true</Deterministic>
-    <!-- Disable telemetry inside container -->
     <DOTNET_CLI_TELEMETRY_OPTOUT>1</DOTNET_CLI_TELEMETRY_OPTOUT>
+    <!-- ── ADD THESE TWO ─────────────────────────────────────────── -->
+    <UseAppHost>true</UseAppHost>         <!-- Force apphost binary generation -->
+    <SelfContained>false</SelfContained>  <!-- Use runtime from image, not bundled -->
   </PropertyGroup>
 </Project>

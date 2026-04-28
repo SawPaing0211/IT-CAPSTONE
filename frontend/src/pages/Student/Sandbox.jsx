@@ -41,6 +41,52 @@ const TEMPLATE_LABELS = {
   recursion: { icon: '🌀', label: 'Recursion Dragon' },
 }
 
+function formatSandboxError(raw, language) {
+  if (!raw) return raw
+
+  // Join wrapped lines, strip path noise
+  const cleaned = raw
+    .split('\n')
+    .join(' ')
+    .replace(/\[\/tmp\/[^\]]*\]/g, '')
+    .replace(/\/tmp\/\S+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  if (language === 'python') {
+    const lineMatches = [...raw.matchAll(/line (\d+)/g)]
+    const errorLine = raw.split('\n').map(l => l.trim())
+      .filter(l => /^(\w+Error|Exception)/.test(l)).pop() || ''
+    if (lineMatches.length > 0) {
+      const line = lineMatches[lineMatches.length - 1][1]
+      return errorLine ? `Line ${line}: ${errorLine}` : `Line ${line}: Runtime error`
+    }
+    return raw.split('\n').map(l => l.trim()).filter(Boolean).pop() || raw
+  }
+
+  if (language === 'java') {
+    const errors = []
+    const regex = /Main\.java:(\d+):\s*error:\s*([^/]+?)(?=\s+\w|$)/g
+    let match
+    while ((match = regex.exec(cleaned)) !== null) {
+      errors.push(`Line ${match[1]}: ${match[2].trim()}`)
+    }
+    if (errors.length > 0) return errors.join('\n')
+  }
+
+  if (language === 'csharp') {
+    const errors = []
+    const regex = /Program\.cs\((\d+),(\d+)\):\s*error\s+(\w+):\s*([^/P]+?)(?=\s*Program|\s*\d+\s*Warning|$)/g
+    let match
+    while ((match = regex.exec(cleaned)) !== null) {
+      errors.push(`Line ${match[1]}, Col ${match[2]}: ${match[4].trim()} (${match[3]})`)
+    }
+    if (errors.length > 0) return errors.join('\n')
+  }
+
+  return cleaned
+}
+
 // ─── Execution time formatter ──────────────────────────────────────────────
 function formatTime(ms) {
   if (ms < 1000) return `${ms}ms`
@@ -567,6 +613,9 @@ export default function Sandbox({ onClose, initialCode = null, initialLanguage =
 
               {output && (
                 <>
+                <pre style={{fontSize:'9px', color:'#666', marginBottom:'8px'}}>
+                  {JSON.stringify({returncode: output.returncode, hasStdout: !!output.stdout, hasStderr: !!output.stderr, hasError: !!output.error}, null, 2)}
+                </pre>
                   {/* Status banner */}
                   <div className={`flex items-center gap-2 mb-4 pb-3 border-b ${
                     output.error ? 'border-red-800' : 'border-emerald-900'
@@ -577,8 +626,8 @@ export default function Sandbox({ onClose, initialCode = null, initialLanguage =
                     </span>
                   </div>
 
-                  {/* stdout */}
-                  {output.stdout && (
+                  {/* stdout — only show if it's clean output, not compiler errors */}
+                  {output.stdout && output.returncode === 0 && (
                     <div className="mb-4">
                       <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-2">Output</p>
                       <pre className="text-emerald-300 whitespace-pre-wrap break-all text-xs leading-relaxed bg-emerald-950/30 border border-emerald-900/50 rounded-lg p-3">
@@ -587,12 +636,12 @@ export default function Sandbox({ onClose, initialCode = null, initialLanguage =
                     </div>
                   )}
 
-                  {/* stderr / error */}
-                  {(output.stderr || output.error) && (
+                  {/* errors — compiler stdout errors + stderr + api errors all go here */}
+                  {(output.returncode !== 0 || output.error) && (
                     <div>
                       <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-2">Error</p>
                       <pre className="text-red-300 whitespace-pre-wrap break-all text-xs leading-relaxed bg-red-950/30 border border-red-900/50 rounded-lg p-3">
-                        {output.stderr || output.error}
+                        {formatSandboxError(output.stdout || output.stderr || output.error, language)}
                       </pre>
                     </div>
                   )}
