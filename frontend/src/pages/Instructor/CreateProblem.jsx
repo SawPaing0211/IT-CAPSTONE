@@ -111,10 +111,22 @@ export default function CreateProblem() {
     }))
   }
 
-  const handleSubmit = async (e) => {
+    const handleSubmit = async (e) => {
     e.preventDefault()
     
-    // Validation
+    // ✅ XP Validation based on difficulty
+    const maxXP = {
+      'Easy': 100,
+      'Medium': 250,
+      'Hard': 500
+    }
+    
+    if (formData.xp_reward > maxXP[formData.difficulty]) {
+      alert(`❌ XP reward exceeds maximum for ${formData.difficulty} difficulty.\n\nMaximum XP for ${formData.difficulty}: ${maxXP[formData.difficulty]}\nYour XP: ${formData.xp_reward}`)
+      return
+    }
+    
+    // Existing validation
     if (!formData.title || !formData.description || formData.test_cases.length === 0) {
       alert('Please fill in all required fields and add at least one test case.')
       return
@@ -127,14 +139,11 @@ export default function CreateProblem() {
     try {
       const token = localStorage.getItem('token')
       
-      // Prepare payload - ensure starter_code is handled correctly
+      // Prepare payload
       const payload = {
         ...formData,
-        // Send starter_code object as JSON string if backend expects it, 
-        // or keep as object if backend handles JSON column. 
-        // Assuming backend expects JSON column object:
         starter_code: formData.starter_code, 
-        is_published: true // Auto-publish for now
+        is_published: true
       }
       
       const res = await fetch('http://localhost:5000/api/problems', {
@@ -383,8 +392,15 @@ export default function CreateProblem() {
                         className="w-5 h-5 rounded border-slate-600 text-blue-600 focus:ring-blue-500"
                       />
                       <div className="flex-1">
-                        <div className="text-white font-medium">{block.section_code}</div>
-                        <div className="text-slate-500 text-sm">{block.name}</div>
+                        <div className="text-white font-medium">
+                          {block.section_code} {block.semester && `- ${block.semester}`}
+                        </div>
+                        {/* ✅ Display subject names instead of block.name */}
+                        {block.subjects && block.subjects.length > 0 && (
+                          <div className="text-slate-500 text-sm mt-1">
+                            {block.subjects.join(', ')}
+                          </div>
+                        )}
                       </div>
                     </label>
                   ))

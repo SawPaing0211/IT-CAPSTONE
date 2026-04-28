@@ -44,47 +44,53 @@ const TEMPLATE_LABELS = {
 function formatSandboxError(raw, language) {
   if (!raw) return raw
 
-  // Join wrapped lines, strip path noise
-  const cleaned = raw
-    .split('\n')
-    .join(' ')
-    .replace(/\[\/tmp\/[^\]]*\]/g, '')
-    .replace(/\/tmp\/\S+/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-
   if (language === 'python') {
-    const lineMatches = [...raw.matchAll(/line (\d+)/g)]
-    const errorLine = raw.split('\n').map(l => l.trim())
-      .filter(l => /^(\w+Error|Exception)/.test(l)).pop() || ''
-    if (lineMatches.length > 0) {
-      const line = lineMatches[lineMatches.length - 1][1]
-      return errorLine ? `Line ${line}: ${errorLine}` : `Line ${line}: Runtime error`
-    }
-    return raw.split('\n').map(l => l.trim()).filter(Boolean).pop() || raw
+    const lines = raw.split('\n').map(l => l.trim()).filter(Boolean)
+    const errorDesc = lines.find(l =>
+      /^(\w+Error|NameError|TypeError|ValueError|SyntaxError|AttributeError|Exception)/.test(l)
+    ) || lines.filter(l =>
+      !l.startsWith('Traceback') && !l.startsWith('File ') && !l.includes('most recent')
+    ).pop() || 'Runtime error'
+    const lineMatch = raw.match(/line (\d+)/)
+    return lineMatch ? `Line ${lineMatch[1]}: ${errorDesc}` : errorDesc
   }
 
   if (language === 'java') {
     const errors = []
-    const regex = /Main\.java:(\d+):\s*error:\s*([^/]+?)(?=\s+\w|$)/g
+    const seen = new Set()
+    // Match full path or just filename: /tmp/sandbox/Main.java:4: error: msg
+    const regex = /(?:\/[^\s]*\/)?Main\.java:(\d+):\s*error:\s*(.+?)(?=\n|$)/gm
     let match
-    while ((match = regex.exec(cleaned)) !== null) {
-      errors.push(`Line ${match[1]}: ${match[2].trim()}`)
+    while ((match = regex.exec(raw)) !== null) {
+      const msg = `Line ${match[1]}: ${match[2].trim()}`
+      if (!seen.has(msg)) { seen.add(msg); errors.push(msg) }
     }
     if (errors.length > 0) return errors.join('\n')
+    // Fallback: grab first meaningful error line
+    const fallback = raw.split('\n')
+      .find(l => l.includes('error:') && !l.includes('error: '))
+    return fallback?.trim() || raw.split('\n').filter(Boolean)[0] || raw
   }
 
   if (language === 'csharp') {
     const errors = []
-    const regex = /Program\.cs\((\d+),(\d+)\):\s*error\s+(\w+):\s*([^/P]+?)(?=\s*Program|\s*\d+\s*Warning|$)/g
+    const seen = new Set()
+    // Match: Program.cs(9,41): error CS1002: message [path]
+    const regex = /Program\.cs\((\d+),(\d+)\):\s*error\s+(\w+):\s*(.+?)(?:\s*\[.*?\])?$/gm
     let match
-    while ((match = regex.exec(cleaned)) !== null) {
-      errors.push(`Line ${match[1]}, Col ${match[2]}: ${match[4].trim()} (${match[3]})`)
+    while ((match = regex.exec(raw)) !== null) {
+      const msg = `Line ${match[1]}, Col ${match[2]}: ${match[4].trim()} (${match[3]})`
+      if (!seen.has(msg)) { seen.add(msg); errors.push(msg) }
     }
     if (errors.length > 0) return errors.join('\n')
   }
 
-  return cleaned
+  // Generic fallback — strip /tmp paths and return clean text
+  return raw
+    .split('\n')
+    .map(l => l.replace(/\/tmp\/\S+/g, '').replace(/\[.*?\]/g, '').trim())
+    .filter(Boolean)
+    .join('\n')
 }
 
 // ─── Execution time formatter ──────────────────────────────────────────────

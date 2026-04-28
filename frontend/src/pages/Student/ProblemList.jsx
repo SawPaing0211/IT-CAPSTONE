@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 
-export default function ProblemList({ onSelectQuest, currentLevel }) {
+export default function ProblemList({ onSelectQuest, currentLevel, blockId }) {
   const [quests, setQuests] = useState([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('all')
@@ -9,16 +9,25 @@ export default function ProblemList({ onSelectQuest, currentLevel }) {
   useEffect(() => {
     setAnimated(true)
     fetchQuests()
-  }, [filter])
+  }, [filter, blockId])
 
   const fetchQuests = async () => {
     try {
       const token = localStorage.getItem('token')
       let url = 'http://localhost:5000/api/problems'
+      
+      // Build query params
+      const params = []
+      if (blockId) params.push(`block_id=${blockId}`)
       if (filter === 'coding' || filter === 'debugging') {
-        url += `?type=${filter}`
+        params.push(`type=${filter}`)
       }
-      const res = await fetch(url, {
+      
+      if (params.length > 0) {
+        url += '?' + params.join('&')
+      }
+      
+            const res = await fetch(url, {
         headers: { 'Authorization': `Bearer ${token}` }
       })
       if (res.ok) {
@@ -166,8 +175,13 @@ export default function ProblemList({ onSelectQuest, currentLevel }) {
                 {/* Instructor & Block Info */}
                 <div className="flex items-center gap-2 text-[10px] text-slate-400 mb-3 pb-3 border-b border-slate-700/50">
                   <span>👨‍🏫 {quest.instructor_name}</span>
-                  <span>•</span>
-                  <span>🏛️ {quest.block_names?.[0] || 'All Blocks'}</span>
+                  {/* ✅ Only show block name if NOT in course context */}
+                  {!blockId && (
+                    <>
+                      <span>•</span>
+                      <span>🏛️ {quest.block_names?.[0] || 'All Blocks'}</span>
+                    </>
+                  )}
                   {quest.due_date && (
                     <>
                       <span>•</span>
