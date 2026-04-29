@@ -78,6 +78,8 @@ class Problem(db.Model):
     auto_grade = db.Column(db.Boolean, default=True)
     plagiarism_threshold = db.Column(db.Float, default=0.85)
     due_date = db.Column(db.DateTime, nullable=True)  # NEW: For quest deadlines
+    # ✅ NEW: Subject ownership (Phase 2)
+    subject_id = db.Column(db.Integer, db.ForeignKey('subjects.id'), nullable=True)
 
 class Submission(db.Model):
     __tablename__ = 'submissions'
@@ -118,6 +120,14 @@ class Subject(db.Model):
     name = db.Column(db.String(200), nullable=False)
     description = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+# ✅ NEW: Teacher Assignment (Who teaches what, where)
+class TeacherAssignment(db.Model):
+    __tablename__ = 'teacher_assignments'
+    id = db.Column(db.Integer, primary_key=True)
+    instructor_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    subject_id = db.Column(db.Integer, db.ForeignKey('subjects.id'), nullable=False)
+    block_id = db.Column(db.Integer, db.ForeignKey('blocks.id'), nullable=False)
 
 # ✅ NEW: Block-Subject junction table
 block_subjects = db.Table('block_subjects',
@@ -194,6 +204,26 @@ class_problems = db.Table('class_problems',
 # ===== HELPERS =====
 def is_instructor_or_admin(user): return user and user.role in ['instructor', 'admin']
 def is_admin(user): return user and user.role == 'admin'
+
+# ✅ NEW: Check if instructor is assigned to teach a subject in a block
+def is_instructor_assigned(instructor_id, subject_id, block_id=None):
+    """Verify instructor has official assignment to teach subject (optionally in specific block)"""
+    query = TeacherAssignment.query.filter_by(
+        instructor_id=instructor_id, 
+        subject_id=subject_id
+    )
+    if block_id:
+        query = query.filter_by(block_id=block_id)
+    return query.first() is not None
+
+# ✅ NEW: Get all blocks an instructor teaches a specific subject in
+def get_instructor_blocks_for_subject(instructor_id, subject_id):
+    """Return list of block IDs where instructor teaches this subject"""
+    assignments = TeacherAssignment.query.filter_by(
+        instructor_id=instructor_id, 
+        subject_id=subject_id
+    ).all()
+    return [a.block_id for a in assignments]
 
 def admin_required(f):
     @wraps(f)
@@ -387,6 +417,25 @@ def create_problem():
         'Hard': 500
     }
     
+    # ✅ NEW: Validate subject assignment (Phase 2)
+    subject_id = data.get('subject_id')
+    if not subject_id:
+        return jsonify({"error": "Course subject is required"}), 400
+    
+    # Verify instructor is assigned to teach this subject in at least one block
+    if not is_instructor_assigned(user_id, subject_id):
+        return jsonify({"error": "You are not assigned to teach this subject"}), 403
+    
+    # Validate block visibility matches instructor's assignments for this subject
+    visible_blocks = data.get('visible_to_blocks', [])
+    if visible_blocks:
+        allowed_blocks = get_instructor_blocks_for_subject(user_id, subject_id)
+        for bid in visible_blocks:
+            if bid not in allowed_blocks:
+                return jsonify({"error": f"You are not assigned to Block {bid} for this subject"}), 403
+    # If visible_to_blocks is empty, it means visible to ALL blocks instructor teaches this subject in
+
+
     if data['xp_reward'] > max_xp[data['difficulty']]:
         return jsonify({
             "error": f"XP reward exceeds maximum for {data['difficulty']} difficulty. Maximum: {max_xp[data['difficulty']]}"
@@ -409,6 +458,7 @@ def create_problem():
             due_date = None
 
     p = Problem(
+        subject_id=subject_id,  # ✅ NEW: Link problem to subject
         title=data['title'], 
         description=data['description'], 
         category=data.get('category','General'), 
@@ -457,9 +507,13 @@ def create_problem():
 def get_problems():
     """Get published problems with filtering for block visibility & problem type"""
     block_id = request.args.get('block_id', type=int)
+    subject_id = request.args.get('subject_id', type=int)  # ✅ NEW: Filter by subject
     problem_type = request.args.get('type')  # 'coding' or 'debugging'
     
     query = Problem.query.filter_by(is_published=True)
+    
+    if subject_id:  # ✅ NEW: If subject specified, filter to that subject only
+        query = query.filter_by(subject_id=subject_id)
     
     if problem_type:
         query = query.filter_by(problem_type=problem_type)
@@ -468,10 +522,27 @@ def get_problems():
     filtered = []
     
     for p in problems:
-        # Block visibility: empty = visible to all; otherwise check membership
+        # ✅ NEW: If problem has a subject, verify student is enrolled in a block that offers it
+        if p.subject_id:
+            # Get student's enrolled blocks
+            student_enrollments = db.session.query(student_blocks.c.block_id).filter_by(
+                student_id=int(get_jwt_identity()) if request.headers.get('Authorization') else None
+            ).all() if request.headers.get('Authorization') else []
+            student_block_ids = [e.block_id for e in student_enrollments]
+            
+            # Check if problem's subject is offered in any of student's blocks
+            subject_in_student_blocks = db.session.query(block_subjects.c.block_id).filter_by(
+                subject_id=p.subject_id
+            ).all()
+            valid_blocks = [s.block_id for s in subject_in_student_blocks]
+            
+            if student_block_ids and not any(bid in valid_blocks for bid in student_block_ids):
+                continue  # Skip this problem - student not enrolled in this subject
+        
+        # Block visibility: empty = visible to all assigned blocks; otherwise check membership
         if not p.visible_to_blocks or (block_id and block_id in p.visible_to_blocks):
             filtered.append(p)
-        elif not block_id:
+        elif not block_id and not p.visible_to_blocks:
             filtered.append(p)
     
     result = []
@@ -945,6 +1016,27 @@ def get_instructor_classes():
         })
     return jsonify(result), 200
 
+@app.route('/api/instructor/assigned-subjects', methods=['GET'])
+@jwt_required()
+def get_instructor_assigned_subjects():
+    """Get unique subjects this instructor is assigned to teach"""
+    user_id = int(get_jwt_identity())
+    
+    # Get all teacher assignments for this instructor
+    assignments = TeacherAssignment.query.filter_by(instructor_id=user_id).all()
+    
+    # Extract unique subject IDs
+    subject_ids = list(set(a.subject_id for a in assignments))
+    
+    # Fetch subject details
+    subjects = Subject.query.filter(Subject.id.in_(subject_ids)).all() if subject_ids else []
+    
+    return jsonify([{
+        "id": s.id,
+        "name": s.name,
+        "description": s.description
+    } for s in subjects]), 200
+
 @app.route('/api/blocks', methods=['POST'])  # ✅ Changed route name
 @jwt_required()
 def create_block():  # ✅ Changed function name
@@ -1100,6 +1192,53 @@ def get_student_announcements():
         "instructor": User.query.get(a.instructor_id).username if a.instructor_id else "System",
         "block_name": Class.query.get(a.class_id).name if a.class_id else "All Blocks"
     } for a in announcements]), 200
+
+@app.route('/api/admin/dashboard-stats', methods=['GET'])
+@admin_required
+def admin_dashboard_stats(admin):
+    """Get dashboard statistics for admin overview"""
+    from sqlalchemy import func
+    
+    # Get counts
+    total_students = User.query.filter_by(role='student', is_active=True).count()
+    total_instructors = User.query.filter_by(role='instructor', is_active=True).count()
+    total_blocks = Block.query.count()
+    total_subjects = Subject.query.count()
+    total_problems = Problem.query.count()
+    total_submissions = Submission.query.count()
+    
+    # Get today's stats
+    today = datetime.utcnow().date()
+    today_logins = User.query.filter(
+        User.role == 'student',
+        func.date(User.created_at) == today
+    ).count()
+    
+    today_submissions = Submission.query.filter(
+        func.date(Submission.submitted_at) == today
+    ).count()
+    
+    # Get recent activity (last 10 audit logs)
+    recent_activity = AuditLog.query.order_by(AuditLog.created_at.desc()).limit(10).all()
+    activity_list = [{
+        "id": a.id,
+        "action": a.action,
+        "details": a.details,
+        "created_at": a.created_at.isoformat(),
+        "admin": User.query.get(a.admin_id).username if a.admin_id else "System"
+    } for a in recent_activity]
+    
+    return jsonify({
+        "total_students": total_students,
+        "total_instructors": total_instructors,
+        "total_blocks": total_blocks,
+        "total_subjects": total_subjects,
+        "total_problems": total_problems,
+        "total_submissions": total_submissions,
+        "today_logins": today_logins,
+        "today_submissions": today_submissions,
+        "recent_activity": activity_list
+    }), 200
 
 # ===== ADMIN ROUTES =====
 @app.route('/api/admin/overview', methods=['GET'])
@@ -1352,6 +1491,91 @@ def admin_generate_report(admin):
     
     return jsonify({"error": "Unsupported format"}), 400
 
+@app.route('/api/admin/subjects', methods=['POST'])
+@admin_required
+def admin_create_subject(admin):
+    """Create a new subject"""
+    data = request.get_json()
+    
+    if not data or not data.get('name'):
+        return jsonify({"error": "Subject name is required"}), 400
+    
+    # Check if subject already exists
+    existing = Subject.query.filter_by(name=data['name'].strip()).first()
+    if existing:
+        return jsonify({"error": "Subject already exists"}), 409
+    
+    subject = Subject(
+        name=data['name'].strip(),
+        description=data.get('description', '').strip()
+    )
+    db.session.add(subject)
+    db.session.commit()
+    
+    log_admin_action(admin.id, "SUBJECT_CREATED", f"Created subject: {subject.name}")
+    
+    return jsonify({
+        "message": "Subject created successfully",
+        "subject": {
+            "id": subject.id,
+            "name": subject.name,
+            "description": subject.description
+        }
+    }), 201
+
+@app.route('/api/admin/subjects', methods=['GET'])
+@admin_required
+def admin_get_subjects(admin):
+    """Get all unique subjects (for admin assignment forms)"""
+    try:
+        # Get all subjects
+        subjects = Subject.query.all()
+        
+        # Remove duplicates in Python (keep first occurrence of each name)
+        seen_names = set()
+        unique_subjects = []
+        for s in subjects:
+            if s.name not in seen_names:
+                seen_names.add(s.name)
+                unique_subjects.append(s)
+        
+        return jsonify([{
+            "id": s.id,
+            "name": s.name,
+            "description": s.description
+        } for s in unique_subjects]), 200
+    except Exception as e:
+        print(f"Error fetching subjects: {e}")
+        return jsonify({"error": "Failed to fetch subjects"}), 500
+    
+    
+@app.route('/api/admin/subjects/<int:subject_id>', methods=['DELETE'])
+@admin_required
+def admin_delete_subject(admin, subject_id):
+    """Delete a subject"""
+    subject = Subject.query.get_or_404(subject_id)
+    
+    # Check if subject is used in any blocks (via block_subjects junction table)
+    usage = db.session.query(block_subjects.c.block_id).filter_by(
+        subject_id=subject_id
+    ).first()
+    
+    if usage:
+        return jsonify({"error": "Cannot delete subject - it's assigned to blocks. Remove it from blocks first."}), 400
+    
+    # Check if subject is used in any problems
+    problem_usage = Problem.query.filter_by(subject_id=subject_id).first()
+    if problem_usage:
+        return jsonify({"error": "Cannot delete subject - it's used in problems. Delete or reassign problems first."}), 400
+    
+    # Safe to delete
+    db.session.delete(subject)
+    db.session.commit()
+    
+    log_admin_action(admin.id, "SUBJECT_DELETED", f"Deleted subject: {subject.name}")
+    
+    return jsonify({"message": "Subject deleted successfully"}), 200
+
 # ===== ADMIN BLOCK ROUTES =====
 @app.route('/api/admin/blocks', methods=['GET'])
 @admin_required
@@ -1438,10 +1662,37 @@ def admin_update_block(admin, block_id):
     block = Block.query.get_or_404(block_id)
     data = request.get_json()
     changes = []
-    if 'name' in data: changes.append(f"Name: {block.name} → {data['name']}"); block.name = data['name']
-    if 'section_code' in data: changes.append(f"Code: {block.section_code} → {data['section_code']}"); block.section_code = data['section_code']
-    if 'semester' in data: block.semester = data['semester']; changes.append(f"Semester: {data['semester']}")
-    if 'instructor_id' in data: block.instructor_id = data['instructor_id']; changes.append(f"Instructor ID: {data['instructor_id']}")
+    
+    if 'section_code' in data:
+        changes.append(f"Code: {block.section_code} → {data['section_code']}")
+        block.section_code = data['section_code']
+    
+    if 'semester' in data:
+        changes.append(f"Semester: {data['semester']}")
+        block.semester = data['semester']
+    
+    if 'instructor_id' in data:
+        changes.append(f"Instructor ID: {data['instructor_id']}")
+        block.instructor_id = data['instructor_id']
+    
+    # ✅ Handle subject assignments
+    if 'subject_ids' in data:
+        subject_ids = data['subject_ids']
+        
+        # Remove all current subject assignments
+        db.session.query(block_subjects).filter_by(block_id=block_id).delete()
+        
+        # Add new subject assignments
+        if subject_ids:
+            for subject_id in subject_ids:
+                db.session.execute(block_subjects.insert().values(
+                    block_id=block_id,
+                    subject_id=subject_id
+                ))
+            changes.append(f"Assigned {len(subject_ids)} subjects")
+        else:
+            changes.append("Removed all subject assignments")
+    
     db.session.commit()
     log_admin_action(admin.id, "UPDATE_BLOCK", f"Updated block {block.section_code}: {', '.join(changes)}", block_id)
     return jsonify({"message": "Block updated", "changes": changes}), 200
@@ -1491,6 +1742,195 @@ def admin_delete_block(admin, block_id):
     
     log_admin_action(admin.id, "DELETE_BLOCK", f"Deleted block {section_code}", block_id)
     return jsonify({"message": "Block deleted"}), 200
+
+
+@app.route('/api/admin/instructor-assignments', methods=['POST'])
+@admin_required
+def admin_create_instructor_assignment(admin):
+    """Admin assigns an instructor to teach a subject in a block"""
+    data = request.get_json()
+    
+    # Required fields
+    required = ['instructor_id', 'subject_id', 'block_id']
+    if not all(k in data for k in required):
+        return jsonify({"error": "Missing required fields: instructor_id, subject_id, block_id"}), 400
+    
+    instructor_id = data['instructor_id']
+    subject_id = data['subject_id']
+    block_id = data['block_id']
+    
+    # Validate instructor exists and has instructor role
+    instructor = User.query.get(instructor_id)
+    if not instructor or instructor.role != 'instructor':
+        return jsonify({"error": "Invalid instructor ID"}), 400
+    
+    # Validate subject exists
+    subject = Subject.query.get(subject_id)
+    if not subject:
+        return jsonify({"error": "Invalid subject ID"}), 400
+    
+    # Validate block exists
+    block = Block.query.get(block_id)
+    if not block:
+        return jsonify({"error": "Invalid block ID"}), 400
+    
+    # Check if assignment already exists
+    existing = TeacherAssignment.query.filter_by(
+        instructor_id=instructor_id,
+        subject_id=subject_id,
+        block_id=block_id
+    ).first()
+    
+    if existing:
+        return jsonify({"error": "Assignment already exists"}), 409
+    
+    # Create new assignment
+    assignment = TeacherAssignment(
+        instructor_id=instructor_id,
+        subject_id=subject_id,
+        block_id=block_id
+    )
+    db.session.add(assignment)
+    db.session.commit()
+    
+    log_admin_action(admin.id, "INSTRUCTOR_ASSIGNED", 
+                    f"Instructor {instructor.username} assigned to teach {subject.name} in Block {block.section_code}")
+    
+    return jsonify({
+        "message": "Instructor assigned successfully",
+        "assignment": {
+            "id": assignment.id,
+            "instructor": instructor.username,
+            "subject": subject.name,
+            "block": block.section_code
+        }
+    }), 201
+
+@app.route('/api/admin/instructor-assignments/<int:assignment_id>', methods=['PUT'])
+@admin_required
+def admin_update_instructor_assignment(admin, assignment_id):
+    """Update an instructor assignment"""
+    assignment = TeacherAssignment.query.get_or_404(assignment_id)
+    data = request.get_json()
+    
+    # Validate required fields
+    if not all(k in data for k in ['instructor_id', 'subject_id', 'block_id']):
+        return jsonify({"error": "Missing required fields: instructor_id, subject_id, block_id"}), 400
+    
+    instructor_id = data['instructor_id']
+    subject_id = data['subject_id']
+    block_id = data['block_id']
+    
+    # Check for duplicate assignment (different assignment with same combo)
+    duplicate = TeacherAssignment.query.filter(
+        TeacherAssignment.instructor_id == instructor_id,
+        TeacherAssignment.subject_id == subject_id,
+        TeacherAssignment.block_id == block_id,
+        TeacherAssignment.id != assignment_id
+    ).first()
+    
+    if duplicate:
+        return jsonify({"error": "This assignment already exists"}), 409
+    
+    # Validate entities exist
+    instructor = User.query.get(instructor_id)
+    if not instructor or instructor.role != 'instructor':
+        return jsonify({"error": "Invalid instructor ID"}), 400
+    
+    subject = Subject.query.get(subject_id)
+    if not subject:
+        return jsonify({"error": "Invalid subject ID"}), 400
+    
+    block = Block.query.get(block_id)
+    if not block:
+        return jsonify({"error": "Invalid block ID"}), 400
+    
+    # Get old values for logging
+    old_instructor = User.query.get(assignment.instructor_id)
+    old_subject = Subject.query.get(assignment.subject_id)
+    old_block = Block.query.get(assignment.block_id)
+    
+    # Update assignment
+    assignment.instructor_id = instructor_id
+    assignment.subject_id = subject_id
+    assignment.block_id = block_id
+    db.session.commit()
+    
+    log_admin_action(admin.id, "INSTRUCTOR_ASSIGNMENT_UPDATED", 
+                    f"Updated: {old_instructor.username} teaching {old_subject.name} in {old_block.section_code} → {instructor.username} teaching {subject.name} in {block.section_code}")
+    
+    return jsonify({
+        "message": "Assignment updated successfully",
+        "assignment": {
+            "id": assignment.id,
+            "instructor": instructor.username,
+            "subject": subject.name,
+            "block": block.section_code
+        }
+    }), 200
+
+
+@app.route('/api/admin/instructor-assignments', methods=['GET'])
+@admin_required
+def admin_get_instructor_assignments(admin):
+    """Get all instructor assignments (with optional filters)"""
+    instructor_id = request.args.get('instructor_id', type=int)
+    subject_id = request.args.get('subject_id', type=int)
+    block_id = request.args.get('block_id', type=int)
+    
+    query = TeacherAssignment.query
+    
+    if instructor_id:
+        query = query.filter_by(instructor_id=instructor_id)
+    if subject_id:
+        query = query.filter_by(subject_id=subject_id)
+    if block_id:
+        query = query.filter_by(block_id=block_id)
+    
+    assignments = query.all()
+    
+    result = []
+    for a in assignments:
+        instructor = User.query.get(a.instructor_id)
+        subject = Subject.query.get(a.subject_id)
+        block = Block.query.get(a.block_id)
+        
+        result.append({
+            "id": a.id,
+            "instructor": {
+                "id": instructor.id,
+                "username": instructor.username
+            } if instructor else None,
+            "subject": {
+                "id": subject.id,
+                "name": subject.name
+            } if subject else None,
+            "block": {
+                "id": block.id,
+                "section_code": block.section_code
+            } if block else None
+        })
+    
+    return jsonify(result), 200
+
+@app.route('/api/admin/instructor-assignments/<int:assignment_id>', methods=['DELETE'])
+@admin_required
+def admin_delete_instructor_assignment(admin, assignment_id):
+    """Remove an instructor assignment"""
+    assignment = TeacherAssignment.query.get_or_404(assignment_id)
+    
+    # Get details for logging
+    instructor = User.query.get(assignment.instructor_id)
+    subject = Subject.query.get(assignment.subject_id)
+    block = Block.query.get(assignment.block_id)
+    
+    db.session.delete(assignment)
+    db.session.commit()
+    
+    log_admin_action(admin.id, "INSTRUCTOR_UNASSIGNED", 
+                    f"Removed assignment: {instructor.username} teaching {subject.name} in Block {block.section_code if block else 'Unknown'}")
+    
+    return jsonify({"message": "Assignment removed"}), 200
     
 # ===== UTILITY & INIT =====
 @app.route('/api/health')

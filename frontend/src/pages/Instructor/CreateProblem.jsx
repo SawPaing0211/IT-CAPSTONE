@@ -3,7 +3,9 @@ import { useNavigate } from 'react-router-dom'
 
 export default function CreateProblem() {
   const navigate = useNavigate()
-  const [blocks, setBlocks] = useState([]) // Will now be populated from /api/instructor/classes
+  const [blocks, setBlocks] = useState([])
+  const [assignedSubjects, setAssignedSubjects] = useState([])
+  const [selectedSubjectId, setSelectedSubjectId] = useState(null)
   const [activeSection, setActiveSection] = useState(1)
   
   const [formData, setFormData] = useState({
@@ -15,11 +17,11 @@ export default function CreateProblem() {
     category: 'General',
     
     // NEW PRO FIELDS
-    problem_type: 'coding', // 'coding' or 'debugging'
-    languages: ['python'], // ['python', 'java', 'csharp']
+    problem_type: 'coding',
+    languages: ['python'],
     is_event_quest: false,
-    visible_to_blocks: [], // Array of block IDs
-    hints: [], // [{text: "...", xp_penalty: 10}]
+    visible_to_blocks: [],
+    hints: [],
     tags: [],
     prerequisites: [],
     estimated_time: '15min',
@@ -36,18 +38,29 @@ export default function CreateProblem() {
     test_cases: [{ input: '', expected: '' }]
   })
 
-  // ✅ FIX: Fetch INSTRUCTOR classes instead of Admin blocks
+  // ✅ Fetch subjects AND blocks
   useEffect(() => {
     const fetchBlocks = async () => {
       try {
         const token = localStorage.getItem('token')
-        // Changed from /api/admin/blocks to /api/instructor/classes
+        
+        // ✅ Fetch assigned subjects first (CORRECT CASING)
+        const subjectsRes = await fetch('http://localhost:5000/api/instructor/assigned-subjects', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        })
+        if (subjectsRes.ok) {
+          const subjectsData = await subjectsRes.json()
+          setAssignedSubjects(subjectsData)
+        }
+        
+        // ✅ Then fetch blocks for visibility filter
         const res = await fetch('http://localhost:5000/api/instructor/classes', {
           headers: { 'Authorization': `Bearer ${token}` }
         })
         if (res.ok) {
           const data = await res.json()
           setBlocks(data)
+          // ✅ Subjects already fetched from API above - no extraction needed
         } else {
           console.error('Failed to fetch classes:', await res.text())
         }
@@ -111,7 +124,7 @@ export default function CreateProblem() {
     }))
   }
 
-    const handleSubmit = async (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault()
     
     // ✅ XP Validation based on difficulty
@@ -123,6 +136,12 @@ export default function CreateProblem() {
     
     if (formData.xp_reward > maxXP[formData.difficulty]) {
       alert(`❌ XP reward exceeds maximum for ${formData.difficulty} difficulty.\n\nMaximum XP for ${formData.difficulty}: ${maxXP[formData.difficulty]}\nYour XP: ${formData.xp_reward}`)
+      return
+    }
+    
+    // ✅ NEW: Subject validation
+    if (!selectedSubjectId) {
+      alert('❌ Please select a course subject for this problem.')
       return
     }
     
@@ -139,9 +158,10 @@ export default function CreateProblem() {
     try {
       const token = localStorage.getItem('token')
       
-      // Prepare payload
+      // ✅ Prepare payload with subject_id
       const payload = {
         ...formData,
+        subject_id: selectedSubjectId,  // ✅ NEW: Link problem to selected subject
         starter_code: formData.starter_code, 
         is_published: true
       }
@@ -223,6 +243,25 @@ export default function CreateProblem() {
         {/* Section 1: Basic Information */}
         {activeSection === 1 && (
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6">
+            {/* ✅ NEW: Course Subject Selector */}
+            <div>
+              <label className="block text-slate-400 text-sm mb-2">Course Subject *</label>
+              <select
+                value={selectedSubjectId || ''}
+                onChange={(e) => setSelectedSubjectId(e.target.value ? parseInt(e.target.value) : null)}
+                className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white outline-none"
+                required
+              >
+                <option value="">Select a subject you teach</option>
+                {assignedSubjects.map(sub => (
+                  <option key={sub.id} value={sub.id}>{sub.name}</option>
+                ))}
+              </select>
+              {assignedSubjects.length === 0 && (
+                <p className="text-amber-400 text-xs mt-1">⚠️ No subjects assigned. Contact admin.</p>
+              )}
+            </div>
+
             <h2 className="text-2xl font-bold text-white flex items-center gap-2">
               <span>📋</span> Basic Information
             </h2>
@@ -370,40 +409,49 @@ export default function CreateProblem() {
               </label>
             </div>
 
-            {/* Block Visibility */}
+            {/* ✅ Block Visibility - Filtered by Selected Subject */}
             <div>
               <label className="block text-slate-400 text-sm mb-3">Visible To Blocks</label>
               <div className="bg-slate-800 rounded-xl p-4 space-y-2 max-h-60 overflow-y-auto border border-slate-700">
                 {blocks.length === 0 ? (
                   <p className="text-slate-500 text-center py-4">No blocks found for your account</p>
                 ) : (
-                  blocks.map(block => (
-                    <label key={block.id} className="flex items-center gap-3 p-3 rounded-lg hover:bg-slate-700 transition cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={formData.visible_to_blocks.includes(block.id)}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            handleInputChange('visible_to_blocks', [...formData.visible_to_blocks, block.id])
-                          } else {
-                            handleInputChange('visible_to_blocks', formData.visible_to_blocks.filter(id => id !== block.id))
-                          }
-                        }}
-                        className="w-5 h-5 rounded border-slate-600 text-blue-600 focus:ring-blue-500"
-                      />
-                      <div className="flex-1">
-                        <div className="text-white font-medium">
-                          {block.section_code} {block.semester && `- ${block.semester}`}
-                        </div>
-                        {/* ✅ Display subject names instead of block.name */}
-                        {block.subjects && block.subjects.length > 0 && (
-                          <div className="text-slate-500 text-sm mt-1">
-                            {block.subjects.join(', ')}
+                  blocks
+                    .filter(block => {
+                      // If no subject selected, show all blocks
+                      if (!selectedSubjectId) return true
+                      // Otherwise, only show blocks that contain the selected subject
+                      return block.subjects && block.subjects.some(subName => {
+                        const selectedSub = assignedSubjects.find(s => s.id === selectedSubjectId)
+                        return selectedSub && subName === selectedSub.name
+                      })
+                    })
+                    .map(block => (
+                      <label key={block.id} className="flex items-center gap-3 p-3 rounded-lg hover:bg-slate-700 transition cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={formData.visible_to_blocks.includes(block.id)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              handleInputChange('visible_to_blocks', [...formData.visible_to_blocks, block.id])
+                            } else {
+                              handleInputChange('visible_to_blocks', formData.visible_to_blocks.filter(id => id !== block.id))
+                            }
+                          }}
+                          className="w-5 h-5 rounded border-slate-600 text-blue-600 focus:ring-blue-500"
+                        />
+                        <div className="flex-1">
+                          <div className="text-white font-medium">
+                            {block.section_code} {block.semester && `- ${block.semester}`}
                           </div>
-                        )}
-                      </div>
-                    </label>
-                  ))
+                          {block.subjects && block.subjects.length > 0 && (
+                            <div className="text-slate-500 text-sm mt-1">
+                              {block.subjects.join(', ')}
+                            </div>
+                          )}
+                        </div>
+                      </label>
+                    ))
                 )}
               </div>
               <p className="text-slate-500 text-xs mt-2">
