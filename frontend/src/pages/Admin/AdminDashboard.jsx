@@ -2,8 +2,10 @@ import { useState, useEffect } from 'react'
 import DashboardOverview from './DashboardOverview'
 import UserManagement from './UserManagement'
 import BlocksSections from './BlocksSections'
+import InstructorAssignments from './InstructorAssignments'
 import ActivityLogs from './ActivityLogs'
 import SystemSettings from './SystemSettings'
+import SubjectsManagement from './SubjectsManagement'
 
 export default function AdminDashboard({ user, onLogout }) {
   const [activeTab, setActiveTab] = useState('dashboard')
@@ -27,7 +29,9 @@ export default function AdminDashboard({ user, onLogout }) {
   const tabs = [
     { id: 'dashboard', label: 'Dashboard', icon: '📊' },
     { id: 'users', label: 'User Management', icon: '👥' },
+    { id: 'assignments', label: 'Instructor Assignments', icon: '👨‍🏫' },
     { id: 'blocks', label: 'Blocks & Sections', icon: '📚' },
+    { id: 'subjects', label: 'Subjects', icon: '📚' },
     { id: 'activity', label: 'Activity Logs', icon: '📜' },
     { id: 'settings', label: 'Settings', icon: '⚙️' }
   ]
@@ -131,6 +135,8 @@ export default function AdminDashboard({ user, onLogout }) {
               <p className="text-slate-400 text-sm hidden sm:block">
                 {activeTab === 'dashboard' && 'System overview and user management'}
                 {activeTab === 'users' && 'Manage students, instructors, and administrators'}
+                {activeTab === 'assignments' && 'Manage instructor subject and block assignments'}
+                {activeTab === 'subjects' && 'Create and manage course subjects'}
                 {activeTab === 'blocks' && 'Manage class blocks and course assignments'}
                 {activeTab === 'activity' && 'Comprehensive audit trail of all administrative actions'}
                 {activeTab === 'settings' && 'Configure system-wide settings and preferences'}
@@ -164,6 +170,8 @@ export default function AdminDashboard({ user, onLogout }) {
           {/* Proper conditional rendering - only one tab renders at a time */}
           {activeTab === 'dashboard' && <DashboardOverview />}
           {activeTab === 'users' && <UserManagement />}
+          {activeTab === 'assignments' && <InstructorAssignments />}
+          {activeTab === 'subjects' && <SubjectsManagement />}
           {activeTab === 'blocks' && <BlocksSections />}
           {activeTab === 'activity' && <ActivityLogs />}
           {activeTab === 'settings' && <SystemSettings />}

@@ -20,19 +20,19 @@ export default function BlocksSections() {
   const [editForm, setEditForm] = useState({
     section_code: '',
     semester: '',
-    instructor_id: null
+    instructor_id: null,
+    subject_ids: []
   })
 
-    // ✅ NEW: State for subjects management
+    
   const [subjects, setSubjects] = useState([]) // Available subjects from API
-  const [inputSubject, setInputSubject] = useState('') // Temp input for adding subjects
+
 
   useEffect(() => {
     fetchBlocks()
-    fetchSubjects() // ✅ Also fetch subjects on load
+    fetchSubjects() 
   }, [])
 
-  // ✅ NEW: Fetch available subjects for the modal
   const fetchSubjects = async () => {
     try {
       const token = localStorage.getItem('token')
@@ -61,19 +61,6 @@ export default function BlocksSections() {
       console.error('Failed to fetch blocks:', err)
       setLoading(false)
     }
-  }
-
-  // ✅ NEW: Add subject to the list (tag style)
-  const handleAddSubject = () => {
-    if (inputSubject.trim() && !newBlock.subjects.includes(inputSubject.trim())) {
-      setNewBlock({ ...newBlock, subjects: [...newBlock.subjects, inputSubject.trim()] })
-      setInputSubject('')
-    }
-  }
-
-  // ✅ NEW: Remove subject from list
-  const handleRemoveSubject = (sub) => {
-    setNewBlock({ ...newBlock, subjects: newBlock.subjects.filter(s => s !== sub) })
   }
 
   const handleCreateBlock = async () => {
@@ -129,10 +116,20 @@ export default function BlocksSections() {
     // ✅ Edit block handlers
   const handleEditBlock = (block) => {
     setEditingBlock(block)
+    
+    // Get current subject IDs from the block's subjects
+    const currentSubjectIds = block.subjects && block.subjects.length > 0 
+      ? block.subjects.map(subName => {
+          const subject = subjects.find(s => s.name === subName)
+          return subject ? subject.id : null
+        }).filter(id => id !== null)
+      : []
+    
     setEditForm({
       section_code: block.section_code,
       semester: block.semester || '',
-      instructor_id: block.instructor_id
+      instructor_id: block.instructor_id,
+      subject_ids: currentSubjectIds
     })
     setShowEditModal(true)
   }
@@ -146,13 +143,19 @@ export default function BlocksSections() {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify(editForm)
+        body: JSON.stringify({
+          section_code: editForm.section_code,
+          semester: editForm.semester,
+          instructor_id: editForm.instructor_id,
+          subject_ids: editForm.subject_ids
+        })
       })
       
       if (res.ok) {
         setShowEditModal(false)
         setEditingBlock(null)
         fetchBlocks()
+        alert('✅ Block updated successfully!')
       } else {
         const error = await res.json()
         alert(`Failed to update block: ${error.error}`)
@@ -490,7 +493,7 @@ export default function BlocksSections() {
         </div>
       )}
 
-            {/* ✅ Edit Block Modal */}
+      {/* Edit Block Modal */}
       {showEditModal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50">
           <div className="bg-slate-900 border-2 border-purple-600/50 rounded-2xl p-6 w-full max-w-md shadow-2xl">
@@ -516,6 +519,45 @@ export default function BlocksSections() {
                   placeholder="e.g., 1st Semester 2024-2025"
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white outline-none focus:border-purple-500"
                 />
+              </div>
+              
+              {/* ✅ Subject Assignment */}
+              <div>
+                <label className="block text-slate-400 text-sm mb-2">Assign Subjects</label>
+                <div className="bg-slate-800 border border-slate-700 rounded-lg p-2 max-h-48 overflow-y-auto">
+                  {subjects.length === 0 ? (
+                    <p className="text-slate-500 text-sm text-center py-2">
+                      No subjects available. Create subjects first.
+                    </p>
+                  ) : (
+                    subjects.map(subject => (
+                      <label key={subject.id} className="flex items-center gap-2 p-2 hover:bg-slate-700 rounded cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={editForm.subject_ids.includes(subject.id)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setEditForm({
+                                ...editForm,
+                                subject_ids: [...editForm.subject_ids, subject.id]
+                              })
+                            } else {
+                              setEditForm({
+                                ...editForm,
+                                subject_ids: editForm.subject_ids.filter(id => id !== subject.id)
+                              })
+                            }
+                          }}
+                          className="w-4 h-4 rounded border-slate-600 text-purple-600 focus:ring-purple-500"
+                        />
+                        <span className="text-sm text-white">{subject.name}</span>
+                      </label>
+                    ))
+                  )}
+                </div>
+                <p className="text-xs text-slate-500 mt-1">
+                  Check subjects to assign to this block
+                </p>
               </div>
             </div>
             <div className="flex gap-3 mt-6">
@@ -543,7 +585,7 @@ export default function BlocksSections() {
             <h2 className="text-2xl font-bold text-white mb-4 flex items-center gap-2">
               <span>📦</span> Create Block
             </h2>
-                        <div className="space-y-4">
+            <div className="space-y-4">
               {/* Block Code */}
               <div>
                 <label className="block text-slate-400 text-sm mb-2">Block Code *</label>
@@ -568,41 +610,43 @@ export default function BlocksSections() {
                 />
               </div>
 
-              {/* ✅ NEW: Subjects Multi-Select with Tags */}
+              {/* NEW: Multi-Select Subjects */}
               <div>
                 <label className="block text-slate-400 text-sm mb-2">Assign Subjects</label>
-                <div className="bg-slate-800 border border-slate-700 rounded-lg p-2 flex gap-2">
-                  <input
-                    type="text"
-                    value={inputSubject}
-                    onChange={(e) => setInputSubject(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAddSubject() }}}
-                    placeholder="Type subject & press Enter..."
-                    list="subjects-list"
-                    className="flex-1 bg-transparent border-none text-white outline-none text-sm"
-                  />
-                  <button onClick={handleAddSubject} className="px-3 py-1 bg-purple-600 hover:bg-purple-500 text-white text-xs rounded font-bold">
-                    Add
-                  </button>
-                </div>
-                
-                {/* Subject Tags Display */}
-                <div className="flex flex-wrap gap-2 mt-2">
-                  {newBlock.subjects && newBlock.subjects.map((sub, idx) => (
-                    <span key={idx} className="px-2 py-1 bg-purple-600/20 text-purple-300 rounded text-xs flex items-center gap-1 border border-purple-600/40">
-                      {sub}
-                      <button onClick={() => handleRemoveSubject(sub)} className="hover:text-white">×</button>
-                    </span>
-                  ))}
-                  {(!newBlock.subjects || newBlock.subjects.length === 0) && (
-                    <span className="text-xs text-slate-500">No subjects added yet.</span>
+                <div className="bg-slate-800 border border-slate-700 rounded-lg p-2 max-h-48 overflow-y-auto">
+                  {subjects.length === 0 ? (
+                    <p className="text-slate-500 text-sm text-center py-2">
+                      No subjects available. Create subjects first in Subjects Management.
+                    </p>
+                  ) : (
+                    subjects.map(subject => (
+                      <label key={subject.id} className="flex items-center gap-2 p-2 hover:bg-slate-700 rounded cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={newBlock.subjects.includes(subject.name)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setNewBlock({
+                                ...newBlock,
+                                subjects: [...newBlock.subjects, subject.name]
+                              })
+                            } else {
+                              setNewBlock({
+                                ...newBlock,
+                                subjects: newBlock.subjects.filter(s => s !== subject.name)
+                              })
+                            }
+                          }}
+                          className="w-4 h-4 rounded border-slate-600 text-purple-600 focus:ring-purple-500"
+                        />
+                        <span className="text-sm text-white">{subject.name}</span>
+                      </label>
+                    ))
                   )}
                 </div>
-                
-                {/* Datalist for autocomplete suggestions */}
-                <datalist id="subjects-list">
-                  {subjects.map((s, idx) => <option key={idx} value={s} />)}
-                </datalist>
+                <p className="text-xs text-slate-500 mt-1">
+                  Check subjects to assign to this block
+                </p>
               </div>
             </div>
             <div className="flex gap-3 mt-6">
