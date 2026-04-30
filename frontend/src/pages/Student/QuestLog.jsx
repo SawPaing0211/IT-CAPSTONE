@@ -9,94 +9,117 @@ export default function QuestLog({ blockId }) {
   // If blockId is provided (course context), use it directly
   // Otherwise, fetch enrolled blocks (dashboard context)
   useEffect(() => {
-    if (blockId) {
-      // Course context - just use the provided blockId
-      setSelectedBlock({ id: blockId })
-      return
-    }
-    
-    // Dashboard context - fetch enrolled blocks
-    const fetchData = async () => {
+  if (blockId) {
+    // Course context - fetch block info to display properly
+    const fetchBlockInfo = async () => {
       try {
         const token = localStorage.getItem('token')
-        
-        // ✅ Use new endpoint
-        const blocksRes = await fetch('http://localhost:5000/api/student/subjects', {
+        // Get subjects to find block info
+        const subjectsRes = await fetch('http://localhost:5000/api/student/subjects', {
           headers: { 'Authorization': `Bearer ${token}` }
         })
-        const subjects = await blocksRes.json()
+        const subjects = await subjectsRes.json()
         
-        // Convert subjects to blocks format (group by block)
-        const blocksMap = {}
-        subjects.forEach(sub => {
-          if (!blocksMap[sub.block_id]) {
-            blocksMap[sub.block_id] = {
-              id: sub.block_id,
-              section_code: sub.block_code,
-              name: sub.name,
-              semester: sub.semester
-            }
-          }
-        })
+        // Find the subject for this block
+        const subject = subjects.find(s => s.block_id === blockId)
         
-        const blocks = Object.values(blocksMap)
-        setEnrolledBlocks(blocks)
-        
-        if (blocks.length > 0) {
-          setSelectedBlock(blocks[0])
+        if (subject) {
+          setSelectedBlock({
+            id: subject.block_id,
+            section_code: subject.block_code,
+            name: subject.name,
+            semester: subject.semester
+          })
         }
       } catch (err) {
-        console.error("Failed to load blocks", err)
-      } finally {
-        setLoading(false)
+        console.error('Failed to fetch block info:', err)
+        // Fallback
+        setSelectedBlock({ id: blockId, section_code: 'Block', name: 'Current Subject' })
       }
     }
-    fetchData()
-  }, [blockId])
+    fetchBlockInfo()
+    return
+  }
+  
+  // Dashboard context - fetch enrolled blocks (existing code)
+  const fetchData = async () => {
+    // ... your existing dashboard context code ...
+  }
+  fetchData()
+}, [blockId])
 
   // Fetch submissions when block changes
   useEffect(() => {
     if (!selectedBlock) return
     
     const fetchSubmissions = async () => {
-      setLoading(true)
-      try {
-        const token = localStorage.getItem('token')
-        const res = await fetch(
-          `http://localhost:5000/api/student/submissions/by-block?block_id=${selectedBlock.id}`,
-          { headers: { 'Authorization': `Bearer ${token}` } }
-        )
-        const data = await res.json()
-        setSubmissions(data.submissions || [])
-      } catch (err) {
-        console.error("Failed to load submissions", err)
-      } finally {
-        setLoading(false)
+  setLoading(true)
+  try {
+    const token = localStorage.getItem('token')
+    
+    // Fetch ALL quests for this block
+    const questsRes = await fetch(
+      `http://localhost:5000/api/problems?block_id=${selectedBlock.id}&subject_id=${selectedBlock.subject_id || ''}`,
+      { headers: { 'Authorization': `Bearer ${token}` } }
+    )
+    const allQuests = await questsRes.json()
+    
+    // Fetch student's submissions
+    const subsRes = await fetch(
+      `http://localhost:5000/api/student/submissions/by-block?block_id=${selectedBlock.id}`,
+      { headers: { 'Authorization': `Bearer ${token}` } }
+    )
+    const subsData = await subsRes.json()
+    const submissions = subsData.submissions || []
+    
+    // Merge: Each quest appears once with its best submission
+    const questsWithStatus = allQuests.map(quest => {
+      // Find best submission for this quest (accepted or latest)
+      const questSubmissions = submissions.filter(s => s.problem_id === quest.id)
+      const bestSubmission = questSubmissions.find(s => s.status === 'accepted') || 
+                            questSubmissions[questSubmissions.length - 1]
+      
+      return {
+        ...quest,
+        status: bestSubmission 
+          ? (bestSubmission.status === 'accepted' ? 'conquered' : 'ongoing')
+          : 'ongoing',
+        submission: bestSubmission,
+        attempts: questSubmissions.length
       }
-    }
+    })
+    
+    setSubmissions(questsWithStatus)
+  } catch (err) {
+    console.error("Failed to load quests", err)
+  } finally {
+    setLoading(false)
+  }
+}
     
     fetchSubmissions()
   }, [selectedBlock])
 
-  if (loading && enrolledBlocks.length === 0) {
-    return (
-      <div className="text-center py-20 text-purple-300 animate-pulse">
-        Loading Quest Log...
-      </div>
-    )
-  }
+  if (loading) {
+  return (
+    <div className="text-center py-20 text-purple-300 animate-pulse">
+      Loading Quest Log...
+    </div>
+  )
+}
 
-  if (enrolledBlocks.length === 0) {
-    return (
-      <div className="p-6 max-w-4xl mx-auto">
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-12 text-center">
-          <div className="text-5xl mb-4">📚</div>
-          <h2 className="text-xl font-bold text-white mb-2">No Subjects Enrolled</h2>
-          <p className="text-slate-400">You're not enrolled in any subjects yet. Contact your administrator.</p>
-        </div>
+// Only show "No Subjects Enrolled" in dashboard context (not course context)
+if (!blockId && enrolledBlocks.length === 0) {
+  return (
+    <div className="p-6 max-w-4xl mx-auto">
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-12 text-center">
+        <div className="text-5xl mb-4">📚</div>
+        <h2 className="text-xl font-bold text-white mb-2">No Subjects Enrolled</h2>
+        <p className="text-slate-400">You're not enrolled in any subjects yet. Contact your administrator.</p>
       </div>
-    )
-  }
+    </div>
+  )
+}
 
   return (
     <div className="p-6 max-w-4xl mx-auto space-y-6">
@@ -161,47 +184,68 @@ export default function QuestLog({ blockId }) {
               <span>Success Rate: {Math.round((submissions.filter(s => s.status === 'accepted').length / submissions.length) * 100)}%</span>
             </div>
             
-            {submissions.map((sub) => (
+            {submissions.map((quest) => {
+            const isConquered = quest.status === 'conquered'
+            const isOngoing = quest.status === 'ongoing'
+            
+            return (
               <div 
-                key={sub.id} 
-                className="group bg-slate-900 border border-slate-800 rounded-xl p-4 hover:border-purple-500/50 transition-all duration-300 flex items-center justify-between"
+                key={quest.id} 
+                className={`group border rounded-xl p-4 transition-all duration-300 flex items-center justify-between ${
+                  isConquered 
+                    ? 'bg-green-900/10 border-green-600/30 hover:border-green-500/50' 
+                    : 'bg-slate-900 border-slate-800 hover:border-purple-500/50'
+                }`}
               >
                 <div className="flex items-center gap-4">
+                  {/* Icon with animation for conquered */}
                   <div className={`w-12 h-12 rounded-lg flex items-center justify-center text-xl transition-transform group-hover:scale-110 ${
-                    sub.status === 'accepted' ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'
+                    isConquered ? 'bg-green-900/30 text-green-400' : 'bg-slate-800 text-slate-400'
                   }`}>
-                    {sub.status === 'accepted' ? '⚔️' : '💀'}
+                    {isConquered ? (
+                      <span className="animate-pulse">⚔️</span>
+                    ) : (
+                      <span>📜</span>
+                    )}
                   </div>
+                  
                   <div>
-                    <h3 className="font-bold text-white group-hover:text-purple-400 transition">
-                      {sub.problem_title}
+                    <h3 className={`font-bold group-hover:text-purple-400 transition ${
+                      isConquered ? 'text-green-400' : 'text-white'
+                    }`}>
+                      {quest.title}
                     </h3>
                     <p className="text-xs text-slate-500">
-                      {new Date(sub.submitted_at).toLocaleDateString()} • {sub.language.toUpperCase()}
+                      {quest.difficulty} • {quest.languages?.[0]?.toUpperCase() || 'PYTHON'}
                     </p>
+                    {quest.attempts > 0 && (
+                      <p className="text-xs text-slate-500">
+                        {quest.attempts} attempt{quest.attempts > 1 ? 's' : ''}
+                      </p>
+                    )}
                   </div>
                 </div>
 
                 <div className="flex items-center gap-6 text-sm">
                   {/* Status Badge */}
                   <span className={`px-3 py-1 rounded-full text-xs font-bold border ${
-                    sub.status === 'accepted' 
+                    isConquered 
                       ? 'bg-green-500/20 text-green-400 border-green-500/30' 
-                      : 'bg-red-500/20 text-red-400 border-red-500/30'
+                      : 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'
                   }`}>
-                    {sub.status === 'accepted' ? 'CONQUERED' : 'DEFEATED'}
+                    {isConquered ? '⚔️ CONQUERED' : '📜 ONGOING'}
                   </span>
 
                   {/* XP Reward */}
                   <div className="text-right">
-                    <span className={`font-bold text-lg ${sub.status === 'accepted' ? 'text-yellow-400' : 'text-slate-600'}`}>
-                      {sub.status === 'accepted' ? `+${sub.score} XP` : '0 XP'}
+                    <span className={`font-bold text-lg ${isConquered ? 'text-yellow-400' : 'text-slate-600'}`}>
+                      {isConquered ? `+${quest.xp_reward} XP` : `${quest.xp_reward} XP`}
                     </span>
-                    <p className="text-xs text-slate-500">Score: {sub.score}</p>
                   </div>
                 </div>
               </div>
-            ))}
+            )
+          })}
           </>
         )}
       </div>

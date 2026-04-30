@@ -504,15 +504,19 @@ def create_problem():
     return jsonify({"message": "Problem created", "problem_id": p.id}), 201
 
 @app.route('/api/problems', methods=['GET'])
+@jwt_required()  # ✅ Ensure auth is required for student filtering
 def get_problems():
     """Get published problems with filtering for block visibility & problem type"""
+    user_id = int(get_jwt_identity())  # ✅ Get user_id once at top
+    user = User.query.get(user_id)
+    
     block_id = request.args.get('block_id', type=int)
-    subject_id = request.args.get('subject_id', type=int)  # ✅ NEW: Filter by subject
-    problem_type = request.args.get('type')  # 'coding' or 'debugging'
+    subject_id = request.args.get('subject_id', type=int)
+    problem_type = request.args.get('type')
     
     query = Problem.query.filter_by(is_published=True)
     
-    if subject_id:  # ✅ NEW: If subject specified, filter to that subject only
+    if subject_id:
         query = query.filter_by(subject_id=subject_id)
     
     if problem_type:
@@ -522,13 +526,16 @@ def get_problems():
     filtered = []
     
     for p in problems:
-        # ✅ NEW: If problem has a subject, verify student is enrolled in a block that offers it
-        if p.subject_id:
+        # ✅ FIXED: Student enrollment check
+        if p.subject_id and user.role == 'student':
             # Get student's enrolled blocks
             student_enrollments = db.session.query(student_blocks.c.block_id).filter_by(
-                student_id=int(get_jwt_identity()) if request.headers.get('Authorization') else None
-            ).all() if request.headers.get('Authorization') else []
+                student_id=user_id  # ✅ Use user_id from top, not conditional
+            ).all()
             student_block_ids = [e.block_id for e in student_enrollments]
+            
+            if not student_block_ids:
+                continue  # Student not enrolled in any blocks
             
             # Check if problem's subject is offered in any of student's blocks
             subject_in_student_blocks = db.session.query(block_subjects.c.block_id).filter_by(
@@ -536,10 +543,10 @@ def get_problems():
             ).all()
             valid_blocks = [s.block_id for s in subject_in_student_blocks]
             
-            if student_block_ids and not any(bid in valid_blocks for bid in student_block_ids):
-                continue  # Skip this problem - student not enrolled in this subject
+            if not any(bid in valid_blocks for bid in student_block_ids):
+                continue  # Skip - student not enrolled in this subject
         
-        # Block visibility: empty = visible to all assigned blocks; otherwise check membership
+        # Block visibility filter
         if not p.visible_to_blocks or (block_id and block_id in p.visible_to_blocks):
             filtered.append(p)
         elif not block_id and not p.visible_to_blocks:
@@ -562,13 +569,13 @@ def get_problems():
             if instructor:
                 instructor_name = instructor.username
         
-        # ✅ Get block section codes (NEW TABLE)
+        # Get block section codes
         block_names = []
         if p.visible_to_blocks:
             for bid in p.visible_to_blocks:
                 block = Block.query.get(bid)
                 if block:
-                    block_names.append(block.section_code)  # Use section code as name
+                    block_names.append(block.section_code)
         
         result.append({
             "id": p.id,
@@ -587,8 +594,8 @@ def get_problems():
             "partial_credit": p.partial_credit,
             "auto_grade": p.auto_grade,
             "due_date": p.due_date.isoformat() if p.due_date else None,
-            "instructor_name": instructor_name,  # ✅ NEW: For quest cards
-            "block_names": block_names,  # ✅ NEW: For quest cards
+            "instructor_name": instructor_name,
+            "block_names": block_names,
             "created_at": p.created_at.isoformat()
         })
     
@@ -640,6 +647,109 @@ def get_problem_detail(problem_id):
         "due_date": problem.due_date.isoformat() if problem.due_date else None,
         "instructor_name": instructor_name,  # ✅ NEW
         "block_names": block_names  # ✅ NEW
+    }), 200
+
+@app.route('/api/problems/<int:problem_id>', methods=['PUT'])
+@jwt_required()
+def update_problem(problem_id):
+    """Update an existing problem (instructors/admins only)"""
+    user_id = int(get_jwt_identity())
+    user = User.query.get(user_id)
+    
+    if not is_instructor_or_admin(user):
+        return jsonify({"error": "Unauthorized"}), 403
+    
+    problem = Problem.query.get_or_404(problem_id)
+    
+    # Verify ownership
+    if problem.created_by != user_id and user.role != 'admin':
+        return jsonify({"error": "Not your problem"}), 403
+    
+    data = request.get_json()
+    
+    # ===== VALIDATION (same as create) =====
+    required = ['title', 'description', 'difficulty', 'xp_reward', 'test_cases']
+    if not all(k in data for k in required):
+        return jsonify({"error": "Missing required fields"}), 400
+    
+    if data['difficulty'] not in ['Easy', 'Medium', 'Hard']:
+        return jsonify({"error": "Invalid difficulty"}), 400
+    
+    if not isinstance(data['test_cases'], list) or len(data['test_cases']) == 0:
+        return jsonify({"error": "At least one test case required"}), 400
+    
+    # XP Validation
+    max_xp = {'Easy': 100, 'Medium': 250, 'Hard': 500}
+    if data['xp_reward'] > max_xp[data['difficulty']]:
+        return jsonify({
+            "error": f"XP reward exceeds maximum for {data['difficulty']} difficulty"
+        }), 400
+    
+    # Subject validation
+    subject_id = data.get('subject_id')
+    if not subject_id:
+        return jsonify({"error": "Course subject is required"}), 400
+    
+    if not is_instructor_assigned(user_id, subject_id):
+        return jsonify({"error": "You are not assigned to teach this subject"}), 403
+    
+    # ===== UPDATE FIELDS =====
+    problem.title = data['title']
+    problem.description = data['description']
+    problem.difficulty = data['difficulty']
+    problem.xp_reward = data['xp_reward']
+    problem.category = data.get('category', problem.category)
+    problem.test_cases = data['test_cases']
+    problem.is_published = data.get('is_published', problem.is_published)
+    problem.subject_id = subject_id
+    
+    # PRO FEATURES
+    problem.problem_type = data.get('problem_type', problem.problem_type)
+    problem.languages = data.get('languages', problem.languages)
+    problem.is_event_quest = data.get('is_event_quest', problem.is_event_quest)
+    problem.visible_to_blocks = data.get('visible_to_blocks', problem.visible_to_blocks)
+    problem.hints = data.get('hints', problem.hints)
+    problem.tags = data.get('tags', problem.tags)
+    problem.prerequisites = data.get('prerequisites', problem.prerequisites)
+    problem.estimated_time = data.get('estimated_time', problem.estimated_time)
+    problem.partial_credit = data.get('partial_credit', problem.partial_credit)
+    problem.auto_grade = data.get('auto_grade', problem.auto_grade)
+    problem.plagiarism_threshold = data.get('plagiarism_threshold', problem.plagiarism_threshold)
+    
+    # Parse due_date
+    if data.get('due_date'):
+        try:
+            problem.due_date = datetime.fromisoformat(data['due_date'])
+        except:
+            pass
+    
+    # Handle starter_code
+    starter_code = data.get('starter_code')
+    if starter_code:
+        if isinstance(starter_code, str):
+            try:
+                starter_code = json.loads(starter_code)
+            except:
+                pass
+        problem.starter_code = starter_code
+    
+    db.session.commit()
+    
+    # ===== UPDATE BLOCK ASSIGNMENTS =====
+    if 'visible_to_blocks' in data:
+        # Remove old assignments
+        db.session.query(block_problems).filter_by(problem_id=problem_id).delete()
+        # Add new assignments
+        for block_id in data['visible_to_blocks']:
+            db.session.execute(block_problems.insert().values(
+                block_id=block_id,
+                problem_id=problem_id
+            ))
+        db.session.commit()
+    
+    return jsonify({
+        "message": "Problem updated successfully",
+        "problem_id": problem.id
     }), 200
 
 # ===== PROBLEM DELETE ENDPOINT =====
@@ -727,6 +837,42 @@ def create_submission():
         db.session.rollback()
         sub.status = 'error'
         db.session.commit()
+        return jsonify({"error": str(e)}), 500
+    
+@app.route('/api/problems/<int:problem_id>/test', methods=['POST'])
+@jwt_required()
+def test_problem_code(problem_id):
+    """Instructors can test code without submitting (no XP, no submission recorded)"""
+    user_id = int(get_jwt_identity())
+    user = User.query.get(user_id)
+    
+    if not is_instructor_or_admin(user):
+        return jsonify({"error": "Instructors and admins only"}), 403
+    
+    data = request.get_json()
+    if not all(k in data for k in ['code', 'language']):
+        return jsonify({"error": "Missing code or language"}), 400
+    
+    prob = Problem.query.get_or_404(problem_id)
+    if not prob.is_published:
+        return jsonify({"error": "Problem not available"}), 404
+    
+    # Run the code against test cases
+    try:
+        results = evaluate_code(data['code'], prob.test_cases, data['language'])
+        
+        passed = sum(1 for r in results if r['passed'])
+        total = len(results)
+        
+        return jsonify({
+            "message": "Test mode - no submission recorded",
+            "test_results": results,
+            "passed": passed,
+            "total": total,
+            "success_rate": round((passed/total*100), 1) if total > 0 else 0
+        }), 200
+        
+    except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/student/submissions', methods=['GET'])
@@ -996,25 +1142,144 @@ def get_instructor_classes():
     if not is_instructor_or_admin(user): 
         return jsonify({"error": "Unauthorized"}), 403
     
-    # ✅ Use NEW Block model
-    blocks = Block.query.filter_by(instructor_id=user.id).all()
+    # ✅ NEW: Get blocks from TeacherAssignment table
+    assignments = TeacherAssignment.query.filter_by(instructor_id=user_id).all()
+    block_ids = list(set(a.block_id for a in assignments))  # Unique block IDs
+    
+    if not block_ids:
+        return jsonify([]), 200
+    
+    # Fetch blocks
+    blocks = Block.query.filter(Block.id.in_(block_ids)).all()
+    
     result = []
     for b in blocks:
-        # ✅ Get subjects for this block
+        # Get subjects for this block
         subj_ids = [s.subject_id for s in db.session.query(block_subjects.c.subject_id).filter_by(block_id=b.id).all()]
         subjects = [Subject.query.get(sid).name for sid in subj_ids if Subject.query.get(sid)]
-        # ✅ Count students in NEW table
+        
+        # Count students
         student_count = db.session.query(student_blocks.c.student_id).filter_by(block_id=b.id).count()
+        
+        # ✅ Count problems assigned to this block (via block_problems junction table)
+        problem_count = db.session.query(block_problems.c.problem_id).filter_by(block_id=b.id).count()
         
         result.append({
             "id": b.id, 
             "section_code": b.section_code, 
-            "name": b.section_code,  # Block code as name
+            "name": b.section_code,
             "subjects": subjects,
             "semester": b.semester, 
-            "student_count": student_count
+            "student_count": student_count,
+            "problem_count": problem_count  # ✅ Send problem count to frontend
         })
     return jsonify(result), 200
+
+@app.route('/api/instructor/dashboard-stats', methods=['GET'])
+@jwt_required()
+def get_instructor_dashboard_stats():
+    """Get instructor dashboard statistics"""
+    user_id = int(get_jwt_identity())
+    user = User.query.get(user_id)
+    
+    if not is_instructor_or_admin(user):
+        return jsonify({"error": "Unauthorized"}), 403
+    
+    # Get all blocks this instructor teaches
+    assignments = TeacherAssignment.query.filter_by(instructor_id=user_id).all()
+    block_ids = list(set(a.block_id for a in assignments))
+    
+    if not block_ids:
+        return jsonify({
+            "total_students": 0,
+            "total_problems": 0,
+            "avg_score": 0,
+            "pending_reviews": 0,
+            "new_problems_this_week": 0,
+            "recent_activity": [],
+            "top_performers": []
+        }), 200
+    
+    # 1. Total students across all blocks
+    student_rows = db.session.query(student_blocks.c.student_id).filter(
+        student_blocks.c.block_id.in_(block_ids)
+    ).distinct().all()
+    total_students = len(student_rows)
+    student_ids = [s[0] for s in student_rows]
+    
+    # 2. Total problems created by this instructor
+    total_problems = Problem.query.filter_by(created_by=user_id, is_published=True).count()
+    
+    # 3. Average class score (from submissions)
+    if student_ids:
+        submissions = Submission.query.filter(
+            Submission.user_id.in_(student_ids),
+            Submission.problem_id.in_(
+                db.session.query(Problem.id).filter(Problem.created_by == user_id)
+            )
+        ).all()
+        
+        if submissions:
+            total_score = sum(s.score for s in submissions)
+            max_possible = len(submissions) * 100  # Assuming max score is 100
+            avg_score = round((total_score / max_possible) * 100) if max_possible > 0 else 0
+        else:
+            avg_score = 0
+    else:
+        avg_score = 0
+    
+    # 4. Pending reviews (submissions needing manual review)
+    pending_reviews = Submission.query.filter(
+        Submission.status == 'pending_review'
+    ).count() if 'pending_review' in [col.name for col in Submission.__table__.columns] else 0
+    
+    # 5. New problems this week
+    from datetime import datetime, timedelta
+    one_week_ago = datetime.utcnow() - timedelta(days=7)
+    new_problems = Problem.query.filter(
+        Problem.created_by == user_id,
+        Problem.created_at >= one_week_ago
+    ).count()
+    
+    # 6. Recent activity (last 10 submissions from students)
+    recent_subs = Submission.query.filter(
+        Submission.user_id.in_(student_ids) if student_ids else False
+    ).order_by(Submission.submitted_at.desc()).limit(10).all()
+    
+    recent_activity = [{
+        "id": s.id,
+        "student": User.query.get(s.user_id).username if s.user_id else "Unknown",
+        "problem": Problem.query.get(s.problem_id).title if s.problem_id else "Unknown",
+        "status": s.status,
+        "score": s.score,
+        "submitted_at": s.submitted_at.isoformat()
+    } for s in recent_subs]
+    
+    # 7. Top performers (top 5 students by XP)
+    if student_ids:
+        top_students = User.query.filter(
+            User.id.in_(student_ids),
+            User.role == 'student'
+        ).order_by(User.xp.desc()).limit(5).all()
+        
+        top_performers = [{
+            "id": s.id,
+            "username": s.username,
+            "xp": s.xp,
+            "level": s.level
+        } for s in top_students]
+    else:
+        top_performers = []
+    
+    return jsonify({
+        "total_students": total_students,
+        "total_problems": total_problems,
+        "avg_score": avg_score,
+        "pending_reviews": pending_reviews,
+        "new_problems_this_week": new_problems,
+        "recent_activity": recent_activity,
+        "top_performers": top_performers
+    }), 200
 
 @app.route('/api/instructor/assigned-subjects', methods=['GET'])
 @jwt_required()

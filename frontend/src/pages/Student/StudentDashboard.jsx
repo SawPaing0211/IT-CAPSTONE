@@ -606,10 +606,26 @@ export default function StudentDashboard({ user, onLogout }) {
     return () => document.body.classList.remove('editor-active')
   }, [activeTab, selectedQuest])
 
-  const handleQuestSelect = (quest) => { setSelectedQuest(quest); setActiveTab('spellforge') }
-  const handleVictory = (xpEarned, newLevel) => {
-    setHeroStats(prev => ({ ...prev, total_xp: (prev?.total_xp || 0) + xpEarned, level: newLevel }))
+  const handleQuestSelect = (quest) => {
+  console.log(`📚 Selected quest: ${quest.id} - ${quest.title}`)
+  // Check if this quest is already completed
+  const isCompleted = localStorage.getItem(`quest_completed_${quest.id}`)
+  if (isCompleted === 'true') {
+    console.log(`✅ Quest ${quest.id} is already completed!`)
   }
+  setSelectedQuest(quest)
+  setActiveTab('spellforge')
+}
+  const handleVictory = (xpEarned, newLevel) => {
+  // ✅ Mark quest as completed in localStorage
+  if (selectedQuest?.id) {
+    localStorage.setItem(`quest_completed_${selectedQuest.id}`, 'true')
+    console.log(`✅ Quest ${selectedQuest.id} marked as completed`)
+  }
+  
+  setHeroStats(prev => ({ ...prev, total_xp: (prev?.total_xp || 0) + xpEarned, level: newLevel }))
+}
+
   const handleReturnFromQuest = () => { setSelectedQuest(null); setActiveTab('quests') }
   const handleCarryToSandbox = (code, language) => {
     setSandboxSeed({ code, language })
@@ -618,10 +634,19 @@ export default function StudentDashboard({ user, onLogout }) {
   const handleLogoutClick = () => { setShowProfileMenu(false); onLogout() }
   
   // Navigation handlers for nested subject view
-  const handleEnterSubject = (block) => {
-    setSelectedBlock(block)
-    setCourseTab('board')
-  }
+  const handleEnterSubject = (subject) => {
+    console.log('📚 Entering subject:', subject)
+  // subject contains: { id, name, block_id, block_code, semester, instructor }
+    setSelectedBlock({
+      id: subject.block_id,
+      section_code: subject.block_code,
+      name: subject.name,  // Subject name
+      semester: subject.semester,
+      instructor: subject.instructor,
+      subject_id: subject.id  // ✅ Store the specific subject_id!
+    })
+  setCourseTab('board')
+}
 
   const handleExitSubject = () => {
     setSelectedBlock(null)
@@ -894,6 +919,7 @@ export default function StudentDashboard({ user, onLogout }) {
                   onSelectQuest={handleQuestSelect} 
                   currentLevel={heroStats?.level || 1}
                   blockId={selectedBlock.id}
+                  subjectId={selectedBlock.subject_id}
                 />
               )}
               {courseTab === 'log' && (

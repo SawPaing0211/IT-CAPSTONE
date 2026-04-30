@@ -20,6 +20,9 @@ export default function StudentCodeEditor({
   const [showHints, setShowHints] = useState(false)
   const [usedHints, setUsedHints] = useState([])
   const [xpGained, setXpGained] = useState(0)
+  const [userRole, setUserRole] = useState(null)
+  const [isQuestCompleted, setIsQuestCompleted] = useState(false) 
+  const [savedCode, setSavedCode] = useState('')   
   const [showSuccessAnim, setShowSuccessAnim] = useState(false)
   const [combo, setCombo] = useState(0)
   const [autoSaveTimer, setAutoSaveTimer] = useState(null)
@@ -149,20 +152,39 @@ const formatErrorOutput = (rawOutput, language) => {
   return rawOutput
 }
 
-  // Load saved code on mount
-  useEffect(() => {
-    if (quest?.starter_code) {
-      const saved = localStorage.getItem(`forge_code_${quest.id}_${language}`)
-      if (saved) {
-        setCode(saved)
-      } else {
-        const starter = typeof quest.starter_code === 'string'
-          ? JSON.parse(quest.starter_code)
-          : quest.starter_code
-        setCode(starter[language] || '')
-      }
+  // Load saved code on mount + detect role + check completion
+useEffect(() => {
+  // ✅ Detect user role from JWT
+  const token = localStorage.getItem('token')
+  if (token) {
+    try {
+      const payload = JSON.parse(atob(token.split('.')[1]))
+      setUserRole(payload.role || 'student')
+    } catch (err) {
+      console.error('Failed to decode token:', err)
+      setUserRole('student')
     }
-  }, [quest, language])
+  }
+  
+  if (quest?.id) {
+    // ✅ Load saved code for this quest + language
+    const saved = localStorage.getItem(`quest_code_${quest.id}_${language}`)
+    if (saved) {
+      setSavedCode(saved)
+      setCode(saved)  // Set the editor code
+    } else if (quest?.starter_code) {
+      // Load starter code if no saved code
+      const starter = typeof quest.starter_code === 'string'
+        ? JSON.parse(quest.starter_code)
+        : quest.starter_code
+      setCode(starter?.[language] || '')
+    }
+    
+    // ✅ Check if quest is marked as completed
+    const completed = localStorage.getItem(`quest_completed_${quest.id}`)
+    setIsQuestCompleted(completed === 'true')
+  }
+}, [quest, language])  // Re-run when quest or language changes
 
   // Auto-save every 5 seconds
   useEffect(() => {
@@ -261,13 +283,76 @@ const formatErrorOutput = (rawOutput, language) => {
   }
 }
 
+  // ✅ NEW: Test code for instructors (no submission, no XP)
+  const handleTestCode = async () => {
+    setIsLoading(true)
+    setOutput(null)
+    
+    // Clear previous markers
+    if (monacoRef.current && editorRef.current) {
+      monacoRef.current.editor.setModelMarkers(
+        editorRef.current.getModel(), 'forge', []
+      )
+    }
+    
+    try {
+      const token = localStorage.getItem('token')
+      const res = await fetch(`http://localhost:5000/api/problems/${quest.id}/test`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ code, language })
+      })
+      
+      if (res.ok) {
+        const data = await res.json()
+        setOutput({
+          ...data,
+          status: 'test_mode',
+          message: data.message
+        })
+        
+        // Highlight errors if any tests failed
+        if (data.test_results) {
+          const errorOutput = data.test_results.find(t => !t.passed)?.output || ''
+          parseAndHighlightErrors(errorOutput, language)
+        }
+        
+        // Show feedback
+        if (data.passed === data.total) {
+          alert(`✅ All ${data.total} test cases passed! (Test mode)`)
+        } else {
+          alert(`⚠️ ${data.passed}/${data.total} test cases passed`)
+        }
+      } else {
+        const error = await res.json()
+        setOutput({ error: error.error, status: 'error' })
+        alert(`Test failed: ${error.error}`)
+      }
+    } catch (err) {
+      console.error('Test error:', err)
+      setOutput({ error: err.message, status: 'error' })
+      alert('Failed to test code')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
   // 🔒 UPDATED: Using api.post instead of fetch
-  const handleSubmit = async () => {
+    const handleSubmit = async () => {
     setIsLoading(true)
     setOutput(null)
     try {
       const data = await api.post('/api/submissions', { problem_id: quest.id, code, language })
       setOutput(data)
+      
+      // ✅ Save code to localStorage on submit
+      if (quest?.id) {
+        localStorage.setItem(`quest_code_${quest.id}_${language}`, code)
+      }
+      
       if (data.status === 'accepted') {
         setShowSuccessAnim(true)
         const hintPenalty = usedHints.reduce((sum, hId) => {
@@ -679,6 +764,12 @@ const formatErrorOutput = (rawOutput, language) => {
           >
             {/* Console header */}
             <div className="flex items-center justify-between px-4 py-2 border-b border-purple-600/20 bg-slate-800/40 shrink-0">
+            {/* ✅ Show role indicator for instructors */}
+            {(userRole === 'instructor' || userRole === 'admin') && (
+              <div className="px-4 py-1 bg-yellow-600/10 border-t border-yellow-600/20 text-[10px] text-yellow-400 text-center">
+                ⚠️ Test mode: Results won't be saved or affect XP
+              </div>
+            )}
               <span className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
                 🔮 Crystal Ball (Console)
                 {isLoading && <span className="text-blue-400 animate-pulse">• Casting spell...</span>}
@@ -691,13 +782,28 @@ const formatErrorOutput = (rawOutput, language) => {
                 >
                   {isLoading ? '⏳' : '▶'} Run <span className="hidden sm:inline">(Ctrl+Enter)</span>
                 </button>
-                <button
-                  onClick={handleSubmit}
-                  disabled={isLoading}
-                  className="px-4 py-1.5 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-md text-xs font-bold text-white transition flex items-center gap-1.5 shadow-lg shadow-green-600/20 border border-green-500/50"
-                >
-                  {isLoading ? '⏳' : '⚔️'} Submit
-                </button>
+                {/* ✅ CONDITIONAL: Instructor sees "Test Code", Student sees "Submit" */}
+                {userRole === 'instructor' || userRole === 'admin' ? (
+                  <button
+                    onClick={handleTestCode}
+                    disabled={isLoading}
+                    className="px-4 py-1.5 bg-gradient-to-r from-yellow-600 to-orange-600 hover:from-yellow-500 hover:to-orange-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-md text-xs font-bold text-white transition flex items-center gap-1.5 shadow-lg shadow-yellow-600/20 border border-yellow-500/50"
+                  >
+                    {isLoading ? '⏳' : '🧪'} Test Code
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleSubmit}
+                    disabled={isLoading || isQuestCompleted}  // ✅ Disable if completed
+                    className={`px-4 py-1.5 rounded-md text-xs font-bold transition flex items-center gap-1.5 ${
+                      isQuestCompleted
+                        ? 'bg-slate-700 text-slate-500 cursor-not-allowed border border-slate-600'
+                        : 'bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 text-white shadow-lg shadow-green-600/20 border border-green-500/50'
+                    }`}
+                  >
+                    {isLoading ? '⏳' : '⚔️'} {isQuestCompleted ? 'Already Conquered' : 'Submit'}
+                  </button>
+                )}
               </div>
             </div>
 

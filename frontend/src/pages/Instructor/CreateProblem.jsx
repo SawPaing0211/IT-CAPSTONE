@@ -1,9 +1,12 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'  // ✅ changed useparams to usesearchparams
 
 export default function CreateProblem() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()  // ✅ Read query params
+  const problemId = searchParams.get('edit')  // ✅ Get problem ID from ?edit=123
   const [blocks, setBlocks] = useState([])
+  const [isEditing, setIsEditing] = useState(!!problemId)  // ✅ Editing mode if problemId exists
   const [assignedSubjects, setAssignedSubjects] = useState([])
   const [selectedSubjectId, setSelectedSubjectId] = useState(null)
   const [activeSection, setActiveSection] = useState(1)
@@ -38,38 +41,78 @@ export default function CreateProblem() {
     test_cases: [{ input: '', expected: '' }]
   })
 
-  // ✅ Fetch subjects AND blocks
-  useEffect(() => {
-    const fetchBlocks = async () => {
-      try {
-        const token = localStorage.getItem('token')
-        
-        // ✅ Fetch assigned subjects first (CORRECT CASING)
-        const subjectsRes = await fetch('http://localhost:5000/api/instructor/assigned-subjects', {
+  // ✅ Fetch subjects AND blocks (and problem data if editing)
+useEffect(() => {
+  const fetchData = async () => {
+    try {
+      const token = localStorage.getItem('token')
+      
+      // ✅ Check if we're editing an existing problem
+      if (problemId) {
+        setIsEditing(true)
+        // Fetch existing problem data
+        const problemRes = await fetch(`http://localhost:5000/api/instructor/problems/${problemId}`, {
           headers: { 'Authorization': `Bearer ${token}` }
         })
-        if (subjectsRes.ok) {
-          const subjectsData = await subjectsRes.json()
-          setAssignedSubjects(subjectsData)
+        if (problemRes.ok) {
+          const problemData = await problemRes.json()
+          
+          // ✅ Populate form with existing data
+          setFormData({
+            ...formData,
+            title: problemData.title,
+            description: problemData.description,
+            difficulty: problemData.difficulty,
+            xp_reward: problemData.xp_reward,
+            category: problemData.category || 'General',
+            problem_type: problemData.problem_type || 'coding',
+            languages: problemData.languages || ['python'],
+            is_event_quest: problemData.is_event_quest || false,
+            visible_to_blocks: problemData.visible_to_blocks || [],
+            hints: problemData.hints || [],
+            tags: problemData.tags || [],
+            prerequisites: problemData.prerequisites || [],
+            estimated_time: problemData.estimated_time || '15min',
+            partial_credit: problemData.partial_credit || 100,
+            auto_grade: problemData.auto_grade !== undefined ? problemData.auto_grade : true,
+            plagiarism_threshold: problemData.plagiarism_threshold || 0.85,
+            starter_code: problemData.starter_code || { python: '', java: '', csharp: '' },
+            test_cases: problemData.test_cases || [{ input: '', expected: '' }]
+          })
+          
+          // ✅ Set selected subject (with delay to ensure subjects are loaded)
+          if (problemData.subject_id) {
+            // Wait a tick for assignedSubjects to populate
+            setTimeout(() => {
+              setSelectedSubjectId(problemData.subject_id)
+            }, 100)
+          }
         }
-        
-        // ✅ Then fetch blocks for visibility filter
-        const res = await fetch('http://localhost:5000/api/instructor/classes', {
-          headers: { 'Authorization': `Bearer ${token}` }
-        })
-        if (res.ok) {
-          const data = await res.json()
-          setBlocks(data)
-          // ✅ Subjects already fetched from API above - no extraction needed
-        } else {
-          console.error('Failed to fetch classes:', await res.text())
-        }
-      } catch (err) {
-        console.error('Failed to fetch classes:', err)
       }
+      
+      // ✅ Fetch assigned subjects
+      const subjectsRes = await fetch('http://localhost:5000/api/instructor/assigned-subjects', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      if (subjectsRes.ok) {
+        const subjectsData = await subjectsRes.json()
+        setAssignedSubjects(subjectsData)
+      }
+      
+      // ✅ Fetch blocks
+      const res = await fetch('http://localhost:5000/api/instructor/classes', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setBlocks(data)
+      }
+    } catch (err) {
+      console.error('Failed to fetch data:', err)
     }
-    fetchBlocks()
-  }, [])
+  }
+  fetchData()
+}, [problemId])  // ✅ Re-run if problemId changes
 
   const handleInputChange = (field, value) => {
     setFormData(prev => ({ ...prev, [field]: value }))
@@ -156,18 +199,25 @@ export default function CreateProblem() {
     }
 
     try {
-      const token = localStorage.getItem('token')
-      
-      // ✅ Prepare payload with subject_id
-      const payload = {
-        ...formData,
-        subject_id: selectedSubjectId,  // ✅ NEW: Link problem to selected subject
-        starter_code: formData.starter_code, 
-        is_published: true
-      }
-      
-      const res = await fetch('http://localhost:5000/api/problems', {
-        method: 'POST',
+  const token = localStorage.getItem('token')
+  
+  // ✅ Prepare payload with subject_id
+  const payload = {
+    ...formData,
+    subject_id: selectedSubjectId,
+    starter_code: formData.starter_code, 
+    is_published: true
+  }
+  
+  // ✅ EDIT vs CREATE logic
+  const url = isEditing 
+    ? `http://localhost:5000/api/problems/${problemId}`
+    : 'http://localhost:5000/api/problems'
+  
+  const method = isEditing ? 'PUT' : 'POST'
+  
+  const res = await fetch(url, {
+    method: method,
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
@@ -176,7 +226,7 @@ export default function CreateProblem() {
       })
       
       if (res.ok) {
-        alert('✅ Problem created successfully!')
+        alert(isEditing ? '✅ Problem updated successfully!' : '✅ Problem created successfully!')
         navigate('/instructor/problems')
       } else {
         const error = await res.json()
@@ -205,7 +255,9 @@ export default function CreateProblem() {
           ← Back
         </button>
         <div>
-          <h1 className="text-3xl font-bold text-white">Create New Problem</h1>
+          <h1 className="text-3xl font-bold text-white">
+            {isEditing ? '✏️ Edit Problem' : '➕ Create New Problem'}
+          </h1> 
           <p className="text-slate-400">Design a coding challenge for your students</p>
         </div>
       </div>
@@ -661,7 +713,7 @@ export default function CreateProblem() {
               type="submit"
               className="px-8 py-3 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 rounded-xl text-white font-bold transition shadow-lg shadow-blue-600/20"
             >
-              ✨ Create Problem
+              {isEditing ? '✨ Update Problem' : '✨ Create Problem'}
             </button>
           )}
         </div>
