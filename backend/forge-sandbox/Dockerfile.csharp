@@ -1,0 +1,37 @@
+FROM mcr.microsoft.com/dotnet/sdk:8.0-alpine
+
+RUN addgroup -S sandbox && adduser -S -G sandbox sandbox
+
+RUN mkdir -p /sandbox-template
+COPY sandbox.csproj /sandbox-template/sandbox.csproj
+RUN chown -R sandbox:sandbox /sandbox-template
+
+# ── Pre-create sentinel dir at a path that tmpfs will NEVER overwrite ─────
+RUN mkdir -p /dotnet-sentinel/.dotnet && \
+    mkdir -p /dotnet-sentinel/.nuget/packages && \
+    chown -R sandbox:sandbox /dotnet-sentinel && \
+    chmod -R 755 /dotnet-sentinel
+
+USER sandbox
+
+# ── Warmup as sandbox user, writing to /dotnet-sentinel ──────────────────
+RUN mkdir -p /tmp/warmup && \
+    cp /sandbox-template/sandbox.csproj /tmp/warmup/ && \
+    echo 'Console.WriteLine("warmup");' > /tmp/warmup/Program.cs && \
+    HOME=/dotnet-sentinel \
+    DOTNET_CLI_HOME=/dotnet-sentinel/.dotnet \
+    NUGET_PACKAGES=/dotnet-sentinel/.nuget/packages \
+    DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1 \
+    DOTNET_CLI_TELEMETRY_OPTOUT=1 \
+    DOTNET_NOLOGO=1 \
+    DOTNET_MULTILEVEL_LOOKUP=0 \
+    dotnet build /tmp/warmup/sandbox.csproj -c Release -v quiet || true && \
+    rm -rf /tmp/warmup
+
+USER root
+COPY run_csharp.sh /usr/local/bin/run_csharp.sh
+RUN chmod +x /usr/local/bin/run_csharp.sh
+
+USER sandbox
+WORKDIR /tmp/work
+ENTRYPOINT ["/usr/local/bin/run_csharp.sh"]
