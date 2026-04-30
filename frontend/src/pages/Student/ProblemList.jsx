@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 
-export default function ProblemList({ onSelectQuest, currentLevel, blockId }) {
+export default function ProblemList({ onSelectQuest, currentLevel, blockId, subjectId }) {
+  console.log('🎯 ProblemList received:', { blockId, subjectId })
   const [quests, setQuests] = useState([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('all')
@@ -9,16 +10,17 @@ export default function ProblemList({ onSelectQuest, currentLevel, blockId }) {
   useEffect(() => {
     setAnimated(true)
     fetchQuests()
-  }, [filter, blockId])
+  }, [filter, blockId, subjectId]) 
 
   const fetchQuests = async () => {
-    try {
+    try {      
       const token = localStorage.getItem('token')
       let url = 'http://localhost:5000/api/problems'
       
       // Build query params
       const params = []
       if (blockId) params.push(`block_id=${blockId}`)
+      if (subjectId) params.push(`subject_id=${subjectId}`) 
       if (filter === 'coding' || filter === 'debugging') {
         params.push(`type=${filter}`)
       }
@@ -30,8 +32,12 @@ export default function ProblemList({ onSelectQuest, currentLevel, blockId }) {
             const res = await fetch(url, {
         headers: { 'Authorization': `Bearer ${token}` }
       })
+
+      console.log('📡 Fetched from URL:', url, '- Status:', res.status)
+
       if (res.ok) {
         const data = await res.json()
+        console.log('📡 Fetched from URL:', url, '- Status:', res.status)
         const filtered = filter === 'event'
           ? data.filter(q => q.is_event_quest)
           : data

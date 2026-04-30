@@ -133,7 +133,12 @@ export default function ProblemManagement() {
                 <tr key={prob.id} className="hover:bg-slate-800/30 transition">
                   <td className="p-4">
                     <div className="flex items-center gap-2">
-                      <p className="font-bold text-white">{prob.title}</p>
+                      <button
+                        onClick={() => navigate(`/instructor/create-problem?edit=${prob.id}`)}
+                        className="font-bold text-blue-400 hover:text-blue-300 transition text-left"
+                      >
+                        {prob.title}
+                      </button>
                       {prob.is_event_quest && (
                         <span className="px-2 py-0.5 bg-gradient-to-r from-yellow-600/20 to-purple-600/20 border border-yellow-600/40 text-yellow-400 rounded-full text-xs font-bold">
                           🎉 EVENT

@@ -83,21 +83,22 @@ export default function MySubjects({ onSelectSubject }) {
           <div
             key={subject.id}
             onClick={() => {
-              // Navigate to subject detail with block info
-              const blockData = {
-                id: subject.block_id,
-                section_code: subject.block_code,
-                name: subject.name,
-                semester: subject.semester,
-                instructor: subject.instructor
-              }
-              // Call parent handler if exists, otherwise navigate
-              if (onSelectSubject) {
-                onSelectSubject(blockData)
-              } else {
-                navigate(`/student/subject/${subject.block_id}`)
-              }
-            }}
+            // ✅ Pass BOTH subject and block info
+            const subjectData = {
+              id: subject.id,              // ✅ SUBJECT ID (8 or 9) - THIS IS THE KEY FIX!
+              name: subject.name,          // Subject name
+              block_id: subject.block_id,  // Block ID
+              block_code: subject.block_code,
+              semester: subject.semester,
+              instructor: subject.instructor
+            }
+            
+            if (onSelectSubject) {
+              onSelectSubject(subjectData)  // ✅ Pass subjectData
+            } else {
+              navigate(`/student/subject/${subject.block_id}`)
+            }
+          }}
             className="group bg-gradient-to-br from-slate-900 to-slate-800 border border-slate-700 rounded-2xl p-6 hover:border-purple-500 hover:shadow-lg hover:shadow-purple-600/20 transition-all duration-300 cursor-pointer transform hover:scale-105"
           >
             {/* Subject Icon & Badge */}

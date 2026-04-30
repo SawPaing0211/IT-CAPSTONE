@@ -17,15 +17,15 @@ useEffect(() => {
       })
       const data = await res.json()
       setClasses(data.map(c => ({
-        id: c.id,
-        name: c.section_code,
-        title: c.name,
-        description: c.semester || 'No description',
-        students: c.student_count || 0,
-        problems: 0,
-        status: 'Active',
-        color: 'bg-blue-600'
-      })))
+      id: c.id,
+      name: c.section_code,
+      title: c.name,
+      description: c.semester || 'No description',
+      students: c.student_count || 0,
+      problems: c.problem_count || 0,  // ✅ Use API value instead of hardcoded 0
+      status: 'Active',
+      color: 'bg-blue-600'
+    })))
     } catch (err) {
       console.error('Failed to fetch classes:', err)
     } finally {
