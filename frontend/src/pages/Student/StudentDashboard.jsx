@@ -7,6 +7,7 @@ import ProgressStats from './components/ProgressStats'
 import QuestLog from './QuestLog'
 import MySubjects from './MySubjects'
 import { api } from '../../api/client'
+import StudentLessons from './StudentLessons'
 
 // ─── Spell templates per language ─────────────────────────────────────────
 const SPELL_TEMPLATES = {
@@ -547,7 +548,7 @@ export default function StudentDashboard({ user, onLogout }) {
   const [sandboxSeed, setSandboxSeed]         = useState(null)   // { code, language }
   const [sandboxHealth, setSandboxHealth]     = useState(null)   // Docker health data
   const [selectedBlock, setSelectedBlock]   = useState(null)   // Tracks which subject is open
-  const [courseTab, setCourseTab]           = useState('board') // Tracks tabs inside a subject
+  const [courseTab, setCourseTab] = useState('lessons') // ✅ Changed default to lessons
 
   const profileRef      = useRef(null)
   const notificationRef = useRef(null)
@@ -645,7 +646,7 @@ export default function StudentDashboard({ user, onLogout }) {
       instructor: subject.instructor,
       subject_id: subject.id  // ✅ Store the specific subject_id!
     })
-  setCourseTab('board')
+  setCourseTab('lessons')
 }
 
   const handleExitSubject = () => {
@@ -893,6 +894,7 @@ export default function StudentDashboard({ user, onLogout }) {
             {/* Course Navigation Tabs */}
             <div className="flex gap-2 border-b border-purple-600/40 pb-2">
               {[
+                { id: 'lessons', label: '📚 Lessons' },  // ✅ NEW: Added Lessons tab
                 { id: 'board', label: '🗺️ Quest Board' },
                 { id: 'log', label: '📜 Quest Log' },
                 { id: 'sandbox', label: '🧪 Sandbox' },
@@ -914,6 +916,11 @@ export default function StudentDashboard({ user, onLogout }) {
 
             {/* Course Content Area */}
             <div className="min-h-[500px]">
+              {/* ✅ NEW: Lessons Tab Content */}
+              {courseTab === 'lessons' && (
+                <StudentLessons blockId={selectedBlock.id} blockName={selectedBlock.name} />
+              )}
+              
               {courseTab === 'board' && (
                 <ProblemList 
                   onSelectQuest={handleQuestSelect} 

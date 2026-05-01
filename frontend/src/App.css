@@ -182,3 +182,120 @@
     border-right-color: var(--border);
   }
 }
+
+/* ========================================= */
+/* ACHIEVEMENT ANIMATIONS                    */
+/* ========================================= */
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes scale-in {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes confetti-fall {
+  to {
+    transform: translateY(100vh) rotate(720deg);
+    opacity: 0;
+  }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.2s ease-out forwards;
+}
+
+.animate-scale-in {
+  animation: scale-in 0.3s ease-out forwards;
+}
+
+/* Confetti particle styles */
+.confetti {
+  position: fixed;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 9999;
+  animation: confetti-fall 3s linear forwards;
+}
+
+@keyframes confettiFall {
+  0% {
+    transform: translateY(0) rotate(0deg);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(100vh) rotate(720deg);
+    opacity: 0;
+  }
+}
+
+/* Crystal Ball Console - Custom Scrollbar */
+.crystal-ball-console,
+.console-output,
+.output-container {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(168, 85, 247, 0.4) rgba(15, 23, 42, 0.5);
+}
+
+.crystal-ball-console::-webkit-scrollbar,
+.console-output::-webkit-scrollbar,
+.output-container::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.crystal-ball-console::-webkit-scrollbar-track,
+.console-output::-webkit-scrollbar-track,
+.output-container::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.5);
+  border-radius: 4px;
+}
+
+.crystal-ball-console::-webkit-scrollbar-thumb,
+.console-output::-webkit-scrollbar-thumb,
+.output-container::-webkit-scrollbar-thumb {
+  background: rgba(168, 85, 247, 0.4);
+  border-radius: 4px;
+  transition: background 0.3s ease;
+}
+
+.crystal-ball-console::-webkit-scrollbar-thumb:hover,
+.console-output::-webkit-scrollbar-thumb:hover,
+.output-container::-webkit-scrollbar-thumb:hover {
+  background: rgba(168, 85, 247, 0.6);
+}
+
+/* Ensure smooth scrolling */
+.crystal-ball-console,
+.console-output {
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Smooth scrollbar transition */
+.console-output::-webkit-scrollbar-thumb {
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+
+.console-output::-webkit-scrollbar-thumb:hover {
+  transform: scale(1.1);
+}
+
+/* Hide scrollbar when not hovering (optional) */
+.console-output {
+  scrollbar-gutter: stable;
+}
+
+.console-output::-webkit-scrollbar {
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.console-output:hover::-webkit-scrollbar {
+  opacity: 1;
+}

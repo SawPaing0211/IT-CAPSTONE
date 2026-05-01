@@ -808,7 +808,7 @@ useEffect(() => {
             </div>
 
             {/* Console output (scrollable within the 192px) */}
-            <div className="overflow-y-auto p-4 font-mono text-xs" style={{ flex: '1 1 0', minHeight: 0 }}>
+            <div className="console-output overflow-y-auto p-4 font-mono text-xs" style={{ flex: '1 1 0', minHeight: 0 }}>
               {!output && !isLoading && (
                 <div className="text-center py-4 text-slate-500">
                   <p className="text-lg mb-2">🔮</p>
