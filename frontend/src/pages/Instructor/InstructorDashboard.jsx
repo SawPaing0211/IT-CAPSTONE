@@ -22,12 +22,7 @@ export default function InstructorDashboard({ user, onLogout }) {
   const menuItems = [
     { path: '/instructor', label: 'Dashboard', icon: '📊' },
     { path: '/instructor/classes', label: 'My Classes', icon: '🏫' },
-    { path: '/instructor/problems', label: 'Problem Management', icon: '📝' },
-    { path: '/instructor/create-problem', label: 'Create Problem', icon: '➕' },
-    { path: '/instructor/announcements', label: 'Announcements', icon: '📢' },
-    { path: '/instructor/plagiarism', label: 'Plagiarism Check', icon: '⚠️' },
-    { path: '/instructor/analytics', label: 'Analytics', icon: '📈' },
-    { path: '/instructor/materials', label: 'Course Materials', icon: '📚' },
+    { path: '/instructor/settings', label: 'Settings', icon: '⚙️' },
   ]
 
   const isActive = (path) => {
@@ -84,7 +79,7 @@ export default function InstructorDashboard({ user, onLogout }) {
           </div>
           {sidebarOpen && (
             <button 
-              onClick={() => navigate('/login')}
+              onClick={onLogout}
               className="w-full mt-3 px-4 py-2 bg-red-600/10 hover:bg-red-600/20 border border-red-600/20 rounded-lg text-sm text-red-400 transition flex items-center justify-center gap-2"
             >
               <span>🚪</span> Sign Out

@@ -39,6 +39,29 @@ def rate_limit(max_calls=5, period=60):
     return decorator
 
 # ===== MODELS =====
+# ===== ACHIEVEMENT MODELS =====
+class Achievement(db.Model):
+    __tablename__ = 'achievements'
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    description = db.Column(db.Text, nullable=False)
+    icon = db.Column(db.String(50), nullable=False)
+    xp_reward = db.Column(db.Integer, default=0)
+    requirement_type = db.Column(db.String(50), nullable=False)  # e.g., 'quest_count', 'streak'
+    requirement_value = db.Column(db.Integer, nullable=False)
+    category = db.Column(db.Enum('student', 'instructor'), default='student')
+
+class UserAchievement(db.Model):
+    __tablename__ = 'user_achievements'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    achievement_id = db.Column(db.Integer, db.ForeignKey('achievements.id'), nullable=False)
+    earned_at = db.Column(db.DateTime, default=datetime.utcnow)
+    progress = db.Column(db.Integer, default=0)
+    
+    user = db.relationship('User', backref=db.backref('user_achievements', lazy=True))
+    achievement = db.relationship('Achievement')
+
 class User(db.Model):
     __tablename__ = 'users'
     id = db.Column(db.Integer, primary_key=True)
@@ -120,6 +143,36 @@ class Subject(db.Model):
     name = db.Column(db.String(200), nullable=False)
     description = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+# ===== COURSE MATERIALS MODELS =====
+class Lesson(db.Model):
+    __tablename__ = 'lessons'
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(200), nullable=False)
+    description = db.Column(db.Text, nullable=True)
+    week_number = db.Column(db.Integer, nullable=False)  # Week 1, 2, 3...
+    subject_id = db.Column(db.Integer, db.ForeignKey('subjects.id'), nullable=False)
+    block_id = db.Column(db.Integer, db.ForeignKey('blocks.id'), nullable=True)  # ✅ NEW: Target specific block (NULL = All Blocks)
+    created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)  # Instructor
+    is_published = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    subject = db.relationship('Subject', backref=db.backref('lessons', lazy=True))
+    block = db.relationship('Block', backref=db.backref('lessons', lazy=True))  # ✅ NEW
+    instructor = db.relationship('User', backref=db.backref('created_lessons', lazy=True))
+    files = db.relationship('LessonFile', backref='lesson', lazy=True, cascade='all, delete-orphan')
+
+class LessonFile(db.Model):
+    __tablename__ = 'lesson_files'
+    id = db.Column(db.Integer, primary_key=True)
+    lesson_id = db.Column(db.Integer, db.ForeignKey('lessons.id'), nullable=False)
+    filename = db.Column(db.String(255), nullable=False)  # Secure server name (UUID)
+    original_filename = db.Column(db.String(255), nullable=False)  # User's original name
+    file_type = db.Column(db.String(50), nullable=False)  # pdf, pptx, docx, mp4, etc.
+    file_size = db.Column(db.Integer, nullable=False)  # in bytes
+    storage_path = db.Column(db.String(500), nullable=False)  # relative path to uploads folder
+    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 # ✅ NEW: Teacher Assignment (Who teaches what, where)
 class TeacherAssignment(db.Model):
@@ -774,6 +827,204 @@ def delete_problem(problem_id):
     
     return jsonify({"message": "Problem deleted"}), 200
 
+# ===== LESSON ROUTES =====
+@app.route('/api/lessons', methods=['POST'])
+@jwt_required()
+def create_lesson():
+    """Create a new lesson (instructors only)"""
+    user_id = int(get_jwt_identity())
+    user = User.query.get(user_id)
+    
+    if not is_instructor_or_admin(user):
+        return jsonify({"error": "Unauthorized"}), 403
+    
+    data = request.get_json()
+    
+    # Validation
+    required = ['title', 'description', 'week_number', 'subject_id']
+    if not all(k in data for k in required):
+        return jsonify({"error": "Missing required fields"}), 400
+    
+    # Verify instructor is assigned to this subject
+    if not is_instructor_assigned(user_id, data['subject_id']):
+        return jsonify({"error": "You are not assigned to teach this subject"}), 403
+    
+    # ✅ Handle block_id validation
+    block_id = data.get('block_id')
+    if block_id:
+        block = Block.query.get(block_id)
+        if not block:
+            return jsonify({"error": "Invalid block ID"}), 400
+        if not is_instructor_assigned(user_id, data['subject_id'], block_id):
+            return jsonify({"error": "You are not assigned to teach this subject in this block"}), 403
+    
+    # Create lesson
+    lesson = Lesson(
+        title=data['title'],
+        description=data.get('description', ''),
+        week_number=data['week_number'],
+        subject_id=data['subject_id'],
+        block_id=block_id,  # ✅ Can be NULL for "All Blocks"
+        created_by=user_id,
+        is_published=data.get('is_published', False)
+    )
+    
+    db.session.add(lesson)
+    db.session.commit()
+    
+    return jsonify({
+        "message": "Lesson created",
+        "lesson_id": lesson.id
+    }), 201
+
+@app.route('/api/lessons/<int:lesson_id>/files', methods=['POST'])
+@jwt_required()
+def upload_lesson_file(lesson_id):
+    """Upload a file to a lesson (instructors only)"""
+    user_id = int(get_jwt_identity())
+    user = User.query.get(user_id)
+    
+    if not is_instructor_or_admin(user):
+        return jsonify({"error": "Unauthorized"}), 403
+    
+    lesson = Lesson.query.get_or_404(lesson_id)
+    
+    # Verify ownership
+    if lesson.created_by != user_id and user.role != 'admin':
+        return jsonify({"error": "Not your lesson"}), 403
+    
+    # Check if file was uploaded
+    if 'file' not in request.files:
+        return jsonify({"error": "No file uploaded"}), 400
+    
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"error": "No file selected"}), 400
+    
+    # Validate file type
+    allowed_types = ['pdf', 'ppt', 'pptx', 'doc', 'docx', 'jpg', 'jpeg', 'png', 'zip']
+    file_ext = file.filename.rsplit('.', 1)[1].lower() if '.' in file.filename else ''
+    if file_ext not in allowed_types:
+        return jsonify({"error": f"File type .{file_ext} not allowed"}), 400
+    
+    # Validate file size (16MB max)
+    if file.content_length and file.content_length > 16 * 1024 * 1024:
+        return jsonify({"error": "File too large (max 16MB)"}), 400
+    
+    # Generate secure filename
+    import uuid, os
+    secure_name = f"{uuid.uuid4().hex}.{file_ext}"
+    
+    # Create uploads folder if not exists
+    upload_dir = os.path.join('uploads', 'lessons', str(lesson_id))
+    os.makedirs(upload_dir, exist_ok=True)
+    
+    # Save file
+    file_path = os.path.join(upload_dir, secure_name)
+    file.save(file_path)
+    
+    # Create database record
+    lesson_file = LessonFile(
+        lesson_id=lesson_id,
+        filename=secure_name,
+        original_filename=file.filename,
+        file_type=file_ext,
+        file_size=file.content_length or 0,
+        storage_path=file_path
+    )
+    
+    db.session.add(lesson_file)
+    db.session.commit()
+    
+    return jsonify({
+        "message": "File uploaded",
+        "file_id": lesson_file.id,
+        "filename": file.filename
+    }), 201
+
+@app.route('/api/lessons', methods=['GET'])
+@jwt_required()
+def get_lessons():
+    """Get all lessons (filtered by instructor's classes)"""
+    user_id = int(get_jwt_identity())
+    user = User.query.get(user_id)
+    
+    if not is_instructor_or_admin(user):
+        return jsonify({"error": "Unauthorized"}), 403
+    
+    # Get all lessons created by this instructor
+    lessons = Lesson.query.filter_by(created_by=user_id).all()
+    
+    result = []
+    for lesson in lessons:
+        # Get files for this lesson
+        files = LessonFile.query.filter_by(lesson_id=lesson.id).all()
+        
+        result.append({
+            "id": lesson.id,
+            "title": lesson.title,
+            "description": lesson.description,
+            "week_number": lesson.week_number,
+            "subject_id": lesson.subject_id,
+            "block_id": lesson.block_id,
+            "is_published": lesson.is_published,
+            "created_at": lesson.created_at.isoformat(),
+            "files": [{
+                "id": f.id,
+                "filename": f.original_filename,
+                "file_type": f.file_type
+            } for f in files]
+        })
+    
+    return jsonify(result), 200
+
+@app.route('/api/student/lessons', methods=['GET'])
+@jwt_required()
+def get_student_lessons():
+    """Get lessons for student's enrolled classes"""
+    user_id = int(get_jwt_identity())
+    user = User.query.get(user_id)
+    
+    if user.role != 'student':
+        return jsonify({"error": "Students only"}), 403
+    
+    # Get blocks this student is enrolled in
+    enrollments = db.session.query(student_blocks.c.block_id).filter_by(
+        student_id=user_id
+    ).all()
+    block_ids = [e.block_id for e in enrollments]
+    
+    if not block_ids:
+        return jsonify([]), 200
+    
+    # Get lessons for these blocks (only published ones)
+    lessons = Lesson.query.filter(
+        Lesson.is_published == True,
+        (Lesson.block_id.in_(block_ids)) | (Lesson.block_id == None)  # Include lessons for all blocks
+    ).order_by(Lesson.week_number, Lesson.created_at).all()
+    
+    result = []
+    for lesson in lessons:
+        # Get files for this lesson
+        files = LessonFile.query.filter_by(lesson_id=lesson.id).all()
+        
+        result.append({
+            "id": lesson.id,
+            "title": lesson.title,
+            "description": lesson.description,
+            "week_number": lesson.week_number,
+            "block_id": lesson.block_id,
+            "created_at": lesson.created_at.isoformat(),
+            "files": [{
+                "id": f.id,
+                "filename": f.original_filename,
+                "file_type": f.file_type,
+                "storage_path": f.storage_path
+            } for f in files]
+        })
+    
+    return jsonify(result), 200
+
 # ===== SUBMISSION ROUTES =====
 @app.route('/api/submissions', methods=['POST'])
 @jwt_required()
@@ -939,6 +1190,76 @@ def get_student_stats():
         "streak": streak,
         "last_submission": subs[0].submitted_at.isoformat() if subs else None
     }), 200
+
+@app.route('/api/student/achievements', methods=['GET'])
+@jwt_required()
+def get_student_achievements():
+    """Get all student achievements with progress"""
+    user_id = int(get_jwt_identity())
+    user = User.query.get(user_id)
+    
+    if user.role != 'student':
+        return jsonify({"error": "Students only"}), 403
+    
+    # Calculate current user stats for progress tracking
+    total_quests = Submission.query.filter_by(user_id=user_id, status='accepted').count()
+    python_quests = Submission.query.filter_by(user_id=user_id, status='accepted', language='python').count()
+    java_quests = Submission.query.filter_by(user_id=user_id, status='accepted', language='java').count()
+    csharp_quests = Submission.query.filter_by(user_id=user_id, status='accepted', language='csharp').count()
+    hard_quests = Submission.query.filter_by(user_id=user_id, status='accepted').join(Problem).filter(Problem.difficulty == 'Hard').count()
+    debug_quests = Submission.query.filter_by(user_id=user_id, status='accepted').join(Problem).filter(Problem.problem_type == 'debugging').count()
+    
+    # Get already earned achievements
+    earned = {ua.achievement_id: ua for ua in UserAchievement.query.filter_by(user_id=user_id).all()}
+    
+    result = []
+    all_achievements = Achievement.query.filter_by(category='student').all()
+    
+    for ach in all_achievements:
+        is_earned = ach.id in earned
+        current_progress = 0
+        
+        # Calculate progress based on requirement type
+        if ach.requirement_type == 'quest_count': 
+            current_progress = total_quests
+        elif ach.requirement_type == 'streak': 
+            current_progress = user.xp // 100  # Mock: 100 XP = 1 "streak day"
+        elif ach.requirement_type == 'python_count': 
+            current_progress = python_quests
+        elif ach.requirement_type == 'java_count': 
+            current_progress = java_quests
+        elif ach.requirement_type == 'csharp_count': 
+            current_progress = csharp_quests
+        elif ach.requirement_type == 'hard_count': 
+            current_progress = hard_quests
+        elif ach.requirement_type == 'debug_count': 
+            current_progress = debug_quests
+        # Add more types here as needed...
+        
+        # Auto-earn if requirements met (and not already earned)
+        if not is_earned and current_progress >= ach.requirement_value:
+            db.session.add(UserAchievement(
+                user_id=user_id, 
+                achievement_id=ach.id, 
+                progress=current_progress
+            ))
+            user.xp += ach.xp_reward  # Award XP immediately
+            is_earned = True
+            
+        result.append({
+            "id": ach.id,
+            "name": ach.name,
+            "description": ach.description,
+            "icon": ach.icon,
+            "xp_reward": ach.xp_reward,
+            "is_earned": is_earned,
+            "progress": min(current_progress, ach.requirement_value),  # Cap at max
+            "max_progress": ach.requirement_value,
+            "earned_at": earned[ach.id].earned_at.isoformat() if is_earned and ach.id in earned else None
+        })
+        
+    db.session.commit()
+    return jsonify(result), 200
 
 # ===== STUDENT BLOCK/SUBJECT ROUTES =====
 @app.route('/api/student/subjects', methods=['GET'])  # ✅ Changed endpoint
@@ -1164,16 +1485,91 @@ def get_instructor_classes():
         # ✅ Count problems assigned to this block (via block_problems junction table)
         problem_count = db.session.query(block_problems.c.problem_id).filter_by(block_id=b.id).count()
         
+        # ✅ Count lessons
+        lesson_count = 0
+        if subj_ids:
+            lesson_count = Lesson.query.filter(
+                Lesson.subject_id.in_(subj_ids),
+                (Lesson.block_id == b.id) | (Lesson.block_id == None)
+            ).count()
+        
+        # ✅ Count announcements
+        announcement_count = Announcement.query.filter_by(class_id=b.id).count()
+        
         result.append({
             "id": b.id, 
             "section_code": b.section_code, 
-            "name": b.section_code,
+            "name": subjects[0] if subjects else b.section_code,  # ✅ Use first subject name
             "subjects": subjects,
             "semester": b.semester, 
             "student_count": student_count,
-            "problem_count": problem_count  # ✅ Send problem count to frontend
+            "problem_count": problem_count,
+            "lesson_count": lesson_count,
+            "announcement_count": announcement_count
         })
     return jsonify(result), 200
+
+@app.route('/api/instructor/classes/<int:classId>', methods=['GET'])
+@jwt_required()
+def get_instructor_class_detail(classId):  # ✅ must match route parameter name
+    """Get detailed information about a specific class/block"""
+    user_id = int(get_jwt_identity())
+    user = User.query.get(user_id)
+    
+    if not is_instructor_or_admin(user):
+        return jsonify({"error": "Unauthorized"}), 403
+    
+    # Get block details
+    block = Block.query.get_or_404(classId)
+    
+    # Verify instructor has access to this block
+    assignments = TeacherAssignment.query.filter_by(
+        instructor_id=user_id, 
+        block_id=classId
+    ).all()
+    
+    if not assignments and user.role != 'admin':
+        return jsonify({"error": "Not authorized to view this class"}), 403
+    
+    # Get subjects for this block
+    subj_rows = db.session.query(block_subjects.c.subject_id).filter_by(
+        block_id=classId
+    ).all()
+    subject_ids = [r.subject_id for r in subj_rows]
+    subjects = [Subject.query.get(sid).name for sid in subject_ids if Subject.query.get(sid)]
+    
+    # Count students
+    student_count = db.session.query(student_blocks.c.student_id).filter_by(
+        block_id=classId
+    ).count()
+    
+    # Count problems assigned to this block
+    problem_count = db.session.query(block_problems.c.problem_id).filter_by(
+        block_id=classId
+    ).count()
+    
+    # Count lessons (if subject exists)
+    lesson_count = 0
+    if subject_ids:
+        lesson_count = Lesson.query.filter(
+            Lesson.subject_id.in_(subject_ids),
+            (Lesson.block_id == classId) | (Lesson.block_id == None)
+        ).count()
+    
+    # Count announcements
+    announcement_count = Announcement.query.filter_by(class_id=classId).count()  # ✅ Use snake_case column name
+    
+    return jsonify({
+        "id": block.id,
+        "section_code": block.section_code,
+        "name": subjects[0] if subjects else block.section_code,  # or you can use subjects[0] if only one subject
+        "semester": block.semester or 'Current Semester',
+        "subjects": subjects,
+        "student_count": student_count,
+        "problem_count": problem_count,
+        "lesson_count": lesson_count,
+        "announcement_count": announcement_count
+    }), 200
 
 @app.route('/api/instructor/dashboard-stats', methods=['GET'])
 @jwt_required()
@@ -1301,6 +1697,29 @@ def get_instructor_assigned_subjects():
         "name": s.name,
         "description": s.description
     } for s in subjects]), 200
+
+@app.route('/api/instructor/blocks-by-subject', methods=['GET'])
+@jwt_required()
+def get_blocks_by_subject():
+    """Get blocks where instructor teaches a specific subject"""
+    user_id = int(get_jwt_identity())
+    subject_id = request.args.get('subject_id', type=int)
+    
+    if not subject_id:
+        return jsonify({"error": "subject_id required"}), 400
+    
+    assignments = TeacherAssignment.query.filter_by(
+        instructor_id=user_id, 
+        subject_id=subject_id
+    ).all()
+    block_ids = [a.block_id for a in assignments]
+    
+    blocks = Block.query.filter(Block.id.in_(block_ids)).all()
+    return jsonify([{
+        "id": b.id,
+        "section_code": b.section_code,
+        "semester": b.semester or 'Current'
+    } for b in blocks]), 200
 
 @app.route('/api/blocks', methods=['POST'])  # ✅ Changed route name
 @jwt_required()
@@ -2203,6 +2622,53 @@ def health():
     return jsonify({"status": "running", "version": "1.0"}), 200
 
 with app.app_context():
+        # ===== SEED ACHIEVEMENTS =====
+    if not Achievement.query.first():
+        achievements_data = [
+            # --- STUDENT BADGES (12) ---
+            {"name": "First Steps", "desc": "Complete your first quest", "icon": "🎯", "xp": 10, "type": "quest_count", "val": 1, "cat": "student"},
+            {"name": "Quest Master", "desc": "Complete 10 quests", "icon": "⚔️", "xp": 50, "type": "quest_count", "val": 10, "cat": "student"},
+            {"name": "Week Warrior", "desc": "Maintain a 7-day streak", "icon": "🔥", "xp": 20, "type": "streak", "val": 7, "cat": "student"},
+            {"name": "Python Novice", "desc": "Solve 5 Python quests", "icon": "🐍", "xp": 15, "type": "python_count", "val": 5, "cat": "student"},
+            {"name": "Java Apprentice", "desc": "Solve 5 Java quests", "icon": "☕", "xp": 15, "type": "java_count", "val": 5, "cat": "student"},
+            {"name": "C# Wizard", "desc": "Solve 5 C# quests", "icon": "🔷", "xp": 15, "type": "csharp_count", "val": 5, "cat": "student"},
+            {"name": "Hard Coder", "desc": "Complete 5 Hard quests", "icon": "💀", "xp": 40, "type": "hard_count", "val": 5, "cat": "student"},
+            {"name": "Debug Master", "desc": "Complete 5 Debugging quests", "icon": "🐛", "xp": 30, "type": "debug_count", "val": 5, "cat": "student"},
+            {"name": "Marathon Coder", "desc": "Maintain a 30-day streak", "icon": "🏃", "xp": 100, "type": "streak", "val": 30, "cat": "student"},
+            {"name": "Perfect Score", "desc": "Get 100% on a Hard quest", "icon": "💯", "xp": 25, "type": "perfect_hard", "val": 1, "cat": "student"},
+            {"name": "Sandbox Wizard", "desc": "Run code in Sandbox 10 times", "icon": "🧪", "xp": 20, "type": "sandbox_runs", "val": 10, "cat": "student"},
+            {"name": "Leaderboard Champ", "desc": "Reach Top 10 on Leaderboard", "icon": "", "xp": 50, "type": "leaderboard", "val": 10, "cat": "student"},
+
+            # --- INSTRUCTOR BADGES (15) ---
+            {"name": "First Lesson", "desc": "Create your first lesson", "icon": "📖", "xp": 25, "type": "lesson_count", "val": 1, "cat": "instructor"},
+            {"name": "Problem Architect", "desc": "Create 10 problems", "icon": "🧩", "xp": 60, "type": "problem_count", "val": 10, "cat": "instructor"},
+            {"name": "Class Starter", "desc": "Have a student complete a quest", "icon": "🚀", "xp": 20, "type": "student_quest", "val": 1, "cat": "instructor"},
+            {"name": "Engagement Booster", "desc": "80%+ students attempt a quest", "icon": "📈", "xp": 40, "type": "engagement", "val": 80, "cat": "instructor"},
+            {"name": "Curriculum Builder", "desc": "Create lessons for 3 weeks", "icon": "🗂️", "xp": 50, "type": "lesson_weeks", "val": 3, "cat": "instructor"},
+            {"name": "Resource Curator", "desc": "Attach files to 10 lessons", "icon": "📎", "xp": 30, "type": "file_count", "val": 10, "cat": "instructor"},
+            {"name": "Multimedia Master", "desc": "Add videos to 5 lessons", "icon": "🎬", "xp": 25, "type": "video_count", "val": 5, "cat": "instructor"},
+            {"name": "Clear Explainer", "desc": "Lesson with 95% completion", "icon": "🗣️", "xp": 45, "type": "lesson_completion", "val": 95, "cat": "instructor"},
+            {"name": "Problem Solver", "desc": "Problem with <10% error rate", "icon": "🔍", "xp": 40, "type": "problem_quality", "val": 10, "cat": "instructor"},
+            {"name": "Innovation Award", "desc": "Create a quest with hints", "icon": "💡", "xp": 50, "type": "hints_used", "val": 1, "cat": "instructor"},
+            {"name": "Student Success", "desc": "70%+ students pass all quests", "icon": "🎓", "xp": 75, "type": "class_pass_rate", "val": 70, "cat": "instructor"},
+            {"name": "Daily Educator", "desc": "Login and act for 14 days", "icon": "📅", "xp": 30, "type": "instructor_streak", "val": 14, "cat": "instructor"},
+            {"name": "Semester Veteran", "desc": "Teach for 16 weeks", "icon": "🎓", "xp": 100, "type": "weeks_taught", "val": 16, "cat": "instructor"},
+            {"name": "Multi-Class Maestro", "desc": "Teach 3 different subjects", "icon": "🎭", "xp": 60, "type": "subjects_taught", "val": 3, "cat": "instructor"},
+            {"name": "Platform Pioneer", "desc": "Use new features within 1 week", "icon": "🚀", "xp": 20, "type": "early_adopter", "val": 1, "cat": "instructor"}
+        ]
+
+        for data in achievements_data:
+            db.session.add(Achievement(
+                name=data["name"],
+                description=data["desc"],
+                icon=data["icon"],
+                xp_reward=data["xp"],
+                requirement_type=data["type"],
+                requirement_value=data["val"],
+                category=data["cat"]
+            ))
+        db.session.commit()
+        print("✅ Seeded 27 Achievements")
     db.create_all()
     
     # Auto-migration for Problem table

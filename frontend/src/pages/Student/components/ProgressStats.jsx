@@ -1,8 +1,62 @@
 import { useState, useEffect } from 'react'
+import AchievementBadge from "../../../components/AchievementBadge"
+import AchievementModal from "../../../components/AchievementModal"
+import { triggerConfetti } from '../../../utils/confetti'
+import AchievementToast from '../../../components/AchievementToast'
 
 export default function ProgressStats({ stats, username }) {
   const [animated, setAnimated] = useState(false)
   const [hoveredDay, setHoveredDay] = useState(null)
+  const [achievements, setAchievements] = useState([])
+  const [loadingAchievements, setLoadingAchievements] = useState(true)
+  const [showAllBadges, setShowAllBadges] = useState(false)
+  
+  // ✅ For celebration effects
+  const [newBadge, setNewBadge] = useState(null)
+  const [prevEarnedCount, setPrevEarnedCount] = useState(0)
+
+  // ✅ Fetch achievements from API
+  useEffect(() => {
+    const fetchAchievements = async () => {
+      try {
+        const token = localStorage.getItem('token')
+        const res = await fetch('http://localhost:5000/api/student/achievements', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        })
+        if (res.ok) {
+          const data = await res.json()
+          setAchievements(data)
+        }
+      } catch (err) {
+        console.error('Failed to fetch achievements:', err)
+      } finally {
+        setLoadingAchievements(false)
+      }
+    }
+    fetchAchievements()
+  }, [])
+
+  // ✅ Detect newly earned badges and trigger celebration
+  useEffect(() => {
+    if (achievements.length > 0 && !loadingAchievements) {
+      const earnedBadges = achievements.filter(b => b.is_earned)
+      const currentEarnedCount = earnedBadges.length
+      
+      // If the count of earned badges increased, trigger celebration
+      if (currentEarnedCount > prevEarnedCount && prevEarnedCount > 0) {
+        // Find the most recently earned badge
+        const newestBadge = earnedBadges[earnedBadges.length - 1]
+        
+        // 🎊 Trigger confetti!
+        triggerConfetti()
+        
+        // 🔔 Show toast notification
+        setNewBadge(newestBadge)
+      }
+      
+      setPrevEarnedCount(currentEarnedCount)
+    }
+  }, [achievements, loadingAchievements])
 
   useEffect(() => {
     setAnimated(true)
@@ -290,36 +344,59 @@ export default function ProgressStats({ stats, username }) {
 
           {/* Achievements */}
           <div className={`bg-slate-800/40 border border-slate-700 rounded-xl p-5 transition-all duration-700 delay-300 ${animated ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-4'}`}>
-            <h3 className="text-base font-bold text-white mb-4 flex items-center gap-2">
-              <span>🏆</span> Achievements
-            </h3>
-            <div className="grid grid-cols-2 gap-2">
-              {mockData.achievements.map((achievement) => (
-                <div 
-                  key={achievement.name}
-                  className={`p-3 rounded-lg border transition-all duration-300 group cursor-pointer ${
-                    achievement.earned 
-                      ? 'bg-gradient-to-br from-yellow-600/20 to-amber-700/20 border-yellow-600/40 hover:scale-105 hover:shadow-lg hover:shadow-yellow-600/20' 
-                      : 'bg-slate-900/40 border-slate-700 opacity-60 hover:opacity-100'
-                  }`}
-                >
-                  <div className="text-2xl mb-1 group-hover:scale-110 transition-transform inline-block">
-                    {achievement.icon}
-                  </div>
-                  <p className={`text-xs font-bold ${achievement.earned ? 'text-yellow-300' : 'text-slate-500'}`}>
-                    {achievement.name}
-                  </p>
-                  <p className="text-[9px] text-slate-500 mt-0.5">{achievement.desc}</p>
-                  {achievement.progress && !achievement.earned && (
-                    <p className="text-[8px] text-slate-600 mt-1">{achievement.progress}</p>
-                  )}
-                  {achievement.earned && achievement.date && (
-                    <p className="text-[8px] text-yellow-600/80 mt-1">{achievement.date}</p>
-                  )}
-                </div>
-              ))}
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                <span>🏆</span> Achievements
+              </h3>
+              <button 
+                onClick={() => setShowAllBadges(true)}
+                className="text-xs text-purple-400 hover:text-purple-300 transition flex items-center gap-1"
+              >
+                View All →
+              </button>
             </div>
+            
+            {loadingAchievements ? (
+              <div className="flex gap-3 justify-center py-4">
+                {[...Array(6)].map((_, i) => (
+                  <div key={i} className="w-12 h-12 bg-slate-800 rounded-xl animate-pulse" />
+                ))}
+              </div>
+            ) : (
+              <>
+                {/* Badge Grid - Show first 6 */}
+                <div className="grid grid-cols-3 gap-3 mb-4">
+                  {achievements.slice(0, 6).map(badge => (
+                    <AchievementBadge 
+                      key={badge.id} 
+                      badge={badge} 
+                      size="sm"
+                    />
+                  ))}
+                </div>
+                
+                {/* Summary */}
+                <div className="flex items-center justify-center gap-4 text-xs text-slate-400">
+                  <span className="flex items-center gap-1">
+                    <span className="w-2 h-2 bg-purple-600 rounded-full" />
+                    {achievements.filter(b => b.is_earned).length} Earned
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <span className="w-2 h-2 bg-slate-600 rounded-full" />
+                    {achievements.filter(b => !b.is_earned).length} Locked
+                  </span>
+                </div>
+              </>
+            )}
           </div>
+
+          {/* ✅ Achievement Modal */}
+          {showAllBadges && (
+            <AchievementModal 
+              achievements={achievements}
+              onClose={() => setShowAllBadges(false)}
+            />
+          )}
 
           {/* Recent Quests */}
           <div className={`bg-slate-800/40 border border-slate-700 rounded-xl p-5 transition-all duration-700 delay-400 ${animated ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-4'}`}>
@@ -354,6 +431,14 @@ export default function ProgressStats({ stats, username }) {
           </div>
         </div>
       </div>
+
+      {/* 🎉 Celebration Toast */}
+      {newBadge && (
+        <AchievementToast 
+          badge={newBadge} 
+          onClose={() => setNewBadge(null)} 
+        />
+      )}
     </div>
   )
 }

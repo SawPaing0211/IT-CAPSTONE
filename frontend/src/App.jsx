@@ -20,6 +20,7 @@ import Announcements from './pages/Instructor/Announcements'
 import PlagiarismCheck from './pages/Instructor/PlagiarismCheck'
 import Analytics from './pages/Instructor/Analytics'
 import CourseMaterials from './pages/Instructor/CourseMaterials'
+import ProblemSubmissions from './pages/Instructor/ProblemSubmissions' 
 
 // Student Pages
 import MySubjects from './pages/Student/MySubjects'
@@ -113,9 +114,10 @@ function AppContent() {
       >
         <Route index element={<DashboardOverview />} />
         <Route path="classes" element={<MyClasses />} />
-        <Route path="classes/:id" element={<ClassDetail />} />
+        <Route path="class/:id" element={<ClassDetail />} />
         <Route path="problems" element={<ProblemManagement />} />
         <Route path="create-problem" element={<CreateProblem />} />
+        <Route path="problem/:problemId/submissions" element={<ProblemSubmissions />} /> 
         <Route path="announcements" element={<Announcements />} />
         <Route path="plagiarism" element={<PlagiarismCheck />} />
         <Route path="analytics" element={<Analytics />} />
@@ -132,7 +134,7 @@ function AppContent() {
         }
       >
         <Route path="subjects" element={<MySubjects />} />
-        <Route index element={<ProblemList />} />
+        <Route index element={<MySubjects />} />
         <Route path="problem/:problemId" element={<StudentCodeEditor />} />
         <Route path="leaderboard" element={<Leaderboard />} />
         <Route path="stats" element={<ProgressStats />} />
@@ -170,4 +172,4 @@ function App() {
   )
 }
 
-export default App
+export default App  
