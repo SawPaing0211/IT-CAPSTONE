@@ -11,6 +11,7 @@ import Announcements from './Announcements'
 import PlagiarismCheck from './PlagiarismCheck'
 import Analytics from './Analytics'
 import CourseMaterials from './CourseMaterials'
+import InstructorAchievements from './InstructorAchievements'
 
 // No mock data here anymore - use props
 
@@ -22,6 +23,7 @@ export default function InstructorDashboard({ user, onLogout }) {
   const menuItems = [
     { path: '/instructor', label: 'Dashboard', icon: '📊' },
     { path: '/instructor/classes', label: 'My Classes', icon: '🏫' },
+    { path: '/instructor/achievements', label: '🏆 Achievements', icon: '🏆' },
     { path: '/instructor/settings', label: 'Settings', icon: '⚙️' },
   ]
 
