@@ -1261,6 +1261,95 @@ def get_student_achievements():
     db.session.commit()
     return jsonify(result), 200
 
+@app.route('/api/instructor/achievements', methods=['GET'])
+@jwt_required()
+def get_instructor_achievements():
+    """Get all instructor achievements with progress"""
+    user_id = int(get_jwt_identity())
+    user = User.query.get(user_id)
+    
+    if user.role not in ['instructor', 'admin']:
+        return jsonify({"error": "Instructors only"}), 403
+    
+    # Calculate instructor stats
+    lessons_created = Lesson.query.filter_by(created_by=user_id).count()
+    problems_created = Problem.query.filter_by(created_by=user_id).count()
+    
+    # Get blocks this instructor teaches
+    assignments = TeacherAssignment.query.filter_by(instructor_id=user_id).all()
+    blocks_taught = len(set(a.block_id for a in assignments))
+    subjects_taught = len(set(a.subject_id for a in assignments))
+    
+    # Count students taught
+    student_blocks_list = [a.block_id for a in assignments]
+    students_taught = 0
+    if student_blocks_list:
+        students_taught = db.session.query(student_blocks.c.student_id).filter(
+            student_blocks.c.block_id.in_(student_blocks_list)
+        ).distinct().count()
+    
+    # Count files uploaded to lessons
+    files_uploaded = db.session.query(LessonFile.id).join(Lesson).filter(
+        Lesson.created_by == user_id
+    ).count()
+    
+    # Get already earned achievements
+    earned = {ua.achievement_id: ua for ua in UserAchievement.query.filter_by(user_id=user_id).all()}
+    
+    result = []
+    all_achievements = Achievement.query.filter_by(category='instructor').all()
+    
+    for ach in all_achievements:
+        is_earned = ach.id in earned
+        current_progress = 0
+        
+        # Calculate progress based on requirement type
+        if ach.requirement_type == 'lesson_count':
+            current_progress = lessons_created
+        elif ach.requirement_type == 'problem_count':
+            current_progress = problems_created
+        elif ach.requirement_type == 'blocks_taught':
+            current_progress = blocks_taught
+        elif ach.requirement_type == 'subjects_taught':
+            current_progress = subjects_taught
+        elif ach.requirement_type == 'students_taught':
+            current_progress = students_taught
+        elif ach.requirement_type == 'file_count':
+            current_progress = files_uploaded
+        elif ach.requirement_type == 'student_quest':
+            # Count students who completed at least one quest in instructor's blocks
+            if student_blocks_list:
+                current_progress = db.session.query(Submission.user_id).join(Problem).filter(
+                    Problem.created_by == user_id,
+                    Submission.status == 'accepted'
+                ).distinct().count()
+        # Add more types as needed...
+        
+        # Auto-earn if requirements met (and not already earned)
+        if not is_earned and current_progress >= ach.requirement_value:
+            db.session.add(UserAchievement(
+                user_id=user_id,
+                achievement_id=ach.id,
+                progress=current_progress
+            ))
+            user.xp += ach.xp_reward
+            is_earned = True
+        
+        result.append({
+            "id": ach.id,
+            "name": ach.name,
+            "description": ach.description,
+            "icon": ach.icon,
+            "xp_reward": ach.xp_reward,
+            "is_earned": is_earned,
+            "progress": min(current_progress, ach.requirement_value),
+            "max_progress": ach.requirement_value,
+            "earned_at": earned[ach.id].earned_at.isoformat() if is_earned and ach.id in earned else None
+        })
+    
+    db.session.commit()
+    return jsonify(result), 200
+
 # ===== STUDENT BLOCK/SUBJECT ROUTES =====
 @app.route('/api/student/subjects', methods=['GET'])  # ✅ Changed endpoint
 @jwt_required()

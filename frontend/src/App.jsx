@@ -20,7 +20,8 @@ import Announcements from './pages/Instructor/Announcements'
 import PlagiarismCheck from './pages/Instructor/PlagiarismCheck'
 import Analytics from './pages/Instructor/Analytics'
 import CourseMaterials from './pages/Instructor/CourseMaterials'
-import ProblemSubmissions from './pages/Instructor/ProblemSubmissions' 
+import ProblemSubmissions from './pages/Instructor/ProblemSubmissions'
+import InstructorAchievements from './pages/Instructor/InstructorAchievements' 
 
 // Student Pages
 import MySubjects from './pages/Student/MySubjects'
@@ -122,6 +123,7 @@ function AppContent() {
         <Route path="plagiarism" element={<PlagiarismCheck />} />
         <Route path="analytics" element={<Analytics />} />
         <Route path="materials" element={<CourseMaterials />} />
+        <Route path="achievements" element={<InstructorAchievements />} />
       </Route>
 
       {/* Student Routes */}
