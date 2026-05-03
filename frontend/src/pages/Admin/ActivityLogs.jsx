@@ -5,24 +5,30 @@ export default function ActivityLogs() {
   const [loading, setLoading] = useState(true)
   const [page, setPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
+  const [total, setTotal] = useState(0)
   const [actionFilter, setActionFilter] = useState('all')
+  const [search, setSearch] = useState('')
+  const [stats, setStats] = useState({ total: 0, today: 0, unique_users: 0, last_activity: null })
 
   useEffect(() => {
     fetchLogs()
-  }, [page, actionFilter])
+  }, [page, actionFilter, search])
 
   const fetchLogs = async () => {
+    setLoading(true)
     try {
       const token = localStorage.getItem('token')
-      const url = `http://localhost:5000/api/admin/audit-logs?page=${page}&limit=20&action=${actionFilter}`
+      const url = `http://localhost:5000/api/admin/audit-logs?page=${page}&limit=20&action=${actionFilter}&search=${search}`
       const res = await fetch(url, {
         headers: { 'Authorization': `Bearer ${token}` }
       })
       if (res.ok) {
         const data = await res.json()
-        setLogs(data)
-        // Calculate total pages (assuming 20 per page)
-        setTotalPages(Math.ceil(data.length / 20))
+        // ✅ Backend now returns { logs, stats, total, pages }
+        setLogs(data.logs || [])
+        setStats(data.stats || { total: 0, today: 0, unique_users: 0, last_activity: null })
+        setTotalPages(data.pages || 1)
+        setTotal(data.total || 0)
       }
     } catch (err) {
       console.error('Failed to fetch logs:', err)
@@ -53,10 +59,40 @@ export default function ActivityLogs() {
   }
 
   const clearOldLogs = async () => {
-    if (!confirm('Delete activity logs older than 30 days?')) return
-    
-    // This would need a backend endpoint
-    alert('This feature will be implemented in the next update')
+    if (!confirm('Delete activity logs older than 30 days? This cannot be undone.')) return
+    try {
+      const token = localStorage.getItem('token')
+      const res = await fetch('http://localhost:5000/api/admin/audit-logs/clear', {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      if (res.ok) {
+        const data = await res.json()
+        alert(`✅ ${data.message}`)
+        fetchLogs()
+      }
+    } catch (err) {
+      console.error('Failed to clear logs:', err)
+    }
+  }
+
+  const formatRelativeTime = (dateStr) => {
+    const now = new Date()
+    const date = new Date(dateStr)
+    const diff = Math.floor((now - date) / 1000)
+    if (diff < 60) return 'Just now'
+    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
+    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
+    return `${Math.floor(diff / 86400)}d ago`
+  }
+
+  const getActionStyle = (action) => {
+    if (!action) return 'bg-slate-600/30 text-slate-300'
+    if (action.includes('DELETE') || action.includes('CLEAR')) return 'bg-red-600/30 text-red-300 border border-red-600/40'
+    if (action.includes('CREATE') || action.includes('ADD')) return 'bg-green-600/30 text-green-300 border border-green-600/40'
+    if (action.includes('UPDATE') || action.includes('EDIT')) return 'bg-blue-600/30 text-blue-300 border border-blue-600/40'
+    if (action.includes('LOGIN') || action.includes('CONFIG')) return 'bg-purple-600/30 text-purple-300 border border-purple-600/40'
+    return 'bg-slate-600/30 text-slate-300 border border-slate-600/40'
   }
 
   return (
@@ -84,38 +120,62 @@ export default function ActivityLogs() {
 
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="bg-slate-900/80 rounded-xl border border-purple-600/30 p-4">
-          <p className="text-slate-400 text-sm mb-1">Total Actions</p>
-          <p className="text-2xl font-black text-purple-400">{logs.length}</p>
+        <div className="bg-slate-900/80 rounded-xl border border-purple-600/30 p-4 hover:border-purple-500/50 transition">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-slate-400 text-sm">Total Actions</p>
+            <span className="text-2xl">📋</span>
+          </div>
+          <p className="text-3xl font-black text-purple-400">{stats.total}</p>
         </div>
-        <div className="bg-slate-900/80 rounded-xl border border-blue-600/30 p-4">
-          <p className="text-slate-400 text-sm mb-1">Today</p>
-          <p className="text-2xl font-black text-blue-400">
-            {logs.filter(log => new Date(log.created_at).toDateString() === new Date().toDateString()).length}
-          </p>
+        <div className="bg-slate-900/80 rounded-xl border border-blue-600/30 p-4 hover:border-blue-500/50 transition">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-slate-400 text-sm">Today</p>
+            <span className="text-2xl">📅</span>
+          </div>
+          <p className="text-3xl font-black text-blue-400">{stats.today}</p>
         </div>
-        <div className="bg-slate-900/80 rounded-xl border border-green-600/30 p-4">
-          <p className="text-slate-400 text-sm mb-1">Unique Users</p>
-          <p className="text-2xl font-black text-green-400">
-            {new Set(logs.map(log => log.user)).size}
-          </p>
+        <div className="bg-slate-900/80 rounded-xl border border-green-600/30 p-4 hover:border-green-500/50 transition">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-slate-400 text-sm">Unique Users</p>
+            <span className="text-2xl">👥</span>
+          </div>
+          <p className="text-3xl font-black text-green-400">{stats.unique_users}</p>
         </div>
-        <div className="bg-slate-900/80 rounded-xl border border-yellow-600/30 p-4">
-          <p className="text-slate-400 text-sm mb-1">Last Activity</p>
-          <p className="text-2xl font-black text-yellow-400">
-            {logs.length > 0 ? 'Just now' : 'N/A'}
+        <div className="bg-slate-900/80 rounded-xl border border-yellow-600/30 p-4 hover:border-yellow-500/50 transition">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-slate-400 text-sm">Last Activity</p>
+            <span className="text-2xl">⏱️</span>
+          </div>
+          <p className="text-lg font-black text-yellow-400">
+            {stats.last_activity ? formatRelativeTime(stats.last_activity) : 'N/A'}
           </p>
         </div>
       </div>
 
       {/* Filter */}
-      <div className="relative">
-        <input
-          type="text"
-          placeholder="Search by user, action, details, or IP..."
-          className="w-full bg-slate-900/80 border border-slate-700 rounded-xl pl-12 pr-4 py-3 text-white focus:border-purple-500 outline-none transition"
-        />
-        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400">🔍</span>
+      <div className="flex gap-3">
+        <div className="relative flex-1">
+          <input
+            type="text"
+            placeholder="Search by user, action, details, or IP..."
+            value={search}
+            onChange={e => { setSearch(e.target.value); setPage(1) }}
+            className="w-full bg-slate-900/80 border border-slate-700 rounded-xl pl-12 pr-4 py-3 text-white focus:border-purple-500 outline-none transition"
+          />
+          <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400">🔍</span>
+        </div>
+        <select
+          value={actionFilter}
+          onChange={e => { setActionFilter(e.target.value); setPage(1) }}
+          className="bg-slate-900/80 border border-slate-700 rounded-xl px-4 py-3 text-white focus:border-purple-500 outline-none transition"
+        >
+          <option value="all">All Actions</option>
+          <option value="USER_CREATED">User Created</option>
+          <option value="USER_UPDATED">User Updated</option>
+          <option value="USER_DELETED">User Deleted</option>
+          <option value="CONFIG_UPDATED">Config Updated</option>
+          <option value="LOGS_CLEARED">Logs Cleared</option>
+        </select>
       </div>
 
       {/* Logs Table */}
@@ -150,15 +210,9 @@ export default function ActivityLogs() {
                       <td className="p-4">
                         <div className="flex items-center gap-2">
                           <span className="text-lg">⚙️</span>
-                          <span className={`px-2 py-1 rounded text-xs font-bold ${
-                            log.action === 'UPDATE_USER' ? 'bg-blue-600/30 text-blue-300' :
-                            log.action === 'CREATE_BLOCK' ? 'bg-green-600/30 text-green-300' :
-                            log.action === 'DELETE_BLOCK' ? 'bg-red-600/30 text-red-300' :
-                            log.action === 'CONFIG_UPDATED' ? 'bg-purple-600/30 text-purple-300' :
-                            'bg-slate-600/30 text-slate-300'
-                          }`}>
-                            {log.action}
-                          </span>
+                          <span className={`px-2 py-1 rounded text-xs font-bold ${getActionStyle(log.action)}`}>
+                              {log.action}
+                            </span>
                         </div>
                       </td>
                       <td className="p-4">
@@ -186,7 +240,7 @@ export default function ActivityLogs() {
           {totalPages > 1 && (
             <div className="flex justify-between items-center p-4 border-t border-slate-800">
               <p className="text-slate-400 text-sm">
-                Showing {(page - 1) * 20 + 1} to {Math.min(page * 20, logs.length)} of {logs.length} entries
+                Showing {total === 0 ? 0 : (page - 1) * 20 + 1} to {Math.min(page * 20, total)} of {total} entries
               </p>
               <div className="flex gap-2">
                 <button

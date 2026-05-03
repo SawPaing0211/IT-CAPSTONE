@@ -687,10 +687,10 @@ export default function StudentDashboard({ user, onLogout }) {
   ]
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-950 via-purple-950/30 to-slate-950 text-white relative">
+    <div className="min-h-screen max-w-screen overflow-x-hidden bg-gradient-to-b from-slate-950 via-purple-950/30 to-slate-950 text-white relative">
 
       {/* Background particles */}
-      <div ref={backgroundRef} className="absolute inset-0 pointer-events-none transition-transform duration-100 ease-out">
+      <div ref={backgroundRef} className="fixed inset-0 pointer-events-none transition-transform duration-100 ease-out overflow-hidden">
         {[...Array(50)].map((_, i) => (
           <div key={i} className="absolute w-1 h-1 bg-white/30 rounded-full animate-float"
             style={{ left: `${Math.random() * 100}%`, top: `${Math.random() * 100}%`, animationDelay: `${Math.random() * 5}s`, animationDuration: `${3 + Math.random() * 4}s`, opacity: 0.3 + Math.random() * 0.5, boxShadow: '0 0 4px rgba(168, 85, 247, 0.5)' }} />
@@ -811,7 +811,7 @@ export default function StudentDashboard({ user, onLogout }) {
       </header>
 
       {/* ── Main Content ── */}
-      <main className="relative z-10 container mx-auto px-4 py-6">
+      <main className="relative z-10 container mx-auto px-4 py-6 overflow-x-hidden">
 
         {/* Tabs - Only show when NOT in a subject (Dashboard mode) */}
         {!selectedBlock && (
@@ -835,32 +835,26 @@ export default function StudentDashboard({ user, onLogout }) {
           </div>
         )}
 
-        {/* Sandbox tab */}
-        {activeTab === 'sandbox' && (
-          <div>
-            <SandboxHealthBanner health={sandboxHealth} />
-            <div className="rounded-2xl overflow-hidden border border-emerald-600/30 shadow-2xl shadow-emerald-900/20"
-              style={{ height: 'calc(100vh - 240px)', minHeight: 480 }}>
-              <ArcaneSandbox
-                seedCode={sandboxSeed?.code || null}
-                seedLanguage={sandboxSeed?.language || 'python'}
-                sandboxHealth={sandboxHealth}
-              />
-            </div>
-          </div>
-        )}
 
-                {/* ================= MODE 1: DASHBOARD (No Subject Selected) ================= */}
+        {/* ================= MODE 1: DASHBOARD (No Subject Selected) ================= */}
         {!selectedBlock ? (
           <div className="animate-fade-in">
             {activeTab === 'subjects' && <MySubjects onSelectSubject={handleEnterSubject} />}
-            {activeTab === 'hall' && <Leaderboard currentUsername={user.username} />}
+            {activeTab === 'hall' && (
+              <div className="overflow-hidden">
+                <Leaderboard currentUsername={user.username} />
+              </div>
+            )}
             {activeTab === 'hero' && heroStats && <ProgressStats stats={heroStats} username={user.username} />}
             {activeTab === 'sandbox' && (
               <div>
                 <SandboxHealthBanner health={sandboxHealth} />
                 <div className="rounded-2xl overflow-hidden border border-emerald-600/30 shadow-2xl shadow-emerald-900/20" style={{ height: 'calc(100vh - 240px)', minHeight: 480 }}>
-                  <ArcaneSandbox sandboxHealth={sandboxHealth} />
+                  <ArcaneSandbox
+                    seedCode={sandboxSeed?.code || null}
+                    seedLanguage={sandboxSeed?.language || 'python'}
+                    sandboxHealth={sandboxHealth}
+                  />
                 </div>
               </div>
             )}
@@ -970,6 +964,28 @@ export default function StudentDashboard({ user, onLogout }) {
           50% { opacity: 0.8; transform: scale(0.98); }
         }
         .animate-pulse-slow { animation: pulse-slow 3s ease-in-out infinite; }
+
+        /* ── Custom Scrollbar ── */
+        ::-webkit-scrollbar {
+          width: 6px;
+          height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+          background: rgba(15, 10, 30, 0.6);
+          border-radius: 10px;
+        }
+        ::-webkit-scrollbar-thumb {
+          background: linear-gradient(180deg, #7c3aed, #db2777);
+          border-radius: 10px;
+          box-shadow: 0 0 8px rgba(168, 85, 247, 0.6);
+        }
+        ::-webkit-scrollbar-thumb:hover {
+          background: linear-gradient(180deg, #9333ea, #ec4899);
+          box-shadow: 0 0 14px rgba(168, 85, 247, 0.9);
+        }
+        ::-webkit-scrollbar-corner {
+          background: transparent;
+        }
       `}</style>
     </div>
   )

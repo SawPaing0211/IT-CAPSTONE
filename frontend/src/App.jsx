@@ -67,12 +67,12 @@ function AppContent() {
   }, [navigate])
 
   const handleLogin = (userData) => {
-    setUser(userData)
-    // Redirect based on role
-    if (userData.role === 'instructor') navigate('/instructor')
-    else if (userData.role === 'student') navigate('/student')
-    else if (userData.role === 'admin') navigate('/admin')
-  }
+  setUser(userData)
+  // Redirect based on role
+  if (userData.role === 'instructor') navigate('/instructor')
+  else if (userData.role === 'student') navigate('/student')
+  else if (userData.role === 'super_admin') navigate('/admin')  // ✅ Updated
+}
   
   const handleLogout = () => { 
     localStorage.removeItem('token')
@@ -147,7 +147,7 @@ function AppContent() {
       <Route 
         path="/admin/*" 
         element={
-          <ProtectedRoute allowedRoles={['admin']}>
+          <ProtectedRoute allowedRoles={['super_admin']}>  // ✅ Updated
             <AdminDashboard user={user} onLogout={handleLogout} />
           </ProtectedRoute>
         }

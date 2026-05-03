@@ -12,44 +12,60 @@ export default function Auth({ onLogin, initialMode = 'login' }) {
   }, [initialMode])
 
   const handleSubmit = async (e) => {
-    e.preventDefault()
-    setError('')
-    setLoading(true)
+  e.preventDefault()
+  setError('')
+  setLoading(true)
+  
+  const endpoint = isLogin ? '/api/auth/login' : '/api/auth/register'
+  const payload = isLogin 
+    ? { username: formData.username, password: formData.password }
+    : { ...formData, role: selectedClass }
+  
+  try {
+    const res = await fetch(`http://localhost:5000${endpoint}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })
+    const data = await res.json()
     
-    const endpoint = isLogin ? '/api/auth/login' : '/api/auth/register'
-    const payload = isLogin 
-      ? { username: formData.username, password: formData.password }
-      : { ...formData, role: selectedClass }
+    if (!res.ok) throw new Error(data.error || 'Request failed')
     
-    try {
-      const res = await fetch(`http://localhost:5000${endpoint}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      })
-      const data = await res.json()
-      
-      if (!res.ok) throw new Error(data.error || 'Request failed')
-      
-      if (isLogin) {
-        localStorage.setItem('token', data.access_token)
-        localStorage.setItem('user', JSON.stringify(data.user))
-        // Store refresh token if backend provides it
-        if (data.refresh_token) {
-          localStorage.setItem('refresh_token', data.refresh_token)
-        }
-        onLogin(data.user)
-      } else {
-        alert('⚔️ Account created! Your quest begins!')
-        setIsLogin(true)
-        setFormData({ username: '', email: '', password: '' })
+    if (isLogin) {
+      // Save tokens
+      localStorage.setItem('token', data.access_token)
+      localStorage.setItem('user', JSON.stringify(data.user))
+      if (data.refresh_token) {
+        localStorage.setItem('refresh_token', data.refresh_token)
       }
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setLoading(false)
+      
+      // ✅ Redirect based on role
+      const role = data.user.role
+      console.log('Login successful, role:', role)
+      
+      setTimeout(() => {
+        if (role === 'super_admin') {
+          window.location.href = '/admin'
+        } else if (role === 'instructor') {
+          window.location.href = '/instructor'
+        } else if (role === 'student') {
+          window.location.href = '/student'
+        } else {
+          onLogin(data.user)
+        }
+      }, 100)
+      
+    } else {
+      alert('⚔️ Account created! Your quest begins!')
+      setIsLogin(true)
+      setFormData({ username: '', email: '', password: '' })
     }
+  } catch (err) {
+    setError(err.message)
+  } finally {
+    setLoading(false)
   }
+}
 
   const classOptions = [
     { id: 'student', icon: '🗡️', name: 'Student', desc: 'Learn & conquer', color: 'from-purple-600 to-pink-600' },

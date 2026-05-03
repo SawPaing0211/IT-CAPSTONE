@@ -808,7 +808,7 @@ useEffect(() => {
             </div>
 
             {/* Console output (scrollable within the 192px) */}
-            <div className="console-output overflow-y-auto p-4 font-mono text-xs" style={{ flex: '1 1 0', minHeight: 0 }}>
+            <div className="console-output overflow-y-auto p-4 font-mono text-xs [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-slate-950 [&::-webkit-scrollbar-track]:rounded-full [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gradient-to-b [&::-webkit-scrollbar-thumb]:from-purple-600 [&::-webkit-scrollbar-thumb]:to-pink-600 [&::-webkit-scrollbar-thumb]:shadow-[0_0_8px_rgba(168,85,247,0.6)]" style={{ flex: '1 1 0', minHeight: 0 }}>
               {!output && !isLoading && (
                 <div className="text-center py-4 text-slate-500">
                   <p className="text-lg mb-2">🔮</p>
@@ -840,7 +840,7 @@ useEffect(() => {
                       </p>
                       {output.status !== 'error' && (
                         <p className="text-xs text-slate-400">
-                          Score: {output.score}% • Passed {output.passed || 0}/{output.total || output.test_results?.length || 0} tests
+                          Score: {output.xp_reward || output.score} XP • Passed {output.test_results?.filter(t => t.passed)?.length || 0}/{output.test_results?.length || 0} tests
                         </p>
                       )}
                     </div>

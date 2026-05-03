@@ -59,10 +59,10 @@ export default function AdminDashboard({ user, onLogout }) {
             </div>
             {sidebarOpen && (
               <div className="overflow-hidden">
-                <h1 className="font-black text-lg bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent whitespace-nowrap">
-                  Forge.Admin
-                </h1>
-                <p className="text-xs text-slate-400 whitespace-nowrap">System Control</p>
+                <h1 className="font-black text-base bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent">
+                Forge.SuperAdmin
+              </h1>
+              <p className="text-xs text-slate-400">Super Admin Control</p>
               </div>
             )}
           </div>
@@ -99,7 +99,7 @@ export default function AdminDashboard({ user, onLogout }) {
             {sidebarOpen && (
               <div className="overflow-hidden flex-1">
                 <p className="font-semibold text-sm truncate">{user?.username || 'Admin'}</p>
-                <p className="text-xs text-slate-400 truncate">Administrator</p>
+                <p className="text-xs text-slate-400 truncate">Super Administrator</p>
               </div>
             )}
           </div>
@@ -134,7 +134,7 @@ export default function AdminDashboard({ user, onLogout }) {
               </h1>
               <p className="text-slate-400 text-sm hidden sm:block">
                 {activeTab === 'dashboard' && 'System overview and user management'}
-                {activeTab === 'users' && 'Manage students, instructors, and administrators'}
+                {activeTab === 'users' && 'Manage students, instructors, and super administrators'}
                 {activeTab === 'assignments' && 'Manage instructor subject and block assignments'}
                 {activeTab === 'subjects' && 'Create and manage course subjects'}
                 {activeTab === 'blocks' && 'Manage class blocks and course assignments'}
@@ -167,6 +167,23 @@ export default function AdminDashboard({ user, onLogout }) {
 
         {/* Tab Content */}
         <div className="p-6 lg:p-8">
+          {/* Super Admin Role Banner */}
+          <div className="mb-6 flex items-center gap-4 px-6 py-4 rounded-2xl bg-gradient-to-r from-purple-900/60 via-pink-900/40 to-purple-900/60 border border-purple-500/40 shadow-lg shadow-purple-900/30">
+            <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-pink-500 rounded-xl flex items-center justify-center text-2xl shadow-lg shadow-purple-600/40 flex-shrink-0">
+              🛡️
+            </div>
+            <div className="flex-1">
+              <h3 className="font-black text-white text-base">Super Administrator</h3>
+              <p className="text-purple-300/80 text-xs mt-0.5">
+                Full platform control — user management, academic structure (subjects, blocks, instructor assignments), system configuration, and audit logs.
+              </p>
+            </div>
+            <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-purple-600/20 border border-purple-500/40 rounded-lg">
+              <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></span>
+              <span className="text-green-400 text-xs font-bold">System Online</span>
+            </div>
+          </div>
+
           {/* Proper conditional rendering - only one tab renders at a time */}
           {activeTab === 'dashboard' && <DashboardOverview />}
           {activeTab === 'users' && <UserManagement />}

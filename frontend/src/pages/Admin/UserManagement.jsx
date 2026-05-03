@@ -14,6 +14,49 @@ export default function UserManagement() {
   // Modal states
   const [manageModal, setManageModal] = useState(null)
   const [recoveryModal, setRecoveryModal] = useState(null)
+  const [addUserModal, setAddUserModal] = useState(false)
+  const [addUserForm, setAddUserForm] = useState({ username: '', email: '', password: '', role: 'student', block_id: '' })
+  const [addUserLoading, setAddUserLoading] = useState(false)
+  const [addUserError, setAddUserError] = useState('')
+  const [addUserSuccess, setAddUserSuccess] = useState('')
+
+  const handleAddUser = async () => {
+    setAddUserError('')
+    setAddUserSuccess('')
+    if (!addUserForm.username || !addUserForm.email || !addUserForm.password) {
+      setAddUserError('Username, email, and password are required.')
+      return
+    }
+    if (addUserForm.password.length < 6) {
+      setAddUserError('Password must be at least 6 characters.')
+      return
+    }
+    setAddUserLoading(true)
+    try {
+      const token = localStorage.getItem('token')
+      const res = await fetch('http://localhost:5000/api/admin/users', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...addUserForm,
+          block_id: addUserForm.block_id ? parseInt(addUserForm.block_id) : null
+        })
+      })
+      const data = await res.json()
+      if (res.ok) {
+        setAddUserSuccess(`✅ User "${data.user.username}" created successfully!`)
+        setAddUserForm({ username: '', email: '', password: '', role: 'student', block_id: '' })
+        fetchUsers()
+        setTimeout(() => { setAddUserModal(false); setAddUserSuccess('') }, 2000)
+      } else {
+        setAddUserError(data.error || 'Failed to create user')
+      }
+    } catch (err) {
+      setAddUserError('Network error. Please try again.')
+    } finally {
+      setAddUserLoading(false)
+    }
+  }
 
   useEffect(() => {
     fetchUsers()
@@ -163,7 +206,10 @@ export default function UserManagement() {
           <button className="px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg transition flex items-center gap-2">
             <span>📥</span> Export CSV
           </button>
-          <button className="px-4 py-2 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-lg transition flex items-center gap-2 font-bold">
+          <button
+            onClick={() => setAddUserModal(true)}
+            className="px-4 py-2 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-lg transition flex items-center gap-2 font-bold shadow-lg shadow-purple-600/30"
+          >
             <span>👤</span> Add User
           </button>
         </div>
@@ -189,7 +235,7 @@ export default function UserManagement() {
             className="bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white focus:border-purple-500 outline-none transition"
           >
             <option value="all">All Roles</option>
-            <option value="admin">Admin</option>
+            <option value="super_admin">Super Admin</option>
             <option value="instructor">Instructor</option>
             <option value="student">Student</option>
           </select>
@@ -228,8 +274,8 @@ export default function UserManagement() {
           <p className="text-2xl font-black text-blue-400">{groupedUsers.instructor.length}</p>
         </div>
         <div className="bg-slate-900/80 rounded-xl border border-purple-600/30 p-4">
-          <p className="text-slate-400 text-sm mb-1">Total Admins</p>
-          <p className="text-2xl font-black text-purple-400">{groupedUsers.admin.length}</p>
+          <p className="text-slate-400 text-sm mb-1">Super Admins</p>
+          <p className="text-2xl font-black text-purple-400">{users.filter(u => u.role === 'super_admin').length}</p>
         </div>
         <div className="bg-slate-900/80 rounded-xl border border-yellow-600/30 p-4">
           <p className="text-slate-400 text-sm mb-1">Filtered Results</p>
@@ -244,12 +290,12 @@ export default function UserManagement() {
         </div>
       ) : (
         <div className="space-y-6">
-          {/* Administrators Section */}
-          {filteredUsers.filter(u => u.role === 'admin').length > 0 && (
+          {/* Super Administrators Section */}
+          {filteredUsers.filter(u => u.role === 'super_admin').length > 0 && (
             <UserSection
-              title="Administrators"
+              title="Super Administrators"
               icon="🛡️"
-              users={filteredUsers.filter(u => u.role === 'admin')}
+              users={filteredUsers.filter(u => u.role === 'super_admin')}
               onManage={(user) => setManageModal(user)}
               onRecover={(user) => setRecoveryModal(user)}
               onDelete={handleDeleteUser}
@@ -305,6 +351,151 @@ export default function UserManagement() {
           onClose={() => setRecoveryModal(null)}
           onSuccess={() => { setRecoveryModal(null); fetchUsers(); }}
         />
+      )}
+
+      {/* Add User Modal */}
+      {addUserModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-slate-900 border border-purple-600/50 rounded-2xl w-full max-w-md shadow-2xl shadow-purple-900/50">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between p-6 border-b border-purple-600/30">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-gradient-to-br from-purple-600 to-pink-600 rounded-xl flex items-center justify-center text-xl">
+                  👤
+                </div>
+                <div>
+                  <h2 className="text-xl font-black text-white">Add New User</h2>
+                  <p className="text-slate-400 text-xs">Create a student, instructor, or super admin</p>
+                </div>
+              </div>
+              <button onClick={() => { setAddUserModal(false); setAddUserError(''); setAddUserSuccess('') }}
+                className="text-slate-400 hover:text-white text-2xl transition">✕</button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 space-y-4">
+              {addUserError && (
+                <div className="flex items-center gap-2 p-3 bg-red-600/20 border border-red-600/40 rounded-lg text-red-300 text-sm">
+                  <span>❌</span> {addUserError}
+                </div>
+              )}
+              {addUserSuccess && (
+                <div className="flex items-center gap-2 p-3 bg-green-600/20 border border-green-600/40 rounded-lg text-green-300 text-sm">
+                  <span>✅</span> {addUserSuccess}
+                </div>
+              )}
+
+              <div>
+                <label className="block text-sm text-slate-400 mb-1.5">Username <span className="text-red-400">*</span></label>
+                <input
+                  type="text"
+                  value={addUserForm.username}
+                  onChange={e => setAddUserForm({...addUserForm, username: e.target.value})}
+                  placeholder="e.g. john_doe"
+                  className="w-full bg-slate-800 border border-slate-700 focus:border-purple-500 rounded-lg px-4 py-2.5 text-white outline-none transition placeholder-slate-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm text-slate-400 mb-1.5">Email <span className="text-red-400">*</span></label>
+                <input
+                  type="email"
+                  value={addUserForm.email}
+                  onChange={e => setAddUserForm({...addUserForm, email: e.target.value})}
+                  placeholder="e.g. john@school.edu"
+                  className="w-full bg-slate-800 border border-slate-700 focus:border-purple-500 rounded-lg px-4 py-2.5 text-white outline-none transition placeholder-slate-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm text-slate-400 mb-1.5">Password <span className="text-red-400">*</span></label>
+                <input
+                  type="password"
+                  value={addUserForm.password}
+                  onChange={e => setAddUserForm({...addUserForm, password: e.target.value})}
+                  placeholder="Min. 6 characters"
+                  className="w-full bg-slate-800 border border-slate-700 focus:border-purple-500 rounded-lg px-4 py-2.5 text-white outline-none transition placeholder-slate-500"
+                />
+                {addUserForm.password && (
+                  <div className="mt-1.5 flex gap-1">
+                    {[1,2,3,4].map(i => (
+                      <div key={i} className={`h-1 flex-1 rounded-full transition-all ${
+                        addUserForm.password.length >= i * 3
+                          ? i <= 1 ? 'bg-red-500' : i <= 2 ? 'bg-yellow-500' : i <= 3 ? 'bg-blue-500' : 'bg-green-500'
+                          : 'bg-slate-700'
+                      }`} />
+                    ))}
+                    <span className="text-xs text-slate-500 ml-1">
+                      {addUserForm.password.length < 4 ? 'Weak' : addUserForm.password.length < 7 ? 'Fair' : addUserForm.password.length < 10 ? 'Good' : 'Strong'}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-sm text-slate-400 mb-1.5">Role <span className="text-red-400">*</span></label>
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { value: 'student', label: 'Student', icon: '🎓' },
+                    { value: 'instructor', label: 'Instructor', icon: '👨‍🏫' },
+                    { value: 'super_admin', label: 'Super Admin', icon: '🛡️' }
+                  ].map(role => (
+                    <button
+                      key={role.value}
+                      type="button"
+                      onClick={() => setAddUserForm({...addUserForm, role: role.value})}
+                      className={`flex flex-col items-center gap-1 p-3 rounded-xl border-2 transition ${
+                        addUserForm.role === role.value
+                          ? 'border-purple-500 bg-purple-600/20 text-white'
+                          : 'border-slate-700 bg-slate-800 text-slate-400 hover:border-slate-600'
+                      }`}
+                    >
+                      <span className="text-xl">{role.icon}</span>
+                      <span className="text-xs font-bold">{role.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {(addUserForm.role === 'student') && (
+                <div>
+                  <label className="block text-sm text-slate-400 mb-1.5">Assign to Block <span className="text-slate-500">(optional)</span></label>
+                  <select
+                    value={addUserForm.block_id}
+                    onChange={e => setAddUserForm({...addUserForm, block_id: e.target.value})}
+                    className="w-full bg-slate-800 border border-slate-700 focus:border-purple-500 rounded-lg px-4 py-2.5 text-white outline-none transition"
+                  >
+                    <option value="">No block assigned</option>
+                    {blocks.map(block => (
+                      <option key={block.id} value={block.id}>{block.section_code} — {block.semester || 'Current'}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="flex gap-3 p-6 border-t border-purple-600/30">
+              <button
+                onClick={() => { setAddUserModal(false); setAddUserError(''); setAddUserSuccess('') }}
+                className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 font-medium transition"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleAddUser}
+                disabled={addUserLoading}
+                className="flex-1 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-white font-black transition shadow-lg shadow-purple-600/30 flex items-center justify-center gap-2"
+              >
+                {addUserLoading ? (
+                  <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Creating...</>
+                ) : (
+                  <><span>👤</span> Create User</>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

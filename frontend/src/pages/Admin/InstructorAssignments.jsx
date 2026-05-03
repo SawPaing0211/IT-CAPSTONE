@@ -5,6 +5,7 @@ export default function InstructorAssignments() {
   const [instructors, setInstructors] = useState([])
   const [subjects, setSubjects] = useState([])
   const [blocks, setBlocks] = useState([])
+  const [filteredBlocks, setFilteredBlocks] = useState([])
   const [loading, setLoading] = useState(true)
   const [showCreateModal, setShowCreateModal] = useState(false)
   
@@ -30,6 +31,29 @@ export default function InstructorAssignments() {
     fetchSubjects()
     fetchBlocks()
   }, [])
+
+  // ✅ NEW: Filter blocks when subject changes
+useEffect(() => {
+  if (!formData.subject_id) {
+    setFilteredBlocks([])
+    return
+  }
+  
+  // Find the selected subject name
+  const selectedSubject = subjects.find(s => s.id == formData.subject_id)
+  
+  // Filter blocks that have the selected subject (block.subjects is an array of names)
+  const blocksWithSubject = blocks.filter(block => 
+    block.subjects && selectedSubject && block.subjects.includes(selectedSubject.name)
+  )
+  
+  setFilteredBlocks(blocksWithSubject)
+  
+  // Reset block selection if current block doesn't have this subject
+  if (formData.block_id && !blocksWithSubject.some(b => b.id == formData.block_id)) {
+    setFormData(prev => ({ ...prev, block_id: '' }))
+  }
+}, [formData.subject_id, blocks, subjects])  // ✅ Added subjects to dependencies
 
   const fetchAssignments = async () => {
     try {
@@ -347,55 +371,81 @@ export default function InstructorAssignments() {
         </div>
       </div>
 
-      {/* Assignments List */}
+      {/* Assignments List — grouped by instructor */}
       {filteredAssignments.length === 0 ? (
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-12 text-center">
+        <div className="bg-slate-900/60 border border-dashed border-slate-700 rounded-2xl p-16 text-center">
           <div className="text-6xl mb-4">📋</div>
           <h3 className="text-xl font-bold text-white mb-2">No assignments found</h3>
-          <p className="text-slate-400">
-            {assignments.length === 0 ? 'Create your first instructor assignment to get started!' : 'Try adjusting your filters'}
+          <p className="text-slate-400 text-sm">
+            {assignments.length === 0 ? 'Click "+ Assign Instructor" to get started.' : 'Try adjusting your filters.'}
           </p>
         </div>
       ) : (
-        <div className="space-y-3">
-          {filteredAssignments.map(assignment => (
-            <div key={assignment.id} className="bg-slate-900 border border-slate-800 rounded-xl p-4 hover:border-purple-600/40 transition group">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-4 flex-1">
-                  <div className="w-12 h-12 bg-gradient-to-br from-purple-600 to-pink-600 rounded-lg flex items-center justify-center text-2xl">
-                    👨‍🏫
-                  </div>
-                  <div className="flex-1">
+        <div className="space-y-4">
+          {/* Group by instructor */}
+          {Object.entries(
+            filteredAssignments.reduce((groups, assignment) => {
+              const key = assignment.instructor?.id || 'unknown'
+              if (!groups[key]) groups[key] = { instructor: assignment.instructor, assignments: [] }
+              groups[key].assignments.push(assignment)
+              return groups
+            }, {})
+          ).map(([instructorId, group]) => (
+            <div key={instructorId} className="bg-slate-900/80 border border-slate-800 rounded-2xl overflow-hidden hover:border-purple-600/30 transition">
+              {/* Instructor Header */}
+              <div className="flex items-center gap-4 px-6 py-4 bg-slate-800/60 border-b border-slate-700/50">
+                <div className="w-11 h-11 bg-gradient-to-br from-purple-600 to-pink-600 rounded-xl flex items-center justify-center text-lg font-black text-white shadow-lg shadow-purple-600/30 flex-shrink-0">
+                  {group.instructor?.username?.[0]?.toUpperCase() || '?'}
+                </div>
+                <div className="flex-1">
+                  <p className="font-bold text-white text-base">{group.instructor?.username || 'Unknown Instructor'}</p>
+                  <p className="text-xs text-slate-400">{group.assignments.length} assignment{group.assignments.length !== 1 ? 's' : ''}</p>
+                </div>
+                <span className="px-3 py-1 bg-purple-600/20 text-purple-300 text-xs font-bold rounded-full border border-purple-600/30">
+                  👨‍🏫 Instructor
+                </span>
+              </div>
+
+              {/* Assignment Rows */}
+              <div className="divide-y divide-slate-800/60">
+                {group.assignments.map(assignment => (
+                  <div key={assignment.id} className="flex items-center justify-between px-6 py-3.5 hover:bg-slate-800/30 transition group">
                     <div className="flex items-center gap-3 flex-wrap">
-                      <h3 className="text-lg font-bold text-white">{assignment.instructor?.username || 'Unknown Instructor'}</h3>
-                      <span className="text-slate-500">→</span>
-                      <span className="px-2 py-1 bg-green-600/20 text-green-300 rounded text-sm font-bold border border-green-600/30">
-                        {assignment.subject?.name || 'Unknown Subject'}
-                      </span>
-                      <span className="text-slate-500">→</span>
-                      <span className="px-2 py-1 bg-purple-600/20 text-purple-300 rounded text-sm font-bold border border-purple-600/30">
-                        Block {assignment.block?.section_code || 'Unknown'}
-                      </span>
+                      {/* Subject */}
+                      <div className="flex items-center gap-2">
+                        <span className="text-slate-500 text-xs uppercase tracking-wider font-bold">Subject</span>
+                        <span className="px-3 py-1 bg-green-600/15 text-green-300 rounded-lg text-sm font-bold border border-green-600/25">
+                          {assignment.subject?.name || 'Unknown'}
+                        </span>
+                      </div>
+                      <span className="text-slate-600 text-xs">in</span>
+                      {/* Block */}
+                      <div className="flex items-center gap-2">
+                        <span className="text-slate-500 text-xs uppercase tracking-wider font-bold">Block</span>
+                        <span className="px-3 py-1 bg-purple-600/15 text-purple-300 rounded-lg text-sm font-bold border border-purple-600/25">
+                          {assignment.block?.section_code || 'Unknown'}
+                        </span>
+                      </div>
+                      <span className="text-slate-700 text-xs ml-2">#{assignment.id}</span>
                     </div>
-                    <div className="flex items-center gap-4 mt-2 text-xs text-slate-500">
-                      <span>Assignment ID: {assignment.id}</span>
+
+                    {/* Actions */}
+                    <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition ml-4 flex-shrink-0">
+                      <button
+                        onClick={() => handleEditAssignment(assignment)}
+                        className="px-3 py-1.5 bg-purple-600/20 hover:bg-purple-600/40 text-purple-300 rounded-lg text-xs font-bold transition border border-purple-600/30"
+                      >
+                        ✏️ Edit
+                      </button>
+                      <button
+                        onClick={() => handleDeleteAssignment(assignment.id)}
+                        className="px-3 py-1.5 bg-red-600/20 hover:bg-red-600/40 text-red-300 rounded-lg text-xs font-bold transition border border-red-600/30"
+                      >
+                        🗑️ Remove
+                      </button>
                     </div>
                   </div>
-                </div>
-                <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition">
-                  <button
-                    onClick={() => handleEditAssignment(assignment)}
-                    className="px-3 py-1.5 bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 rounded-lg text-sm font-bold transition"
-                  >
-                    ✏️ Edit
-                  </button>
-                  <button
-                    onClick={() => handleDeleteAssignment(assignment.id)}
-                    className="px-3 py-1.5 bg-red-600/20 hover:bg-red-600/30 text-red-300 rounded-lg text-sm font-bold transition"
-                  >
-                    🗑️ Remove
-                  </button>
-                </div>
+                ))}
               </div>
             </div>
           ))}
@@ -447,12 +497,18 @@ export default function InstructorAssignments() {
                   value={formData.block_id}
                   onChange={(e) => setFormData({...formData, block_id: e.target.value})}
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white outline-none focus:border-purple-500"
+                  disabled={!formData.subject_id}
                 >
-                  <option value="">Select Block</option>
-                  {blocks.map(block => (
+                  <option value="">
+                    {formData.subject_id ? 'Select Block' : 'Please select a subject first'}
+                  </option>
+                  {filteredBlocks.map(block => (
                     <option key={block.id} value={block.id}>{block.section_code} - {block.semester || 'No Semester'}</option>
                   ))}
                 </select>
+                {formData.subject_id && filteredBlocks.length === 0 && (
+                  <p className="text-yellow-400 text-xs mt-1">⚠️ No blocks found with this subject</p>
+                )}
               </div>
             </div>
             <div className="flex gap-3 mt-6">
@@ -518,12 +574,18 @@ export default function InstructorAssignments() {
                   value={formData.block_id}
                   onChange={(e) => setFormData({...formData, block_id: e.target.value})}
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white outline-none focus:border-purple-500"
+                  disabled={!formData.subject_id}
                 >
-                  <option value="">Select Block</option>
-                  {blocks.map(block => (
+                  <option value="">
+                    {formData.subject_id ? 'Select Block' : 'Please select a subject first'}
+                  </option>
+                  {filteredBlocks.map(block => (
                     <option key={block.id} value={block.id}>{block.section_code} - {block.semester || 'No Semester'}</option>
                   ))}
                 </select>
+                {formData.subject_id && filteredBlocks.length === 0 && (
+                  <p className="text-yellow-400 text-xs mt-1">⚠️ No blocks found with this subject</p>
+                )}
               </div>
             </div>
             <div className="flex gap-3 mt-6">

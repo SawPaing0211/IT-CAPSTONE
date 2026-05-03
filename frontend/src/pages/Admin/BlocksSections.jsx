@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import CreateBlockModal from './CreateBlockModal'
 
 export default function BlocksSections() {
   const [blocks, setBlocks] = useState([])
@@ -24,9 +25,7 @@ export default function BlocksSections() {
     subject_ids: []
   })
 
-    
   const [subjects, setSubjects] = useState([]) // Available subjects from API
-
 
   useEffect(() => {
     fetchBlocks()
@@ -63,36 +62,6 @@ export default function BlocksSections() {
     }
   }
 
-  const handleCreateBlock = async () => {
-    try {
-      const token = localStorage.getItem('token')
-      const res = await fetch('http://localhost:5000/api/admin/blocks', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-                // ✅ Send subjects array instead of single name
-        body: JSON.stringify({
-          section_code: newBlock.section_code,
-          semester: newBlock.semester,
-          subjects: newBlock.subjects || [] // ✅ Array of subject names
-        })
-      })
-      if (res.ok) {
-        setShowCreateModal(false)
-        setNewBlock({ section_code: '', semester: '', subjects: [] }) // ✅ Reset subjects too
-        fetchBlocks()
-      } else {
-        const error = await res.json()
-        alert(`Failed to create block: ${error.error}`)
-      }
-    } catch (err) {
-      console.error('Failed to create block:', err)
-      alert('Failed to create block')
-    }
-  }
-
   const handleDeleteBlock = async (blockId) => {
     if (!confirm('Are you sure you want to delete this block?')) return
     try {
@@ -113,7 +82,7 @@ export default function BlocksSections() {
     }
   }
 
-    // ✅ Edit block handlers
+  // ✅ Edit block handlers
   const handleEditBlock = (block) => {
     setEditingBlock(block)
     
@@ -256,6 +225,7 @@ export default function BlocksSections() {
           <button
             onClick={() => setShowCreateModal(true)}
             className="px-4 py-2 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-lg text-white font-bold transition shadow-lg shadow-purple-600/30"
+            title="Create a new class block with subjects and instructor"
           >
             <span className="text-xl">+</span> Create Block
           </button>
@@ -413,19 +383,19 @@ export default function BlocksSections() {
                   </div>
                 </div>
                 <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition">
-                <button 
-                  onClick={() => handleEditBlock(block)}
-                  className="px-3 py-1.5 bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 rounded-lg text-sm font-bold transition"
-                >
-                  ✏️ Edit
-                </button>
-                <button
-                  onClick={() => handleDeleteBlock(block.id)}
-                  className="px-3 py-1.5 bg-red-600/20 hover:bg-red-600/30 text-red-300 rounded-lg text-sm font-bold transition"
-                >
-                  🗑️ Delete
-                </button>
-              </div>
+                  <button 
+                    onClick={() => handleEditBlock(block)}
+                    className="px-3 py-1.5 bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 rounded-lg text-sm font-bold transition"
+                  >
+                    ✏️ Edit
+                  </button>
+                  <button
+                    onClick={() => handleDeleteBlock(block.id)}
+                    className="px-3 py-1.5 bg-red-600/20 hover:bg-red-600/30 text-red-300 rounded-lg text-sm font-bold transition"
+                  >
+                    🗑️ Delete
+                  </button>
+                </div>
               </div>
             </div>
           ))}
@@ -578,93 +548,12 @@ export default function BlocksSections() {
         </div>
       )}
 
-      {/* Create Block Modal */}
+      {/* ✨ NEW: Polished Create Block Modal */}
       {showCreateModal && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50">
-          <div className="bg-slate-900 border-2 border-purple-600/50 rounded-2xl p-6 w-full max-w-md shadow-2xl">
-            <h2 className="text-2xl font-bold text-white mb-4 flex items-center gap-2">
-              <span>📦</span> Create Block
-            </h2>
-            <div className="space-y-4">
-              {/* Block Code */}
-              <div>
-                <label className="block text-slate-400 text-sm mb-2">Block Code *</label>
-                <input
-                  type="text"
-                  value={newBlock.section_code}
-                  onChange={(e) => setNewBlock({...newBlock, section_code: e.target.value})}
-                  placeholder="e.g., 101"
-                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white outline-none focus:border-purple-500"
-                />
-              </div>
-
-              {/* Semester */}
-              <div>
-                <label className="block text-slate-400 text-sm mb-2">Semester</label>
-                <input
-                  type="text"
-                  value={newBlock.semester}
-                  onChange={(e) => setNewBlock({...newBlock, semester: e.target.value})}
-                  placeholder="e.g., 1st Semester"
-                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white outline-none focus:border-purple-500"
-                />
-              </div>
-
-              {/* NEW: Multi-Select Subjects */}
-              <div>
-                <label className="block text-slate-400 text-sm mb-2">Assign Subjects</label>
-                <div className="bg-slate-800 border border-slate-700 rounded-lg p-2 max-h-48 overflow-y-auto">
-                  {subjects.length === 0 ? (
-                    <p className="text-slate-500 text-sm text-center py-2">
-                      No subjects available. Create subjects first in Subjects Management.
-                    </p>
-                  ) : (
-                    subjects.map(subject => (
-                      <label key={subject.id} className="flex items-center gap-2 p-2 hover:bg-slate-700 rounded cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={newBlock.subjects.includes(subject.name)}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setNewBlock({
-                                ...newBlock,
-                                subjects: [...newBlock.subjects, subject.name]
-                              })
-                            } else {
-                              setNewBlock({
-                                ...newBlock,
-                                subjects: newBlock.subjects.filter(s => s !== subject.name)
-                              })
-                            }
-                          }}
-                          className="w-4 h-4 rounded border-slate-600 text-purple-600 focus:ring-purple-500"
-                        />
-                        <span className="text-sm text-white">{subject.name}</span>
-                      </label>
-                    ))
-                  )}
-                </div>
-                <p className="text-xs text-slate-500 mt-1">
-                  Check subjects to assign to this block
-                </p>
-              </div>
-            </div>
-            <div className="flex gap-3 mt-6">
-              <button
-                onClick={() => setShowCreateModal(false)}
-                className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-white font-bold transition"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleCreateBlock}
-                className="flex-1 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-lg text-white font-bold transition shadow-lg shadow-purple-600/30"
-              >
-                Create Block
-              </button>
-            </div>
-          </div>
-        </div>
+        <CreateBlockModal 
+          onClose={() => setShowCreateModal(false)}
+          onSuccess={() => { setShowCreateModal(false); fetchBlocks(); }}
+        />
       )}
     </div>
   )
