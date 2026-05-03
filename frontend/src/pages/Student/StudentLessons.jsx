@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 
-export default function StudentLessons({ blockId, blockName }) {
+export default function StudentLessons({ subjectId, blockId, blockName }) {
   const [lessons, setLessons] = useState([])
   const [loading, setLoading] = useState(true)
 
@@ -8,16 +8,21 @@ export default function StudentLessons({ blockId, blockName }) {
     const fetchLessons = async () => {
       try {
         const token = localStorage.getItem('token')
-        const res = await fetch('http://localhost:5000/api/student/lessons', {
-          headers: { 'Authorization': `Bearer ${token}` }
-        })
+        if (!subjectId) {
+          setLessons([])
+          setLoading(false)
+          return
+        }
+        const res = await fetch(
+          `http://localhost:5000/api/student/lessons?subject_id=${subjectId}`,
+          { headers: { 'Authorization': `Bearer ${token}` } }
+        )
         if (res.ok) {
           const data = await res.json()
-          // Filter lessons for this specific block
-          const blockLessons = data.filter(lesson => 
-            !lesson.block_id || lesson.block_id === blockId
-          )
-          setLessons(blockLessons)
+          const filtered = blockId
+            ? data.filter(lesson => !lesson.block_id || lesson.block_id === blockId)
+            : data
+          setLessons(filtered)
         }
       } catch (err) {
         console.error('Failed to fetch lessons:', err)
@@ -26,7 +31,7 @@ export default function StudentLessons({ blockId, blockName }) {
       }
     }
     fetchLessons()
-  }, [blockId])
+  }, [subjectId, blockId])
 
   const handleDownload = async (lessonId, fileId, filename) => {
     try {

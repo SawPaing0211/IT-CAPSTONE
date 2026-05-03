@@ -918,7 +918,7 @@ export default function StudentDashboard({ user, onLogout }) {
             <div className="min-h-[500px]">
               {/* ✅ NEW: Lessons Tab Content */}
               {courseTab === 'lessons' && (
-                <StudentLessons blockId={selectedBlock.id} blockName={selectedBlock.name} />
+                <StudentLessons subjectId={selectedBlock.subject_id} blockId={selectedBlock.id} blockName={selectedBlock.name} />
               )}
               
               {courseTab === 'board' && (
