@@ -5,7 +5,7 @@ from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime, timedelta
 from functools import wraps
-import subprocess, sys, time, csv, json
+import subprocess, sys, time, csv, json, io
 from io import StringIO
 from sqlalchemy import text, inspect
 from routes.sandbox import sandbox_bp, _run_in_docker
@@ -68,7 +68,7 @@ class User(db.Model):
     username = db.Column(db.String(50), unique=True, nullable=False)
     email = db.Column(db.String(100), unique=True, nullable=False)
     password_hash = db.Column(db.String(255), nullable=False)
-    role = db.Column(db.Enum('student', 'instructor', 'admin'), default='student')
+    role = db.Column(db.Enum('student', 'instructor', 'super_admin'), default='student')
     xp = db.Column(db.Integer, default=0)
     level = db.Column(db.Integer, default=1)
     is_active = db.Column(db.Boolean, default=True)
@@ -255,8 +255,8 @@ class_problems = db.Table('class_problems',
 )
 
 # ===== HELPERS =====
-def is_instructor_or_admin(user): return user and user.role in ['instructor', 'admin']
-def is_admin(user): return user and user.role == 'admin'
+def is_instructor_or_admin(user): return user and user.role in ['instructor', 'super_admin']
+def is_super_admin(user): return user and user.role == 'super_admin'
 
 # ✅ NEW: Check if instructor is assigned to teach a subject in a block
 def is_instructor_assigned(instructor_id, subject_id, block_id=None):
@@ -284,14 +284,25 @@ def admin_required(f):
     def decorated(*args, **kwargs):
         user_id = int(get_jwt_identity())
         user = User.query.get(user_id)
-        if not is_admin(user):
-            return jsonify({"error": "Admin access required"}), 403
+        if not is_super_admin(user):
+            return jsonify({"error": "Super Admin access required"}), 403
         return f(user, *args, **kwargs)
     return decorated
 
 def log_admin_action(admin_id, action, details=None, target_id=None):
-    log = AuditLog(admin_id=admin_id, action=action, details=details or "", target_id=target_id, ip_address=request.remote_addr)
-    db.session.add(log); db.session.flush()
+    try:
+        log = AuditLog(
+            admin_id=admin_id,
+            action=action,
+            details=details or "",
+            target_id=target_id,
+            ip_address=request.remote_addr
+        )
+        db.session.add(log)
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        print(f"⚠️ audit log failed: {e}")
 
 def sanitize_code(code, language):
     if language == 'python':
@@ -2080,8 +2091,8 @@ def get_student_announcements():
         return jsonify({"error": "Students only"}), 403
     
     # Get blocks this student is in
-    student_blocks = db.session.query(class_students.c.class_id).filter_by(student_id=user_id).all()
-    block_ids = [b[0] for b in student_blocks]
+    student_class_ids = db.session.query(class_students.c.class_id).filter_by(student_id=user_id).all()
+    block_ids = [b[0] for b in student_class_ids]
     
     # Fetch announcements: global OR for student's blocks
     announcements = Announcement.query.filter(
@@ -2159,6 +2170,46 @@ def admin_overview(admin):
         "maintenance_mode": (SystemConfig.query.filter_by(key='maintenance_mode').first() or type('obj', (object,), {'value': 'false'})).value == 'true',
         "server_time": datetime.utcnow().isoformat()
     }), 200
+
+@app.route('/api/admin/users', methods=['POST'])
+@admin_required
+def admin_create_user(admin):
+    data = request.get_json()
+    required = ['username', 'email', 'password', 'role']
+    if not all(k in data for k in required):
+        return jsonify({"error": "Missing required fields"}), 400
+    if data['role'] not in ['student', 'instructor', 'super_admin']:
+        return jsonify({"error": "Invalid role"}), 400
+    if User.query.filter_by(username=data['username']).first():
+        return jsonify({"error": "Username already exists"}), 400
+    if User.query.filter_by(email=data['email']).first():
+        return jsonify({"error": "Email already exists"}), 400
+    new_user = User(
+        username=data['username'],
+        email=data['email'],
+        password_hash=generate_password_hash(data['password']),
+        role=data['role'],
+        is_active=True,
+        xp=0, level=1
+    )
+    db.session.add(new_user)
+    db.session.flush()
+    if data.get('block_id') and data['role'] == 'student':
+        block = Block.query.get(int(data['block_id']))
+        if block:
+            db.session.execute(student_blocks.insert().values(
+                student_id=new_user.id,
+                block_id=int(data['block_id'])
+            ))
+    db.session.commit()
+    log_admin_action(admin.id, "USER_CREATED",
+        f"Created {data['role']} account: {data['username']} ({data['email']})",
+        target_id=new_user.id)
+    return jsonify({
+        "message": "User created successfully",
+        "user": {"id": new_user.id, "username": new_user.username,
+                 "email": new_user.email, "role": new_user.role}
+    }), 201
 
 @app.route('/api/admin/users', methods=['GET'])
 @admin_required
@@ -2245,7 +2296,7 @@ def admin_update_user(admin, user_id):
     data = request.get_json()
     changes = []
     
-    if 'role' in data and data['role'] in ['student','instructor','admin']:
+    if 'role' in data and data['role'] in ['student','instructor','super_admin']:
         if target.role != data['role']: changes.append(f"Role: {target.role} -> {data['role']}")
         target.role = data['role']
     if 'is_active' in data:  # ✅ FIXED: was missing 'data:'
@@ -2359,19 +2410,57 @@ def admin_update_config(admin):
 @app.route('/api/admin/audit-logs', methods=['GET'])
 @admin_required
 def admin_get_logs(admin):
-    action = request.args.get('action')
-    limit = min(request.args.get('limit', 50, type=int), 200)
-    q = AuditLog.query.order_by(AuditLog.created_at.desc()).limit(limit)
-    if action: q = q.filter_by(action=action)
-    logs = q.all()
-    return jsonify([{
-        "id": l.id, 
-        "admin": User.query.get(l.admin_id).username if l.admin_id else "System", 
-        "action": l.action, 
-        "details": l.details, 
-        "ip": l.ip_address, 
-        "created_at": l.created_at.isoformat()
-    } for l in logs]), 200
+    search = request.args.get('search', '')
+    action_filter = request.args.get('action', '')
+    page = request.args.get('page', 1, type=int)
+    limit = min(request.args.get('limit', 20, type=int), 200)
+
+    q = AuditLog.query
+    if action_filter and action_filter != 'all':
+        q = q.filter(AuditLog.action == action_filter)
+    if search:
+        q = q.filter(
+            (AuditLog.action.ilike(f'%{search}%')) |
+            (AuditLog.details.ilike(f'%{search}%')) |
+            (AuditLog.ip_address.ilike(f'%{search}%'))
+        )
+
+    total = q.count()
+    logs = q.order_by(AuditLog.created_at.desc()).offset((page-1)*limit).limit(limit).all()
+
+    today = datetime.utcnow().date()
+    today_count = AuditLog.query.filter(db.func.date(AuditLog.created_at) == today).count()
+    unique_users = db.session.query(AuditLog.admin_id).distinct().count()
+    last_log = AuditLog.query.order_by(AuditLog.created_at.desc()).first()
+
+    return jsonify({
+        "logs": [{
+            "id": l.id,
+            "admin": User.query.get(l.admin_id).username if l.admin_id else "System",
+            "action": l.action,
+            "details": l.details,
+            "ip": l.ip_address,
+            "created_at": l.created_at.isoformat()
+        } for l in logs],
+        "total": total,
+        "page": page,
+        "pages": max(1, (total + limit - 1) // limit),
+        "stats": {
+            "total": AuditLog.query.count(),
+            "today": today_count,
+            "unique_users": unique_users,
+            "last_activity": last_log.created_at.isoformat() if last_log else None
+        }
+    }), 200
+
+@app.route('/api/admin/audit-logs/clear', methods=['DELETE'])
+@admin_required
+def admin_clear_logs(admin):
+    cutoff = datetime.utcnow() - timedelta(days=30)
+    deleted = AuditLog.query.filter(AuditLog.created_at < cutoff).delete()
+    db.session.commit()
+    log_admin_action(admin.id, "LOGS_CLEARED", f"Cleared {deleted} logs older than 30 days")
+    return jsonify({"message": f"Cleared {deleted} old logs"}), 200
 
 @app.route('/api/admin/reports', methods=['GET'])
 @admin_required
@@ -2396,6 +2485,132 @@ def admin_generate_report(admin):
         return app.response_class(si.getvalue(), mimetype="text/csv", headers={"Content-Disposition": "attachment; filename=submissions_report.csv"})
     
     return jsonify({"error": "Unsupported format"}), 400
+
+# =====================================================================
+# ADD THIS ROUTE TO app.py  (paste after admin_generate_report route)
+# =====================================================================
+#
+# Also add these imports at the top of app.py if not already present:
+#   import io, zipfile
+#
+# =====================================================================
+
+@app.route('/api/admin/backup', methods=['POST'])
+@admin_required
+def admin_backup_database(admin):
+    """
+    Trigger a database backup and return it as a downloadable SQL file.
+
+    POST body (JSON, optional):
+        { "tables": "all" }           ← full backup
+        { "tables": ["users", ...] }  ← selective backup
+
+    The route generates SQL INSERT statements from the live database and
+    returns them as an attachment.  For production you would shell out
+    to mysqldump and stream the result; this pure-Python implementation
+    works without mysqldump and avoids extra OS dependencies.
+    """
+    import io
+
+    data = request.get_json(silent=True) or {}
+    tables_param = data.get('tables', 'all')
+
+    # ── Resolve which models / table names to export ──────────────────
+    ALL_MODELS = [
+        ('users',               User),
+        ('blocks',              Block),
+        ('subjects',            Subject),
+        ('problems',            Problem),
+        ('submissions',         Submission),
+        ('audit_logs',          AuditLog),
+        ('achievements',        Achievement),
+        ('teacher_assignments', TeacherAssignment),
+        ('announcements',       Announcement),
+        ('system_config',       SystemConfig),
+    ]
+
+    if tables_param == 'all':
+        models_to_export = ALL_MODELS
+    elif isinstance(tables_param, list):
+        key_set = set(tables_param)
+        models_to_export = [(tbl, mdl) for tbl, mdl in ALL_MODELS if tbl in key_set]
+    else:
+        models_to_export = ALL_MODELS
+
+    # ── Build SQL dump ────────────────────────────────────────────────
+    buf = io.StringIO()
+    ts  = datetime.utcnow().isoformat()
+
+    buf.write(f"-- Forge.dev Database Backup\n")
+    buf.write(f"-- Generated : {ts} UTC\n")
+    buf.write(f"-- Tables    : {', '.join(t for t, _ in models_to_export)}\n")
+    buf.write(f"-- Admin     : {admin.username} (ID {admin.id})\n\n")
+    buf.write("SET FOREIGN_KEY_CHECKS=0;\n\n")
+
+    for table_name, model_cls in models_to_export:
+        try:
+            rows = db.session.query(model_cls).all()
+            if not rows:
+                buf.write(f"-- Table `{table_name}` is empty\n\n")
+                continue
+
+            # Introspect columns from the mapper
+            columns = [c.key for c in model_cls.__mapper__.columns]
+
+            buf.write(f"-- ── {table_name} ({len(rows)} rows) ──\n")
+            buf.write(f"TRUNCATE TABLE `{table_name}`;\n")
+
+            for row in rows:
+                values = []
+                for col in columns:
+                    val = getattr(row, col, None)
+                    if val is None:
+                        values.append('NULL')
+                    elif isinstance(val, bool):
+                        values.append('1' if val else '0')
+                    elif isinstance(val, (int, float)):
+                        values.append(str(val))
+                    elif isinstance(val, datetime):
+                        values.append(f"'{val.isoformat()}'")
+                    elif isinstance(val, (dict, list)):
+                        import json as _json
+                        safe = _json.dumps(val).replace("'", "\\'")
+                        values.append(f"'{safe}'")
+                    else:
+                        safe = str(val).replace("\\", "\\\\").replace("'", "\\'")
+                        values.append(f"'{safe}'")
+
+                col_list = ', '.join(f'`{c}`' for c in columns)
+                val_list = ', '.join(values)
+                buf.write(f"INSERT INTO `{table_name}` ({col_list}) VALUES ({val_list});\n")
+
+            buf.write("\n")
+        except Exception as e:
+            buf.write(f"-- ERROR exporting {table_name}: {e}\n\n")
+
+    buf.write("SET FOREIGN_KEY_CHECKS=1;\n")
+    buf.write(f"-- End of backup\n")
+
+    sql_bytes = buf.getvalue().encode('utf-8')
+
+    # ── Log the action ────────────────────────────────────────────────
+    log_admin_action(
+        admin.id,
+        'DATABASE_BACKUP',
+        f"Backup generated: {len(models_to_export)} tables, {len(sql_bytes)//1024} KB",
+    )
+
+    filename = f"forge_backup_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.sql"
+
+    return app.response_class(
+        sql_bytes,
+        mimetype='application/sql',
+        headers={
+            'Content-Disposition': f'attachment; filename="{filename}"',
+            'Content-Length': str(len(sql_bytes)),
+        }
+    )
+
 
 @app.route('/api/admin/subjects', methods=['POST'])
 @admin_required
@@ -2680,13 +2895,13 @@ def admin_create_instructor_assignment(admin):
     if not block:
         return jsonify({"error": "Invalid block ID"}), 400
     
-    # Check if assignment already exists
+        # Check if assignment already exists
     existing = TeacherAssignment.query.filter_by(
         instructor_id=instructor_id,
         subject_id=subject_id,
         block_id=block_id
     ).first()
-    
+
     if existing:
         return jsonify({"error": "Assignment already exists"}), 409
     
@@ -2750,7 +2965,7 @@ def admin_update_instructor_assignment(admin, assignment_id):
     block = Block.query.get(block_id)
     if not block:
         return jsonify({"error": "Invalid block ID"}), 400
-    
+
     # Get old values for logging
     old_instructor = User.query.get(assignment.instructor_id)
     old_subject = Subject.query.get(assignment.subject_id)
