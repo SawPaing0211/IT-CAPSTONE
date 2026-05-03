@@ -47,10 +47,6 @@ FILE_EXTENSIONS = {
     'csharp': 'cs',
 }
 
-# ─── Java: the public class name must match the filename ──────────────────
-#    We always name the file "Main.java" and enforce this class name.
-JAVA_CLASS_NAME = 'Main'
-
 # ─── Resource limits ──────────────────────────────────────────────────────
 LIMITS = {
     'timeout_seconds': 10,          # Wall-clock time limit per run
@@ -65,7 +61,7 @@ LIMITS = {
 LANGUAGE_TIMEOUTS = {
     'python': 10,
     'java':   15,
-    'csharp': 60, 
+    'csharp': 60,
 }
 
 MEM_LIMITS = {
@@ -77,7 +73,7 @@ MEM_LIMITS = {
 CAP_DROP = {
     'python': ['ALL'],
     'java':   ['ALL'],
-    'csharp': ['ALL'],  # ← restore ALL for csharp, seccomp handles the mutex
+    'csharp': ['ALL'],
 }
 
 SECURITY_OPTS = {
@@ -110,9 +106,8 @@ def _get_docker_client():
         with _docker_lock:
             if _docker_client is None:
                 try:
-                    # Connects to Docker Desktop on Windows via named pipe / TCP
                     _docker_client = docker.from_env(timeout=10)
-                    _docker_client.ping()   # fail fast if Docker isn't running
+                    _docker_client.ping()
                     logger.info("🐳 Docker client connected")
                 except Exception as e:
                     logger.error(f"🐳 Docker connection failed: {e}")
@@ -122,28 +117,84 @@ def _get_docker_client():
                     )
     return _docker_client
 
-# ─── Prepare source file ──────────────────────────────────────────────────
+
+# =============================================================================
+#  Wrapper Generators
+#  These create the Main.java / Program.cs entry point that calls the
+#  student's Solution class. Student code is NEVER modified.
+# =============================================================================
+
+def _generate_java_wrapper() -> str:
+    return '''\
+import java.util.Scanner;
+import java.io.File;
+
+public class Main {
+    public static void main(String[] args) throws Exception {
+        Scanner scanner;
+        File inputFile = new File("/tmp/sandbox/input.txt");
+        if (inputFile.exists()) {
+            scanner = new Scanner(inputFile);
+        } else {
+            scanner = new Scanner(System.in);
+        }
+        String input = scanner.nextLine().trim();
+        scanner.close();
+
+        String[] parts = input.split(",");
+        int a = Integer.parseInt(parts[0].trim());
+        int b = Integer.parseInt(parts[1].trim());
+
+        int result = Solution.sumTwoNumbers(a, b);
+        System.out.println(result);
+    }
+}
+'''
+
+
+def _generate_csharp_wrapper() -> str:
+    return '''\
+using System;
+using System.IO;
+
+public class Program {
+    public static void Main() {
+        string inputFile = "/tmp/sandbox/input.txt";
+        string raw = File.Exists(inputFile)
+            ? File.ReadAllText(inputFile).Trim()
+            : (Console.ReadLine() ?? "");
+
+        string[] parts = raw.Split(',');
+        int a = int.Parse(parts[0].Trim());
+        int b = int.Parse(parts[1].Trim());
+
+        int result = Solution.SumTwoNumbers(a, b);
+        Console.WriteLine(result);
+    }
+}
+'''
+
+
+# =============================================================================
+#  Source-file writer
+# =============================================================================
+
 def _write_source(tmpdir: str, code: str, language: str) -> str:
     """
-    Write student code to a temp file.
-    For Java, the file MUST be named Main.java regardless of what the student wrote.
-    Returns the absolute path to the file.
-    """
-    ext = FILE_EXTENSIONS[language]
+    Write the student's code to a temp file — completely unmodified.
 
+    Java  → Solution.java   (no regex, no class-rename)
+    C#    → Solution.cs
+    Python→ solution.py
+
+    Returns the absolute path to the written file.
+    """
     if language == 'java':
-        filename = f'{JAVA_CLASS_NAME}.{ext}'
-        # Auto-fix: if student used a different public class name, rewrite it
-        # Simple heuristic — replace 'public class SomeName' with 'public class Main'
-        import re
-        code = re.sub(
-            r'public\s+class\s+\w+',
-            f'public class {JAVA_CLASS_NAME}',
-            code,
-            count=1
-        )
+        filename = 'Solution.java'
+    elif language == 'csharp':
+        filename = 'Solution.cs'
     else:
-        filename = f'solution.{ext}'
+        filename = f'solution.{FILE_EXTENSIONS[language]}'
 
     filepath = os.path.join(tmpdir, filename)
     with open(filepath, 'w', encoding='utf-8') as f:
@@ -151,10 +202,16 @@ def _write_source(tmpdir: str, code: str, language: str) -> str:
 
     return filepath
 
-# ─── Core execution function ──────────────────────────────────────────────
+
+# =============================================================================
+#  Core execution function
+# =============================================================================
+
 def _run_in_docker(code: str, language: str) -> dict:
     """
-    Spin up a fresh container, inject the code, collect output, destroy container.
+    Spin up a fresh container, inject the code (+ wrapper for Java/C#),
+    collect output, destroy container.
+
     Returns dict: { stdout, stderr, returncode, elapsed_ms, timed_out }
     """
     client  = _get_docker_client()
@@ -162,11 +219,27 @@ def _run_in_docker(code: str, language: str) -> dict:
     started = time.time()
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        # Write source file to host temp dir
+
+        # ── 1. Write student source (untouched) ───────────────────────────
         src_path = _write_source(tmpdir, code, language)
         filename = os.path.basename(src_path)
 
-        # Container-side path (tmpfs mount makes /tmp/sandbox writable)
+        # ── 2. Write wrapper file for Java / C# ───────────────────────────
+        #       Python needs no wrapper — it runs solution.py directly.
+        if language == 'java':
+            wrapper_path = os.path.join(tmpdir, 'Main.java')
+            with open(wrapper_path, 'w', encoding='utf-8') as f:
+                f.write(_generate_java_wrapper())
+
+        elif language == 'csharp':
+            wrapper_path = os.path.join(tmpdir, 'Program.cs')
+            with open(wrapper_path, 'w', encoding='utf-8') as f:
+                f.write(_generate_csharp_wrapper())
+
+        # ── 3. Determine what path the container receives as its argument ──
+        #       run_java.sh   expects the student file path (it discovers Main.java itself)
+        #       run_csharp.sh expects the student file path (it discovers Program.cs itself)
+        #       python        receives solution.py directly
         container_src = f'/tmp/sandbox/{filename}'
 
         try:
@@ -174,6 +247,8 @@ def _run_in_docker(code: str, language: str) -> dict:
                 image=image,
                 command=[container_src],
 
+                # Bind-mount the whole tmpdir read-only so both student +
+                # wrapper files are visible inside the container.
                 volumes={
                     tmpdir: {
                         'bind': '/tmp/sandbox',
@@ -182,8 +257,8 @@ def _run_in_docker(code: str, language: str) -> dict:
                 },
 
                 tmpfs={
-                    '/tmp':          'size=256m,mode=1777',  # MSBuild needs writable /tmp
-                    '/tmp/work':     'size=256m,mode=1777',
+                    '/tmp':      'size=256m,mode=1777',
+                    '/tmp/work': 'size=256m,mode=1777',
                 },
 
                 network_disabled=True,
@@ -204,29 +279,27 @@ def _run_in_docker(code: str, language: str) -> dict:
                 stderr=True,
 
                 environment={
-                    'PYTHONUNBUFFERED':              '1',
-                    'DOTNET_CLI_TELEMETRY_OPTOUT':   '1',
-                    'JAVA_OPTS':                     '-XX:TieredStopAtLevel=1',
-                    'HOME':                          '/dotnet-sentinel',
-                    'DOTNET_CLI_HOME':               '/dotnet-sentinel/.dotnet',
-                    'NUGET_PACKAGES':                '/dotnet-sentinel/.nuget/packages',
-                    'NUGET_HTTP_CACHE_PATH':         '/tmp/work/.nuget-http-cache',
-                    'NUGET_SCRATCH':                 '/tmp/work/.nuget-scratch',
-                    'DOTNET_NOLOGO':                 '1',
+                    'PYTHONUNBUFFERED':                  '1',
+                    'DOTNET_CLI_TELEMETRY_OPTOUT':       '1',
+                    'JAVA_OPTS':                         '-XX:TieredStopAtLevel=1',
+                    'HOME':                              '/dotnet-sentinel',
+                    'DOTNET_CLI_HOME':                   '/dotnet-sentinel/.dotnet',
+                    'NUGET_PACKAGES':                    '/dotnet-sentinel/.nuget/packages',
+                    'NUGET_HTTP_CACHE_PATH':             '/tmp/work/.nuget-http-cache',
+                    'NUGET_SCRATCH':                     '/tmp/work/.nuget-scratch',
+                    'DOTNET_NOLOGO':                     '1',
                     'DOTNET_SKIP_FIRST_TIME_EXPERIENCE': '1',
-                    'DOTNET_MULTILEVEL_LOOKUP':      '0',
+                    'DOTNET_MULTILEVEL_LOOKUP':          '0',
                 },
             )
 
             # ── Wait with timeout ─────────────────────────────────────────
             try:
-                # Use language-specific timeout (C# gets 60s, Python gets 10s)
                 timeout = LANGUAGE_TIMEOUTS.get(language, LIMITS['timeout_seconds'])
-                result = container.wait(timeout=timeout)
+                result  = container.wait(timeout=timeout)
                 timed_out  = False
-                returncode = result.get('StatusCode', -1)   
+                returncode = result.get('StatusCode', -1)
             except Exception:
-                # Timeout or Docker error — kill the container
                 try:
                     container.kill()
                 except Exception:
@@ -238,7 +311,7 @@ def _run_in_docker(code: str, language: str) -> dict:
             raw_stdout = b''
             raw_stderr = b''
             try:
-                raw_stdout = container.logs(stdout=True, stderr=False)
+                raw_stdout = container.logs(stdout=True,  stderr=False)
                 raw_stderr = container.logs(stdout=False, stderr=True)
             except Exception:
                 pass
@@ -262,11 +335,11 @@ def _run_in_docker(code: str, language: str) -> dict:
             elapsed_ms = int((time.time() - started) * 1000)
 
             return {
-                'stdout':     stdout,
-                'stderr':     stderr,
-                'returncode': returncode,
-                'elapsed':    elapsed_ms,
-                'timed_out':  timed_out,
+                'stdout':       stdout,
+                'stderr':       stderr,
+                'returncode':   returncode,
+                'elapsed':      elapsed_ms,
+                'timed_out':    timed_out,
                 'timeout_used': timeout,
             }
 
@@ -285,7 +358,6 @@ def _run_in_docker(code: str, language: str) -> dict:
             }
 
         except RuntimeError as e:
-            # Docker not running
             elapsed_ms = int((time.time() - started) * 1000)
             return {
                 'stdout':     '',
@@ -356,9 +428,7 @@ def run_sandbox():
     result = _run_in_docker(code, language)
 
     # ── Enrich response for the frontend ─────────────────────────────────
-            # ── Enrich response for the frontend ─────────────────────────────────
     if result.get('timed_out'):
-        # Use the timeout that was actually used for this language
         timeout_used = result.get('timeout_used', LIMITS['timeout_seconds'])
         result['error'] = (
             f'⏱️ Time limit exceeded ({timeout_used}s). '
@@ -370,47 +440,58 @@ def run_sandbox():
         raw = result.get('stdout', '') + result.get('stderr', '')
         if raw.strip():
             cleaned = raw
-            cleaned = re.sub(r'[^\s\[]*[/\\](?=Program\.cs|Main\.java)', '', cleaned)
+            cleaned = re.sub(r'[^\s\[]*[/\\](?=Program\.cs|Main\.java|Solution\.java|Solution\.cs)', '', cleaned)
             cleaned = re.sub(r'\[/tmp/[^\]]*\]', '', cleaned)
             error_lines = []
             seen = set()
-             # Handle Python tracebacks first (multi-line pattern)
+
+            # ── Python tracebacks ─────────────────────────────────────────
             py_lines = re.findall(r'line (\d+)', raw)
-            py_err = re.search(r'(\w+Error[^\n]*)', raw)
+            py_err   = re.search(r'(\w+Error[^\n]*)', raw)
             if py_lines and py_err and 'File "/tmp/' in raw:
-                # ✅ Grab the LAST line number (actual error, not the caller)
                 result['stderr'] = f"Line {py_lines[-1]}: {py_err.group(1)}"
                 result['stdout'] = ''
-                result['error'] = f'💥 Process exited with code {result["returncode"]}'
+                result['error']  = f'💥 Process exited with code {result["returncode"]}'
                 return jsonify({
-                    'stdout': '', 'stderr': result['stderr'],
+                    'stdout':     '',
+                    'stderr':     result['stderr'],
                     'returncode': result['returncode'],
-                    'elapsed': result.get('elapsed', 0),
-                    'error': result['error'],
+                    'elapsed':    result.get('elapsed', 0),
+                    'error':      result['error'],
                 }), 200
+
             for line in cleaned.split('\n'):
                 line = line.strip()
-                m = re.search(r'Program\.cs\((\d+),(\d+)\):\s*error\s+(\w+):\s*([^\[]+)', line)
+
+                # C# errors  (Program.cs or Solution.cs)
+                m = re.search(
+                    r'(?:Program|Solution)\.cs\((\d+),(\d+)\):\s*error\s+(\w+):\s*([^\[]+)',
+                    line
+                )
                 if m:
-                    student_line = int(m.group(1))
-                    msg = f'Line {student_line}, Col {m.group(2)}: {m.group(4).strip()} ({m.group(3)})'
+                    msg = (
+                        f'Line {m.group(1)}, Col {m.group(2)}: '
+                        f'{m.group(4).strip()} ({m.group(3)})'
+                    )
                     if msg not in seen:
                         seen.add(msg)
                         error_lines.append(msg)
                     continue
-                m2 = re.search(r'Main\.java:(\d+):\s*error:\s*(.+)', line)
+
+                # Java errors (Main.java or Solution.java)
+                m2 = re.search(r'(?:Main|Solution)\.java:(\d+):\s*error:\s*(.+)', line)
                 if m2:
                     error_msg = m2.group(2).strip()
                     if 'reached end of file' in error_msg or 'class, interface' in error_msg:
-                        msg = f'unexpected end of file: check for missing braces or semicolons'
+                        msg = 'unexpected end of file: check for missing braces or semicolons'
                     else:
-                        # ✅ no lines injected, use exact line number
-                        student_line = int(m2.group(1))
-                        msg = f'Line {student_line}: {error_msg}'
+                        msg = f'Line {m2.group(1)}: {error_msg}'
                     if msg not in seen:
                         seen.add(msg)
                         error_lines.append(msg)
                     continue
+
+                # Generic "line N: ErrorType" fallback
                 m3 = re.search(r'line (\d+)', line)
                 m4 = re.search(r'(\w+Error[^\n]*)', line)
                 if m3 and m4:
@@ -418,6 +499,7 @@ def run_sandbox():
                     if msg not in seen:
                         seen.add(msg)
                         error_lines.append(msg)
+
             result['stderr'] = '\n'.join(error_lines) if error_lines else cleaned.strip()
             result['stdout'] = ''
         result['error'] = f'💥 Process exited with code {result["returncode"]}'
@@ -428,11 +510,11 @@ def run_sandbox():
         'stderr':     result.get('stderr', ''),
         'returncode': result.get('returncode', -1),
         'elapsed':    result.get('elapsed', 0),
-        'error':      result.get('error'),   # None if no error
+        'error':      result.get('error'),
     }), 200
 
 
-# ─── Health check: tells the frontend if Docker is available ──────────────
+# ─── Health check ─────────────────────────────────────────────────────────
 @sandbox_bp.route('/api/sandbox/health', methods=['GET'])
 @jwt_required()
 def sandbox_health():
@@ -452,12 +534,12 @@ def sandbox_health():
 
         all_ready = all(images_available.values())
         return jsonify({
-            'docker_running':   True,
-            'images':           images_available,
-            'all_ready':        all_ready,
+            'docker_running': True,
+            'images':         images_available,
+            'all_ready':      all_ready,
             'limits': {
-                'timeout_s':    LIMITS['timeout_seconds'],
-                'memory_mb':    LIMITS['memory_bytes'] // (1024 * 1024),
+                'timeout_s':         LIMITS['timeout_seconds'],
+                'memory_mb':         LIMITS['memory_bytes'] // (1024 * 1024),
                 'max_runs_per_hour': 30,
             }
         }), 200
