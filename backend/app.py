@@ -1114,10 +1114,26 @@ def get_student_lessons():
     if not block_ids:
         return jsonify([]), 200
     
-    # Get lessons for these blocks (only published ones)
+    # ✅ FIXED: Get subject_id from query params and filter by it
+    subject_id = request.args.get('subject_id', type=int)
+    if not subject_id:
+        return jsonify([]), 200
+
+    # Verify this subject is actually in one of the student's blocks
+    subject_block_rows = db.session.query(block_subjects.c.block_id).filter_by(
+        subject_id=subject_id
+    ).all()
+    subject_block_ids = [r.block_id for r in subject_block_rows]
+    valid_block_ids = [bid for bid in block_ids if bid in subject_block_ids]
+
+    if not valid_block_ids:
+        return jsonify([]), 200
+
+    # Get lessons filtered by subject_id AND valid blocks
     lessons = Lesson.query.filter(
         Lesson.is_published == True,
-        (Lesson.block_id.in_(block_ids)) | (Lesson.block_id == None)  # Include lessons for all blocks
+        Lesson.subject_id == subject_id,
+        (Lesson.block_id.in_(valid_block_ids)) | (Lesson.block_id == None)
     ).order_by(Lesson.week_number, Lesson.created_at).all()
     
     result = []
