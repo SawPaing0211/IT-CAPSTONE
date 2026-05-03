@@ -1,15 +1,35 @@
 #!/bin/sh
-CS_FILE="$1"
+# ─── Adventure Realm C# Runner ───────────────────────────────────────────────
+#
+# Wrapper pattern:
+#   /tmp/sandbox/Solution.cs  — student code (untouched, read-only mount)
+#   /tmp/sandbox/Program.cs   — generated wrapper (also in read-only mount)
+#
+# Both .cs files are copied into the build directory so dotnet sees them as
+# part of the same project, then compiled and executed.
+#
+# $1 is the student file path, e.g. /tmp/sandbox/Solution.cs
+# ─────────────────────────────────────────────────────────────────────────────
+
+STUDENT_FILE="$1"
+SANDBOX_DIR="$(dirname "$STUDENT_FILE")"
+
 WORK_DIR="/tmp/work"
 BUILD_DIR="$WORK_DIR/build"
 
 mkdir -p "$BUILD_DIR"
 mkdir -p "$BUILD_DIR/obj"
-mkdir -p "/tmp/work/.nuget"
+mkdir -p "$WORK_DIR/.nuget"
 
+# ── Copy project template ─────────────────────────────────────────────────
 cp /sandbox-template/sandbox.csproj "$BUILD_DIR/sandbox.csproj"
-cp "$CS_FILE" "$BUILD_DIR/Program.cs"
 
+# ── Copy BOTH source files into the build directory ──────────────────────
+#    dotnet picks up every *.cs in the project directory automatically.
+cp "$SANDBOX_DIR/Solution.cs" "$BUILD_DIR/Solution.cs"
+cp "$SANDBOX_DIR/Program.cs"  "$BUILD_DIR/Program.cs"
+
+# ── Environment ──────────────────────────────────────────────────────────
 export HOME=/dotnet-sentinel
 export DOTNET_CLI_HOME=/dotnet-sentinel/.dotnet
 export NUGET_PACKAGES=/tmp/work/.nuget/packages
@@ -36,7 +56,7 @@ dotnet build "$BUILD_DIR/sandbox.csproj" \
 
 BUILD_EXIT=$?
 if [ $BUILD_EXIT -ne 0 ]; then
-    # ── Re-run build to show student the actual error ─────────────────────
+    # Re-run to surface the actual compiler error to the student
     dotnet build "$BUILD_DIR/sandbox.csproj" \
         --configuration Release \
         --no-restore \

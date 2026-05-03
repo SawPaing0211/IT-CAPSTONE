@@ -17,8 +17,11 @@ RUN pip install --no-cache-dir \
 RUN mkdir -p /tmp/sandbox && chown sandbox:sandbox /tmp/sandbox
 
 # ── Drop to non-root ──────────────────────────────────────────────────────────
+# ── Add the runner script ─────────────────────────────────────────────────────
+COPY run_python.sh /usr/local/bin/run_python.sh
+RUN chmod +x /usr/local/bin/run_python.sh
+
 USER sandbox
 WORKDIR /tmp/sandbox
 
-# ── The entrypoint just runs whatever .py file we inject ─────────────────────
-ENTRYPOINT ["python", "-u"]
+ENTRYPOINT ["sh", "/usr/local/bin/run_python.sh"]

@@ -299,59 +299,176 @@ def sanitize_code(code, language):
         return not any(p in code for p in dangerous)
     return True
 
+def _run_in_docker_with_stdin(code: str, language: str, stdin_input: str) -> dict:
+    """
+    like _run_in_docker() but pipes stdin_input into the container.
+    student code is written untouched; the wrapper reads from stdin.
+    """
+    import tempfile, os, time
+
+    from routes.sandbox import (
+        DOCKER_IMAGES, MEM_LIMITS, CAP_DROP, SECURITY_OPTS,
+        LANGUAGE_TIMEOUTS, LIMITS,
+        _write_source, _generate_java_wrapper, _generate_csharp_wrapper,
+        _get_docker_client,
+    )
+
+    client  = _get_docker_client()
+    image   = DOCKER_IMAGES[language]
+    started = time.time()
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        src_path = _write_source(tmpdir, code, language)
+        filename = os.path.basename(src_path)
+
+        # ── Write input to file so container can read it ──────────────────
+        input_path = os.path.join(tmpdir, 'input.txt')
+        with open(input_path, 'w', encoding='utf-8') as f:
+            f.write(stdin_input if stdin_input else '')
+
+        if language == 'java':
+            with open(os.path.join(tmpdir, 'Main.java'), 'w', encoding='utf-8') as f:
+                f.write(_generate_java_wrapper())
+        elif language == 'csharp':
+            with open(os.path.join(tmpdir, 'Program.cs'), 'w', encoding='utf-8') as f:
+                f.write(_generate_csharp_wrapper())
+
+        container_src = f'/tmp/sandbox/{filename}'
+
+        try:
+            container = client.containers.run(
+                image=image,
+                command=[container_src],
+                # stdin_open removed — using file-based input
+
+                volumes={tmpdir: {'bind': '/tmp/sandbox', 'mode': 'ro'}},
+                tmpfs={
+                    '/tmp':      'size=256m,mode=1777',
+                    '/tmp/work': 'size=256m,mode=1777',
+                },
+
+                network_disabled=True,
+                read_only=True,
+                cap_drop=CAP_DROP[language],
+                security_opt=SECURITY_OPTS[language],
+                mem_limit=MEM_LIMITS[language],
+                memswap_limit=MEM_LIMITS[language],
+                cpu_period=LIMITS['cpu_period'],
+                cpu_quota=LIMITS['cpu_quota'],
+                pids_limit=LIMITS['pids_limit'],
+
+                detach=True,
+                remove=False,
+                stdout=True,
+                stderr=True,
+
+                environment={
+                    'PYTHONUNBUFFERED':                  '1',
+                    'DOTNET_CLI_TELEMETRY_OPTOUT':       '1',
+                    'JAVA_OPTS':                         '-XX:TieredStopAtLevel=1',
+                    'HOME':                              '/dotnet-sentinel',
+                    'DOTNET_CLI_HOME':                   '/dotnet-sentinel/.dotnet',
+                    'NUGET_PACKAGES':                    '/dotnet-sentinel/.nuget/packages',
+                    'NUGET_HTTP_CACHE_PATH':             '/tmp/work/.nuget-http-cache',
+                    'NUGET_SCRATCH':                     '/tmp/work/.nuget-scratch',
+                    'DOTNET_NOLOGO':                     '1',
+                    'DOTNET_SKIP_FIRST_TIME_EXPERIENCE': '1',
+                    'DOTNET_MULTILEVEL_LOOKUP':          '0',
+                },
+            )
+
+            # Input is already in /tmp/sandbox/input.txt — nothing to pipe
+
+            try:
+                timeout    = LANGUAGE_TIMEOUTS.get(language, LIMITS['timeout_seconds'])
+                result_obj = container.wait(timeout=timeout)
+                timed_out  = False
+                returncode = result_obj.get('StatusCode', -1)
+            except Exception:
+                try: container.kill()
+                except Exception: pass
+                timed_out  = True
+                returncode = -1
+
+            raw_stdout = raw_stderr = b''
+            try:
+                raw_stdout = container.logs(stdout=True,  stderr=False)
+                raw_stderr = container.logs(stdout=False, stderr=True)
+            except Exception:
+                pass
+
+            try: container.remove(force=True)
+            except Exception: pass
+
+            stdout = raw_stdout.decode('utf-8', errors='replace')
+            stderr = raw_stderr.decode('utf-8', errors='replace')
+            max_b  = LIMITS['output_bytes']
+            if len(stdout) > max_b:
+                stdout = stdout[:max_b] + '\n⚠️ [Output truncated]'
+            if len(stderr) > max_b:
+                stderr = stderr[:max_b] + '\n⚠️ [Error truncated]'
+
+            elapsed_ms = int((time.time() - started) * 1000)
+            return {
+                'stdout':       stdout,
+                'stderr':       stderr,
+                'returncode':   returncode,
+                'elapsed':      elapsed_ms,
+                'timed_out':    timed_out,
+                'timeout_used': timeout,
+            }
+
+        except Exception as e:
+            elapsed_ms = int((time.time() - started) * 1000)
+            return {
+                'stdout': '', 'stderr': '',
+                'error':  f'💥 Execution error: {str(e)}',
+                'returncode': -1, 'elapsed': elapsed_ms, 'timed_out': False,
+            }
+
+
 def evaluate_code(code, test_cases, language):
     """Execute code in Docker sandbox and compare against test cases"""
     results = []
+
     for tc in test_cases:
         input_val = tc.get('input', '').strip()
-        expected = tc.get('expected', '').strip()
+        expected  = tc.get('expected', '').strip()
 
-        # Inject input into code for each language
-        if language == 'python':
-            full_code = f"import sys\nsys.stdin = __import__('io').StringIO({repr(input_val)})\n" + code
-        elif language == 'java':
-            full_code = code.replace(
-                'public static void main(String[] args)',
-                f'public static void main(String[] args) throws Exception'
-            )
-            full_code = f"import java.util.Scanner;\n" + full_code
-        else:
-            full_code = code
+        result = _run_in_docker_with_stdin(code, language, input_val)
 
-        result = _run_in_docker(full_code, language)
-
-        actual = result.get('stdout', '').strip()
-        stderr = result.get('stderr', '').strip()
+        actual    = result.get('stdout', '').strip()
+        stderr    = result.get('stderr', '').strip()
         timed_out = result.get('timed_out', False)
-        error = result.get('error', '')
+        error     = result.get('error', '')
 
         if timed_out:
             results.append({
                 "test_case": input_val[:50],
-                "expected": expected[:50],
-                "passed": False,
-                "output": "Timeout: >10s",
-                "runtime": "10.00s",
-                "message": "Execution timeout"
+                "expected":  expected[:50],
+                "passed":    False,
+                "output":    "Timeout: execution exceeded time limit",
+                "runtime":   f"{result.get('elapsed', 0)/1000:.2f}s",
+                "message":   "Execution timeout"
             })
         elif error or (result.get('returncode', 0) != 0 and not actual):
             results.append({
                 "test_case": input_val[:50],
-                "expected": expected[:50],
-                "passed": False,
-                "output": (stderr or error)[:500],
-                "runtime": f"{result.get('elapsed', 0)/1000:.2f}s",
-                "message": stderr[:80] if stderr else error[:80]
+                "expected":  expected[:50],
+                "passed":    False,
+                "output":    (stderr or error)[:500],
+                "runtime":   f"{result.get('elapsed', 0)/1000:.2f}s",
+                "message":   (stderr or error)[:80]
             })
         else:
             passed = actual == expected
             results.append({
                 "test_case": input_val[:50],
-                "expected": expected[:50],
-                "passed": passed,
-                "output": actual[:100],
-                "runtime": f"{result.get('elapsed', 0)/1000:.2f}s",
-                "message": "Passed" if passed else f"Expected: {expected[:50]}"
+                "expected":  expected[:50],
+                "passed":    passed,
+                "output":    actual[:100],
+                "runtime":   f"{result.get('elapsed', 0)/1000:.2f}s",
+                "message":   "Passed" if passed else f"Expected: {expected[:50]}"
             })
 
     return results
