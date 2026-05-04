@@ -6,74 +6,48 @@ export default function ProblemSubmissions() {
   const navigate = useNavigate()
   const [problem, setProblem] = useState(null)
   const [students, setStudents] = useState([])
-  const [submissions, setSubmissions] = useState([])
   const [loading, setLoading] = useState(true)
-  const [filter, setFilter] = useState('all') // all, submitted, pending
+  const [filter, setFilter] = useState('all')
+  const [error, setError] = useState(null)
 
   useEffect(() => {
     fetchData()
   }, [problemId])
 
   const fetchData = async () => {
+    setLoading(true)
+    setError(null)
     try {
       const token = localStorage.getItem('token')
-      
-      // Fetch problem details
-      const problemRes = await fetch(`http://localhost:5000/api/instructor/problems/${problemId}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      })
-      if (problemRes.ok) {
-        const data = await problemRes.json()
-        setProblem(data)
+      const res = await fetch(
+        `http://localhost:5000/api/instructor/problems/${problemId}/submissions`,
+        { headers: { 'Authorization': `Bearer ${token}` } }
+      )
+      if (!res.ok) {
+        const err = await res.json()
+        throw new Error(err.error || 'Failed to fetch submissions')
       }
-
-      // Fetch all students (you might need to adjust this endpoint)
-      const studentsRes = await fetch('http://localhost:5000/api/admin/users?role=student', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      })
-      if (studentsRes.ok) {
-        const data = await studentsRes.json()
-        setStudents(data)
-      }
-
-      // Fetch submissions for this problem
-      const subsRes = await fetch(`http://localhost:5000/api/submissions?problem_id=${problemId}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      })
-      if (subsRes.ok) {
-        const data = await subsRes.json()
-        setSubmissions(data.submissions || data)
-      }
+      const data = await res.json()
+      setProblem(data.problem)
+      setStudents(data.students)
     } catch (err) {
       console.error('Failed to fetch data:', err)
+      setError(err.message)
     } finally {
       setLoading(false)
     }
   }
 
-  // Merge students with their submission status
-  const studentSubmissions = students.map(student => {
-    const submission = submissions.find(s => s.user_id === student.id || s.student_id === student.id)
-    return {
-      ...student,
-      submitted: !!submission,
-      score: submission?.score || 0,
-      status: submission?.status || 'Not Submitted',
-      submitted_at: submission?.submitted_at || null,
-      test_results: submission?.test_results || null
-    }
-  })
-
-  const filteredStudents = studentSubmissions.filter(student => {
+  const filteredStudents = students.filter(student => {
     if (filter === 'submitted') return student.submitted
     if (filter === 'pending') return !student.submitted
     return true
   })
 
-  const submittedCount = studentSubmissions.filter(s => s.submitted).length
-  const pendingCount = studentSubmissions.filter(s => !s.submitted).length
-  const avgScore = submittedCount > 0 
-    ? Math.round(studentSubmissions.filter(s => s.submitted).reduce((acc, s) => acc + s.score, 0) / submittedCount)
+  const submittedCount = students.filter(s => s.submitted).length
+  const pendingCount = students.filter(s => !s.submitted).length
+  const avgScore = submittedCount > 0
+    ? Math.round(students.filter(s => s.submitted).reduce((acc, s) => acc + s.score, 0) / submittedCount)
     : 0
 
   if (loading) {
@@ -85,20 +59,34 @@ export default function ProblemSubmissions() {
     )
   }
 
+  if (error) {
+    return (
+      <div className="text-center py-20">
+        <p className="text-red-400 mb-4">⚠️ {error}</p>
+        <button
+          onClick={() => navigate('/instructor/problems')}
+          className="px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300"
+        >
+          ← Back to Problems
+        </button>
+      </div>
+    )
+  }
+
   if (!problem) {
     return (
-      <div className="text-center py-20 text-red-400">
-        Problem not found
-      </div>
+      <div className="text-center py-20 text-red-400">Problem not found</div>
     )
   }
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <button onClick={() => navigate('/instructor/problems')} className="text-slate-400 hover:text-white transition">
+          <button
+            onClick={() => navigate('/instructor/problems')}
+            className="text-slate-400 hover:text-white transition"
+          >
             ← Back
           </button>
           <div>
@@ -106,14 +94,14 @@ export default function ProblemSubmissions() {
             <p className="text-slate-400">Submission Overview</p>
           </div>
         </div>
-        <div className="flex gap-3">
-          <button className="px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 font-medium transition">
-            📊 View Analytics
-          </button>
-        </div>
+        <button
+          onClick={fetchData}
+          className="px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 font-medium transition"
+        >
+          🔄 Refresh
+        </button>
       </div>
 
-      {/* Stats */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
           <p className="text-slate-400 text-sm">Total Students</p>
@@ -133,35 +121,26 @@ export default function ProblemSubmissions() {
         </div>
       </div>
 
-      {/* Filter Tabs */}
       <div className="flex gap-2">
-        <button
-          onClick={() => setFilter('all')}
-          className={`px-4 py-2 rounded-lg font-medium transition ${
-            filter === 'all' ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
-          }`}
-        >
-          All ({studentSubmissions.length})
-        </button>
-        <button
-          onClick={() => setFilter('submitted')}
-          className={`px-4 py-2 rounded-lg font-medium transition ${
-            filter === 'submitted' ? 'bg-green-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
-          }`}
-        >
-          Submitted ({submittedCount})
-        </button>
-        <button
-          onClick={() => setFilter('pending')}
-          className={`px-4 py-2 rounded-lg font-medium transition ${
-            filter === 'pending' ? 'bg-yellow-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
-          }`}
-        >
-          Pending ({pendingCount})
-        </button>
+        {[
+          { key: 'all', label: `All (${students.length})`, active: 'bg-blue-600' },
+          { key: 'submitted', label: `Submitted (${submittedCount})`, active: 'bg-green-600' },
+          { key: 'pending', label: `Pending (${pendingCount})`, active: 'bg-yellow-600' },
+        ].map(tab => (
+          <button
+            key={tab.key}
+            onClick={() => setFilter(tab.key)}
+            className={`px-4 py-2 rounded-lg font-medium transition ${
+              filter === tab.key
+                ? `${tab.active} text-white`
+                : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
 
-      {/* Submissions Table */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
         <table className="w-full text-left">
           <thead className="bg-slate-800/50 text-slate-400 text-sm">
@@ -169,15 +148,17 @@ export default function ProblemSubmissions() {
               <th className="p-4 font-medium">Student</th>
               <th className="p-4 font-medium">Status</th>
               <th className="p-4 font-medium">Score</th>
+              <th className="p-4 font-medium">Language</th>
               <th className="p-4 font-medium">Submitted At</th>
-              <th className="p-4 font-medium text-right">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-800">
             {filteredStudents.length === 0 ? (
               <tr>
                 <td colSpan="5" className="p-8 text-center text-slate-500">
-                  No students found
+                  {students.length === 0
+                    ? 'No students enrolled in your blocks yet.'
+                    : 'No students match this filter.'}
                 </td>
               </tr>
             ) : (
@@ -196,30 +177,38 @@ export default function ProblemSubmissions() {
                   </td>
                   <td className="p-4">
                     <span className={`px-3 py-1 rounded-full text-xs font-bold ${
-                      student.submitted ? 'bg-green-600/20 text-green-400' : 'bg-yellow-600/20 text-yellow-400'
+                      !student.submitted
+                        ? 'bg-slate-700/50 text-slate-400'
+                        : student.status === 'accepted'
+                        ? 'bg-green-600/20 text-green-400'
+                        : student.status === 'wrong_answer'
+                        ? 'bg-yellow-600/20 text-yellow-400'
+                        : 'bg-red-600/20 text-red-400'
                     }`}>
-                      {student.submitted ? '✅ Submitted' : '⏳ Pending'}
+                      {!student.submitted ? '⏳ Not Submitted'
+                        : student.status === 'accepted' ? '✅ Accepted'
+                        : student.status === 'wrong_answer' ? '⚠️ Wrong Answer'
+                        : student.status === 'error' ? '❌ Error'
+                        : `📝 ${student.status}`}
                     </span>
                   </td>
                   <td className="p-4">
-                    {student.submitted ? (
-                      <span className="text-yellow-400 font-mono font-bold">{student.score} XP</span>
-                    ) : (
-                      <span className="text-slate-500">-</span>
-                    )}
+                    {student.submitted
+                      ? <span className="text-yellow-400 font-mono font-bold">{student.score} XP</span>
+                      : <span className="text-slate-500">—</span>}
+                  </td>
+                  <td className="p-4">
+                    {student.language
+                      ? <span className="text-slate-300 text-sm">
+                          {student.language === 'python' ? '🐍'
+                            : student.language === 'java' ? '☕' : '🔷'} {student.language}
+                        </span>
+                      : <span className="text-slate-500">—</span>}
                   </td>
                   <td className="p-4 text-slate-400 text-sm">
-                    {student.submitted_at ? new Date(student.submitted_at).toLocaleString() : '-'}
-                  </td>
-                  <td className="p-4 text-right">
-                    {student.submitted && (
-                      <button 
-                        onClick={() => alert(`View code for ${student.username}\n\nScore: ${student.score} XP\nStatus: ${student.status}`)}
-                        className="px-3 py-1 bg-blue-600/20 text-blue-400 rounded-lg text-xs font-medium hover:bg-blue-600/30 transition"
-                      >
-                        View Code
-                      </button>
-                    )}
+                    {student.submitted_at
+                      ? new Date(student.submitted_at).toLocaleString()
+                      : '—'}
                   </td>
                 </tr>
               ))
@@ -230,3 +219,4 @@ export default function ProblemSubmissions() {
     </div>
   )
 }
+  

@@ -4,7 +4,6 @@ import UserManagement from './UserManagement'
 import BlocksSections from './BlocksSections'
 import InstructorAssignments from './InstructorAssignments'
 import ActivityLogs from './ActivityLogs'
-import SystemSettings from './SystemSettings'
 import SubjectsManagement from './SubjectsManagement'
 
 export default function AdminDashboard({ user, onLogout }) {
@@ -33,7 +32,6 @@ export default function AdminDashboard({ user, onLogout }) {
     { id: 'blocks', label: 'Blocks & Sections', icon: '📚' },
     { id: 'subjects', label: 'Subjects', icon: '📚' },
     { id: 'activity', label: 'Activity Logs', icon: '📜' },
-    { id: 'settings', label: 'Settings', icon: '⚙️' }
   ]
 
   return (
@@ -139,7 +137,6 @@ export default function AdminDashboard({ user, onLogout }) {
                 {activeTab === 'subjects' && 'Create and manage course subjects'}
                 {activeTab === 'blocks' && 'Manage class blocks and course assignments'}
                 {activeTab === 'activity' && 'Comprehensive audit trail of all administrative actions'}
-                {activeTab === 'settings' && 'Configure system-wide settings and preferences'}
               </p>
             </div>
           </div>
@@ -191,7 +188,6 @@ export default function AdminDashboard({ user, onLogout }) {
           {activeTab === 'subjects' && <SubjectsManagement />}
           {activeTab === 'blocks' && <BlocksSections />}
           {activeTab === 'activity' && <ActivityLogs />}
-          {activeTab === 'settings' && <SystemSettings />}
         </div>
       </main>
     </div>

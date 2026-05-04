@@ -1910,6 +1910,84 @@ def get_instructor_dashboard_stats():
         "top_performers": top_performers
     }), 200
 
+@app.route('/api/instructor/problems/<int:problem_id>/submissions', methods=['GET'])
+@jwt_required()
+def get_problem_submissions(problem_id):
+    """Get all submissions for a specific problem (instructor view)"""
+    user_id = int(get_jwt_identity())
+    user = User.query.get(user_id)
+    if not is_instructor_or_admin(user):
+        return jsonify({"error": "Unauthorized"}), 403
+
+    problem = Problem.query.get_or_404(problem_id)
+
+    if problem.created_by != user_id and not is_super_admin(user):
+        return jsonify({"error": "Not your problem"}), 403
+
+    submissions = Submission.query.filter_by(problem_id=problem_id)\
+        .order_by(Submission.submitted_at.desc()).all()
+
+    assignments = TeacherAssignment.query.filter_by(instructor_id=user_id).all()
+    block_ids = list(set(a.block_id for a in assignments))
+
+    enrolled_student_ids = []
+    if block_ids:
+        rows = db.session.query(student_blocks.c.student_id).filter(
+            student_blocks.c.block_id.in_(block_ids)
+        ).distinct().all()
+        enrolled_student_ids = [r[0] for r in rows]
+
+    sub_map = {}
+    for s in submissions:
+        if s.user_id not in sub_map:
+            sub_map[s.user_id] = s
+
+    result_students = []
+    for student_id in enrolled_student_ids:
+        student = User.query.get(student_id)
+        if not student or student.role != 'student':
+            continue
+        sub = sub_map.get(student_id)
+        result_students.append({
+            "id": student.id,
+            "username": student.username,
+            "email": student.email,
+            "submitted": sub is not None,
+            "score": sub.score if sub else 0,
+            "status": sub.status if sub else "Not Submitted",
+            "submitted_at": sub.submitted_at.isoformat() if sub else None,
+            "submission_id": sub.id if sub else None,
+            "language": sub.language if sub else None,
+        })
+
+    for student_id, sub in sub_map.items():
+        if student_id not in enrolled_student_ids:
+            student = User.query.get(student_id)
+            if student:
+                result_students.append({
+                    "id": student.id,
+                    "username": student.username,
+                    "email": student.email,
+                    "submitted": True,
+                    "score": sub.score,
+                    "status": sub.status,
+                    "submitted_at": sub.submitted_at.isoformat(),
+                    "submission_id": sub.id,
+                    "language": sub.language,
+                })
+
+    return jsonify({
+        "students": result_students,
+        "total": len(result_students),
+        "submitted_count": sum(1 for s in result_students if s["submitted"]),
+        "problem": {
+            "id": problem.id,
+            "title": problem.title,
+            "difficulty": problem.difficulty,
+            "xp_reward": problem.xp_reward
+        }
+    }), 200
+
 @app.route('/api/instructor/assigned-subjects', methods=['GET'])
 @jwt_required()
 def get_instructor_assigned_subjects():
