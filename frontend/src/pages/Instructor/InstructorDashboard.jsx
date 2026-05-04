@@ -24,7 +24,6 @@ export default function InstructorDashboard({ user, onLogout }) {
     { path: '/instructor', label: 'Dashboard', icon: '📊' },
     { path: '/instructor/classes', label: 'My Classes', icon: '🏫' },
     { path: '/instructor/achievements', label: '🏆 Achievements', icon: '🏆' },
-    { path: '/instructor/settings', label: 'Settings', icon: '⚙️' },
   ]
 
   const isActive = (path) => {

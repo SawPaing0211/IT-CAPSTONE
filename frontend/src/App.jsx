@@ -34,7 +34,6 @@ import QuestLog from './pages/Student/QuestLog'
 // Admin Pages
 import UserManagement from './pages/Admin/UserManagement'
 import BlocksSections from './pages/Admin/BlocksSections'
-import SystemSettings from './pages/Admin/SystemSettings'
 import ActivityLogs from './pages/Admin/ActivityLogs'
 
 function AppContent() {
@@ -155,7 +154,6 @@ function AppContent() {
         <Route index element={<UserManagement />} />
         <Route path="users" element={<UserManagement />} />
         <Route path="blocks" element={<BlocksSections />} />
-        <Route path="settings" element={<SystemSettings />} />
         <Route path="logs" element={<ActivityLogs />} />
       </Route>
 
