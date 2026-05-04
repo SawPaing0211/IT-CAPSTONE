@@ -64,19 +64,35 @@ export default function SystemSettingsModal({ onClose }) {
     try {
       const token = localStorage.getItem('token')
 
-      // Only send keys the backend expects
-      const allowed = {
-        execution_timeout: config.execution_timeout,
-        enabled_languages: config.enabled_languages,
-        xp_multiplier: config.xp_multiplier,
+      // Send ALL configurable fields matching the backend allowed set
+      const payload = {
+        // General
+        system_name:          config.system_name,
+        institution_name:     config.institution_name,
+        timezone:             config.timezone,
+        // Security
+        maintenance_mode:     config.maintenance_mode,
+        min_password_length:  config.min_password_length,
+        session_timeout:      config.session_timeout,
+        jwt_expiration_hours: config.jwt_expiration_hours,
+        // Execution
+        execution_timeout:    config.execution_timeout,
+        enabled_languages:    config.enabled_languages,
+        memory_limit_mb:      config.memory_limit_mb,
+        // Gamification
+        xp_multiplier:        config.xp_multiplier,
+        easy_xp_max:          config.easy_xp_max,
+        medium_xp_max:        config.medium_xp_max,
+        hard_xp_max:          config.hard_xp_max,
+        // Plagiarism
         plagiarism_threshold: config.plagiarism_threshold,
-        maintenance_mode: config.maintenance_mode,
+        plagiarism_auto_flag: config.plagiarism_auto_flag,
       }
 
       const res = await fetch(`${API}/api/admin/config`, {
         method: 'PUT',
         headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify(allowed)
+        body: JSON.stringify(payload)
       })
 
       if (res.ok) {
@@ -95,7 +111,7 @@ export default function SystemSettingsModal({ onClose }) {
 
   const showToast = (message, type = 'success') => {
     setToast({ message, type })
-    setTimeout(() => setToast(null), 3500)
+    setTimeout(() => setToast(null), 4000)
   }
 
   const languageList = config.enabled_languages.split(',').map(l => l.trim()).filter(Boolean)
