@@ -2385,23 +2385,60 @@ def admin_update_email(admin, user_id):
 @admin_required
 def admin_get_config(admin):
     configs = {c.key: c.value for c in SystemConfig.query.all()}
-    defaults = {'execution_timeout':'5', 'enabled_languages':'python,java,csharp', 'xp_multiplier':'1.0', 'plagiarism_threshold':'0.85', 'maintenance_mode':'false'}
-    for k, v in defaults.items(): configs.setdefault(k, v)
+    defaults = {
+        # General
+        'system_name': 'Forge.dev',
+        'institution_name': '',
+        'timezone': 'Asia/Manila',
+        # Security
+        'maintenance_mode': 'false',
+        'min_password_length': '8',
+        'session_timeout': '60',
+        'jwt_expiration_hours': '24',
+        # Execution
+        'execution_timeout': '5',
+        'enabled_languages': 'python,java,csharp',
+        'memory_limit_mb': '256',
+        # Gamification
+        'xp_multiplier': '1.0',
+        'easy_xp_max': '100',
+        'medium_xp_max': '250',
+        'hard_xp_max': '500',
+        # Plagiarism
+        'plagiarism_threshold': '0.85',
+        'plagiarism_auto_flag': 'true',
+    }
+    for k, v in defaults.items():
+        configs.setdefault(k, v)
     return jsonify(configs), 200
 
 @app.route('/api/admin/config', methods=['PUT'])
 @admin_required
 def admin_update_config(admin):
     data = request.get_json()
-    allowed = {'execution_timeout','enabled_languages','xp_multiplier','plagiarism_threshold','maintenance_mode'}
-    if not all(k in allowed for k in data.keys()): 
-        return jsonify({"error": "Invalid config keys"}), 400
+    allowed = {
+        # General
+        'system_name', 'institution_name', 'timezone',
+        # Security
+        'maintenance_mode', 'min_password_length', 'session_timeout', 'jwt_expiration_hours',
+        # Execution
+        'execution_timeout', 'enabled_languages', 'memory_limit_mb',
+        # Gamification
+        'xp_multiplier', 'easy_xp_max', 'medium_xp_max', 'hard_xp_max',
+        # Plagiarism
+        'plagiarism_threshold', 'plagiarism_auto_flag',
+    }
+    invalid_keys = [k for k in data.keys() if k not in allowed]
+    if invalid_keys:
+        return jsonify({"error": f"Invalid config keys: {', '.join(invalid_keys)}"}), 400
     changes = []
     for k, v in data.items():
         existing = SystemConfig.query.filter_by(key=k).first()
         old_val = existing.value if existing else "N/A"
-        if existing: existing.value = str(v)
-        else: db.session.add(SystemConfig(key=k, value=str(v)))
+        if existing:
+            existing.value = str(v)
+        else:
+            db.session.add(SystemConfig(key=k, value=str(v)))
         changes.append(f"{k}: {old_val} -> {v}")
     db.session.commit()
     log_admin_action(admin.id, "CONFIG_UPDATED", f"Changes: {', '.join(changes)}")
