@@ -18,7 +18,8 @@ export default function MyClasses() {
         setClasses(data.map(c => ({
           id: c.id,
           name: c.section_code,
-          title: c.name,
+          // ✅ BONUS: Show ALL subjects joined by comma
+          title: c.subjects?.length > 0 ? c.subjects.join(', ') : c.name,
           description: c.semester || 'Current Semester',
           students: c.student_count || 0,
           problems: c.problem_count || 0,
@@ -35,9 +36,11 @@ export default function MyClasses() {
     fetchClasses()
   }, [])
 
+  // ✅ STEP 2: Enhanced search to include subjects
   const filteredClasses = classes.filter(c =>
     c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    c.title.toLowerCase().includes(searchTerm.toLowerCase())
+    c.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    c.description.toLowerCase().includes(searchTerm.toLowerCase())
   )
 
   const gradients = [
@@ -71,7 +74,7 @@ export default function MyClasses() {
         <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 text-lg pointer-events-none">🔍</span>
         <input
           type="text"
-          placeholder="Search by block number or course name..."
+          placeholder="Search by block number, course name, or subject..."
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
           className="w-full bg-slate-900 border border-slate-800 rounded-xl px-5 py-3.5 pl-12 text-white placeholder-slate-600 focus:border-blue-500/60 focus:outline-none transition text-sm"
@@ -134,7 +137,16 @@ export default function MyClasses() {
                           {cls.status}
                         </span>
                       </div>
-                      <p className="text-blue-400 text-sm font-medium mb-0.5">{cls.title}</p>
+                      
+                      {/* ✅ BONUS: Better visual display for multiple subjects */}
+                      <div className="flex flex-wrap gap-1 mb-0.5">
+                        {cls.title.split(', ').map((subject, i) => (
+                          <span key={i} className="text-blue-400 text-sm font-medium">
+                            {subject}{i < cls.title.split(', ').length - 1 ? ',' : ''}
+                          </span>
+                        ))}
+                      </div>
+                      
                       <p className="text-slate-500 text-xs">{cls.description}</p>
                     </div>
                   </div>
