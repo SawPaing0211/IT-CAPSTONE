@@ -6,7 +6,12 @@ export default function SubjectsManagement() {
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [newSubject, setNewSubject] = useState({
     name: '',
-    description: ''
+    description: '',
+    subject_code: '',
+    units: '',
+    department: '',
+    year_level: '',
+    subject_type: 'lecture',
   })
 
   useEffect(() => {
@@ -44,7 +49,15 @@ export default function SubjectsManagement() {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify(newSubject)
+        body: JSON.stringify({
+          name: newSubject.name.trim(),
+          description: newSubject.description.trim(),
+          subject_code: newSubject.subject_code.trim(),
+          units: newSubject.units ? parseInt(newSubject.units) : null,
+          department: newSubject.department,
+          year_level: newSubject.year_level ? parseInt(newSubject.year_level) : null,
+          subject_type: newSubject.subject_type,
+        })
       })
 
       if (res.ok) {
@@ -134,12 +147,23 @@ export default function SubjectsManagement() {
                     📖
                   </div>
                   <div className="flex-1">
-                    <h3 className="text-lg font-bold text-white mb-1">{subject.name}</h3>
+                    <div className="flex items-center gap-2 flex-wrap mb-1">
+                      {subject.subject_code && (
+                        <span className="font-mono text-xs font-bold bg-slate-800 text-purple-300 border border-purple-600/30 px-2 py-0.5 rounded">{subject.subject_code}</span>
+                      )}
+                      <h3 className="text-lg font-bold text-white">{subject.name}</h3>
+                    </div>
                     {subject.description ? (
-                      <p className="text-slate-400 text-sm">{subject.description}</p>
+                      <p className="text-slate-400 text-sm mb-2">{subject.description}</p>
                     ) : (
-                      <p className="text-slate-600 text-sm italic">No description</p>
+                      <p className="text-slate-600 text-sm italic mb-2">No description</p>
                     )}
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {subject.units && <span className="text-xs bg-blue-600/20 text-blue-300 border border-blue-600/30 px-2 py-0.5 rounded-full">{subject.units} units</span>}
+                      {subject.year_level && <span className="text-xs bg-green-600/20 text-green-300 border border-green-600/30 px-2 py-0.5 rounded-full">Year {subject.year_level}</span>}
+                      {subject.subject_type && <span className="text-xs bg-orange-600/20 text-orange-300 border border-orange-600/30 px-2 py-0.5 rounded-full capitalize">{subject.subject_type.replace('_', ' + ')}</span>}
+                      {subject.department && <span className="text-xs bg-purple-600/20 text-purple-300 border border-purple-600/30 px-2 py-0.5 rounded-full">{subject.department}</span>}
+                    </div>
                   </div>
                 </div>
                 <button
@@ -157,45 +181,180 @@ export default function SubjectsManagement() {
       {/* Create Subject Modal */}
       {showCreateModal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-slate-900 border-2 border-purple-600/50 rounded-2xl p-6 w-full max-w-md shadow-2xl">
-            <h2 className="text-2xl font-bold text-white mb-4 flex items-center gap-2">
-              <span>📚</span> Create Subject
-            </h2>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-slate-400 text-sm mb-2">Subject Name *</label>
-                <input
-                  type="text"
-                  value={newSubject.name}
-                  onChange={(e) => setNewSubject({...newSubject, name: e.target.value})}
-                  placeholder="e.g., Introduction to Programming"
-                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white outline-none focus:border-purple-500 transition"
-                />
+          <div className="bg-slate-900 border-2 border-purple-600/50 rounded-2xl w-full max-w-lg shadow-2xl shadow-purple-900/40 overflow-hidden">
+
+            {/* Header */}
+            <div className="bg-gradient-to-r from-purple-900/60 to-pink-900/40 px-6 py-5 border-b border-purple-600/30 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-gradient-to-br from-purple-500 to-pink-500 rounded-xl flex items-center justify-center text-xl">📚</div>
+                <div>
+                  <h2 className="text-xl font-black text-white">Create Subject</h2>
+                  <p className="text-purple-300/70 text-xs">Add a new course subject to the system</p>
+                </div>
               </div>
+              <button
+                onClick={() => setShowCreateModal(false)}
+                className="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition text-lg"
+              >×</button>
+            </div>
+
+            {/* Body */}
+            <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+
+              {/* Subject Code + Name */}
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">
+                    Subject Code *
+                  </label>
+                  <input
+                    type="text"
+                    value={newSubject.subject_code}
+                    onChange={(e) => setNewSubject({...newSubject, subject_code: e.target.value.toUpperCase()})}
+                    placeholder="e.g., CS101"
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-white placeholder-slate-500 outline-none focus:border-purple-500 transition font-mono tracking-widest text-sm"
+                  />
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">
+                    Subject Name *
+                  </label>
+                  <input
+                    type="text"
+                    value={newSubject.name}
+                    onChange={(e) => setNewSubject({...newSubject, name: e.target.value})}
+                    placeholder="e.g., Introduction to Programming"
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2.5 text-white placeholder-slate-500 outline-none focus:border-purple-500 transition text-sm"
+                  />
+                </div>
+              </div>
+
+              {/* Description */}
               <div>
-                <label className="block text-slate-400 text-sm mb-2">Description</label>
+                <label className="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">
+                  Description <span className="text-slate-600 normal-case font-normal">(optional)</span>
+                </label>
                 <textarea
                   value={newSubject.description}
                   onChange={(e) => setNewSubject({...newSubject, description: e.target.value})}
-                  placeholder="Brief description of the subject..."
-                  rows="3"
-                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white outline-none focus:border-purple-500 resize-none transition"
+                  placeholder="Brief description of what this subject covers..."
+                  rows="2"
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white placeholder-slate-500 outline-none focus:border-purple-500 resize-none transition text-sm"
                 />
               </div>
-            </div>
-            <div className="flex gap-3 mt-6">
-              <button
-                onClick={() => setShowCreateModal(false)}
-                className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 rounded-xl text-white font-bold transition"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleCreateSubject}
-                className="flex-1 py-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-xl text-white font-bold transition shadow-lg shadow-purple-600/30"
-              >
-                Create Subject
-              </button>
+
+              {/* Units + Year Level + Type */}
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">Units</label>
+                  <select
+                    value={newSubject.units}
+                    onChange={(e) => setNewSubject({...newSubject, units: e.target.value})}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-white outline-none focus:border-purple-500 transition text-sm"
+                  >
+                    <option value="">—</option>
+                    {[1,2,3,4,5,6].map(u => <option key={u} value={u}>{u} {u === 1 ? 'unit' : 'units'}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">Year Level</label>
+                  <select
+                    value={newSubject.year_level}
+                    onChange={(e) => setNewSubject({...newSubject, year_level: e.target.value})}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-white outline-none focus:border-purple-500 transition text-sm"
+                  >
+                    <option value="">Any</option>
+                    <option value="1">1st Year</option>
+                    <option value="2">2nd Year</option>
+                    <option value="3">3rd Year</option>
+                    <option value="4">4th Year</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">Type</label>
+                  <select
+                    value={newSubject.subject_type}
+                    onChange={(e) => setNewSubject({...newSubject, subject_type: e.target.value})}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-white outline-none focus:border-purple-500 transition text-sm"
+                  >
+                    <option value="lecture">Lecture</option>
+                    <option value="lab">Lab</option>
+                    <option value="lecture_lab">Lec + Lab</option>
+                    <option value="elective">Elective</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Department */}
+              <div>
+                <label className="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">Department / College</label>
+                <select
+                  value={newSubject.department}
+                  onChange={(e) => setNewSubject({...newSubject, department: e.target.value})}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2.5 text-white outline-none focus:border-purple-500 transition text-sm"
+                >
+                  <option value="">— Select Department —</option>
+                  <option value="CCS">College of Computer Studies (CCS)</option>
+                  <option value="COE">College of Engineering (COE)</option>
+                  <option value="CAS">College of Arts & Sciences (CAS)</option>
+                  <option value="COB">College of Business (COB)</option>
+                  <option value="CED">College of Education (CED)</option>
+                  <option value="GE">General Education</option>
+                </select>
+              </div>
+
+              {/* Live Preview */}
+              {newSubject.name.trim() && (
+                <div className="bg-slate-800/60 border border-purple-600/20 rounded-xl p-4">
+                  <p className="text-slate-500 text-xs uppercase tracking-wider font-semibold mb-3">Preview</p>
+                  <div className="flex items-start gap-3">
+                    <div className="w-10 h-10 bg-gradient-to-br from-purple-600 to-pink-600 rounded-xl flex items-center justify-center text-lg flex-shrink-0">📖</div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {newSubject.subject_code && (
+                          <span className="font-mono text-xs font-bold bg-slate-700 text-purple-300 px-2 py-0.5 rounded">{newSubject.subject_code}</span>
+                        )}
+                        <p className="text-white font-bold text-sm">{newSubject.name}</p>
+                      </div>
+                      <p className="text-slate-500 text-xs mt-0.5 truncate">{newSubject.description || 'No description'}</p>
+                      <div className="flex items-center gap-2 mt-2 flex-wrap">
+                        {newSubject.units && (
+                          <span className="text-xs bg-blue-600/20 text-blue-300 border border-blue-600/30 px-2 py-0.5 rounded-full">{newSubject.units} units</span>
+                        )}
+                        {newSubject.year_level && (
+                          <span className="text-xs bg-green-600/20 text-green-300 border border-green-600/30 px-2 py-0.5 rounded-full">Year {newSubject.year_level}</span>
+                        )}
+                        {newSubject.subject_type && (
+                          <span className="text-xs bg-orange-600/20 text-orange-300 border border-orange-600/30 px-2 py-0.5 rounded-full capitalize">{newSubject.subject_type.replace('_', ' + ')}</span>
+                        )}
+                        {newSubject.department && (
+                          <span className="text-xs bg-purple-600/20 text-purple-300 border border-purple-600/30 px-2 py-0.5 rounded-full">{newSubject.department}</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Actions */}
+              <div className="flex gap-3 pt-1">
+                <button
+                  onClick={() => {
+                    setShowCreateModal(false)
+                    setNewSubject({ name: '', description: '', subject_code: '', units: '', department: '', year_level: '', subject_type: 'lecture' })
+                  }}
+                  className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 rounded-xl text-white font-bold transition border border-slate-700"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleCreateSubject}
+                  className="flex-1 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-xl text-white font-bold transition shadow-lg shadow-purple-600/30 flex items-center justify-center gap-2"
+                >
+                  ✅ Create Subject
+                </button>
+              </div>
+
             </div>
           </div>
         </div>
