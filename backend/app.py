@@ -1742,53 +1742,48 @@ def get_instructor_problem_detail(problem_id):
 def get_instructor_classes():
     user_id = int(get_jwt_identity())
     user = User.query.get(user_id)
-    if not is_instructor_or_admin(user): 
+    if not is_instructor_or_admin(user):
         return jsonify({"error": "Unauthorized"}), 403
     
-    # ✅ NEW: Get blocks from TeacherAssignment table
+    # Get blocks from TeacherAssignment table
     assignments = TeacherAssignment.query.filter_by(instructor_id=user_id).all()
-    block_ids = list(set(a.block_id for a in assignments))  # Unique block IDs
+    block_ids = list(set(a.block_id for a in assignments))
     
     if not block_ids:
         return jsonify([]), 200
     
-    # Fetch blocks
     blocks = Block.query.filter(Block.id.in_(block_ids)).all()
-    
     result = []
+    
     for b in blocks:
-        # Get subjects for this block
-        subj_ids = [s.subject_id for s in db.session.query(block_subjects.c.subject_id).filter_by(block_id=b.id).all()]
-        subjects = [Subject.query.get(sid).name for sid in subj_ids if Subject.query.get(sid)]
+        # ✅ Get ONLY subjects THIS instructor teaches in this block
+        my_subject_ids = [a.subject_id for a in assignments if a.block_id == b.id]
+        subjects = [Subject.query.get(sid).name for sid in my_subject_ids if Subject.query.get(sid)]
         
-        # Count students
         student_count = db.session.query(student_blocks.c.student_id).filter_by(block_id=b.id).count()
-        
-        # ✅ Count problems assigned to this block (via block_problems junction table)
         problem_count = db.session.query(block_problems.c.problem_id).filter_by(block_id=b.id).count()
         
-        # ✅ Count lessons
         lesson_count = 0
-        if subj_ids:
+        if my_subject_ids:
             lesson_count = Lesson.query.filter(
-                Lesson.subject_id.in_(subj_ids),
+                Lesson.subject_id.in_(my_subject_ids),
                 (Lesson.block_id == b.id) | (Lesson.block_id == None)
             ).count()
         
-        # ✅ Count announcements
         announcement_count = Announcement.query.filter_by(class_id=b.id).count()
         
         result.append({
-            "id": b.id, 
-            "section_code": b.section_code, 
-            "name": subjects[0] if subjects else b.section_code,  # ✅ Use first subject name
+            "id": b.id,
+            "section_code": b.section_code,
+            "name": subjects[0] if subjects else b.section_code,
             "subjects": subjects,
-            "semester": b.semester, 
+            "semester": b.semester,
             "student_count": student_count,
             "problem_count": problem_count,
             "lesson_count": lesson_count,
             "announcement_count": announcement_count
         })
+    
     return jsonify(result), 200
 
 @app.route('/api/instructor/classes/<int:classId>', methods=['GET'])
