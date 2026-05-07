@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
+import StudentCodeModal from "./StudentCodeModal";
 
 export default function ProblemSubmissions() {
   const { problemId } = useParams()
@@ -9,6 +10,7 @@ export default function ProblemSubmissions() {
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('all')
   const [error, setError] = useState(null)
+  const [viewingSubmissionId, setViewingSubmissionId] = useState(null)
 
   useEffect(() => {
     fetchData()
@@ -81,6 +83,16 @@ export default function ProblemSubmissions() {
 
   return (
     <div className="space-y-6">
+
+      {/* Modal */}
+      {viewingSubmissionId && (
+        <StudentCodeModal
+          submissionId={viewingSubmissionId}
+          onClose={() => setViewingSubmissionId(null)}
+        />
+      )}
+
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
           <button
@@ -102,6 +114,7 @@ export default function ProblemSubmissions() {
         </button>
       </div>
 
+      {/* Stats */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
           <p className="text-slate-400 text-sm">Total Students</p>
@@ -121,6 +134,7 @@ export default function ProblemSubmissions() {
         </div>
       </div>
 
+      {/* Filters */}
       <div className="flex gap-2">
         {[
           { key: 'all', label: `All (${students.length})`, active: 'bg-blue-600' },
@@ -141,6 +155,7 @@ export default function ProblemSubmissions() {
         ))}
       </div>
 
+      {/* Table */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
         <table className="w-full text-left">
           <thead className="bg-slate-800/50 text-slate-400 text-sm">
@@ -150,12 +165,13 @@ export default function ProblemSubmissions() {
               <th className="p-4 font-medium">Score</th>
               <th className="p-4 font-medium">Language</th>
               <th className="p-4 font-medium">Submitted At</th>
+              <th className="p-4 font-medium">Code</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-800">
             {filteredStudents.length === 0 ? (
               <tr>
-                <td colSpan="5" className="p-8 text-center text-slate-500">
+                <td colSpan="6" className="p-8 text-center text-slate-500">
                   {students.length === 0
                     ? 'No students enrolled in your blocks yet.'
                     : 'No students match this filter.'}
@@ -164,6 +180,8 @@ export default function ProblemSubmissions() {
             ) : (
               filteredStudents.map(student => (
                 <tr key={student.id} className="hover:bg-slate-800/30 transition">
+
+                  {/* Student */}
                   <td className="p-4">
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 bg-purple-600 rounded-full flex items-center justify-center font-bold text-sm">
@@ -175,6 +193,8 @@ export default function ProblemSubmissions() {
                       </div>
                     </div>
                   </td>
+
+                  {/* Status */}
                   <td className="p-4">
                     <span className={`px-3 py-1 rounded-full text-xs font-bold ${
                       !student.submitted
@@ -192,11 +212,15 @@ export default function ProblemSubmissions() {
                         : `📝 ${student.status}`}
                     </span>
                   </td>
+
+                  {/* Score */}
                   <td className="p-4">
                     {student.submitted
                       ? <span className="text-yellow-400 font-mono font-bold">{student.score} XP</span>
                       : <span className="text-slate-500">—</span>}
                   </td>
+
+                  {/* Language */}
                   <td className="p-4">
                     {student.language
                       ? <span className="text-slate-300 text-sm">
@@ -205,11 +229,28 @@ export default function ProblemSubmissions() {
                         </span>
                       : <span className="text-slate-500">—</span>}
                   </td>
+
+                  {/* Submitted At */}
                   <td className="p-4 text-slate-400 text-sm">
                     {student.submitted_at
                       ? new Date(student.submitted_at).toLocaleString()
                       : '—'}
                   </td>
+
+                  {/* View Code */}
+                  <td className="p-4">
+                    {student.submission_id ? (
+                      <button
+                        onClick={() => setViewingSubmissionId(student.submission_id)}
+                        className="px-3 py-1.5 bg-blue-600/20 hover:bg-blue-600 text-blue-400 hover:text-white border border-blue-600/40 hover:border-blue-600 rounded-lg text-xs font-medium transition-all duration-150"
+                      >
+                        {'</>'}  View Code
+                      </button>
+                    ) : (
+                      <span className="text-slate-600 text-xs">No submission</span>
+                    )}
+                  </td>
+
                 </tr>
               ))
             )}
@@ -219,4 +260,3 @@ export default function ProblemSubmissions() {
     </div>
   )
 }
-  

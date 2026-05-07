@@ -76,6 +76,9 @@ class User(db.Model):
 
 class Problem(db.Model):
     __tablename__ = 'problems'
+    __table_args__ = (
+        db.Index('idx_problem_published_subject', 'is_published', 'subject_id'),
+    )
     id = db.Column(db.Integer, primary_key=True)
     title = db.Column(db.String(200), nullable=False)
     description = db.Column(db.Text, nullable=False)
@@ -106,6 +109,10 @@ class Problem(db.Model):
 
 class Submission(db.Model):
     __tablename__ = 'submissions'
+    __table_args__ = (
+        db.Index('idx_submission_user_problem', 'user_id', 'problem_id'),
+        db.Index('idx_submission_user_status', 'user_id', 'status'),
+    )
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     problem_id = db.Column(db.Integer, db.ForeignKey('problems.id'), nullable=False)
@@ -142,6 +149,16 @@ class Subject(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(200), nullable=False)
     description = db.Column(db.Text, nullable=True)
+    # ✅ NEW: University-standard fields
+    subject_code = db.Column(db.String(20), nullable=True)   # e.g. CS101
+    units = db.Column(db.Integer, nullable=True)              # e.g. 3
+    department = db.Column(db.String(100), nullable=True)     # e.g. CCS
+    year_level = db.Column(db.Integer, nullable=True)         # 1–4
+    subject_type = db.Column(
+        db.Enum('lecture', 'lab', 'lecture_lab', 'elective'),
+        nullable=True,
+        default='lecture'
+    )
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 # ===== COURSE MATERIALS MODELS =====
@@ -177,6 +194,10 @@ class LessonFile(db.Model):
 # ✅ NEW: Teacher Assignment (Who teaches what, where)
 class TeacherAssignment(db.Model):
     __tablename__ = 'teacher_assignments'
+    __table_args__ = (
+        db.UniqueConstraint('instructor_id', 'subject_id', 'block_id',
+                            name='unique_teacher_assignment'),
+    )
     id = db.Column(db.Integer, primary_key=True)
     instructor_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     subject_id = db.Column(db.Integer, db.ForeignKey('subjects.id'), nullable=False)
@@ -305,9 +326,30 @@ def log_admin_action(admin_id, action, details=None, target_id=None):
         print(f"⚠️ audit log failed: {e}")
 
 def sanitize_code(code, language):
+    """
+    Simple substring checks — no regex, no ReDoS risk.
+    Returns True if code is considered safe, False otherwise.
+    """
     if language == 'python':
-        dangerous = ['__import__', 'os.system', 'subprocess', 'eval(', 'exec(', 'open(', 'import os', 'import sys']
-        return not any(p in code for p in dangerous)
+        dangerous_patterns = [
+            '__import__',
+            'os.system',
+            'os.popen',
+            'os.exec',
+            'subprocess',
+            'eval(',
+            'exec(',
+            'open(',
+            'import os',
+            'import sys',
+            'import socket',
+            'import shutil',
+            'importlib',
+            'pty.spawn',
+            'ctypes',
+        ]
+        code_lower = code.lower()
+        return not any(pattern.lower() in code_lower for pattern in dangerous_patterns)
     return True
 
 def _run_in_docker_with_stdin(code: str, language: str, stdin_input: str) -> dict:
@@ -333,6 +375,18 @@ def _run_in_docker_with_stdin(code: str, language: str, stdin_input: str) -> dic
         filename = os.path.basename(src_path)
 
         # ── Write input to file so container can read it ──────────────────
+        # ✅ cap stdin to prevent sandbox abuse
+        max_input_size = 64 * 1024  # 64kb
+        if stdin_input and len(stdin_input.encode('utf-8')) > max_input_size:
+            return {
+                'stdout': '',
+                'stderr': 'input too large (max 64kb)',
+                'returncode': -1,
+                'elapsed': 0,
+                'timed_out': False,
+                'timeout_used': 0
+            }
+
         input_path = os.path.join(tmpdir, 'input.txt')
         with open(input_path, 'w', encoding='utf-8') as f:
             f.write(stdin_input if stdin_input else '')
@@ -843,7 +897,7 @@ def update_problem(problem_id):
     problem = Problem.query.get_or_404(problem_id)
     
     # Verify ownership
-    if problem.created_by != user_id and user.role != 'admin':
+    if problem.created_by != user_id and user.role != 'super_admin':
         return jsonify({"error": "Not your problem"}), 403
     
     data = request.get_json()
@@ -942,8 +996,9 @@ def delete_problem(problem_id):
     if not is_instructor_or_admin(user):
         return jsonify({"error": "Unauthorized"}), 403
     
-    problem = Problem.query.get_or_404(problem_id)
-    if problem.created_by != user_id and user.role != 'admin':
+    problem = Problem.query.get_or_404(problem_id)  # ✅ THIS WAS MISSING
+    
+    if problem.created_by != user_id and user.role != 'super_admin':
         return jsonify({"error": "Not your problem"}), 403
     
     # Clean up related data in junction tables
@@ -1018,7 +1073,7 @@ def upload_lesson_file(lesson_id):
     lesson = Lesson.query.get_or_404(lesson_id)
     
     # Verify ownership
-    if lesson.created_by != user_id and user.role != 'admin':
+    if lesson.created_by != user_id and user.role != 'super_admin':
         return jsonify({"error": "Not your lesson"}), 403
     
     # Check if file was uploaded
@@ -1172,6 +1227,7 @@ def get_student_lessons():
 # ===== SUBMISSION ROUTES =====
 @app.route('/api/submissions', methods=['POST'])
 @jwt_required()
+@rate_limit(max_calls=10, period=60)
 def create_submission():
     """Submit code for grading - returns XP/level updates"""
     user_id = int(get_jwt_identity())
@@ -1186,6 +1242,14 @@ def create_submission():
     prob = Problem.query.get_or_404(data['problem_id'])
     if not prob.is_published: 
         return jsonify({"error": "Problem unavailable"}), 404
+    
+    # ✅ Deadline enforcement
+    if prob.due_date and datetime.utcnow() > prob.due_date:
+        return jsonify({
+            "error": "Deadline passed",
+            "message": f"This quest closed on {prob.due_date.strftime('%B %d, %Y at %I:%M %p UTC')}",
+            "due_date": prob.due_date.isoformat()
+        }), 403
     
     sub = Submission(
          user_id=user.id, 
@@ -1412,7 +1476,7 @@ def get_instructor_achievements():
     user_id = int(get_jwt_identity())
     user = User.query.get(user_id)
     
-    if user.role not in ['instructor', 'admin']:
+    if user.role not in ['instructor', 'super_admin']:
         return jsonify({"error": "Instructors only"}), 403
     
     # Calculate instructor stats
@@ -1495,54 +1559,39 @@ def get_instructor_achievements():
     return jsonify(result), 200
 
 # ===== STUDENT BLOCK/SUBJECT ROUTES =====
-@app.route('/api/student/subjects', methods=['GET'])  # ✅ Changed endpoint
+@app.route('/api/student/subjects', methods=['GET'])
 @jwt_required()
-def get_student_subjects():  # ✅ Renamed function
-    """Get all individual subjects this student is enrolled in"""
+def get_student_subjects():
+    """Get all subjects this student is enrolled in — single optimized JOIN query"""
     user_id = int(get_jwt_identity())
-    
-    # ✅ Get blocks student is enrolled in
-    enrollments = db.session.query(student_blocks.c.block_id).filter_by(
-        student_id=user_id
+
+    results = db.session.query(
+        Subject.id,
+        Subject.name,
+        Block.id.label('block_id'),
+        Block.section_code,
+        Block.semester,
+        User.username.label('instructor_name')
+    ).join(
+        block_subjects, Subject.id == block_subjects.c.subject_id
+    ).join(
+        Block, Block.id == block_subjects.c.block_id
+    ).join(
+        student_blocks,
+        (student_blocks.c.block_id == Block.id) &
+        (student_blocks.c.student_id == user_id)
+    ).outerjoin(
+        User, User.id == Block.instructor_id
     ).all()
-    block_ids = [e.block_id for e in enrollments]
-    
-    if not block_ids:
-        return jsonify([]), 200
-    
-    # ✅ Fetch blocks
-    blocks = Block.query.filter(Block.id.in_(block_ids)).all()
-    
-    # ✅ Return EACH SUBJECT as a separate item
-    result = []
-    for block in blocks:
-        # Get subjects for this block
-        subj_rows = db.session.query(block_subjects.c.subject_id).filter_by(
-            block_id=block.id
-        ).all()
-        subject_ids = [r.subject_id for r in subj_rows]
-        
-        # Get instructor name
-        instructor_name = "TBA"
-        if block.instructor_id:
-            instructor = User.query.get(block.instructor_id)
-            if instructor:
-                instructor_name = instructor.username
-        
-        # ✅ Create a separate entry for EACH subject
-        for subj_id in subject_ids:
-            subject = Subject.query.get(subj_id)
-            if subject:
-                result.append({
-                    "id": subject.id,  # ✅ Subject ID (not block ID)
-                    "name": subject.name,  # ✅ Subject name (e.g., "Introduction to Programming")
-                    "block_id": block.id,  # ✅ Keep reference to block
-                    "block_code": block.section_code,  # ✅ Block code (e.g., "101")
-                    "semester": block.semester,
-                    "instructor": instructor_name
-                })
-    
-    return jsonify(result), 200
+
+    return jsonify([{
+        "id": r.id,
+        "name": r.name,
+        "block_id": r.block_id,
+        "block_code": r.section_code,
+        "semester": r.semester,
+        "instructor": r.instructor_name or "TBA"
+    } for r in results]), 200
 
 @app.route('/api/student/submissions/by-block', methods=['GET'])
 @jwt_required()
@@ -1555,9 +1604,9 @@ def get_submissions_by_block():
         return jsonify({"error": "block_id query parameter required"}), 400
     
     # ✅ Verify student is enrolled in this block (NEW TABLE)
-    enrollment = db.session.query(student_blocks).filter_by(
-        student_id=user_id, 
-        block_id=block_id
+    enrollment = db.session.query(student_blocks.c.student_id).filter(
+        student_blocks.c.student_id == user_id,
+        student_blocks.c.block_id == block_id
     ).first()
     
     if not enrollment:
@@ -1653,7 +1702,7 @@ def get_instructor_problem_detail(problem_id):
         return jsonify({"error": "Unauthorized"}), 403
     
     problem = Problem.query.get_or_404(problem_id)
-    if problem.created_by != user_id and user.role != 'admin':
+    if problem.created_by != user_id and user.role != 'super_admin':
         return jsonify({"error": "Not your problem"}), 403
     
     # Parse starter_code
@@ -1761,7 +1810,7 @@ def get_instructor_class_detail(classId):  # ✅ must match route parameter name
         block_id=classId
     ).all()
     
-    if not assignments and user.role != 'admin':
+    if not assignments and user.role != 'super_admin':
         return jsonify({"error": "Not authorized to view this class"}), 403
     
     # Get subjects for this block
@@ -1988,6 +2037,50 @@ def get_problem_submissions(problem_id):
         }
     }), 200
 
+@app.route('/api/instructor/submissions/<int:submission_id>/code', methods=['GET'])
+@jwt_required()
+def get_submission_code(submission_id):
+    """Instructor views a student's submitted code + test results"""
+    user_id = int(get_jwt_identity())
+    user = User.query.get(user_id)
+
+    if not is_instructor_or_admin(user):
+        return jsonify({"error": "Unauthorized"}), 403
+
+    sub = Submission.query.get_or_404(submission_id)
+    problem = Problem.query.get_or_404(sub.problem_id)
+
+    # Verify instructor owns this problem OR is super_admin
+    if problem.created_by != user_id and user.role != 'super_admin':
+        return jsonify({"error": "Not your problem"}), 403
+
+    student = User.query.get(sub.user_id)
+
+    # Re-run test cases against submitted code to get per-test breakdown
+    try:
+        test_results = evaluate_code(sub.code, problem.test_cases, sub.language)
+    except Exception:
+        test_results = []
+
+    return jsonify({
+        "submission_id": sub.id,
+        "student": {
+            "id": student.id,
+            "username": student.username
+        } if student else None,
+        "problem": {
+            "id": problem.id,
+            "title": problem.title,
+            "difficulty": problem.difficulty
+        },
+        "code": sub.code,
+        "language": sub.language,
+        "status": sub.status,
+        "score": sub.score,
+        "submitted_at": sub.submitted_at.isoformat(),
+        "test_results": test_results
+    }), 200
+
 @app.route('/api/instructor/assigned-subjects', methods=['GET'])
 @jwt_required()
 def get_instructor_assigned_subjects():
@@ -2032,47 +2125,6 @@ def get_blocks_by_subject():
         "semester": b.semester or 'Current'
     } for b in blocks]), 200
 
-@app.route('/api/blocks', methods=['POST'])  # ✅ Changed route name
-@jwt_required()
-def create_block():  # ✅ Changed function name
-    user_id = int(get_jwt_identity())
-    user = User.query.get(user_id)
-    if not is_instructor_or_admin(user): 
-        return jsonify({"error": "Unauthorized"}), 403
-    
-    data = request.get_json()
-    if not data.get('section_code'): 
-        return jsonify({"error": "Section code required"}), 400
-    
-    # ✅ Check if block already exists (NEW TABLE)
-    if Block.query.filter_by(instructor_id=user.id, section_code=data['section_code'], semester=data.get('semester')).first(): 
-        return jsonify({"error": "Block already exists"}), 400
-    
-    # ✅ Create new Block (NEW MODEL)
-    b = Block(
-        instructor_id=user.id, 
-        section_code=data['section_code'], 
-        semester=data.get('semester','')
-    )
-    db.session.add(b)
-    db.session.commit()
-    
-    # ✅ Link subjects if provided
-    subjects = data.get('subjects', [])
-    for sub_name in subjects:
-        subject = Subject.query.filter_by(name=sub_name).first()
-        if not subject:
-            subject = Subject(name=sub_name)
-            db.session.add(subject)
-            db.session.flush()
-        db.session.execute(block_subjects.insert().values(
-            block_id=b.id,
-            subject_id=subject.id
-        ))
-    db.session.commit()
-    
-    return jsonify({"message": "Block created", "block_id": b.id}), 201
-
 @app.route('/api/instructor/class/<int:class_id>/stats', methods=['GET'])
 @jwt_required()
 def get_class_stats(class_id):
@@ -2082,7 +2134,7 @@ def get_class_stats(class_id):
         return jsonify({"error": "Unauthorized"}), 403
     
     c = Class.query.get_or_404(class_id)
-    if c.instructor_id != user.id and user.role != 'admin': 
+    if c.instructor_id != user.id and user.role != 'super_admin': 
         return jsonify({"error": "Not your class"}), 403
     
     student_ids = [cs.student_id for cs in db.session.query(class_students.c.student_id).filter_by(class_id=class_id).all()]
@@ -2168,9 +2220,9 @@ def get_student_announcements():
     if user.role != 'student':
         return jsonify({"error": "Students only"}), 403
     
-    # Get blocks this student is in
-    student_class_ids = db.session.query(class_students.c.class_id).filter_by(student_id=user_id).all()
-    block_ids = [b[0] for b in student_class_ids]
+    # Get blocks this student is in (NEW student_blocks table)
+    block_rows = db.session.query(student_blocks.c.block_id).filter_by(student_id=user_id).all()
+    block_ids = [b[0] for b in block_rows]
     
     # Fetch announcements: global OR for student's blocks
     announcements = Announcement.query.filter(
@@ -2730,32 +2782,94 @@ def admin_backup_database(admin):
 @app.route('/api/admin/subjects', methods=['POST'])
 @admin_required
 def admin_create_subject(admin):
-    """Create a new subject"""
+    """Create a new subject with full university metadata."""
     data = request.get_json()
-    
-    if not data or not data.get('name'):
+
+    # ── Basic validation ───────────────────────────────────────────────
+    if not data or not data.get('name', '').strip():
         return jsonify({"error": "Subject name is required"}), 400
-    
-    # Check if subject already exists
-    existing = Subject.query.filter_by(name=data['name'].strip()).first()
+
+    name = data['name'].strip()
+    if len(name) > 200:
+        return jsonify({"error": "Subject name must be 200 characters or fewer"}), 400
+
+    # ── subject_code: alphanumeric + hyphens only, no regex needed ────
+    subject_code = data.get('subject_code', '').strip().upper() or None
+    if subject_code:
+        if len(subject_code) > 20:
+            return jsonify({"error": "Subject code must be 20 characters or fewer"}), 400
+        allowed_chars = set('ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_')
+        if not all(ch in allowed_chars for ch in subject_code):
+            return jsonify({"error": "Subject code may only contain letters, digits, hyphens, and underscores"}), 400
+
+    # ── units ─────────────────────────────────────────────────────────
+    units = data.get('units')
+    if units is not None:
+        try:
+            units = int(units)
+            if units < 1 or units > 12:
+                return jsonify({"error": "Units must be between 1 and 12"}), 400
+        except (ValueError, TypeError):
+            return jsonify({"error": "Units must be a valid integer"}), 400
+
+    # ── year_level ────────────────────────────────────────────────────
+    year_level = data.get('year_level')
+    if year_level is not None:
+        try:
+            year_level = int(year_level)
+            if year_level < 1 or year_level > 6:
+                return jsonify({"error": "Year level must be between 1 and 6"}), 400
+        except (ValueError, TypeError):
+            return jsonify({"error": "Year level must be a valid integer"}), 400
+
+    # ── subject_type ──────────────────────────────────────────────────
+    allowed_types = {'lecture', 'lab', 'lecture_lab', 'elective'}
+    subject_type = data.get('subject_type', 'lecture')
+    if subject_type not in allowed_types:
+        return jsonify({"error": f"subject_type must be one of: {', '.join(sorted(allowed_types))}"}), 400
+
+    # ── department ────────────────────────────────────────────────────
+    department = data.get('department', '').strip() or None
+    if department and len(department) > 100:
+        return jsonify({"error": "Department must be 100 characters or fewer"}), 400
+
+    # ── Duplicate check ───────────────────────────────────────────────
+    existing = Subject.query.filter_by(name=name).first()
     if existing:
-        return jsonify({"error": "Subject already exists"}), 409
-    
+        return jsonify({"error": "A subject with this name already exists"}), 409
+
+    # ── Persist ───────────────────────────────────────────────────────
     subject = Subject(
-        name=data['name'].strip(),
-        description=data.get('description', '').strip()
+        name=name,
+        description=data.get('description', '').strip() or None,
+        subject_code=subject_code,
+        units=units,
+        department=department,
+        year_level=year_level,
+        subject_type=subject_type,
     )
     db.session.add(subject)
     db.session.commit()
-    
-    log_admin_action(admin.id, "SUBJECT_CREATED", f"Created subject: {subject.name}")
-    
+
+    log_admin_action(
+        admin.id,
+        "SUBJECT_CREATED",
+        f"Created subject: {subject.name}"
+        + (f" [{subject.subject_code}]" if subject.subject_code else ""),
+        target_id=subject.id,
+    )
+
     return jsonify({
         "message": "Subject created successfully",
         "subject": {
-            "id": subject.id,
-            "name": subject.name,
-            "description": subject.description
+            "id":           subject.id,
+            "name":         subject.name,
+            "description":  subject.description,
+            "subject_code": subject.subject_code,
+            "units":        subject.units,
+            "department":   subject.department,
+            "year_level":   subject.year_level,
+            "subject_type": subject.subject_type,
         }
     }), 201
 
@@ -2776,9 +2890,14 @@ def admin_get_subjects(admin):
                 unique_subjects.append(s)
         
         return jsonify([{
-            "id": s.id,
-            "name": s.name,
-            "description": s.description
+            "id":           s.id,
+            "name":         s.name,
+            "description":  s.description,
+            "subject_code": s.subject_code,
+            "units":        s.units,
+            "department":   s.department,
+            "year_level":   s.year_level,
+            "subject_type": s.subject_type,
         } for s in unique_subjects]), 200
     except Exception as e:
         print(f"Error fetching subjects: {e}")
