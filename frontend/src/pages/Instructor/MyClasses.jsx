@@ -19,7 +19,7 @@ export default function MyClasses() {
           id: c.id,
           name: c.section_code,
           // ✅ BONUS: Show ALL subjects joined by comma
-          title: c.subjects?.length > 0 ? c.subjects.join(', ') : c.name,
+          title: c.subjects?.length > 0 ? c.subjects.join(' · ') : c.name,
           description: c.semester || 'Current Semester',
           students: c.student_count || 0,
           problems: c.problem_count || 0,

@@ -105,7 +105,7 @@ export default function ClassDetail() {
                 Active
               </span>
             </div>
-            <p className="text-slate-400">{classInfo.name || classInfo.subjects?.join(', ')}</p>
+            <p className="text-slate-400">{classInfo.subjects?.join(' · ') || classInfo.name}</p>
           </div>
         </div>
         {/* ✅ Removed "+ Add Student" button */}

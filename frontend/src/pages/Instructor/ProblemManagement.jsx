@@ -7,20 +7,20 @@ export default function ProblemManagement({ classId }) {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
 
-  useEffect(() => { fetchProblems() }, [])
+  useEffect(() => { fetchProblems() }, [classId])
 
   const fetchProblems = async () => {
     try {
       const token = localStorage.getItem('token')
-      const res = await fetch('http://localhost:5000/api/instructor/problems', {
+      const url = classId
+        ? `http://localhost:5000/api/instructor/classes/${classId}/problems`
+        : 'http://localhost:5000/api/instructor/problems'
+      const res = await fetch(url, {
         headers: { 'Authorization': `Bearer ${token}` }
       })
       if (res.ok) {
         const data = await res.json()
-        const filtered = classId
-          ? data.filter(p => !p.visible_to_blocks || p.visible_to_blocks.includes(parseInt(classId)))
-          : data
-        setProblems(filtered)
+        setProblems(data)
       }
     } catch (err) {
       console.error('Failed to fetch problems:', err)
@@ -224,7 +224,7 @@ export default function ProblemManagement({ classId }) {
                     <td className="px-5 py-4 text-right" onClick={e => e.stopPropagation()}>
                       <div className="flex justify-end gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
                         <button
-                          onClick={() => navigate(`/instructor/create-problem?id=${problem.id}`)}
+                          onClick={() => navigate(`/instructor/create-problem?edit=${problem.id}`)}
                           title="Edit Problem"
                           className="p-2 hover:bg-blue-500/10 rounded-lg transition text-slate-400 hover:text-blue-400"
                         >

@@ -69,7 +69,7 @@ export default function UserManagement() {
   useEffect(() => {
     fetchUsers()
     fetchBlocks()
-  }, [roleFilter, blockFilter, statusFilter])
+  }, [roleFilter, blockFilter, statusFilter, search])
 
   const fetchUsers = async () => {
     try {
