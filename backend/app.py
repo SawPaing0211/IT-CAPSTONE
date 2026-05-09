@@ -5,7 +5,7 @@ from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime, timedelta
 from functools import wraps
-import subprocess, sys, time, csv, json, io, unicodedata, re, base64
+import subprocess, sys, time, csv, json, io, unicodedata, re, base64, secrets, string
 from io import StringIO
 from sqlalchemy import text, inspect
 from routes.sandbox import sandbox_bp, _run_in_docker
@@ -901,33 +901,52 @@ def get_problems():
     
     problems = query.all()
     filtered = []
-    
-    for p in problems:
-        # ✅ FIXED: Student enrollment check
-        if p.subject_id and user.role == 'student':
-            # Get student's enrolled blocks
-            student_enrollments = db.session.query(student_blocks.c.block_id).filter_by(
-                student_id=user_id  # ✅ Use user_id from top, not conditional
-            ).all()
-            student_block_ids = [e.block_id for e in student_enrollments]
-            
-            if not student_block_ids:
-                continue  # Student not enrolled in any blocks
-            
-            # Check if problem's subject is offered in any of student's blocks
-            subject_in_student_blocks = db.session.query(block_subjects.c.block_id).filter_by(
-                subject_id=p.subject_id
-            ).all()
-            valid_blocks = [s.block_id for s in subject_in_student_blocks]
-            
-            if not any(bid in valid_blocks for bid in student_block_ids):
-                continue  # Skip - student not enrolled in this subject
-        
-        # Block visibility filter
-        if not p.visible_to_blocks or (block_id and block_id in p.visible_to_blocks):
-            filtered.append(p)
-        elif not block_id and not p.visible_to_blocks:
-            filtered.append(p)
+
+    if user.role in ('instructor', 'super_admin'):
+        for p in problems:
+            if user.role == 'super_admin' or p.created_by == user_id:
+                filtered.append(p)
+    else:
+        # Student path — get enrolled blocks once
+        student_enrollment_rows = db.session.query(student_blocks.c.block_id).filter_by(
+            student_id=user_id
+        ).all()
+        student_block_ids = [e.block_id for e in student_enrollment_rows]
+
+        if not student_block_ids:
+            return jsonify([]), 200
+
+        for p in problems:
+            # Must belong to a subject offered in at least one of the student's blocks
+            if p.subject_id:
+                subject_block_rows = db.session.query(block_subjects.c.block_id).filter_by(
+                    subject_id=p.subject_id
+                ).all()
+                valid_subject_blocks = [r.block_id for r in subject_block_rows]
+                if not any(bid in valid_subject_blocks for bid in student_block_ids):
+                    continue
+
+            # Block visibility check
+            if p.visible_to_blocks:
+                # Explicit list — student must be in one of the named blocks
+                if block_id:
+                    if block_id in p.visible_to_blocks and block_id in student_block_ids:
+                        filtered.append(p)
+                else:
+                    if any(bid in p.visible_to_blocks for bid in student_block_ids):
+                        filtered.append(p)
+            else:
+                # Empty = visible to all blocks where the CREATOR teaches this subject
+                if p.created_by and p.subject_id:
+                    creator_blocks = get_instructor_blocks_for_subject(
+                        p.created_by, p.subject_id
+                    )
+                    if block_id:
+                        if block_id in creator_blocks and block_id in student_block_ids:
+                            filtered.append(p)
+                    else:
+                        if any(bid in creator_blocks for bid in student_block_ids):
+                            filtered.append(p)
     
     result = []
     for p in filtered:
@@ -1881,6 +1900,62 @@ def get_instructor_problems():
         "created_at": p.created_at.isoformat()
     } for p in problems]), 200
 
+@app.route('/api/instructor/classes/<int:class_id>/problems', methods=['GET'])
+@jwt_required()
+def get_class_problems(class_id):
+    """Problems scoped to a specific block — only shows problems visible to that block."""
+    user_id = int(get_jwt_identity())
+    user = User.query.get(user_id)
+
+    if not is_instructor_or_admin(user):
+        return jsonify({"error": "Unauthorized"}), 403
+
+    if user.role != 'super_admin':
+        assignment = TeacherAssignment.query.filter_by(
+            instructor_id=user_id,
+            block_id=class_id
+        ).first()
+        if not assignment:
+            return jsonify({"error": "Not assigned to this block"}), 403
+
+    problems = Problem.query.filter_by(created_by=user_id).all()
+
+    instructor_subject_ids_in_block = [
+        a.subject_id for a in TeacherAssignment.query.filter_by(
+            instructor_id=user_id,
+            block_id=class_id
+        ).all()
+    ]
+
+    result = []
+    for p in problems:
+        in_scope = False
+        if p.visible_to_blocks:
+            if class_id in p.visible_to_blocks:
+                in_scope = True
+        else:
+            if p.subject_id in instructor_subject_ids_in_block:
+                in_scope = True
+
+        if not in_scope:
+            continue
+
+        result.append({
+            "id": p.id,
+            "title": p.title,
+            "difficulty": p.difficulty,
+            "is_published": p.is_published,
+            "xp_reward": p.xp_reward,
+            "problem_type": p.problem_type,
+            "languages": p.languages or ['python'],
+            "tags": p.tags or [],
+            "visible_to_blocks": p.visible_to_blocks or [],
+            "due_date": p.due_date.isoformat() if p.due_date else None,
+            "created_at": p.created_at.isoformat()
+        })
+
+    return jsonify(result), 200
+
 @app.route('/api/instructor/problems/<int:problem_id>', methods=['GET'])
 @jwt_required()
 def get_instructor_problem_detail(problem_id):
@@ -1963,7 +2038,7 @@ def get_instructor_classes():
         result.append({
             "id": b.id,
             "section_code": b.section_code,
-            "name": subjects[0] if subjects else b.section_code,
+            "name": ', '.join(subjects) if subjects else b.section_code,
             "subjects": subjects,
             "semester": b.semester,
             "student_count": student_count,
@@ -1996,12 +2071,9 @@ def get_instructor_class_detail(classId):  # ✅ must match route parameter name
     if not assignments and user.role != 'super_admin':
         return jsonify({"error": "Not authorized to view this class"}), 403
     
-    # Get subjects for this block
-    subj_rows = db.session.query(block_subjects.c.subject_id).filter_by(
-        block_id=classId
-    ).all()
-    subject_ids = [r.subject_id for r in subj_rows]
-    subjects = [Subject.query.get(sid).name for sid in subject_ids if Subject.query.get(sid)]
+    # ✅ FIX: Only get subjects THIS instructor teaches in this block
+    my_subject_ids = [a.subject_id for a in assignments]
+    subjects = [Subject.query.get(sid).name for sid in my_subject_ids if Subject.query.get(sid)]
     
     # Count students
     student_count = db.session.query(student_blocks.c.student_id).filter_by(
@@ -2015,19 +2087,19 @@ def get_instructor_class_detail(classId):  # ✅ must match route parameter name
     
     # Count lessons (if subject exists)
     lesson_count = 0
-    if subject_ids:
+    if my_subject_ids:
         lesson_count = Lesson.query.filter(
-            Lesson.subject_id.in_(subject_ids),
+            Lesson.subject_id.in_(my_subject_ids),
             (Lesson.block_id == classId) | (Lesson.block_id == None)
         ).count()
     
     # Count announcements
-    announcement_count = Announcement.query.filter_by(class_id=classId).count()  # ✅ Use snake_case column name
+    announcement_count = Announcement.query.filter_by(class_id=classId).count()
     
     return jsonify({
         "id": block.id,
         "section_code": block.section_code,
-        "name": subjects[0] if subjects else block.section_code,  # or you can use subjects[0] if only one subject
+        "name": ', '.join(subjects) if subjects else block.section_code,  # or you can use subjects[0] if only one subject
         "semester": block.semester or 'Current Semester',
         "subjects": subjects,
         "student_count": student_count,
@@ -2537,7 +2609,7 @@ def admin_get_users(admin):
     elif status == 'inactive': q = q.filter_by(is_active=False)
     if search: q = q.filter((User.username.ilike(f'%{search}%')) | (User.email.ilike(f'%{search}%')))
     
-    users = q.order_by(User.created_at.desc()).limit(50).all()
+    users = q.order_by(User.created_at.desc()).limit(500).all()
     
     result = []
     for u in users:
@@ -3945,7 +4017,7 @@ def admin_bulk_enrollment_upload(admin):
         return jsonify({"error": "Maximum 2000 rows per upload"}), 400
 
     # Normalise header names (strip whitespace, lowercase)
-    rows = [{k.strip().lower(): (v or "").strip() for k, v in row.items()} for row in rows]
+    rows = [{k.strip().lower(): (v or "").strip() for k, v in row.items() if k is not None} for row in rows]
 
     required_cols = {
         "student_id", "firstname", "middlename", "lastname", "suffix",
@@ -4562,14 +4634,10 @@ def admin_create_section(admin):
         if not block:
             return jsonify({"error": "Block not found"}), 404
 
-    existing = SubjectSection.query.filter_by(
-        section_no=section_no,
-        subject_id=data['subject_id'],
-        semester=data.get('semester'),
-        academic_year=data.get('academic_year'),
-    ).first()
+    # ✅ Check global uniqueness (matches DB constraint)
+    existing = SubjectSection.query.filter_by(section_no=section_no).first()
     if existing:
-        return jsonify({"error": f"Section '{section_no}' already exists for this subject and semester"}), 409
+        return jsonify({"error": f"Section number '{section_no}' is already in use university-wide"}), 409
 
     capacity = data.get('capacity', 40)
     try:
@@ -4790,15 +4858,17 @@ def admin_bulk_upload_sections(admin):
         semester      = row.get('semester', '').strip() or None
         academic_year = row.get('academic_year', '').strip() or None
 
-        existing = SubjectSection.query.filter_by(
-            section_no=section_no,
-            subject_id=subject.id,
-            semester=semester,
-            academic_year=academic_year,
-        ).first()
+        # ✅ Check global uniqueness (matches DB constraint)
+        existing = SubjectSection.query.filter_by(section_no=section_no).first()
         if existing:
+            existing_subject = Subject.query.get(existing.subject_id)
+            subject_label = existing_subject.subject_code if existing_subject else f"subject_id={existing.subject_id}"
             skipped += 1
-            results.append({"row": idx, "status": "skipped", "reason": "section already exists"})
+            results.append({
+                "row": idx,
+                "status": "skipped",
+                "reason": f"section_no '{section_no}' already assigned to {subject_label}"
+            })
             continue
 
         try:

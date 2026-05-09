@@ -8,6 +8,7 @@ export default function CreateProblem() {
   const [blocks, setBlocks] = useState([])
   const [isEditing, setIsEditing] = useState(!!problemId)  // ✅ Editing mode if problemId exists
   const [assignedSubjects, setAssignedSubjects] = useState([])
+  const [blocksBySubject, setBlocksBySubject] = useState([])
   const [selectedSubjectId, setSelectedSubjectId] = useState(null)
   const [activeSection, setActiveSection] = useState(1)
   
@@ -113,6 +114,36 @@ useEffect(() => {
   }
   fetchData()
 }, [problemId])  // ✅ Re-run if problemId changes
+
+  useEffect(() => {
+    if (!selectedSubjectId) {
+      setBlocksBySubject([])
+      return
+    }
+    const fetchBlocksForSubject = async () => {
+      try {
+        const token = localStorage.getItem('token')
+        const res = await fetch(
+          `http://localhost:5000/api/instructor/blocks-by-subject?subject_id=${selectedSubjectId}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        )
+        if (res.ok) {
+          const data = await res.json()
+          setBlocksBySubject(data)
+          // Clear selected blocks that are no longer valid for this subject
+          setFormData(prev => ({
+            ...prev,
+            visible_to_blocks: prev.visible_to_blocks.filter(bid =>
+              data.some(b => b.id === bid)
+            )
+          }))
+        }
+      } catch (err) {
+        console.error('Failed to fetch blocks for subject:', err)
+      }
+    }
+    fetchBlocksForSubject()
+  }, [selectedSubjectId])
 
   const handleInputChange = (field, value) => {
     setFormData(prev => ({ ...prev, [field]: value }))
@@ -465,45 +496,32 @@ useEffect(() => {
             <div>
               <label className="block text-slate-400 text-sm mb-3">Visible To Blocks</label>
               <div className="bg-slate-800 rounded-xl p-4 space-y-2 max-h-60 overflow-y-auto border border-slate-700">
-                {blocks.length === 0 ? (
-                  <p className="text-slate-500 text-center py-4">No blocks found for your account</p>
+                {blocksBySubject.length === 0 ? (
+                  <p className="text-slate-500 text-center py-4">
+                    {selectedSubjectId ? 'No blocks found for this subject' : 'Select a subject first to see available blocks'}
+                  </p>
                 ) : (
-                  blocks
-                    .filter(block => {
-                      // If no subject selected, show all blocks
-                      if (!selectedSubjectId) return true
-                      // Otherwise, only show blocks that contain the selected subject
-                      return block.subjects && block.subjects.some(subName => {
-                        const selectedSub = assignedSubjects.find(s => s.id === selectedSubjectId)
-                        return selectedSub && subName === selectedSub.name
-                      })
-                    })
-                    .map(block => (
-                      <label key={block.id} className="flex items-center gap-3 p-3 rounded-lg hover:bg-slate-700 transition cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={formData.visible_to_blocks.includes(block.id)}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              handleInputChange('visible_to_blocks', [...formData.visible_to_blocks, block.id])
-                            } else {
-                              handleInputChange('visible_to_blocks', formData.visible_to_blocks.filter(id => id !== block.id))
-                            }
-                          }}
-                          className="w-5 h-5 rounded border-slate-600 text-blue-600 focus:ring-blue-500"
-                        />
-                        <div className="flex-1">
-                          <div className="text-white font-medium">
-                            {block.section_code} {block.semester && `- ${block.semester}`}
-                          </div>
-                          {block.subjects && block.subjects.length > 0 && (
-                            <div className="text-slate-500 text-sm mt-1">
-                              {block.subjects.join(', ')}
-                            </div>
-                          )}
+                  blocksBySubject.map(block => (
+                    <label key={block.id} className="flex items-center gap-3 p-3 rounded-lg hover:bg-slate-700 transition cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={formData.visible_to_blocks.includes(block.id)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            handleInputChange('visible_to_blocks', [...formData.visible_to_blocks, block.id])
+                          } else {
+                            handleInputChange('visible_to_blocks', formData.visible_to_blocks.filter(id => id !== block.id))
+                          }
+                        }}
+                        className="w-5 h-5 rounded border-slate-600 text-blue-600 focus:ring-blue-500"
+                      />
+                      <div className="flex-1">
+                        <div className="text-white font-medium">
+                          {block.section_code}{block.semester ? ` — ${block.semester}` : ''}
                         </div>
-                      </label>
-                    ))
+                      </div>
+                    </label>
+                  ))
                 )}
               </div>
               <p className="text-slate-500 text-xs mt-2">
