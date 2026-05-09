@@ -11,7 +11,7 @@ export default function BlocksSections() {
   const [viewMode, setViewMode] = useState('list') // 'list' or 'grid'
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [newBlock, setNewBlock] = useState({
-    section_code: '',
+    section_code: '', 
     semester: '',
     subjects: []  
   })
@@ -520,7 +520,19 @@ export default function BlocksSections() {
                           }}
                           className="w-4 h-4 rounded border-slate-600 text-purple-600 focus:ring-purple-500"
                         />
-                        <span className="text-sm text-white">{subject.name}</span>
+                        <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+                          {subject.internal_subject_no && (
+                            <span className="shrink-0 px-1.5 py-0.5 bg-slate-600 text-slate-200 rounded text-[10px] font-mono font-semibold">
+                              {subject.internal_subject_no}
+                            </span>
+                          )}
+                          {subject.subject_code && (
+                            <span className="shrink-0 px-1.5 py-0.5 bg-purple-700/60 text-purple-200 rounded text-[10px] font-mono font-semibold border border-purple-600/40">
+                              {subject.subject_code}
+                            </span>
+                          )}
+                          <span className="text-sm text-white truncate">{subject.name}</span>
+                        </div>
                       </label>
                     ))
                   )}

@@ -68,10 +68,10 @@ export default function Auth({ onLogin, initialMode = 'login' }) {
 }
 
   const classOptions = [
-    { id: 'student', icon: '🗡️', name: 'Student', desc: 'Learn & conquer', color: 'from-purple-600 to-pink-600' },
-    { id: 'instructor', icon: '📚', name: 'Instructor', desc: 'Teach & guide', color: 'from-blue-600 to-cyan-600' },
-    { id: 'admin', icon: '👑', name: 'Admin', desc: 'Rule & manage', color: 'from-yellow-600 to-orange-600' }
-  ]
+  { id: 'student', icon: '🗡️', name: 'Student', desc: 'Learn & conquer', color: 'from-purple-600 to-pink-600' },
+  { id: 'instructor', icon: '📚', name: 'Instructor', desc: 'Teach & guide', color: 'from-blue-600 to-cyan-600' },
+  { id: 'super_admin', icon: '👑', name: 'Admin', desc: 'Rule & manage', color: 'from-yellow-600 to-orange-600' } 
+]
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-950 via-purple-950/20 to-slate-950 flex items-center justify-center p-4 relative overflow-hidden">

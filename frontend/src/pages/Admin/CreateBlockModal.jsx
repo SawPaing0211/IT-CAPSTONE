@@ -184,8 +184,19 @@ export default function CreateBlockModal({ onClose, onSuccess }) {
                   <label key={s.id} className="flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-slate-700 cursor-pointer transition">
                     <input type="checkbox" checked={form.selected_subjects.includes(s.name)} onChange={() => toggleSubject(s.name)}
                       className="w-4 h-4 rounded border-slate-600 text-purple-600 focus:ring-purple-500" />
-                    <span className="text-sm text-white">{s.name}</span>
-                    {s.description && <span className="text-xs text-slate-500 ml-auto">{s.description.slice(0, 30)}</span>}
+                    <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+                      {s.internal_subject_no && (
+                        <span className="shrink-0 px-1.5 py-0.5 bg-slate-600 text-slate-200 rounded text-[10px] font-mono font-semibold">
+                          {s.internal_subject_no}
+                        </span>
+                      )}
+                      {s.subject_code && (
+                        <span className="shrink-0 px-1.5 py-0.5 bg-purple-700/60 text-purple-200 rounded text-[10px] font-mono font-semibold border border-purple-600/40">
+                          {s.subject_code}
+                        </span>
+                      )}
+                      <span className="text-sm text-white truncate">{s.name}</span>
+                    </div>
                   </label>
                 ))}
               </div>
@@ -194,12 +205,18 @@ export default function CreateBlockModal({ onClose, onSuccess }) {
             {/* Selected subjects preview */}
             {form.selected_subjects.length > 0 && (
               <div className="flex flex-wrap gap-1.5">
-                {form.selected_subjects.map(s => (
-                  <span key={s} className="flex items-center gap-1 px-2 py-1 bg-purple-600/20 border border-purple-600/40 rounded-lg text-purple-300 text-xs">
-                    {s}
-                    <button onClick={() => toggleSubject(s)} className="text-purple-400 hover:text-white ml-1">×</button>
-                  </span>
-                ))}
+                {form.selected_subjects.map(name => {
+                  const subject = subjects.find(s => s.name === name)
+                  return (
+                    <span key={name} className="flex items-center gap-1 px-2 py-1 bg-purple-600/20 border border-purple-600/40 rounded-lg text-purple-300 text-xs">
+                      {subject?.subject_code && (
+                        <span className="font-mono text-purple-400">{subject.subject_code}</span>
+                      )}
+                      <span>{name}</span>
+                      <button onClick={() => toggleSubject(name)} className="text-purple-400 hover:text-white ml-1">×</button>
+                    </span>
+                  )
+                })}
               </div>
             )}
 

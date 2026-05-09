@@ -5,7 +5,7 @@ from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime, timedelta
 from functools import wraps
-import subprocess, sys, time, csv, json, io
+import subprocess, sys, time, csv, json, io, unicodedata, re, base64
 from io import StringIO
 from sqlalchemy import text, inspect
 from routes.sandbox import sandbox_bp, _run_in_docker
@@ -118,8 +118,15 @@ class Submission(db.Model):
     problem_id = db.Column(db.Integer, db.ForeignKey('problems.id'), nullable=False)
     code = db.Column(db.Text, nullable=False)
     language = db.Column(db.Enum('python', 'java', 'csharp'), nullable=False)
-    status = db.Column(db.Enum('accepted', 'wrong_answer', 'timeout', 'error'), nullable=False)
-    score = db.Column(db.Integer, default=0)
+    status       = db.Column(db.Enum(
+                       'accepted', 'partial', 'wrong_answer',
+                       'timeout', 'error', 'compile_error'
+                   ), nullable=False, default='error')
+    score        = db.Column(db.Integer, default=0)
+    passed_cases = db.Column(db.Integer, default=0)
+    total_cases  = db.Column(db.Integer, default=0)
+    exec_ms      = db.Column(db.Integer, default=0)
+    error_msg    = db.Column(db.Text,    nullable=True)
     submitted_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 class Announcement(db.Model):
@@ -134,32 +141,38 @@ class Announcement(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-# ✅ NEW: Block model (section codes only)
+# ── Block model — academic section ────────────────────────────────────
 class Block(db.Model):
     __tablename__ = 'blocks'
-    id = db.Column(db.Integer, primary_key=True)
-    section_code = db.Column(db.String(20), nullable=False)
-    semester = db.Column(db.String(50), nullable=True)
-    instructor_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    id            = db.Column(db.Integer,    primary_key=True)
+    section_code  = db.Column(db.String(20), nullable=False)
+    semester      = db.Column(db.String(50), nullable=True)
+    academic_year = db.Column(db.String(9),  nullable=False, default='2024-2025')
+    year_level    = db.Column(db.Integer,    nullable=False, default=1)
+    max_students  = db.Column(db.Integer,    nullable=False, default=45)
+    is_active     = db.Column(db.Boolean,    nullable=False, default=True)
+    instructor_id = db.Column(db.Integer,    db.ForeignKey('users.id'), nullable=True)
+    created_at    = db.Column(db.DateTime,   default=datetime.utcnow)
 
-# ✅ NEW: Subject model (course names)
+# ── Subject model — IT/programming subjects only ──────────────────────
 class Subject(db.Model):
     __tablename__ = 'subjects'
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(200), nullable=False)
-    description = db.Column(db.Text, nullable=True)
-    # ✅ NEW: University-standard fields
-    subject_code = db.Column(db.String(20), nullable=True)   # e.g. CS101
-    units = db.Column(db.Integer, nullable=True)              # e.g. 3
-    department = db.Column(db.String(100), nullable=True)     # e.g. CCS
-    year_level = db.Column(db.Integer, nullable=True)         # 1–4
-    subject_type = db.Column(
-        db.Enum('lecture', 'lab', 'lecture_lab', 'elective'),
-        nullable=True,
-        default='lecture'
-    )
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    id                  = db.Column(db.Integer, primary_key=True)
+    internal_subject_no = db.Column(db.String(10),  nullable=True)
+    name                = db.Column(db.String(200),  nullable=False)
+    description         = db.Column(db.Text,         nullable=True)
+    subject_code        = db.Column(db.String(20),   nullable=True, unique=True)
+    units               = db.Column(db.Integer,      nullable=True)
+    department          = db.Column(db.String(100),  nullable=True)
+    year_level          = db.Column(db.Integer,      nullable=True)
+    semester            = db.Column(db.Integer,      nullable=True)
+    subject_type        = db.Column(
+                            db.Enum('lecture', 'lab', 'lecture_lab', 'elective'),
+                            nullable=True, default='lecture')
+    supported_languages = db.Column(db.String(100),  nullable=False, default='python')
+    default_difficulty  = db.Column(db.String(10),   nullable=False, default='easy')
+    is_active           = db.Column(db.Boolean,      nullable=False, default=True)
+    created_at          = db.Column(db.DateTime,     default=datetime.utcnow)
 
 # ===== COURSE MATERIALS MODELS =====
 class Lesson(db.Model):
@@ -239,6 +252,31 @@ class Class(db.Model):
     semester = db.Column(db.String(20), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
+class SubjectSection(db.Model):
+    __tablename__ = 'subject_sections'
+    id            = db.Column(db.Integer, primary_key=True)
+    section_no    = db.Column(db.String(20),  nullable=False)
+    subject_id    = db.Column(db.Integer,     db.ForeignKey('subjects.id'), nullable=False)
+    block_id      = db.Column(db.Integer,     db.ForeignKey('blocks.id'),   nullable=True)
+    schedule      = db.Column(db.String(100), nullable=True)
+    room          = db.Column(db.String(50),  nullable=True)
+    capacity      = db.Column(db.Integer,     nullable=False, default=40)
+    current_count = db.Column(db.Integer,     nullable=False, default=0)
+    semester      = db.Column(db.String(50),  nullable=True)
+    academic_year = db.Column(db.String(9),   nullable=True)
+    is_active     = db.Column(db.Boolean,     nullable=False, default=True)
+    created_at    = db.Column(db.DateTime,    default=datetime.utcnow)
+
+class IrregularEnrollment(db.Model):
+    __tablename__ = 'irregular_enrollments'
+    __table_args__ = (
+        db.UniqueConstraint('student_id', 'section_id', name='unique_irregular_enrollment'),
+    )
+    id          = db.Column(db.Integer, primary_key=True)
+    student_id  = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    section_id  = db.Column(db.Integer, db.ForeignKey('subject_sections.id'), nullable=False)
+    enrolled_at = db.Column(db.DateTime, default=datetime.utcnow)
+
 class AuditLog(db.Model):
     __tablename__ = 'audit_logs'
     id = db.Column(db.Integer, primary_key=True)
@@ -274,6 +312,110 @@ class_problems = db.Table('class_problems',
     db.Column('class_id', db.Integer, db.ForeignKey('classes.id'), primary_key=True),
     db.Column('problem_id', db.Integer, db.ForeignKey('problems.id'), primary_key=True)
 )
+
+# ============================================================
+# IT SUBJECT CONSTANTS — Forge.dev scope (final confirmed)
+# 12 subjects | 6 LEC/LAB pairs | Python, Java, C# only
+# ============================================================
+SUPPORTED_IT_SUBJECTS = [
+    # Year 1, Semester 1
+    ("290007", "IT115",  "Introduction to Computing Lec",      2, "lecture", 1, 1),
+    ("290008", "IT115L", "Introduction to Computing Lab",      1, "lab",     1, 1),
+    ("290009", "IT116",  "Fundamentals of Programming Lec",    2, "lecture", 1, 1),
+    ("290010", "IT116L", "Fundamentals of Programming Lab",    1, "lab",     1, 1),
+    # Year 1, Semester 2
+    ("290013", "IT125",  "Computer Programming 1 Lec",         2, "lecture", 1, 2),
+    ("290014", "IT125L", "Computer Programming 1 Lab",         1, "lab",     1, 2),
+    ("290015", "IT126",  "Data Structure & Algorithm Lec",     2, "lecture", 1, 2),
+    ("290016", "IT126L", "Data Structure & Algorithm Lab",     1, "lab",     1, 2),
+    # Year 2, Semester 1
+    ("290017", "IT215",  "Database Management System Lec",     2, "lecture", 2, 1),
+    ("290018", "IT215L", "Database Management System Lab",     1, "lab",     2, 1),
+    ("290019", "IT216",  "Computer Programming 2 Lec",         2, "lecture", 2, 1),
+    ("290020", "IT216L", "Computer Programming 2 Lab",         1, "lab",     2, 1),
+    # Year 2, Semester 2
+    ("290025", "IT225",  "Object Oriented Programming Lec",    2, "lecture", 2, 2),
+    ("290026", "IT225L", "Object Oriented Programming Lab",    1, "lab",     2, 2),
+    ("290027", "IT226",  "Adv. Database Mgt System Lec",       2, "lecture", 2, 2),
+    ("290028", "IT226L", "Adv. Database Mgt System Lab",       1, "lab",     2, 2),
+]
+
+SUBJECT_LANGUAGE_MAP = {
+    "IT115":  "python",
+    "IT115L": "python",
+    "IT116":  "python",
+    "IT116L": "python",
+    "IT125":  "python,java,csharp",
+    "IT125L": "python,java,csharp",
+    "IT126":  "python,java,csharp",
+    "IT126L": "python,java,csharp",
+    "IT215":  "python,java,csharp",
+    "IT215L": "python,java,csharp",
+    "IT216":  "java,csharp",
+    "IT216L": "java,csharp",
+    "IT225":  "java,csharp,python",
+    "IT225L": "java,csharp,python",
+    "IT226":  "java,csharp,python",
+    "IT226L": "java,csharp,python",
+}
+
+SUBJECT_DIFFICULTY_DEFAULTS = {
+    "IT115":  "easy",   "IT115L": "easy",
+    "IT116":  "easy",   "IT116L": "easy",
+    "IT125":  "easy",   "IT125L": "easy",
+    "IT126":  "medium", "IT126L": "medium",
+    "IT215":  "medium", "IT215L": "medium",
+    "IT216":  "medium", "IT216L": "medium",
+    "IT225":  "medium", "IT225L": "medium",
+    "IT226":  "hard",   "IT226L": "hard",
+}
+
+SUPPORTED_SUBJECT_CODES = frozenset(row[1] for row in SUPPORTED_IT_SUBJECTS)
+
+
+def validate_it_subject_scope(subject_code: str):
+    if not subject_code:
+        return False, "Subject code is required."
+    code = subject_code.upper().strip()
+    if code in SUPPORTED_SUBJECT_CODES:
+        return True, ""
+    NON_IT = ('TH', 'PE', 'HI', 'HU', 'PY', 'EN', 'NS', 'CM', 'PC', 'MH', 'NSTP')
+    for prefix in NON_IT:
+        if code.startswith(prefix):
+            return False, (
+                f"'{subject_code}' is a non-IT subject and is not supported by Forge.dev. "
+                f"Only IT programming subjects (IT115–IT225L) are in scope."
+            )
+    return False, (
+        f"'{subject_code}' is not in the supported subject list. "
+        f"Supported codes: {', '.join(sorted(SUPPORTED_SUBJECT_CODES))}"
+    )
+
+
+def seed_it_subjects():
+    seeded, skipped = 0, 0
+    for row in SUPPORTED_IT_SUBJECTS:
+        internal_no, code, name, units, stype, yr, sem = row
+        if Subject.query.filter_by(subject_code=code).first():
+            skipped += 1
+            continue
+        db.session.add(Subject(
+            internal_subject_no = internal_no,
+            subject_code        = code,
+            name                = name,
+            units               = units,
+            subject_type        = stype,
+            year_level          = yr,
+            semester            = sem,
+            department          = 'CCIT',
+            supported_languages = SUBJECT_LANGUAGE_MAP.get(code, 'python'),
+            default_difficulty  = SUBJECT_DIFFICULTY_DEFAULTS.get(code, 'easy'),
+            is_active           = True
+        ))
+        seeded += 1
+    db.session.commit()
+    return {'seeded': seeded, 'skipped': skipped, 'total': len(SUPPORTED_IT_SUBJECTS)}
+
 
 # ===== HELPERS =====
 def is_instructor_or_admin(user): return user and user.role in ['instructor', 'super_admin']
@@ -1229,74 +1371,120 @@ def get_student_lessons():
 @jwt_required()
 @rate_limit(max_calls=10, period=60)
 def create_submission():
-    """Submit code for grading - returns XP/level updates"""
+    """Submit code for grading — fair scoring with partial credit and floor XP"""
     user_id = int(get_jwt_identity())
     user = User.query.get(user_id)
-    if user.role != 'student': 
+    if user.role != 'student':
         return jsonify({"error": "Students only"}), 403
-    
+
     data = request.get_json()
-    if not all(k in data for k in ['problem_id','code','language']): 
+    if not all(k in data for k in ['problem_id', 'code', 'language']):
         return jsonify({"error": "Missing fields"}), 400
-    
+
     prob = Problem.query.get_or_404(data['problem_id'])
-    if not prob.is_published: 
+    if not prob.is_published:
         return jsonify({"error": "Problem unavailable"}), 404
-    
-    # ✅ Deadline enforcement
+
+    # Deadline enforcement
     if prob.due_date and datetime.utcnow() > prob.due_date:
         return jsonify({
             "error": "Deadline passed",
             "message": f"This quest closed on {prob.due_date.strftime('%B %d, %Y at %I:%M %p UTC')}",
             "due_date": prob.due_date.isoformat()
         }), 403
-    
+
+    # XP floor table — 10% of xp_reward, minimum guaranteed even on errors
+    floor_xp = max(5, int(prob.xp_reward * 0.10))
+
     sub = Submission(
-         user_id=user.id, 
-         problem_id=prob.id, 
-         code=data['code'], 
-         language=data['language'], 
-         status='error',        # ← valid ENUM value as placeholder
-         score=0
+        user_id=user.id,
+        problem_id=prob.id,
+        code=data['code'],
+        language=data['language'],
+        status='error',
+        score=0
     )
     db.session.add(sub)
     db.session.flush()
-    
+
     try:
-        results = evaluate_code(data['code'], prob.test_cases, data['language'])
-        passed = sum(1 for r in results if r['passed'])
-        total = len(results)
-        
-        if passed == total and total > 0:
-            # Full credit
-            sub.status, sub.score = 'accepted', prob.xp_reward
-            user.xp += prob.xp_reward
+        results     = evaluate_code(data['code'], prob.test_cases, data['language'])
+        total       = len(results)
+        passed      = sum(1 for r in results if r['passed'])
+        has_timeout = any('Timeout' in r.get('output', '') for r in results)
+        has_error   = any(
+            r.get('message', '') not in ('Passed', '') and not r['passed']
+            for r in results
+        )
+
+        # Determine status and score
+        if total == 0:
+            sub.status = 'error'
+            sub.score  = 0
+
+        elif passed == total:
+            sub.status = 'accepted'
+            sub.score  = prob.xp_reward
+
+        elif has_timeout:
+            sub.status = 'timeout'
+            sub.score  = floor_xp
+
+        elif passed == 0 and has_error:
+            sub.status = 'error'
+            sub.score  = floor_xp
+
+        elif passed == 0:
+            sub.status = 'wrong_answer'
+            sub.score  = floor_xp
+
         else:
-            # Partial credit based on config
-            partial = prob.partial_credit / 100.0
-            sub.status, sub.score = 'wrong_answer', int((passed/total) * prob.xp_reward * partial) if total > 0 else 0
-            if sub.score > 0:
-                user.xp += sub.score
-        
-        # Update level: every 100 XP = 1 level
-        user.level = 1 + (user.xp // 100)
-        
+            # Partial: some passed, some failed
+            partial_m  = (prob.partial_credit or 100) / 100.0
+            sub.status = 'partial'
+            sub.score  = max(floor_xp, int(prob.xp_reward * (passed / total) * partial_m))
+
+        sub.passed_cases = passed
+        sub.total_cases  = total
+
+        # XP delta — only award improvement over student's previous best
+        best_prev = (Submission.query
+                     .filter_by(user_id=user_id, problem_id=prob.id)
+                     .filter(Submission.id != sub.id)
+                     .order_by(Submission.score.desc())
+                     .first())
+        prev_best_score = best_prev.score if best_prev else 0
+        xp_delta = max(0, sub.score - prev_best_score)
+
+        if xp_delta > 0:
+            user.xp   += xp_delta
+            user.level = 1 + (user.xp // 100)
+
         db.session.commit()
-        
+
         return jsonify({
-            "submission_id": sub.id, 
-            "status": sub.status, 
-            "score": sub.score, 
-            "test_results": results, 
-            "user_xp": user.xp, 
-            "user_level": user.level
+            "submission_id": sub.id,
+            "status":        sub.status,
+            "score":         sub.score,
+            "passed_cases":  passed,
+            "total_cases":   total,
+            "xp_earned":     xp_delta,
+            "test_results":  results,
+            "user_xp":       user.xp,
+            "user_level":    user.level,
+            "scoring_note": (
+                f"All {total} test cases passed. Full XP awarded." if sub.status == 'accepted'
+                else f"{passed}/{total} test cases passed. {sub.score} XP awarded." if sub.status == 'partial'
+                else f"Participation credit awarded: {sub.score} XP."
+            )
         }), 201
-        
+
     except Exception as e:
         db.session.rollback()
         sub.status = 'error'
+        sub.score  = floor_xp
         db.session.commit()
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": str(e), "xp_earned": floor_xp}), 500
     
 @app.route('/api/problems/<int:problem_id>/test', methods=['POST'])
 @jwt_required()
@@ -2657,6 +2845,167 @@ def admin_generate_report(admin):
 #
 # =====================================================================
 
+@app.route('/api/admin/users/bulk-upload-csv', methods=['POST'])
+@admin_required
+def admin_bulk_upload_csv(admin):
+    import io, csv, secrets, string, base64
+
+    role_type = request.form.get('role_type', 'student')
+    if role_type not in ('student', 'instructor'):
+        return jsonify({"error": "role_type must be 'student' or 'instructor'"}), 400
+
+    override_block_id = request.form.get('block_id', type=int)
+
+    if 'file' not in request.files:
+        return jsonify({"error": "No file provided — send field name 'file'"}), 400
+
+    f = request.files['file']
+    if not f.filename.lower().endswith('.csv'):
+        return jsonify({"error": "Only .csv files are accepted"}), 400
+
+    raw = f.read(5 * 1024 * 1024 + 1)
+    if len(raw) > 5 * 1024 * 1024:
+        return jsonify({"error": "File exceeds 5 MB limit"}), 413
+
+    try:
+        text   = raw.decode('utf-8-sig')
+        reader = csv.DictReader(io.StringIO(text))
+        rows   = list(reader)
+    except Exception as e:
+        return jsonify({"error": f"CSV parse error: {str(e)}"}), 400
+
+    if not rows:
+        return jsonify({"error": "CSV file is empty"}), 400
+    if len(rows) > 1500:
+        return jsonify({"error": "Maximum 1500 rows per upload"}), 400
+
+    rows = [{k.strip().lower(): v.strip() for k, v in row.items()} for row in rows]
+
+    headers  = set(rows[0].keys())
+    required = {'username', 'email'}
+    missing  = required - headers
+    if missing:
+        return jsonify({"error": "Missing columns", "missing": sorted(missing)}), 400
+
+    def _gen_password():
+        pool  = string.ascii_letters + string.digits + '!@#$%'
+        chars = [
+            secrets.choice(string.ascii_uppercase),
+            secrets.choice(string.digits),
+            secrets.choice('!@#$%'),
+        ]
+        chars += [secrets.choice(pool) for _ in range(9)]
+        secrets.SystemRandom().shuffle(chars)
+        return ''.join(chars)
+
+    results       = []
+    created_users = []
+    errors_count  = 0
+    skipped_count = 0
+
+    all_blocks     = Block.query.all()
+    block_code_map = {b.section_code.strip().lower(): b.id for b in all_blocks}
+    block_id_set   = {b.id for b in all_blocks}
+    seen_usernames = set()
+    seen_emails    = set()
+
+    try:
+        for row_num, row in enumerate(rows, start=2):
+            username = row.get('username', '').strip()
+            email    = row.get('email',    '').strip().lower()
+            row_errors = []
+
+            if not username or len(username) < 2 or len(username) > 50:
+                row_errors.append('username missing or invalid (2–50 chars)')
+            if not email:
+                row_errors.append('email required')
+            elif not ('@' in email and '.' in email.split('@')[-1]):
+                row_errors.append('invalid email format')
+            elif len(email) > 120:
+                row_errors.append('email too long')
+            if username in seen_usernames:
+                row_errors.append('duplicate username in CSV')
+            if email in seen_emails:
+                row_errors.append('duplicate email in CSV')
+
+            if row_errors:
+                results.append({'row': row_num, 'status': 'error', 'errors': row_errors})
+                errors_count += 1
+                continue
+
+            seen_usernames.add(username)
+            seen_emails.add(email)
+
+            if User.query.filter_by(username=username).first():
+                results.append({'row': row_num, 'status': 'skipped', 'email': email, 'reason': 'username_exists'})
+                skipped_count += 1; continue
+
+            if User.query.filter_by(email=email).first():
+                results.append({'row': row_num, 'status': 'skipped', 'email': email, 'reason': 'email_exists'})
+                skipped_count += 1; continue
+
+            resolved_block_id = None
+            if override_block_id:
+                if override_block_id in block_id_set:
+                    resolved_block_id = override_block_id
+                else:
+                    results.append({'row': row_num, 'status': 'error', 'email': email,
+                                    'errors': [f'block_id {override_block_id} not found']})
+                    errors_count += 1; continue
+            else:
+                csv_block_code = row.get('block_code', '').strip().lower()
+                if csv_block_code:
+                    resolved_block_id = block_code_map.get(csv_block_code)
+
+            temp_pwd = _gen_password()
+            new_user = User(
+                username      = username,
+                email         = email,
+                password_hash = generate_password_hash(temp_pwd),
+                role          = role_type,
+                is_active     = True,
+                xp            = 0,
+                level         = 1,
+            )
+            db.session.add(new_user)
+            db.session.flush()
+
+            if resolved_block_id and role_type == 'student':
+                already = db.session.query(student_blocks).filter_by(
+                    student_id=new_user.id, block_id=resolved_block_id
+                ).first()
+                if not already:
+                    db.session.execute(
+                        student_blocks.insert().values(student_id=new_user.id, block_id=resolved_block_id)
+                    )
+
+            created_users.append({'row': row_num, 'username': username, 'email': email,
+                                   'temp_password': temp_pwd, 'block_id': resolved_block_id})
+            results.append({'row': row_num, 'status': 'created', 'email': email})
+
+        db.session.commit()
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": "Transaction rolled back", "detail": str(e), "results": results}), 500
+
+    cred_buf = io.StringIO()
+    writer   = csv.writer(cred_buf)
+    writer.writerow(['username', 'email', 'temporary_password', 'block_id', 'must_change_password'])
+    for u in created_users:
+        writer.writerow([u['username'], u['email'], u['temp_password'], u['block_id'] or '', 'YES'])
+    cred_b64 = base64.b64encode(cred_buf.getvalue().encode('utf-8')).decode('utf-8')
+
+    log_admin_action(admin.id, 'BULK_CSV_UPLOAD',
+        f"CSV upload ({role_type}): {len(created_users)} created, {skipped_count} skipped, {errors_count} errors from {len(rows)} rows.")
+
+    return jsonify({
+        "summary":        {"total_rows": len(rows), "created": len(created_users), "skipped": skipped_count, "errors": errors_count},
+        "results":        results,
+        "credential_csv": cred_b64,
+    }), 207 if errors_count else 200
+
+
 @app.route('/api/admin/backup', methods=['POST'])
 @admin_required
 def admin_backup_database(admin):
@@ -2925,6 +3274,119 @@ def admin_delete_subject(admin, subject_id):
     log_admin_action(admin.id, "SUBJECT_DELETED", f"Deleted subject: {subject.name}")
     
     return jsonify({"message": "Subject deleted successfully"}), 200
+
+@app.route('/api/admin/subjects/<int:subject_id>', methods=['PUT'])
+@admin_required
+def admin_update_subject(admin, subject_id):
+    """Update an existing subject"""
+    subject = Subject.query.get_or_404(subject_id)
+    data = request.get_json()
+    changes = []
+
+    # ── name ──────────────────────────────────────────────────────────
+    if 'name' in data:
+        name = data['name'].strip()
+        if not name:
+            return jsonify({"error": "Subject name cannot be empty"}), 400
+        if len(name) > 200:
+            return jsonify({"error": "Subject name must be 200 characters or fewer"}), 400
+        if name != subject.name:
+            existing = Subject.query.filter(Subject.name == name, Subject.id != subject_id).first()
+            if existing:
+                return jsonify({"error": "A subject with this name already exists"}), 409
+            changes.append(f"name: {subject.name} → {name}")
+            subject.name = name
+
+    # ── subject_code ──────────────────────────────────────────────────
+    if 'subject_code' in data:
+        code = data['subject_code'].strip().upper() if data['subject_code'] else None
+        if code:
+            if len(code) > 20:
+                return jsonify({"error": "Subject code must be 20 characters or fewer"}), 400
+            allowed_chars = set('ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_')
+            if not all(ch in allowed_chars for ch in code):
+                return jsonify({"error": "Subject code may only contain letters, digits, hyphens, and underscores"}), 400
+            duplicate = Subject.query.filter(Subject.subject_code == code, Subject.id != subject_id).first()
+            if duplicate:
+                return jsonify({"error": f"Subject code '{code}' is already in use"}), 409
+        changes.append(f"subject_code → {code}")
+        subject.subject_code = code
+
+    # ── internal_subject_no ───────────────────────────────────────────
+    if 'internal_subject_no' in data:
+        subject.internal_subject_no = data['internal_subject_no'].strip() or None
+        changes.append("internal_subject_no updated")
+
+    # ── description ───────────────────────────────────────────────────
+    if 'description' in data:
+        subject.description = data['description'].strip() or None
+        changes.append("description updated")
+
+    # ── units ─────────────────────────────────────────────────────────
+    if 'units' in data:
+        units = data['units']
+        if units is not None:
+            try:
+                units = int(units)
+                if units < 1 or units > 12:
+                    return jsonify({"error": "Units must be between 1 and 12"}), 400
+            except (ValueError, TypeError):
+                return jsonify({"error": "Units must be a valid integer"}), 400
+        subject.units = units
+        changes.append(f"units → {units}")
+
+    # ── year_level ────────────────────────────────────────────────────
+    if 'year_level' in data:
+        year_level = data['year_level']
+        if year_level is not None:
+            try:
+                year_level = int(year_level)
+                if year_level < 1 or year_level > 6:
+                    return jsonify({"error": "Year level must be between 1 and 6"}), 400
+            except (ValueError, TypeError):
+                return jsonify({"error": "Year level must be a valid integer"}), 400
+        subject.year_level = year_level
+        changes.append(f"year_level → {year_level}")
+
+    # ── subject_type ──────────────────────────────────────────────────
+    if 'subject_type' in data:
+        allowed_types = {'lecture', 'lab', 'lecture_lab', 'elective'}
+        if data['subject_type'] not in allowed_types:
+            return jsonify({"error": f"subject_type must be one of: {', '.join(sorted(allowed_types))}"}), 400
+        subject.subject_type = data['subject_type']
+        changes.append(f"subject_type → {data['subject_type']}")
+
+    # ── department ────────────────────────────────────────────────────
+    if 'department' in data:
+        dept = data['department'].strip() or None
+        if dept and len(dept) > 100:
+            return jsonify({"error": "Department must be 100 characters or fewer"}), 400
+        subject.department = dept
+        changes.append(f"department → {dept}")
+
+    db.session.commit()
+
+    log_admin_action(
+        admin.id,
+        "SUBJECT_UPDATED",
+        f"Updated subject: {subject.name} — {', '.join(changes) if changes else 'no changes'}",
+        target_id=subject_id,
+    )
+
+    return jsonify({
+        "message": "Subject updated successfully",
+        "subject": {
+            "id":                  subject.id,
+            "name":                subject.name,
+            "description":         subject.description,
+            "subject_code":        subject.subject_code,
+            "internal_subject_no": subject.internal_subject_no,
+            "units":               subject.units,
+            "department":          subject.department,
+            "year_level":          subject.year_level,
+            "subject_type":        subject.subject_type,
+        }
+    }), 200
 
 # ===== ADMIN BLOCK ROUTES =====
 @app.route('/api/admin/blocks', methods=['GET'])
@@ -3282,6 +3744,1099 @@ def admin_delete_instructor_assignment(admin, assignment_id):
     
     return jsonify({"message": "Assignment removed"}), 200
     
+# ── Seed IT subjects (one-time, super_admin only) ──────────────────────
+@app.route('/api/admin/seed-subjects', methods=['POST'])
+@admin_required
+def admin_seed_subjects(admin):
+    result = seed_it_subjects()
+    log_admin_action(
+        admin.id, 'SUBJECTS_SEEDED',
+        f"Seeded {result['seeded']} IT subjects, {result['skipped']} already existed."
+    )
+    return jsonify({
+        "message": f"Seeded {result['seeded']} subjects. {result['skipped']} already existed.",
+        "details": result
+    }), 200
+
+# ============================================================
+# PASTE THIS BLOCK INTO app.py
+#
+# Add these imports at the top of app.py if not already present:
+#   import unicodedata, re, base64, secrets, string, csv, io
+#   (all are stdlib — no pip installs needed)
+#
+# Add these two SQLAlchemy models anywhere in the MODELS section:
+#
+#   class SubjectSection(db.Model):
+#       __tablename__ = 'subject_sections'
+#       id            = db.Column(db.Integer, primary_key=True)
+#       section_no    = db.Column(db.String(20),  nullable=False)
+#       subject_id    = db.Column(db.Integer,     db.ForeignKey('subjects.id'), nullable=False)
+#       block_id      = db.Column(db.Integer,     db.ForeignKey('blocks.id'),   nullable=True)
+#       schedule      = db.Column(db.String(100), nullable=True)
+#       room          = db.Column(db.String(50),  nullable=True)
+#       capacity      = db.Column(db.Integer,     nullable=False, default=40)
+#       current_count = db.Column(db.Integer,     nullable=False, default=0)
+#       semester      = db.Column(db.String(50),  nullable=True)
+#       academic_year = db.Column(db.String(9),   nullable=True)
+#       is_active     = db.Column(db.Boolean,     nullable=False, default=True)
+#       created_at    = db.Column(db.DateTime,    default=datetime.utcnow)
+#
+#   class IrregularEnrollment(db.Model):
+#       __tablename__ = 'irregular_enrollments'
+#       id          = db.Column(db.Integer, primary_key=True)
+#       student_id  = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+#       section_id  = db.Column(db.Integer, db.ForeignKey('subject_sections.id'), nullable=False)
+#       enrolled_at = db.Column(db.DateTime, default=datetime.utcnow)
+#       __table_args__ = (
+#           db.UniqueConstraint('student_id', 'section_id', name='unique_irregular_enrollment'),
+#       )
+#
+# ============================================================
+
+
+# ── Email-generation helpers ────────────────────────────────────────────
+
+_SUFFIXES = frozenset({"jr", "sr", "i", "ii", "iii", "iv", "v"})
+
+
+def _clean_name_part(token: str) -> str:
+    """
+    Normalise one name token for email use:
+      - NFD decompose  →  strip combining accents  (ñ→n, é→e)
+      - lowercase
+      - remove every non-alpha character
+        (hyphens, apostrophes, spaces already split out)
+    """
+    nfd = unicodedata.normalize("NFD", token)
+    ascii_only = nfd.encode("ascii", "ignore").decode("ascii")
+    return re.sub(r"[^a-z]", "", ascii_only.lower())
+
+
+def _build_email_local(firstname: str, middlename: str, lastname: str) -> str:
+    """
+    Build the local part of the Adamson email address.
+    Rules (from spec):
+      - Full first name (can be compound, e.g. "Paul Christian Caleb")
+      - Full middle name (not just initial); skip if blank
+      - Full last name; hyphens removed by _clean_name_part
+      - Skip suffix tokens (Jr., I., etc.)
+    Returns dot-joined parts, e.g. "paul.christian.caleb.rejano"
+    """
+    parts = []
+
+    for token in firstname.strip().split():
+        clean = token.rstrip(".")
+        if clean.lower() not in _SUFFIXES:
+            slug = _clean_name_part(token)
+            if slug:
+                parts.append(slug)
+
+    if middlename and middlename.strip():
+        for token in middlename.strip().split():
+            clean = token.rstrip(".")
+            if clean.lower() not in _SUFFIXES:
+                slug = _clean_name_part(token)
+                if slug:
+                    parts.append(slug)
+
+    for token in lastname.strip().split():
+        clean = token.rstrip(".")
+        if clean.lower() not in _SUFFIXES:
+            slug = _clean_name_part(token)
+            if slug:
+                parts.append(slug)
+
+    return ".".join(parts)
+
+
+def _generate_enrollment_email(
+    firstname: str,
+    middlename: str,
+    lastname: str,
+    suffix: str,
+    student_id_raw: str,
+    existing_emails: set,
+) -> str:
+    """
+    Return a unique @adamson.edu.ph email.
+    Duplicate → append numeric part of student_id, e.g. paul.rejano.202400100
+    """
+    local = _build_email_local(firstname, middlename, lastname)
+    email = f"{local}@adamson.edu.ph"
+
+    if email not in existing_emails:
+        return email
+
+    # Collision — append digits from student_id
+    id_digits = re.sub(r"[^0-9]", "", student_id_raw)
+    email = f"{local}.{id_digits}@adamson.edu.ph"
+    return email  # caller adds to set
+
+
+def _generate_secure_password(length: int = 12) -> str:
+    """
+    Cryptographically secure 12-char password.
+    Guarantees at least one uppercase, one digit, one symbol.
+    """
+    pool = string.ascii_letters + string.digits + "!@#$%&*"
+    while True:
+        pwd = "".join(secrets.choice(pool) for _ in range(length))
+        if (
+            any(c.isupper() for c in pwd)
+            and any(c.islower() for c in pwd)
+            and any(c.isdigit() for c in pwd)
+            and any(c in "!@#$%&*" for c in pwd)
+        ):
+            return pwd
+
+
+# ── Route ───────────────────────────────────────────────────────────────
+
+@app.route("/api/admin/enrollment/bulk-upload", methods=["POST"])
+@admin_required
+def admin_bulk_enrollment_upload(admin):
+    """
+    Master enrollment CSV upload — handles regular AND irregular students
+    in a single file.
+
+    CSV columns (header row required, order does NOT matter):
+        student_id, firstname, middlename, lastname, suffix,
+        year_level, student_type, block_code, section_no, subject_code
+
+    Regular row example:
+        2024-00001,Juan,Santos,Dela Cruz,,1,regular,IT101,,,
+
+    Irregular row example (one row per section):
+        2024-00100,Pedro,Jose,Reyes,,3,irregular,,29144,ITCED102L
+
+    Returns JSON:
+    {
+        "summary":        { total_rows, created, enrolled, skipped, errors },
+        "results":        [ { row, student_id, status, reason? } … ],
+        "credential_csv": "<base64-encoded CSV>",
+        "errors":         [ "human-readable error string" … ]
+    }
+
+    HTTP 200 on full success, 207 if any row had errors.
+    """
+    # ── 1. File validation ────────────────────────────────────────────────
+    if "file" not in request.files:
+        return jsonify({"error": "No file provided — send field name 'file'"}), 400
+
+    f = request.files["file"]
+    if not f.filename.lower().endswith(".csv"):
+        return jsonify({"error": "Only .csv files are accepted"}), 400
+
+    raw = f.read(5 * 1024 * 1024 + 1)
+    if len(raw) > 5 * 1024 * 1024:
+        return jsonify({"error": "File exceeds 5 MB limit"}), 413
+
+    try:
+        text   = raw.decode("utf-8-sig")          # handles Excel BOM
+        reader = csv.DictReader(io.StringIO(text))
+        rows   = list(reader)
+    except Exception as exc:
+        return jsonify({"error": f"CSV parse error: {exc}"}), 400
+
+    if not rows:
+        return jsonify({"error": "CSV file is empty"}), 400
+    if len(rows) > 2000:
+        return jsonify({"error": "Maximum 2000 rows per upload"}), 400
+
+    # Normalise header names (strip whitespace, lowercase)
+    rows = [{k.strip().lower(): (v or "").strip() for k, v in row.items()} for row in rows]
+
+    required_cols = {
+        "student_id", "firstname", "middlename", "lastname", "suffix",
+        "year_level", "student_type", "block_code", "section_no", "subject_code",
+    }
+    missing_cols = required_cols - set(rows[0].keys())
+    if missing_cols:
+        return jsonify({
+            "error":   "Missing CSV columns",
+            "missing": sorted(missing_cols),
+        }), 400
+
+    # ── 2. Pre-load lookup caches (avoids N+1 queries) ────────────────────
+    # blocks:  section_code (upper) → Block object
+    blocks_by_code: dict = {
+        b.section_code.strip().upper(): b
+        for b in Block.query.all()
+    }
+
+    # subject_sections: section_no (str) → SubjectSection object
+    sections_by_no: dict = {
+        str(s.section_no).strip(): s
+        for s in SubjectSection.query.filter_by(is_active=True).all()
+    }
+
+    # existing emails in DB (for duplicate-email guard)
+    existing_emails: set = {
+        row[0] for row in db.session.query(User.email).all()
+    }
+
+    # existing usernames (username = student_id without hyphens, e.g. "2024-00001")
+    existing_usernames: set = {
+        row[0] for row in db.session.query(User.username).all()
+    }
+
+    # student_id string → User (already-created users, re-populated per flush)
+    users_by_sid: dict = {
+        u.username: u
+        for u in User.query.filter_by(role="student").all()
+    }
+
+    # ── 3. Group rows by student_id for deduplication ─────────────────────
+    # irregular students can have multiple rows (one per section)
+    regular_rows:   list  = []
+    irregular_dict: dict  = {}   # sid → [row, …]
+
+    row_errors: list = []   # human-readable strings for the response
+
+    for idx, row in enumerate(rows, start=2):   # start=2: row 1 is header
+        stype = row["student_type"].strip().lower()
+        sid   = row["student_id"].strip()
+
+        if not sid:
+            row_errors.append(f"Row {idx}: student_id is empty — skipped")
+            continue
+        if stype == "regular":
+            regular_rows.append((idx, row))
+        elif stype == "irregular":
+            irregular_dict.setdefault(sid, []).append((idx, row))
+        else:
+            row_errors.append(
+                f"Row {idx} (student_id={sid}): unknown student_type '{stype}' — skipped"
+            )
+
+    # ── 4. Processing helpers ─────────────────────────────────────────────
+
+    results:         list = []
+    credential_list: list = []   # dicts for the output CSV
+    created_count   = 0
+    enrolled_count  = 0
+    skipped_count   = 0
+
+    def _get_or_create_user(idx, row) -> "tuple[User|None, str|None, bool]":
+        """
+        Return (user, plain_password, is_new).
+        plain_password is None when the user already existed.
+        Flushes the new user to DB so its .id is available immediately.
+        """
+        nonlocal created_count, existing_emails, existing_usernames
+
+        sid = row["student_id"].strip()
+
+        # --- already in DB from a previous upload -----------------------
+        if sid in users_by_sid:
+            return users_by_sid[sid], None, False
+
+        # --- basic field validation ------------------------------------
+        fn = row.get("firstname",  "").strip()
+        ln = row.get("lastname",   "").strip()
+        mn = row.get("middlename", "").strip()
+        sx = row.get("suffix",     "").strip()
+        yl = row.get("year_level", "").strip()
+
+        if not fn or not ln:
+            row_errors.append(f"Row {idx} (student_id={sid}): firstname/lastname missing — skipped")
+            return None, None, False
+
+        year_level_int = None
+        if yl.isdigit() and 1 <= int(yl) <= 6:
+            year_level_int = int(yl)
+
+        # --- username = student_id (matches existing CSV convention) ---
+        if sid in existing_usernames:
+            # user exists but wasn't in our cache — refresh & return
+            user = User.query.filter_by(username=sid).first()
+            if user:
+                users_by_sid[sid] = user
+                return user, None, False
+            # shouldn't happen, but guard
+            row_errors.append(f"Row {idx} (student_id={sid}): username conflict — skipped")
+            return None, None, False
+
+        # --- email generation ------------------------------------------
+        email = _generate_enrollment_email(fn, mn, ln, sx, sid, existing_emails)
+        if email in existing_emails:
+            row_errors.append(
+                f"Row {idx} (student_id={sid}): email '{email}' already taken — skipped"
+            )
+            return None, None, False
+
+        # --- create user -----------------------------------------------
+        plain_pwd = _generate_secure_password()
+
+        full_name = " ".join(filter(None, [fn, mn, ln, sx]))
+
+        new_user = User(
+            username      = sid,
+            email         = email,
+            password_hash = generate_password_hash(plain_pwd),
+            role          = "student",
+            is_active     = True,
+            xp            = 0,
+            level         = 1,
+            created_at    = datetime.utcnow(),
+        )
+        db.session.add(new_user)
+        db.session.flush()   # populates new_user.id without committing
+
+        # Update in-memory caches so subsequent rows see this user
+        existing_emails.add(email)
+        existing_usernames.add(sid)
+        users_by_sid[sid] = new_user
+
+        created_count += 1
+        credential_list.append({
+            "student_id":       sid,
+            "full_name":        full_name,
+            "email":            email,
+            "temp_password":    plain_pwd,
+            "student_type":     row.get("student_type", "").strip().lower(),
+            "block_or_section": "",   # filled in by caller
+        })
+
+        return new_user, plain_pwd, True
+
+    # ── 5. Process REGULAR students ───────────────────────────────────────
+    for idx, row in regular_rows:
+        sid        = row["student_id"].strip()
+        block_code = row["block_code"].strip().upper()
+
+        if not block_code:
+            skipped_count += 1
+            results.append({"row": idx, "student_id": sid, "status": "error",
+                             "reason": "block_code missing for regular student"})
+            row_errors.append(f"Row {idx} (student_id={sid}): block_code is empty — skipped")
+            continue
+
+        block = blocks_by_code.get(block_code)
+        if not block:
+            skipped_count += 1
+            results.append({"row": idx, "student_id": sid, "status": "error",
+                             "reason": f"block '{block_code}' not found"})
+            row_errors.append(f"Row {idx} (student_id={sid}): block '{block_code}' not found — skipped")
+            continue
+
+        if not block.is_active:
+            skipped_count += 1
+            results.append({"row": idx, "student_id": sid, "status": "skipped",
+                             "reason": f"block '{block_code}' is closed"})
+            continue
+
+        # Capacity check — count current enrollments in this block
+        current_count = db.session.query(
+            db.func.count(student_blocks.c.id)
+        ).filter(student_blocks.c.block_id == block.id).scalar() or 0
+
+        if current_count >= 40:
+            block.is_active = False   # auto-close
+            skipped_count  += 1
+            results.append({"row": idx, "student_id": sid, "status": "skipped",
+                             "reason": f"block '{block_code}' is full (40/40)"})
+            row_errors.append(f"Row {idx} (student_id={sid}): block '{block_code}' is full — auto-closed")
+            continue
+
+        user, plain_pwd, is_new = _get_or_create_user(idx, row)
+        if user is None:
+            skipped_count += 1
+            continue
+
+        # Idempotency — skip if already enrolled in this block
+        already = db.session.query(student_blocks.c.id).filter_by(
+            student_id=user.id, block_id=block.id
+        ).first()
+        if already:
+            skipped_count += 1
+            results.append({"row": idx, "student_id": sid, "status": "skipped",
+                             "reason": "already enrolled in this block"})
+            continue
+
+        db.session.execute(
+            student_blocks.insert().values(
+                student_id  = user.id,
+                block_id    = block.id,
+                enrolled_at = datetime.utcnow(),
+            )
+        )
+        enrolled_count += 1
+
+        # Auto-close block when it reaches 40
+        new_count = current_count + 1
+        if new_count >= 40:
+            block.is_active = False
+
+        # Patch credential list entry with block info
+        if is_new:
+            credential_list[-1]["block_or_section"] = block_code
+
+        results.append({
+            "row":        idx,
+            "student_id": sid,
+            "status":     "created" if is_new else "enrolled",
+            "block":      block_code,
+        })
+
+    # ── 6. Process IRREGULAR students ─────────────────────────────────────
+    for sid, sid_rows in irregular_dict.items():
+        # Use the FIRST row to create / fetch the user
+        first_idx, first_row = sid_rows[0]
+        user, plain_pwd, is_new = _get_or_create_user(first_idx, first_row)
+
+        if user is None:
+            skipped_count += len(sid_rows)
+            continue
+
+        sections_enrolled = []
+
+        for idx, row in sid_rows:
+            section_no = row["section_no"].strip()
+
+            if not section_no:
+                skipped_count += 1
+                results.append({"row": idx, "student_id": sid, "status": "error",
+                                 "reason": "section_no missing for irregular student"})
+                row_errors.append(f"Row {idx} (student_id={sid}): section_no is empty — skipped")
+                continue
+
+            section = sections_by_no.get(section_no)
+            if not section:
+                skipped_count += 1
+                results.append({"row": idx, "student_id": sid, "status": "error",
+                                 "reason": f"section '{section_no}' not found or inactive"})
+                row_errors.append(
+                    f"Row {idx} (student_id={sid}): section '{section_no}' not found — skipped"
+                )
+                continue
+
+            # Idempotency — skip if already enrolled in this section
+            already = IrregularEnrollment.query.filter_by(
+                student_id = user.id,
+                section_id = section.id,
+            ).first()
+            if already:
+                skipped_count += 1
+                results.append({"row": idx, "student_id": sid, "status": "skipped",
+                                 "reason": f"already enrolled in section {section_no}"})
+                continue
+
+            enrollment = IrregularEnrollment(
+                student_id  = user.id,
+                section_id  = section.id,
+                enrolled_at = datetime.utcnow(),
+            )
+            db.session.add(enrollment)
+
+            # Bump section's current_count
+            section.current_count = (section.current_count or 0) + 1
+
+            enrolled_count    += 1
+            sections_enrolled.append(section_no)
+
+            results.append({
+                "row":        idx,
+                "student_id": sid,
+                "status":     "created" if (is_new and idx == first_idx) else "enrolled",
+                "section":    section_no,
+            })
+
+        # Patch credential list entry with section list
+        if is_new and sections_enrolled:
+            credential_list[-1]["block_or_section"] = ";".join(sections_enrolled)
+
+    # ── 7. Commit everything ───────────────────────────────────────────────
+    try:
+        db.session.commit()
+    except Exception as exc:
+        db.session.rollback()
+        return jsonify({
+            "error":  "Database commit failed — all changes rolled back",
+            "detail": str(exc),
+        }), 500
+
+    # ── 8. Build base64 credential CSV ────────────────────────────────────
+    cred_buf = io.StringIO()
+    cred_writer = csv.writer(cred_buf)
+    cred_writer.writerow([
+        "student_id", "full_name", "email",
+        "temporary_password", "student_type",
+        "block_or_sections", "must_change_password",
+    ])
+    for c in credential_list:
+        cred_writer.writerow([
+            c["student_id"],
+            c["full_name"],
+            c["email"],
+            c["temp_password"],
+            c["student_type"],
+            c["block_or_section"],
+            "YES",
+        ])
+    cred_b64 = base64.b64encode(
+        cred_buf.getvalue().encode("utf-8")
+    ).decode("utf-8")
+
+    # ── 9. Audit log ──────────────────────────────────────────────────────
+    log_admin_action(
+        admin.id,
+        "BULK_ENROLLMENT_UPLOAD",
+        (
+            f"Enrollment upload: {len(rows)} rows processed — "
+            f"{created_count} accounts created, "
+            f"{enrolled_count} enrollments added, "
+            f"{skipped_count} skipped, "
+            f"{len(row_errors)} errors."
+        ),
+    )
+
+    # ── 10. Response ──────────────────────────────────────────────────────
+    error_count = len(row_errors)
+    return jsonify({
+        "summary": {
+            "total_rows": len(rows),
+            "created":    created_count,
+            "enrolled":   enrolled_count,
+            "skipped":    skipped_count,
+            "errors":     error_count,
+        },
+        "results":        results,
+        "errors":         row_errors,
+        "credential_csv": cred_b64,
+    }), (207 if error_count else 200)
+
+
+# ── Bulk CSV user upload ────────────────────────────────────────────────
+@app.route('/api/admin/users/bulk-upload', methods=['POST'])
+@admin_required
+def admin_bulk_upload_users(admin):
+    """
+    Accepts a CSV file and bulk-creates student or instructor accounts.
+
+    Form fields:
+        role_type : 'student' or 'instructor'
+        file      : the CSV file
+
+    Student CSV columns  : student_id, firstname, lastname, year_level
+    Instructor CSV columns: employee_id, firstname, lastname, department
+
+    Returns a summary + base64-encoded credential CSV for download.
+    """
+    import secrets, string, base64
+
+    role_type = request.form.get('role_type', 'student')
+    if role_type not in ('student', 'instructor'):
+        return jsonify({"error": "role_type must be 'student' or 'instructor'"}), 400
+
+    if 'file' not in request.files:
+        return jsonify({"error": "No file provided"}), 400
+
+    file = request.files['file']
+    if not file.filename.lower().endswith('.csv'):
+        return jsonify({"error": "Only .csv files are accepted"}), 400
+
+    raw = file.read(5 * 1024 * 1024)
+    if len(raw) >= 5 * 1024 * 1024:
+        return jsonify({"error": "File exceeds 5 MB limit"}), 413
+
+    # Parse CSV
+    try:
+        text   = raw.decode('utf-8-sig')   # handle Excel BOM
+        reader = csv.DictReader(io.StringIO(text))
+        rows   = list(reader)
+    except Exception as e:
+        return jsonify({"error": f"CSV parse error: {str(e)}"}), 400
+
+    if not rows:
+        return jsonify({"error": "CSV file is empty"}), 400
+    if len(rows) > 1500:
+        return jsonify({"error": "Maximum 1500 rows per upload"}), 400
+
+    # Validate required columns
+    headers = {k.strip().lower() for k in rows[0].keys()}
+    required = (
+        {'student_id', 'firstname', 'lastname', 'year_level'}
+        if role_type == 'student'
+        else {'employee_id', 'firstname', 'lastname', 'department'}
+    )
+    missing = required - headers
+    if missing:
+        return jsonify({"error": "Missing columns", "missing": sorted(missing)}), 400
+
+    def _gen_password():
+        chars = (
+            secrets.choice(string.ascii_uppercase) +
+            secrets.choice(string.ascii_uppercase) +
+            secrets.choice(string.digits) +
+            secrets.choice(string.digits) +
+            secrets.choice('!@#$%') +
+            ''.join(secrets.choice(string.ascii_lowercase) for _ in range(6))
+        )
+        lst = list(chars)
+        secrets.SystemRandom().shuffle(lst)
+        return ''.join(lst)
+
+    results, created_users, errors = [], [], []
+
+    try:
+        for row_num, row in enumerate(rows, start=2):
+            row = {k.strip().lower(): v.strip() for k, v in row.items()}
+
+            row_errors = []
+            fn = row.get('firstname', '')
+            ln = row.get('lastname', '')
+            if not fn or len(fn) > 50:
+                row_errors.append('firstname missing or too long')
+            if not ln or len(ln) > 50:
+                row_errors.append('lastname missing or too long')
+
+            if role_type == 'student':
+                sid = row.get('student_id', '')
+                if not sid or not sid.isdigit() or not (7 <= len(sid) <= 10):
+                    row_errors.append('student_id must be 7–10 digits')
+                yl = row.get('year_level', '')
+                if not yl.isdigit() or int(yl) not in range(1, 7):
+                    row_errors.append('year_level must be 1–6')
+            else:
+                eid = row.get('employee_id', '')
+                if not eid or len(eid) > 20:
+                    row_errors.append('employee_id missing or too long')
+
+            if row_errors:
+                errors.append({'row': row_num, 'errors': row_errors})
+                results.append({'row': row_num, 'status': 'error', 'errors': row_errors})
+                continue
+
+            # Build email and username
+            if role_type == 'student':
+                email    = f"{row['student_id']}@adamson.edu.ph"
+                username = row['student_id']
+            else:
+                fn_clean = ''.join(c for c in fn.lower() if c.isalpha())
+                ln_clean = ''.join(c for c in ln.lower() if c.isalpha())
+                email    = f"{ln_clean}.{fn_clean}@adamson.edu.ph"
+                username = row.get('employee_id', email.split('@')[0])
+
+            if User.query.filter_by(email=email).first():
+                results.append({
+                    'row': row_num, 'status': 'skipped',
+                    'reason': 'email_exists', 'email': email
+                })
+                continue
+
+            temp_pwd = _gen_password()
+            new_user = User(
+                username      = username,
+                email         = email,
+                password_hash = generate_password_hash(temp_pwd),
+                role          = 'instructor' if role_type == 'instructor' else 'student',
+                is_active     = True,
+                xp            = 0,
+                level         = 1
+            )
+            db.session.add(new_user)
+            db.session.flush()
+
+            created_users.append({
+                'row':           row_num,
+                'username':      username,
+                'email':         email,
+                'temp_password': temp_pwd,
+                'status':        'created'
+            })
+            results.append({'row': row_num, 'status': 'created', 'email': email})
+
+        db.session.commit()
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "error":   "Transaction rolled back",
+            "detail":  str(e),
+            "results": results
+        }), 500
+
+    # Build credential CSV for download (base64 encoded)
+    cred_buf    = io.StringIO()
+    cred_writer = csv.writer(cred_buf)
+    id_col      = 'student_id' if role_type == 'student' else 'employee_id'
+    cred_writer.writerow([id_col, 'email', 'temporary_password', 'must_change_password'])
+    for u in created_users:
+        cred_writer.writerow([u['username'], u['email'], u['temp_password'], 'YES'])
+    cred_b64 = base64.b64encode(
+        cred_buf.getvalue().encode('utf-8')
+    ).decode('utf-8')
+
+    log_admin_action(
+        admin.id, 'BULK_USER_UPLOAD',
+        f"Bulk upload ({role_type}): {len(created_users)} created, "
+        f"{len(errors)} errors out of {len(rows)} rows."
+    )
+
+    status_code = 207 if errors else 200
+    return jsonify({
+        "summary": {
+            "total_rows": len(rows),
+            "created":    len(created_users),
+            "skipped":    len(results) - len(created_users) - len(errors),
+            "errors":     len(errors),
+        },
+        "results":        results,
+        "credential_csv": cred_b64
+    }), status_code
+
+
+# ===== ADMIN SECTIONS ROUTES =====
+
+@app.route('/api/admin/sections', methods=['GET'])
+@admin_required
+def admin_get_sections(admin):
+    """Get all subject sections with enrollment counts and related info"""
+    subject_id = request.args.get('subject_id', type=int)
+    block_id = request.args.get('block_id', type=int)
+    semester = request.args.get('semester', '')
+    active_only = request.args.get('active_only', 'false').lower() == 'true'
+
+    q = SubjectSection.query
+    if subject_id:
+        q = q.filter_by(subject_id=subject_id)
+    if block_id:
+        q = q.filter_by(block_id=block_id)
+    if semester:
+        q = q.filter_by(semester=semester)
+    if active_only:
+        q = q.filter_by(is_active=True)
+
+    sections = q.order_by(SubjectSection.section_no).all()
+
+    result = []
+    for s in sections:
+        subject = Subject.query.get(s.subject_id)
+        block = Block.query.get(s.block_id) if s.block_id else None
+        enrolled = IrregularEnrollment.query.filter_by(section_id=s.id).count()
+
+        result.append({
+            "id":            s.id,
+            "section_no":    s.section_no,
+            "subject_id":    s.subject_id,
+            "subject_name":  subject.name if subject else None,
+            "subject_code":  subject.subject_code if subject else None,
+            "block_id":      s.block_id,
+            "block_code":    block.section_code if block else None,
+            "schedule":      s.schedule,
+            "room":          s.room,
+            "capacity":      s.capacity,
+            "current_count": enrolled,
+            "semester":      s.semester,
+            "academic_year": s.academic_year,
+            "is_active":     s.is_active,
+            "created_at":    s.created_at.isoformat(),
+        })
+
+    return jsonify(result), 200
+
+
+@app.route('/api/admin/sections', methods=['POST'])
+@admin_required
+def admin_create_section(admin):
+    """Create a new subject section"""
+    data = request.get_json()
+
+    required = ['section_no', 'subject_id']
+    if not all(k in data for k in required):
+        return jsonify({"error": "section_no and subject_id are required"}), 400
+
+    section_no = str(data['section_no']).strip()
+    if not section_no:
+        return jsonify({"error": "section_no cannot be empty"}), 400
+
+    subject = Subject.query.get(data['subject_id'])
+    if not subject:
+        return jsonify({"error": "Subject not found"}), 404
+
+    block_id = data.get('block_id')
+    if block_id:
+        block = Block.query.get(block_id)
+        if not block:
+            return jsonify({"error": "Block not found"}), 404
+
+    existing = SubjectSection.query.filter_by(
+        section_no=section_no,
+        subject_id=data['subject_id'],
+        semester=data.get('semester'),
+        academic_year=data.get('academic_year'),
+    ).first()
+    if existing:
+        return jsonify({"error": f"Section '{section_no}' already exists for this subject and semester"}), 409
+
+    capacity = data.get('capacity', 40)
+    try:
+        capacity = int(capacity)
+        if capacity < 1 or capacity > 200:
+            return jsonify({"error": "Capacity must be between 1 and 200"}), 400
+    except (ValueError, TypeError):
+        return jsonify({"error": "Capacity must be an integer"}), 400
+
+    section = SubjectSection(
+        section_no    = section_no,
+        subject_id    = data['subject_id'],
+        block_id      = block_id,
+        schedule      = data.get('schedule', '').strip() or None,
+        room          = data.get('room', '').strip() or None,
+        capacity      = capacity,
+        current_count = 0,
+        semester      = data.get('semester', '').strip() or None,
+        academic_year = data.get('academic_year', '').strip() or None,
+        is_active     = data.get('is_active', True),
+    )
+    db.session.add(section)
+    db.session.commit()
+
+    log_admin_action(admin.id, "SECTION_CREATED",
+        f"Created section {section_no} for {subject.name}", target_id=section.id)
+
+    return jsonify({
+        "message":    "Section created successfully",
+        "section_id": section.id,
+        "section_no": section.section_no,
+    }), 201
+
+
+@app.route('/api/admin/sections/<int:section_id>', methods=['PUT'])
+@admin_required
+def admin_update_section(admin, section_id):
+    """Update a subject section"""
+    section = SubjectSection.query.get_or_404(section_id)
+    data = request.get_json()
+    changes = []
+
+    if 'section_no' in data:
+        new_no = str(data['section_no']).strip()
+        if new_no != section.section_no:
+            changes.append(f"section_no: {section.section_no} → {new_no}")
+            section.section_no = new_no
+
+    if 'subject_id' in data:
+        subject = Subject.query.get(data['subject_id'])
+        if not subject:
+            return jsonify({"error": "Subject not found"}), 404
+        if data['subject_id'] != section.subject_id:
+            changes.append(f"subject_id: {section.subject_id} → {data['subject_id']}")
+            section.subject_id = data['subject_id']
+
+    if 'block_id' in data:
+        block_id = data['block_id']
+        if block_id is not None:
+            block = Block.query.get(block_id)
+            if not block:
+                return jsonify({"error": "Block not found"}), 404
+        changes.append(f"block_id: {section.block_id} → {block_id}")
+        section.block_id = block_id
+
+    if 'schedule' in data:
+        section.schedule = data['schedule'].strip() or None
+        changes.append("schedule updated")
+
+    if 'room' in data:
+        section.room = data['room'].strip() or None
+        changes.append("room updated")
+
+    if 'capacity' in data:
+        try:
+            cap = int(data['capacity'])
+            if cap < 1 or cap > 200:
+                return jsonify({"error": "Capacity must be between 1 and 200"}), 400
+            section.capacity = cap
+            changes.append(f"capacity → {cap}")
+        except (ValueError, TypeError):
+            return jsonify({"error": "Capacity must be an integer"}), 400
+
+    if 'semester' in data:
+        section.semester = data['semester']
+    if 'academic_year' in data:
+        section.academic_year = data['academic_year']
+    if 'is_active' in data:
+        section.is_active = bool(data['is_active'])
+        changes.append(f"is_active → {section.is_active}")
+
+    db.session.commit()
+    log_admin_action(admin.id, "SECTION_UPDATED",
+        f"Updated section {section.section_no}: {', '.join(changes) or 'no changes'}",
+        target_id=section_id)
+
+    return jsonify({"message": "Section updated", "changes": changes}), 200
+
+
+@app.route('/api/admin/sections/<int:section_id>', methods=['DELETE'])
+@admin_required
+def admin_delete_section(admin, section_id):
+    """Delete a section (only if no irregular enrollments exist)"""
+    section = SubjectSection.query.get_or_404(section_id)
+
+    enrolled = IrregularEnrollment.query.filter_by(section_id=section_id).count()
+    if enrolled > 0:
+        return jsonify({
+            "error": f"Cannot delete — {enrolled} student(s) are enrolled in this section. Unenroll them first."
+        }), 400
+
+    section_no = section.section_no
+    db.session.delete(section)
+    db.session.commit()
+
+    log_admin_action(admin.id, "SECTION_DELETED", f"Deleted section {section_no}", target_id=section_id)
+    return jsonify({"message": "Section deleted"}), 200
+
+
+@app.route('/api/admin/sections/<int:section_id>/enrollments', methods=['GET'])
+@admin_required
+def admin_get_section_enrollments(admin, section_id):
+    """Get all students enrolled in a specific section"""
+    section = SubjectSection.query.get_or_404(section_id)
+
+    enrollments = IrregularEnrollment.query.filter_by(section_id=section_id).all()
+    students = []
+    for e in enrollments:
+        student = User.query.get(e.student_id)
+        if student:
+            students.append({
+                "enrollment_id": e.id,
+                "student_id":    student.id,
+                "username":      student.username,
+                "email":         student.email,
+                "enrolled_at":   e.enrolled_at.isoformat(),
+            })
+
+    subject = Subject.query.get(section.subject_id)
+    return jsonify({
+        "section": {
+            "id":         section.id,
+            "section_no": section.section_no,
+            "subject":    subject.name if subject else None,
+            "schedule":   section.schedule,
+            "room":       section.room,
+            "capacity":   section.capacity,
+        },
+        "enrolled_count": len(students),
+        "students":       students,
+    }), 200
+
+
+@app.route('/api/admin/sections/bulk-upload', methods=['POST'])
+@admin_required
+def admin_bulk_upload_sections(admin):
+    """
+    Bulk create sections from CSV.
+
+    CSV columns:
+        section_no, subject_code, block_code, schedule, room,
+        capacity, semester, academic_year
+    """
+    if 'file' not in request.files:
+        return jsonify({"error": "No file provided"}), 400
+
+    f = request.files['file']
+    if not f.filename.lower().endswith('.csv'):
+        return jsonify({"error": "Only .csv files accepted"}), 400
+
+    raw = f.read(5 * 1024 * 1024 + 1)
+    if len(raw) > 5 * 1024 * 1024:
+        return jsonify({"error": "File exceeds 5 MB"}), 413
+
+    try:
+        text   = raw.decode('utf-8-sig')
+        reader = csv.DictReader(io.StringIO(text))
+        rows   = list(reader)
+    except Exception as e:
+        return jsonify({"error": f"CSV parse error: {e}"}), 400
+
+    if not rows:
+        return jsonify({"error": "CSV is empty"}), 400
+
+    rows = [{k.strip().lower(): (v or '').strip() for k, v in row.items()} for row in rows]
+
+    required_cols = {'section_no', 'subject_code'}
+    missing = required_cols - set(rows[0].keys())
+    if missing:
+        return jsonify({"error": "Missing columns", "missing": sorted(missing)}), 400
+
+    subjects_by_code = {s.subject_code.upper(): s for s in Subject.query.filter(Subject.subject_code != None).all()}
+    blocks_by_code   = {b.section_code.upper(): b for b in Block.query.all()}
+
+    results = []
+    created = 0
+    skipped = 0
+    errors  = 0
+
+    for idx, row in enumerate(rows, start=2):
+        section_no   = row.get('section_no', '').strip()
+        subject_code = row.get('subject_code', '').strip().upper()
+
+        if not section_no or not subject_code:
+            errors += 1
+            results.append({"row": idx, "status": "error", "reason": "section_no and subject_code required"})
+            continue
+
+        subject = subjects_by_code.get(subject_code)
+        if not subject:
+            errors += 1
+            results.append({"row": idx, "status": "error", "reason": f"subject_code '{subject_code}' not found"})
+            continue
+
+        block_code = row.get('block_code', '').strip().upper()
+        block = blocks_by_code.get(block_code) if block_code else None
+
+        semester      = row.get('semester', '').strip() or None
+        academic_year = row.get('academic_year', '').strip() or None
+
+        existing = SubjectSection.query.filter_by(
+            section_no=section_no,
+            subject_id=subject.id,
+            semester=semester,
+            academic_year=academic_year,
+        ).first()
+        if existing:
+            skipped += 1
+            results.append({"row": idx, "status": "skipped", "reason": "section already exists"})
+            continue
+
+        try:
+            capacity = int(row.get('capacity', 40))
+        except ValueError:
+            capacity = 40
+
+        section = SubjectSection(
+            section_no    = section_no,
+            subject_id    = subject.id,
+            block_id      = block.id if block else None,
+            schedule      = row.get('schedule', '').strip() or None,
+            room          = row.get('room', '').strip() or None,
+            capacity      = max(1, min(200, capacity)),
+            current_count = 0,
+            semester      = semester,
+            academic_year = academic_year,
+            is_active     = True,
+        )
+        db.session.add(section)
+        created += 1
+        results.append({"row": idx, "status": "created", "section_no": section_no, "subject": subject.name})
+
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": "Commit failed", "detail": str(e)}), 500
+
+    log_admin_action(admin.id, "SECTIONS_BULK_UPLOAD",
+        f"Sections CSV: {created} created, {skipped} skipped, {errors} errors from {len(rows)} rows.")
+
+    return jsonify({
+        "summary": {"total_rows": len(rows), "created": created, "skipped": skipped, "errors": errors},
+        "results": results,
+    }), (207 if errors else 200)
+
+
 # ===== UTILITY & INIT =====
 @app.route('/api/health')
 def health(): 
@@ -3374,4 +4929,4 @@ with app.app_context():
 
 if __name__ == '__main__':
     print("🚀 Forge.dev Backend | 📊 System-Ready | 🧪 Sandbox Active")
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    app.run(debug=True, host='0.0.0.0', port=5000)  

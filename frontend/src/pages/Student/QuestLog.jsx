@@ -77,13 +77,15 @@ export default function QuestLog({ blockId }) {
       // Find best submission for this quest (accepted or latest)
       const questSubmissions = submissions.filter(s => s.problem_id === quest.id)
       const bestSubmission = questSubmissions.find(s => s.status === 'accepted') || 
-                            questSubmissions[questSubmissions.length - 1]
-      
-      return {
-        ...quest,
-        status: bestSubmission 
-          ? (bestSubmission.status === 'accepted' ? 'conquered' : 'ongoing')
-          : 'ongoing',
+                      questSubmissions[questSubmissions.length - 1]
+
+return {
+  ...quest,
+  status: bestSubmission 
+    ? (bestSubmission.status === 'accepted' ? 'conquered' 
+       : bestSubmission.status === 'partial' ? 'partial'
+       : 'ongoing')
+    : 'ongoing',
         submission: bestSubmission,
         attempts: questSubmissions.length
       }
@@ -181,7 +183,7 @@ if (!blockId && enrolledBlocks.length === 0) {
           <>
             <div className="flex items-center justify-between text-sm text-slate-400 mb-2">
               <span>{submissions.length} {submissions.length === 1 ? 'Quest' : 'Quests'} Completed</span>
-              <span>Success Rate: {Math.round((submissions.filter(s => s.status === 'accepted').length / submissions.length) * 100)}%</span>
+              <span>Success Rate: {Math.round((submissions.filter(s => s.status === 'conquered').length / submissions.length) * 100)}%</span>
             </div>
             
             {submissions.map((quest) => {
@@ -229,11 +231,13 @@ if (!blockId && enrolledBlocks.length === 0) {
                 <div className="flex items-center gap-6 text-sm">
                   {/* Status Badge */}
                   <span className={`px-3 py-1 rounded-full text-xs font-bold border ${
-                    isConquered 
-                      ? 'bg-green-500/20 text-green-400 border-green-500/30' 
-                      : 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'
+                    quest.status === 'conquered' ? 'bg-green-500/20 text-green-400 border-green-500/30' 
+                    : quest.status === 'partial' ? 'bg-blue-500/20 text-blue-400 border-blue-500/30'
+                    : 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'
                   }`}>
-                    {isConquered ? '⚔️ CONQUERED' : '📜 ONGOING'}
+                    {quest.status === 'conquered' ? '⚔️ CONQUERED' 
+                    : quest.status === 'partial' ? '⚡ PARTIAL'
+                    : '📜 ONGOING'}
                   </span>
 
                   {/* XP Reward */}

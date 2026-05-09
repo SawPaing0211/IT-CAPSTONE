@@ -25,6 +25,31 @@ export default function CreateUserModal({ onClose, onSuccess }) {
   const [showPassword, setShowPassword] = useState(false)
   const [createdUser, setCreatedUser] = useState(null)
 
+  // ✅ NEW: Reset form when modal mounts/opens
+  useEffect(() => {
+    resetForm()
+  }, [])
+
+  // ✅ NEW: Helper function to reset all form state
+  const resetForm = () => {
+    setForm({
+      username: '',
+      email: '',
+      password: '',
+      role: 'student',
+      block_id: '',
+      student_id_number: '',
+      year_level: '',
+      auto_generate_password: false,
+      send_email_notification: false,
+    })
+    setPasswordStrength(0)
+    setCreatedUser(null)
+    setStep(1)
+    setErrors({})
+    setToast(null)
+  }
+
   useEffect(() => { fetchBlocks() }, [])
 
   const fetchBlocks = async () => {
@@ -129,7 +154,7 @@ export default function CreateUserModal({ onClose, onSuccess }) {
               <p className="text-purple-300/70 text-xs">{step === 1 ? 'Fill in the account details below' : 'Account created successfully'}</p>
             </div>
           </div>
-          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition text-lg">×</button>
+          <button onClick={() => { onClose(); resetForm() }} className="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition text-lg">×</button>
         </div>
 
         {step === 1 ? (
@@ -231,7 +256,7 @@ export default function CreateUserModal({ onClose, onSuccess }) {
 
             {/* Actions */}
             <div className="flex gap-3 pt-2">
-              <button onClick={onClose} className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-white font-bold transition">Cancel</button>
+              <button onClick={() => { onClose(); resetForm() }} className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-white font-bold transition">Cancel</button>
               <button onClick={handleSubmit} disabled={loading}
                 className="flex-1 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 disabled:opacity-50 rounded-lg text-white font-bold transition shadow-lg shadow-purple-600/30 flex items-center justify-center gap-2">
                 {loading ? <><span className="animate-spin">⟳</span> Creating…</> : '✅ Create Account'}
@@ -251,11 +276,11 @@ export default function CreateUserModal({ onClose, onSuccess }) {
             </div>
             <p className="text-slate-500 text-xs">Save these credentials — the password won't be shown again.</p>
             <div className="flex gap-3 pt-2">
-              <button onClick={() => { setStep(1); setForm({ username:'',email:'',password:'',role:'student',block_id:'',student_id_number:'',year_level:'',auto_generate_password:false }); setCreatedUser(null) }}
+              <button onClick={() => resetForm()}
                 className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-white font-bold transition">
                 + Create Another
               </button>
-              <button onClick={onSuccess} className="flex-1 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-lg text-white font-bold transition">
+              <button onClick={() => { onSuccess(); resetForm() }} className="flex-1 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-lg text-white font-bold transition">
                 Done
               </button>
             </div>

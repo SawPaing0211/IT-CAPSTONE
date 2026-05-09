@@ -117,63 +117,34 @@ def _get_docker_client():
                     )
     return _docker_client
 
-
 # =============================================================================
-#  Wrapper Generators
-#  These create the Main.java / Program.cs entry point that calls the
-#  student's Solution class. Student code is NEVER modified.
+#  Wrapper Generators — entry points that call the student's Solution class
 # =============================================================================
 
 def _generate_java_wrapper() -> str:
     return '''\
-import java.util.Scanner;
-import java.io.File;
-
 public class Main {
     public static void main(String[] args) throws Exception {
-        Scanner scanner;
-        File inputFile = new File("/tmp/sandbox/input.txt");
-        if (inputFile.exists()) {
-            scanner = new Scanner(inputFile);
-        } else {
-            scanner = new Scanner(System.in);
-        }
-        String input = scanner.nextLine().trim();
-        scanner.close();
-
-        String[] parts = input.split(",");
-        int a = Integer.parseInt(parts[0].trim());
-        int b = Integer.parseInt(parts[1].trim());
-
-        int result = Solution.sumTwoNumbers(a, b);
-        System.out.println(result);
+        Solution.main(args);
     }
 }
 '''
-
 
 def _generate_csharp_wrapper() -> str:
     return '''\
 using System;
 using System.IO;
-
 public class Program {
-    public static void Main() {
+    public static void Main(string[] args) {
         string inputFile = "/tmp/sandbox/input.txt";
-        string raw = File.Exists(inputFile)
-            ? File.ReadAllText(inputFile).Trim()
-            : (Console.ReadLine() ?? "");
-
-        string[] parts = raw.Split(',');
-        int a = int.Parse(parts[0].Trim());
-        int b = int.Parse(parts[1].Trim());
-
-        int result = Solution.SumTwoNumbers(a, b);
-        Console.WriteLine(result);
+        if (File.Exists(inputFile)) {
+            string input = File.ReadAllText(inputFile).Trim();
+            Console.SetIn(new StringReader(input));
+        }
+        Solution.Main();
     }
 }
 '''
-
 
 # =============================================================================
 #  Source-file writer
@@ -181,20 +152,31 @@ public class Program {
 
 def _write_source(tmpdir: str, code: str, language: str) -> str:
     """
-    Write the student's code to a temp file — completely unmodified.
+    Write student code to a temp file.
+    For Java/C#, rename the entry-point class to Solution so the
+    wrapper can call it without conflict. Uses plain string replace —
+    no regex.
 
-    Java  → Solution.java   (no regex, no class-rename)
-    C#    → Solution.cs
-    Python→ solution.py
-
-    Returns the absolute path to the written file.
+    Java   → Solution.java
+    C#     → Solution.cs
+    Python → solution.py
     """
     if language == 'java':
         filename = 'Solution.java'
+        # Rename whatever public class the student used to Solution
+        for common in ('Main', 'Program', 'HelloWorld', 'App', 'MyClass'):
+            if f'public class {common}' in code:
+                code = code.replace(f'public class {common}', 'public class Solution', 1)
+                break
     elif language == 'csharp':
         filename = 'Solution.cs'
+        for common in ('Program', 'Main', 'HelloWorld', 'App', 'MyClass'):
+            if f'public class {common}' in code:
+                code = code.replace(f'public class {common}', 'public class Solution', 1)
+                break
+        # Keep Main() method name — Solution.cs IS the entry point
     else:
-        filename = f'solution.{FILE_EXTENSIONS[language]}'
+        filename = 'solution.py'
 
     filepath = os.path.join(tmpdir, filename)
     with open(filepath, 'w', encoding='utf-8') as f:
@@ -209,7 +191,7 @@ def _write_source(tmpdir: str, code: str, language: str) -> str:
 
 def _run_in_docker(code: str, language: str) -> dict:
     """
-    Spin up a fresh container, inject the code (+ wrapper for Java/C#),
+    Spin up a fresh container, inject the code,
     collect output, destroy container.
 
     Returns dict: { stdout, stderr, returncode, elapsed_ms, timed_out }
@@ -224,22 +206,17 @@ def _run_in_docker(code: str, language: str) -> dict:
         src_path = _write_source(tmpdir, code, language)
         filename = os.path.basename(src_path)
 
-        # ── 2. Write wrapper file for Java / C# ───────────────────────────
-        #       Python needs no wrapper — it runs solution.py directly.
+        # ── 2. Write wrapper file for Java / C# ──────────────────────────
         if language == 'java':
             wrapper_path = os.path.join(tmpdir, 'Main.java')
             with open(wrapper_path, 'w', encoding='utf-8') as f:
                 f.write(_generate_java_wrapper())
-
         elif language == 'csharp':
             wrapper_path = os.path.join(tmpdir, 'Program.cs')
             with open(wrapper_path, 'w', encoding='utf-8') as f:
                 f.write(_generate_csharp_wrapper())
 
         # ── 3. Determine what path the container receives as its argument ──
-        #       run_java.sh   expects the student file path (it discovers Main.java itself)
-        #       run_csharp.sh expects the student file path (it discovers Program.cs itself)
-        #       python        receives solution.py directly
         container_src = f'/tmp/sandbox/{filename}'
 
         try:
@@ -247,8 +224,7 @@ def _run_in_docker(code: str, language: str) -> dict:
                 image=image,
                 command=[container_src],
 
-                # Bind-mount the whole tmpdir read-only so both student +
-                # wrapper files are visible inside the container.
+                # Bind-mount the whole tmpdir read-only into the container.
                 volumes={
                     tmpdir: {
                         'bind': '/tmp/sandbox',
@@ -440,7 +416,7 @@ def run_sandbox():
         raw = result.get('stdout', '') + result.get('stderr', '')
         if raw.strip():
             cleaned = raw
-            cleaned = re.sub(r'[^\s\[]*[/\\](?=Program\.cs|Main\.java|Solution\.java|Solution\.cs)', '', cleaned)
+            cleaned = re.sub(r'[^\s\[]*[/\\](?=Program\.cs|Main\.java|solution\.cs)', '', cleaned)
             cleaned = re.sub(r'\[/tmp/[^\]]*\]', '', cleaned)
             error_lines = []
             seen = set()
