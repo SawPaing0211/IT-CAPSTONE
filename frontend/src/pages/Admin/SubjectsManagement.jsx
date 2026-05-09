@@ -4,10 +4,24 @@ export default function SubjectsManagement() {
   const [subjects, setSubjects] = useState([])
   const [loading, setLoading] = useState(true)
   const [showCreateModal, setShowCreateModal] = useState(false)
-  const [newSubject, setNewSubject] = useState({
+  const [showEditModal, setShowEditModal] = useState(false)
+  const [editingSubject, setEditingSubject] = useState(null)
+  const [editForm, setEditForm] = useState({
+    internal_subject_no: '',
     name: '',
     description: '',
     subject_code: '',
+    units: '',
+    department: '',
+    year_level: '',
+    subject_type: 'lecture',
+  })
+  const [toast, setToast] = useState(null)
+  const [newSubject, setNewSubject] = useState({
+    internal_subject_no: '',  // ✅ Adamson's Subject Number (e.g., 290007)
+    name: '',
+    description: '',
+    subject_code: '',         // Course code (e.g., IT115)
     units: '',
     department: '',
     year_level: '',
@@ -50,9 +64,11 @@ export default function SubjectsManagement() {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
+          // ✅ Include internal_subject_no in payload
+          internal_subject_no: newSubject.internal_subject_no.trim() || null,
           name: newSubject.name.trim(),
           description: newSubject.description.trim(),
-          subject_code: newSubject.subject_code.trim(),
+          subject_code: newSubject.subject_code.trim() || null,
           units: newSubject.units ? parseInt(newSubject.units) : null,
           department: newSubject.department,
           year_level: newSubject.year_level ? parseInt(newSubject.year_level) : null,
@@ -62,7 +78,17 @@ export default function SubjectsManagement() {
 
       if (res.ok) {
         setShowCreateModal(false)
-        setNewSubject({ name: '', description: '' })
+        // ✅ Reset all fields including internal_subject_no
+        setNewSubject({ 
+          internal_subject_no: '',
+          name: '', 
+          description: '', 
+          subject_code: '', 
+          units: '', 
+          department: '', 
+          year_level: '', 
+          subject_type: 'lecture' 
+        })
         await fetchSubjects()
         alert('✅ Subject created successfully!')
       } else {
@@ -72,6 +98,61 @@ export default function SubjectsManagement() {
     } catch (err) {
       console.error('Failed to create subject:', err)
       alert('Failed to create subject')
+    }
+  }
+
+  const showToast = (message, type = 'success') => {
+    setToast({ message, type })
+    setTimeout(() => setToast(null), 4000)
+  }
+
+  const handleEditClick = (subject) => {
+    setEditingSubject(subject)
+    setEditForm({
+      internal_subject_no: subject.internal_subject_no || '',
+      name: subject.name || '',
+      description: subject.description || '',
+      subject_code: subject.subject_code || '',
+      units: subject.units ? String(subject.units) : '',
+      department: subject.department || '',
+      year_level: subject.year_level ? String(subject.year_level) : '',
+      subject_type: subject.subject_type || 'lecture',
+    })
+    setShowEditModal(true)
+  }
+
+  const handleSaveEdit = async () => {
+    if (!editForm.name.trim()) {
+      showToast('Subject name is required', 'error')
+      return
+    }
+    try {
+      const token = localStorage.getItem('token')
+      const res = await fetch(`http://localhost:5000/api/admin/subjects/${editingSubject.id}`, {
+        method: 'PUT',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          internal_subject_no: editForm.internal_subject_no.trim() || null,
+          name: editForm.name.trim(),
+          description: editForm.description.trim(),
+          subject_code: editForm.subject_code.trim() || null,
+          units: editForm.units ? parseInt(editForm.units) : null,
+          department: editForm.department,
+          year_level: editForm.year_level ? parseInt(editForm.year_level) : null,
+          subject_type: editForm.subject_type,
+        })
+      })
+      if (res.ok) {
+        setShowEditModal(false)
+        setEditingSubject(null)
+        await fetchSubjects()
+        showToast('Subject updated successfully!')
+      } else {
+        const error = await res.json()
+        showToast(error.error || 'Failed to update subject', 'error')
+      }
+    } catch (err) {
+      showToast('Network error. Please try again.', 'error')
     }
   }
 
@@ -108,6 +189,120 @@ export default function SubjectsManagement() {
 
   return (
     <div className="space-y-6">
+      {/* Toast */}
+      {toast && (
+        <div className={`fixed top-6 right-6 z-[9999] px-5 py-3 rounded-xl font-semibold text-white shadow-xl transition ${toast.type === 'error' ? 'bg-red-600' : 'bg-green-600'}`}>
+          {toast.type === 'error' ? '❌' : '✅'} {toast.message}
+        </div>
+      )}
+
+      {/* Edit Subject Modal */}
+      {showEditModal && editingSubject && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-slate-900 border-2 border-purple-600/50 rounded-2xl w-full max-w-lg shadow-2xl shadow-purple-900/40 overflow-hidden">
+            <div className="bg-gradient-to-r from-purple-900/60 to-pink-900/40 px-6 py-5 border-b border-purple-600/30 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-gradient-to-br from-purple-500 to-pink-500 rounded-xl flex items-center justify-center text-xl">✏️</div>
+                <div>
+                  <h2 className="text-xl font-black text-white">Edit Subject</h2>
+                  <p className="text-purple-300/70 text-xs">Update subject details</p>
+                </div>
+              </div>
+              <button onClick={() => { setShowEditModal(false); setEditingSubject(null) }}
+                className="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition text-lg">×</button>
+            </div>
+            <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">Subject Number</label>
+                  <input type="text" value={editForm.internal_subject_no}
+                    onChange={e => setEditForm({...editForm, internal_subject_no: e.target.value})}
+                    placeholder="e.g., 290007"
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-white placeholder-slate-500 outline-none focus:border-purple-500 transition font-mono tracking-widest text-sm" />
+                  <p className="text-slate-500 text-[10px] mt-1">Adamson internal ID</p>
+                </div>
+                <div>
+                  <label className="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">Subject Code</label>
+                  <input type="text" value={editForm.subject_code}
+                    onChange={e => setEditForm({...editForm, subject_code: e.target.value.toUpperCase()})}
+                    placeholder="e.g., IT115"
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-white placeholder-slate-500 outline-none focus:border-purple-500 transition font-mono tracking-widest text-sm" />
+                </div>
+                <div>
+                  <label className="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">Subject Name *</label>
+                  <input type="text" value={editForm.name}
+                    onChange={e => setEditForm({...editForm, name: e.target.value})}
+                    placeholder="e.g., Intro to Computing"
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-white placeholder-slate-500 outline-none focus:border-purple-500 transition text-sm" />
+                </div>
+              </div>
+              <div>
+                <label className="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">Description <span className="text-slate-600 normal-case font-normal">(optional)</span></label>
+                <textarea value={editForm.description}
+                  onChange={e => setEditForm({...editForm, description: e.target.value})}
+                  placeholder="Brief description..." rows="2"
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white placeholder-slate-500 outline-none focus:border-purple-500 resize-none transition text-sm" />
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">Units</label>
+                  <select value={editForm.units} onChange={e => setEditForm({...editForm, units: e.target.value})}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-white outline-none focus:border-purple-500 transition text-sm">
+                    <option value="">—</option>
+                    {[1,2,3,4,5,6].map(u => <option key={u} value={u}>{u} {u === 1 ? 'unit' : 'units'}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">Year Level</label>
+                  <select value={editForm.year_level} onChange={e => setEditForm({...editForm, year_level: e.target.value})}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-white outline-none focus:border-purple-500 transition text-sm">
+                    <option value="">Any</option>
+                    <option value="1">1st Year</option>
+                    <option value="2">2nd Year</option>
+                    <option value="3">3rd Year</option>
+                    <option value="4">4th Year</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">Type</label>
+                  <select value={editForm.subject_type} onChange={e => setEditForm({...editForm, subject_type: e.target.value})}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-white outline-none focus:border-purple-500 transition text-sm">
+                    <option value="lecture">Lecture</option>
+                    <option value="lab">Lab</option>
+                    <option value="lecture_lab">Lec + Lab</option>
+                    <option value="elective">Elective</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">Department / College</label>
+                <select value={editForm.department} onChange={e => setEditForm({...editForm, department: e.target.value})}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2.5 text-white outline-none focus:border-purple-500 transition text-sm">
+                  <option value="">— Select Department —</option>
+                  <option value="CCIT">College of Computing and Information Technology (CCIT)</option>
+                  <option value="CCS">College of Computer Studies (CCS)</option>
+                  <option value="COE">College of Engineering (COE)</option>
+                  <option value="CAS">College of Arts & Sciences (CAS)</option>
+                  <option value="COB">College of Business (COB)</option>
+                  <option value="CED">College of Education (CED)</option>
+                  <option value="GE">General Education</option>
+                </select>
+              </div>
+              <div className="flex gap-3 pt-1">
+                <button onClick={() => { setShowEditModal(false); setEditingSubject(null) }}
+                  className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 rounded-xl text-white font-bold transition border border-slate-700">
+                  Cancel
+                </button>
+                <button onClick={handleSaveEdit}
+                  className="flex-1 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-xl text-white font-bold transition shadow-lg shadow-purple-600/30 flex items-center justify-center gap-2">
+                  💾 Save Changes
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -148,8 +343,17 @@ export default function SubjectsManagement() {
                   </div>
                   <div className="flex-1">
                     <div className="flex items-center gap-2 flex-wrap mb-1">
+                      {/* ✅ Show Subject Number (Adamson's internal number) */}
+                      {subject.internal_subject_no && (
+                        <span className="font-mono text-xs font-bold bg-slate-800 text-yellow-300 border border-yellow-600/30 px-2 py-0.5 rounded">
+                          {subject.internal_subject_no}
+                        </span>
+                      )}
+                      {/* Subject Code */}
                       {subject.subject_code && (
-                        <span className="font-mono text-xs font-bold bg-slate-800 text-purple-300 border border-purple-600/30 px-2 py-0.5 rounded">{subject.subject_code}</span>
+                        <span className="font-mono text-xs font-bold bg-slate-800 text-purple-300 border border-purple-600/30 px-2 py-0.5 rounded">
+                          {subject.subject_code}
+                        </span>
                       )}
                       <h3 className="text-lg font-bold text-white">{subject.name}</h3>
                     </div>
@@ -166,12 +370,20 @@ export default function SubjectsManagement() {
                     </div>
                   </div>
                 </div>
-                <button
-                  onClick={() => handleDeleteSubject(subject.id, subject.name)}
-                  className="px-4 py-2 bg-red-600/20 hover:bg-red-600/30 text-red-300 rounded-lg text-sm font-bold transition opacity-0 group-hover:opacity-100 flex items-center gap-2"
-                >
-                  <span>🗑️</span> Delete
-                </button>
+                <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition">
+                  <button
+                    onClick={() => handleEditClick(subject)}
+                    className="px-4 py-2 bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 rounded-lg text-sm font-bold transition flex items-center gap-2"
+                  >
+                    <span>✏️</span> Edit
+                  </button>
+                  <button
+                    onClick={() => handleDeleteSubject(subject.id, subject.name)}
+                    className="px-4 py-2 bg-red-600/20 hover:bg-red-600/30 text-red-300 rounded-lg text-sm font-bold transition flex items-center gap-2"
+                  >
+                    <span>🗑️</span> Delete
+                  </button>
+                </div>
               </div>
             </div>
           ))}
@@ -201,21 +413,39 @@ export default function SubjectsManagement() {
             {/* Body */}
             <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
 
-              {/* Subject Code + Name */}
+              {/* ✅ Subject Number + Subject Code + Name */}
               <div className="grid grid-cols-3 gap-3">
+                {/* Adamson Subject Number */}
                 <div>
                   <label className="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">
-                    Subject Code *
+                    Subject Number
+                  </label>
+                  <input
+                    type="text"
+                    value={newSubject.internal_subject_no}
+                    onChange={(e) => setNewSubject({...newSubject, internal_subject_no: e.target.value})}
+                    placeholder="e.g., 290007"
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-white placeholder-slate-500 outline-none focus:border-purple-500 transition font-mono tracking-widest text-sm"
+                  />
+                  <p className="text-slate-500 text-[10px] mt-1">Adamson internal ID</p>
+                </div>
+                
+                {/* Subject Code */}
+                <div>
+                  <label className="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">
+                    Subject Code
                   </label>
                   <input
                     type="text"
                     value={newSubject.subject_code}
                     onChange={(e) => setNewSubject({...newSubject, subject_code: e.target.value.toUpperCase()})}
-                    placeholder="e.g., CS101"
+                    placeholder="e.g., IT115"
                     className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-white placeholder-slate-500 outline-none focus:border-purple-500 transition font-mono tracking-widest text-sm"
                   />
                 </div>
-                <div className="col-span-2">
+                
+                {/* Subject Name */}
+                <div className="col-span-1">
                   <label className="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">
                     Subject Name *
                   </label>
@@ -223,8 +453,8 @@ export default function SubjectsManagement() {
                     type="text"
                     value={newSubject.name}
                     onChange={(e) => setNewSubject({...newSubject, name: e.target.value})}
-                    placeholder="e.g., Introduction to Programming"
-                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2.5 text-white placeholder-slate-500 outline-none focus:border-purple-500 transition text-sm"
+                    placeholder="e.g., Intro to Computing"
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-white placeholder-slate-500 outline-none focus:border-purple-500 transition text-sm"
                   />
                 </div>
               </div>
@@ -294,6 +524,7 @@ export default function SubjectsManagement() {
                   className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2.5 text-white outline-none focus:border-purple-500 transition text-sm"
                 >
                   <option value="">— Select Department —</option>
+                  <option value="CCIT">College of Computing and Information Technology (CCIT)</option>
                   <option value="CCS">College of Computer Studies (CCS)</option>
                   <option value="COE">College of Engineering (COE)</option>
                   <option value="CAS">College of Arts & Sciences (CAS)</option>
@@ -311,8 +542,16 @@ export default function SubjectsManagement() {
                     <div className="w-10 h-10 bg-gradient-to-br from-purple-600 to-pink-600 rounded-xl flex items-center justify-center text-lg flex-shrink-0">📖</div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
+                        {/* ✅ Preview shows both numbers */}
+                        {newSubject.internal_subject_no && (
+                          <span className="font-mono text-xs font-bold bg-slate-700 text-yellow-300 px-2 py-0.5 rounded">
+                            {newSubject.internal_subject_no}
+                          </span>
+                        )}
                         {newSubject.subject_code && (
-                          <span className="font-mono text-xs font-bold bg-slate-700 text-purple-300 px-2 py-0.5 rounded">{newSubject.subject_code}</span>
+                          <span className="font-mono text-xs font-bold bg-slate-700 text-purple-300 px-2 py-0.5 rounded">
+                            {newSubject.subject_code}
+                          </span>
                         )}
                         <p className="text-white font-bold text-sm">{newSubject.name}</p>
                       </div>
@@ -341,7 +580,16 @@ export default function SubjectsManagement() {
                 <button
                   onClick={() => {
                     setShowCreateModal(false)
-                    setNewSubject({ name: '', description: '', subject_code: '', units: '', department: '', year_level: '', subject_type: 'lecture' })
+                    setNewSubject({ 
+                      internal_subject_no: '',
+                      name: '', 
+                      description: '', 
+                      subject_code: '', 
+                      units: '', 
+                      department: '', 
+                      year_level: '', 
+                      subject_type: 'lecture' 
+                    })
                   }}
                   className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 rounded-xl text-white font-bold transition border border-slate-700"
                 >

@@ -270,6 +270,7 @@ useEffect(() => {
       const errorOutput = data.test_results.find(t => !t.passed)?.output || ''
       parseAndHighlightErrors(errorOutput, language)
     }
+    if (data.xp_earned > 0) setXpGained(data.xp_earned)
     if (data.status === 'accepted') {
       playSuccessSound()
       setCombo(c => c + 1)
@@ -840,7 +841,7 @@ useEffect(() => {
                       </p>
                       {output.status !== 'error' && (
                         <p className="text-xs text-slate-400">
-                          Score: {output.xp_reward || output.score} XP • Passed {output.test_results?.filter(t => t.passed)?.length || 0}/{output.test_results?.length || 0} tests
+                          {output.scoring_note || `Score: ${output.score} XP • Passed ${output.passed_cases ?? output.test_results?.filter(t => t.passed)?.length ?? 0}/${output.total_cases ?? output.test_results?.length ?? 0} tests`}
                         </p>
                       )}
                     </div>

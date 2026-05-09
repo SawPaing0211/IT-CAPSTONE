@@ -30,4 +30,8 @@ javac -encoding UTF-8 \
 
 # Run the wrapper entry point (Main.class).
 # -cp $WORK_DIR    → classpath includes Solution.class compiled above
-exec java -cp "$WORK_DIR" Main
+if [ -f /tmp/sandbox/input.txt ]; then
+    exec java -cp "$WORK_DIR" Main < /tmp/sandbox/input.txt
+else
+    exec java -cp "$WORK_DIR" Main
+fi

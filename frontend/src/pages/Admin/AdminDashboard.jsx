@@ -5,6 +5,7 @@ import BlocksSections from './BlocksSections'
 import InstructorAssignments from './InstructorAssignments'
 import ActivityLogs from './ActivityLogs'
 import SubjectsManagement from './SubjectsManagement'
+import SectionsManagement from './SectionsManagement'  // ✅ NEW IMPORT
 
 export default function AdminDashboard({ user, onLogout }) {
   const [activeTab, setActiveTab] = useState('dashboard')
@@ -30,7 +31,8 @@ export default function AdminDashboard({ user, onLogout }) {
     { id: 'users', label: 'User Management', icon: '👥' },
     { id: 'assignments', label: 'Instructor Assignments', icon: '👨‍🏫' },
     { id: 'blocks', label: 'Blocks & Sections', icon: '📚' },
-    { id: 'subjects', label: 'Subjects', icon: '📚' },
+    { id: 'subjects', label: 'Subjects', icon: '📖' },
+    { id: 'sections', label: 'Subject Sections', icon: '🗂️' },  // ✅ NEW TAB
     { id: 'activity', label: 'Activity Logs', icon: '📜' },
   ]
 
@@ -58,9 +60,9 @@ export default function AdminDashboard({ user, onLogout }) {
             {sidebarOpen && (
               <div className="overflow-hidden">
                 <h1 className="font-black text-base bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent">
-                Forge.SuperAdmin
-              </h1>
-              <p className="text-xs text-slate-400">Super Admin Control</p>
+                  Forge.SuperAdmin
+                </h1>
+                <p className="text-xs text-slate-400">Super Admin Control</p>
               </div>
             )}
           </div>
@@ -136,6 +138,7 @@ export default function AdminDashboard({ user, onLogout }) {
                 {activeTab === 'assignments' && 'Manage instructor subject and block assignments'}
                 {activeTab === 'subjects' && 'Create and manage course subjects'}
                 {activeTab === 'blocks' && 'Manage class blocks and course assignments'}
+                {activeTab === 'sections' && 'Manage subject sections, schedules, and irregular enrollments'}  // ✅ NEW DESCRIPTION
                 {activeTab === 'activity' && 'Comprehensive audit trail of all administrative actions'}
               </p>
             </div>
@@ -187,6 +190,7 @@ export default function AdminDashboard({ user, onLogout }) {
           {activeTab === 'assignments' && <InstructorAssignments />}
           {activeTab === 'subjects' && <SubjectsManagement />}
           {activeTab === 'blocks' && <BlocksSections />}
+          {activeTab === 'sections' && <SectionsManagement />}  {/* ✅ NEW RENDER */}
           {activeTab === 'activity' && <ActivityLogs />}
         </div>
       </main>

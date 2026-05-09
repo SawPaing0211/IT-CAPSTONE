@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import EditUserModal from './EditUserModal'
 import RecoveryModal from './RecoveryModal'
+import UploadCSVModal from './UploadCSVModal'
 
 export default function UserManagement() {
   const [users, setUsers] = useState([])
@@ -19,6 +20,13 @@ export default function UserManagement() {
   const [addUserLoading, setAddUserLoading] = useState(false)
   const [addUserError, setAddUserError] = useState('')
   const [addUserSuccess, setAddUserSuccess] = useState('')
+  const [csvModal, setCsvModal] = useState(false)
+
+  const resetAddUserForm = () => {
+    setAddUserForm({ username: '', email: '', password: '', role: 'student', block_id: '' })
+    setAddUserError('')
+    setAddUserSuccess('')
+  }
 
   const handleAddUser = async () => {
     setAddUserError('')
@@ -207,6 +215,13 @@ export default function UserManagement() {
             <span>📥</span> Export CSV
           </button>
           <button
+            onClick={() => setCsvModal(true)}
+            className="px-4 py-2 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 rounded-lg transition flex items-center gap-2 font-bold shadow-lg shadow-green-600/30"
+          >
+            <span>📤</span> Upload CSV
+          </button>
+
+          <button
             onClick={() => setAddUserModal(true)}
             className="px-4 py-2 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-lg transition flex items-center gap-2 font-bold shadow-lg shadow-purple-600/30"
           >
@@ -224,6 +239,8 @@ export default function UserManagement() {
               placeholder="Search users..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
+              autoComplete="off"
+              name="user-search"
               className="w-full bg-slate-800 border border-slate-700 rounded-lg pl-10 pr-4 py-2 text-white focus:border-purple-500 outline-none transition"
             />
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">🔍</span>
@@ -353,6 +370,14 @@ export default function UserManagement() {
         />
       )}
 
+      {csvModal && (
+        <UploadCSVModal
+          blocks={blocks}
+          onClose={() => setCsvModal(false)}
+          onSuccess={() => { setCsvModal(false); fetchUsers() }}
+        />
+      )}
+
       {/* Add User Modal */}
       {addUserModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
@@ -368,7 +393,7 @@ export default function UserManagement() {
                   <p className="text-slate-400 text-xs">Create a student, instructor, or super admin</p>
                 </div>
               </div>
-              <button onClick={() => { setAddUserModal(false); setAddUserError(''); setAddUserSuccess('') }}
+              <button onClick={() => { setAddUserModal(false); resetAddUserForm() }}
                 className="text-slate-400 hover:text-white text-2xl transition">✕</button>
             </div>
 
@@ -477,7 +502,7 @@ export default function UserManagement() {
             {/* Modal Footer */}
             <div className="flex gap-3 p-6 border-t border-purple-600/30">
               <button
-                onClick={() => { setAddUserModal(false); setAddUserError(''); setAddUserSuccess('') }}
+                onClick={() => { setAddUserModal(false); resetAddUserForm() }}
                 className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 font-medium transition"
               >
                 Cancel

@@ -109,6 +109,7 @@ export default function RecoveryModal({ user, onClose, onSuccess }) {
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
                 placeholder="Enter new password"
+                autoComplete="new-password"
                 className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white focus:border-blue-500 outline-none"
               />
             </div>
@@ -120,6 +121,7 @@ export default function RecoveryModal({ user, onClose, onSuccess }) {
                 value={confirmText}
                 onChange={(e) => setConfirmText(e.target.value)}
                 placeholder='Type "RESET" to confirm'
+                autoComplete="off"
                 className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white focus:border-blue-500 outline-none"
               />
             </div>
@@ -148,6 +150,7 @@ export default function RecoveryModal({ user, onClose, onSuccess }) {
                 value={newEmail}
                 onChange={(e) => setNewEmail(e.target.value)}
                 placeholder="Enter new email"
+                autoComplete="off"
                 className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white focus:border-blue-500 outline-none"
               />
             </div>
@@ -159,6 +162,7 @@ export default function RecoveryModal({ user, onClose, onSuccess }) {
                 value={confirmText}
                 onChange={(e) => setConfirmText(e.target.value)}
                 placeholder='Type "UPDATE" to confirm'
+                autoComplete="off"
                 className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white focus:border-blue-500 outline-none"
               />
             </div>

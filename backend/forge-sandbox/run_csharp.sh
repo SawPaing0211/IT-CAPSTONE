@@ -52,6 +52,7 @@ dotnet build "$BUILD_DIR/sandbox.csproj" \
     --configuration Release \
     --no-restore \
     --output "$BUILD_DIR/out" \
+    -p:StartupObject=Program \
     -v quiet > /dev/null 2>&1
 
 BUILD_EXIT=$?
@@ -61,8 +62,13 @@ if [ $BUILD_EXIT -ne 0 ]; then
         --configuration Release \
         --no-restore \
         --output "$BUILD_DIR/out" \
+        -p:StartupObject=Program \
         -v quiet 2>&1
     exit $BUILD_EXIT
 fi
 
-exec dotnet "$BUILD_DIR/out/sandbox.dll"
+if [ -f /tmp/sandbox/input.txt ]; then
+    exec dotnet "$BUILD_DIR/out/sandbox.dll" < /tmp/sandbox/input.txt
+else
+    exec dotnet "$BUILD_DIR/out/sandbox.dll"
+fi

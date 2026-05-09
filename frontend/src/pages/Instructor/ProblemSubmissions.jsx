@@ -201,14 +201,19 @@ export default function ProblemSubmissions() {
                         ? 'bg-slate-700/50 text-slate-400'
                         : student.status === 'accepted'
                         ? 'bg-green-600/20 text-green-400'
+                        : student.status === 'partial'
+                        ? 'bg-blue-600/20 text-blue-400'
                         : student.status === 'wrong_answer'
                         ? 'bg-yellow-600/20 text-yellow-400'
                         : 'bg-red-600/20 text-red-400'
                     }`}>
                       {!student.submitted ? '⏳ Not Submitted'
-                        : student.status === 'accepted' ? '✅ Accepted'
-                        : student.status === 'wrong_answer' ? '⚠️ Wrong Answer'
-                        : student.status === 'error' ? '❌ Error'
+                        : student.status === 'accepted'      ? '✅ Accepted'
+                        : student.status === 'partial'       ? '⚡ Partial'
+                        : student.status === 'wrong_answer'  ? '⚠️ Wrong Answer'
+                        : student.status === 'timeout'       ? '⏱️ Timeout'
+                        : student.status === 'compile_error' ? '🔴 Compile Error'
+                        : student.status === 'error'         ? '❌ Error'
                         : `📝 ${student.status}`}
                     </span>
                   </td>
