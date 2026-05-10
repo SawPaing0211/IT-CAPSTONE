@@ -21,7 +21,9 @@ export default function StudentCodeEditor({
   const [usedHints, setUsedHints] = useState([])
   const [xpGained, setXpGained] = useState(0)
   const [userRole, setUserRole] = useState(null)
-  const [isQuestCompleted, setIsQuestCompleted] = useState(false) 
+  const [isQuestCompleted, setIsQuestCompleted] = useState(false)
+  const [hasSubmitted, setHasSubmitted] = useState(false)
+  const [priorSubmission, setPriorSubmission] = useState(null) 
   const [savedCode, setSavedCode] = useState('')   
   const [showSuccessAnim, setShowSuccessAnim] = useState(false)
   const [combo, setCombo] = useState(0)
@@ -171,20 +173,37 @@ useEffect(() => {
     const saved = localStorage.getItem(`quest_code_${quest.id}_${language}`)
     if (saved) {
       setSavedCode(saved)
-      setCode(saved)  // Set the editor code
+      setCode(saved)
     } else if (quest?.starter_code) {
-      // Load starter code if no saved code
       const starter = typeof quest.starter_code === 'string'
         ? JSON.parse(quest.starter_code)
         : quest.starter_code
       setCode(starter?.[language] || '')
     }
     
-    // ✅ Check if quest is marked as completed
-    const completed = localStorage.getItem(`quest_completed_${quest.id}`)
-    setIsQuestCompleted(completed === 'true')
+    // ✅ FIXED: Wrap async logic in named async function
+    const checkSubmission = async () => {
+      try {
+        const token = localStorage.getItem('token')
+        const subRes = await fetch(`http://localhost:5000/api/problems/${quest.id}/my-submission`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        })
+        if (subRes.ok) {
+          const subData = await subRes.json()
+          if (subData.has_submitted) {
+            setHasSubmitted(true)
+            setPriorSubmission(subData)
+            setIsQuestCompleted(subData.status === 'accepted')
+          }
+        }
+      } catch (err) {
+        console.error('Failed to check submission status:', err)
+      }
+    }
+    
+    checkSubmission() // ✅ Call the async function
   }
-}, [quest, language])  // Re-run when quest or language changes
+}, [quest, language]) // Re-run when quest or language changes
 
   // Auto-save every 5 seconds
   useEffect(() => {
@@ -252,37 +271,48 @@ useEffect(() => {
     return () => window.removeEventListener('resize', handleResize)
   }, [])
 
-  // 🔒 UPDATED: Using api.post instead of fetch
+  // ▶ Run — tests code WITHOUT submitting, no XP, no lock
   const handleRunCode = async () => {
-  setIsLoading(true)
-  setOutput(null)
-  // Clear previous markers
-  if (monacoRef.current && editorRef.current) {
-    monacoRef.current.editor.setModelMarkers(
-      editorRef.current.getModel(), 'forge', []
-    )
-  }
-  try {
-    const data = await api.post('/api/submissions', { problem_id: quest.id, code, language })
-    setOutput(data)
-    // Highlight errors in editor if tests failed
-    if (data.test_results) {
-      const errorOutput = data.test_results.find(t => !t.passed)?.output || ''
-      parseAndHighlightErrors(errorOutput, language)
+    setIsLoading(true)
+    setOutput(null)
+    if (monacoRef.current && editorRef.current) {
+      monacoRef.current.editor.setModelMarkers(
+        editorRef.current.getModel(), 'forge', []
+      )
     }
-    if (data.xp_earned > 0) setXpGained(data.xp_earned)
-    if (data.status === 'accepted') {
-      playSuccessSound()
-      setCombo(c => c + 1)
-    } else {
-      setCombo(0)
+    try {
+      const token = localStorage.getItem('token')
+      const endpoint = (userRole === 'instructor' || userRole === 'super_admin')
+        ? `http://localhost:5000/api/problems/${quest.id}/test`
+        : `http://localhost:5000/api/problems/${quest.id}/run`
+
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ code, language })
+      })
+      const data = await res.json()
+      // Normalize to same shape as submission result for display
+      setOutput({
+        ...data,
+        status: data.passed === data.total ? 'accepted' : 'wrong_answer',
+        score: null,  
+        xp_earned: 0,
+        is_run_mode: true  // flag so UI can show "Run result, not submitted"
+      })
+      if (data.test_results) {
+        const errorOutput = data.test_results.find(t => !t.passed)?.output || ''
+        parseAndHighlightErrors(errorOutput, language)
+      }
+    } catch (err) {
+      setOutput({ error: err.message, status: 'error', is_run_mode: true })
+    } finally {
+      setIsLoading(false)
     }
-  } catch (err) {
-    setOutput({ error: err.message, status: 'error' })
-  } finally {
-    setIsLoading(false)
   }
-}
 
   // ✅ NEW: Test code for instructors (no submission, no XP)
   const handleTestCode = async () => {
@@ -345,28 +375,47 @@ useEffect(() => {
     const handleSubmit = async () => {
     setIsLoading(true)
     setOutput(null)
+    if (monacoRef.current && editorRef.current) {
+      monacoRef.current.editor.setModelMarkers(
+        editorRef.current.getModel(), 'forge', []
+      )
+    }
     try {
       const data = await api.post('/api/submissions', { problem_id: quest.id, code, language })
-      setOutput(data)
+      setOutput({ ...data, is_run_mode: false })
       
       // ✅ Save code to localStorage on submit
       if (quest?.id) {
         localStorage.setItem(`quest_code_${quest.id}_${language}`, code)
       }
       
+      // ✅ Lock submit after ANY submission (accepted, error, partial, etc.)
+      setHasSubmitted(true)
+      setPriorSubmission(data)
+
       if (data.status === 'accepted') {
+        setIsQuestCompleted(true)
         setShowSuccessAnim(true)
         const hintPenalty = usedHints.reduce((sum, hId) => {
           const hint = quest.hints?.find(h => h.id === hId)
           return sum + (hint?.xp_penalty || 0)
         }, 0)
-        const gained = Math.max(0, (quest.xp_reward || 0) - hintPenalty)
+        const gained = Math.max(0, (data.xp_earned || quest.xp_reward || 0) - hintPenalty)
         setXpGained(gained)
         if (onVictory) onVictory(gained, data.user_level || heroLevel)
         setTimeout(() => setShowSuccessAnim(false), 3000)
       }
     } catch (err) {
-      setOutput({ error: err.message, status: 'error' })
+      if (err.status === 409 || err.message?.includes('Already submitted')) {
+        setHasSubmitted(true)
+        setOutput({ 
+          error: 'You have already submitted this problem. Use Run to test your code.',
+          status: 'error',
+          is_run_mode: false
+        })
+      } else {
+        setOutput({ error: err.message, status: 'error', is_run_mode: false })
+      }
     } finally {
       setIsLoading(false)
     }
@@ -763,14 +812,14 @@ useEffect(() => {
             className="flex flex-col bg-slate-900/80 border-t border-purple-600/20"
             style={{ height: '192px', minHeight: '192px', flexShrink: 0, overflow: 'hidden' }}
           >
-            {/* Console header */}
-            <div className="flex items-center justify-between px-4 py-2 border-b border-purple-600/20 bg-slate-800/40 shrink-0">
-            {/* ✅ Show role indicator for instructors */}
-            {(userRole === 'instructor' || userRole === 'admin') && (
-              <div className="px-4 py-1 bg-yellow-600/10 border-t border-yellow-600/20 text-[10px] text-yellow-400 text-center">
+            {/* ✅ Instructor mode banner — OUTSIDE the flex header row */}
+            {(userRole === 'instructor' || userRole === 'super_admin') && (
+              <div className="px-4 py-1 bg-yellow-600/10 border-b border-yellow-600/20 text-[10px] text-yellow-400 text-center shrink-0">
                 ⚠️ Test mode: Results won't be saved or affect XP
               </div>
             )}
+            {/* Console header */}
+            <div className="flex items-center justify-between px-4 py-2 border-b border-purple-600/20 bg-slate-800/40 shrink-0">
               <span className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
                 🔮 Crystal Ball (Console)
                 {isLoading && <span className="text-blue-400 animate-pulse">• Casting spell...</span>}
@@ -784,7 +833,7 @@ useEffect(() => {
                   {isLoading ? '⏳' : '▶'} Run <span className="hidden sm:inline">(Ctrl+Enter)</span>
                 </button>
                 {/* ✅ CONDITIONAL: Instructor sees "Test Code", Student sees "Submit" */}
-                {userRole === 'instructor' || userRole === 'admin' ? (
+                {userRole === 'instructor' || userRole === 'super_admin' ? (
                   <button
                     onClick={handleTestCode}
                     disabled={isLoading}
@@ -795,14 +844,16 @@ useEffect(() => {
                 ) : (
                   <button
                     onClick={handleSubmit}
-                    disabled={isLoading || isQuestCompleted}  // ✅ Disable if completed
+                    disabled={isLoading || hasSubmitted}
                     className={`px-4 py-1.5 rounded-md text-xs font-bold transition flex items-center gap-1.5 ${
-                      isQuestCompleted
+                      hasSubmitted
                         ? 'bg-slate-700 text-slate-500 cursor-not-allowed border border-slate-600'
                         : 'bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 text-white shadow-lg shadow-green-600/20 border border-green-500/50'
                     }`}
                   >
-                    {isLoading ? '⏳' : '⚔️'} {isQuestCompleted ? 'Already Conquered' : 'Submit'}
+                    {isLoading ? '⏳' : '⚔️'} {hasSubmitted
+                      ? (priorSubmission?.status === 'accepted' ? '✅ Conquered' : '🔒 Submitted')
+                      : 'Submit'}
                   </button>
                 )}
               </div>
@@ -841,7 +892,9 @@ useEffect(() => {
                       </p>
                       {output.status !== 'error' && (
                         <p className="text-xs text-slate-400">
-                          {output.scoring_note || `Score: ${output.score} XP • Passed ${output.passed_cases ?? output.test_results?.filter(t => t.passed)?.length ?? 0}/${output.total_cases ?? output.test_results?.length ?? 0} tests`}
+                          {output.is_run_mode
+  ? `Run mode • Passed ${output.passed ?? output.test_results?.filter(t => t.passed)?.length ?? 0}/${output.total ?? output.test_results?.length ?? 0} tests`
+  : output.scoring_note || `Score: ${output.score} XP • Passed ${output.passed_cases ?? 0}/${output.total_cases ?? 0} tests`}
                         </p>
                       )}
                     </div>

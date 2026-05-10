@@ -185,11 +185,11 @@ export default function ProblemSubmissions() {
                   <td className="p-4">
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 bg-purple-600 rounded-full flex items-center justify-center font-bold text-sm">
-                        {student.username[0].toUpperCase()}
+                        {(student.full_name || student.username)[0].toUpperCase()}
                       </div>
                       <div>
-                        <p className="font-bold text-white">{student.username}</p>
-                        <p className="text-slate-500 text-xs">{student.email}</p>
+                        <p className="font-bold text-white">{student.full_name}</p>
+                        <p className="text-slate-500 text-xs">{student.username} · {student.email}</p>
                       </div>
                     </div>
                   </td>

@@ -72,9 +72,16 @@ export default function BlocksSections() {
       })
       if (res.ok) {
         fetchBlocks()
+        alert('✅ Block deleted successfully!')
       } else {
-        const error = await res.json()
-        alert(`Failed to delete block: ${error.error}`)
+        let msg = 'Unknown error'
+        try {
+          const error = await res.json()
+          msg = error.error || msg
+        } catch {
+          msg = `Server error (${res.status})`
+        }
+        alert(`Failed to delete block: ${msg}`)
       }
     } catch (err) {
       console.error('Failed to delete block:', err)

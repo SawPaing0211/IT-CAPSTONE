@@ -138,7 +138,7 @@ export default function AdminDashboard({ user, onLogout }) {
                 {activeTab === 'assignments' && 'Manage instructor subject and block assignments'}
                 {activeTab === 'subjects' && 'Create and manage course subjects'}
                 {activeTab === 'blocks' && 'Manage class blocks and course assignments'}
-                {activeTab === 'sections' && 'Manage subject sections, schedules, and irregular enrollments'}  // ✅ NEW DESCRIPTION
+                {activeTab === 'sections' && 'Manage subject sections, schedules, and irregular enrollments'}
                 {activeTab === 'activity' && 'Comprehensive audit trail of all administrative actions'}
               </p>
             </div>

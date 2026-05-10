@@ -141,7 +141,7 @@ public class Program {
             string input = File.ReadAllText(inputFile).Trim();
             Console.SetIn(new StringReader(input));
         }
-        Solution.Main();
+        Solution.Run();
     }
 }
 '''
@@ -170,11 +170,22 @@ def _write_source(tmpdir: str, code: str, language: str) -> str:
                 break
     elif language == 'csharp':
         filename = 'Solution.cs'
-        for common in ('Program', 'Main', 'HelloWorld', 'App', 'MyClass'):
+        for common in ('Program', 'Main', 'HelloWorld', 'App', 'MyClass', 'Solution', 'MyProgram', 'Code', 'Submission'):
             if f'public class {common}' in code:
                 code = code.replace(f'public class {common}', 'public class Solution', 1)
                 break
-        # Keep Main() method name — Solution.cs IS the entry point
+        # Rename Main() → Run() and make it public so wrapper can call it
+        for sig in (
+            'public static void Main(string[] args)',
+            'public static void Main()',
+            'static void Main(string[] args)',
+            'static void Main()',
+            'private static void Main(string[] args)',
+            'private static void Main()',
+        ):
+            if sig in code:
+                code = code.replace(sig, 'public static void Run()', 1)
+                break
     else:
         filename = 'solution.py'
 

@@ -79,13 +79,19 @@ export default function QuestLog({ blockId }) {
       const bestSubmission = questSubmissions.find(s => s.status === 'accepted') || 
                       questSubmissions[questSubmissions.length - 1]
 
+const statusMap = {
+  'accepted':     'conquered',
+  'partial':      'partial',
+  'wrong_answer': 'wrong',
+  'error':        'error',
+  'compile_error':'error',
+  'timeout':      'timeout',
+}
 return {
   ...quest,
-  status: bestSubmission 
-    ? (bestSubmission.status === 'accepted' ? 'conquered' 
-       : bestSubmission.status === 'partial' ? 'partial'
-       : 'ongoing')
-    : 'ongoing',
+  status: bestSubmission
+    ? (statusMap[bestSubmission.status] || 'ongoing')
+    : 'not_started',
         submission: bestSubmission,
         attempts: questSubmissions.length
       }
@@ -182,8 +188,10 @@ if (!blockId && enrolledBlocks.length === 0) {
         ) : (
           <>
             <div className="flex items-center justify-between text-sm text-slate-400 mb-2">
-              <span>{submissions.length} {submissions.length === 1 ? 'Quest' : 'Quests'} Completed</span>
-              <span>Success Rate: {Math.round((submissions.filter(s => s.status === 'conquered').length / submissions.length) * 100)}%</span>
+              <span>
+                {submissions.filter(s => s.status === 'conquered').length} / {submissions.length} {submissions.length === 1 ? 'Quest' : 'Quests'} Conquered
+              </span>
+              <span>Success Rate: {submissions.length > 0 ? Math.round((submissions.filter(s => s.status === 'conquered').length / submissions.length) * 100) : 0}%</span>
             </div>
             
             {submissions.map((quest) => {
@@ -231,20 +239,38 @@ if (!blockId && enrolledBlocks.length === 0) {
                 <div className="flex items-center gap-6 text-sm">
                   {/* Status Badge */}
                   <span className={`px-3 py-1 rounded-full text-xs font-bold border ${
-                    quest.status === 'conquered' ? 'bg-green-500/20 text-green-400 border-green-500/30' 
-                    : quest.status === 'partial' ? 'bg-blue-500/20 text-blue-400 border-blue-500/30'
+                    quest.status === 'conquered'  ? 'bg-green-500/20 text-green-400 border-green-500/30'
+                    : quest.status === 'partial'  ? 'bg-blue-500/20 text-blue-400 border-blue-500/30'
+                    : quest.status === 'wrong'    ? 'bg-red-500/20 text-red-400 border-red-500/30'
+                    : quest.status === 'error'    ? 'bg-red-500/20 text-red-400 border-red-500/30'
+                    : quest.status === 'timeout'  ? 'bg-orange-500/20 text-orange-400 border-orange-500/30'
+                    : quest.status === 'not_started' ? 'bg-slate-700/50 text-slate-500 border-slate-700'
                     : 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'
                   }`}>
-                    {quest.status === 'conquered' ? '⚔️ CONQUERED' 
-                    : quest.status === 'partial' ? '⚡ PARTIAL'
+                    {quest.status === 'conquered'   ? '⚔️ CONQUERED'
+                    : quest.status === 'partial'    ? '⚡ PARTIAL'
+                    : quest.status === 'wrong'      ? '❌ WRONG ANSWER'
+                    : quest.status === 'error'      ? '🔴 ERROR'
+                    : quest.status === 'timeout'    ? '⏱ TIMEOUT'
+                    : quest.status === 'not_started'? '📋 NOT STARTED'
                     : '📜 ONGOING'}
                   </span>
 
                   {/* XP Reward */}
                   <div className="text-right">
-                    <span className={`font-bold text-lg ${isConquered ? 'text-yellow-400' : 'text-slate-600'}`}>
-                      {isConquered ? `+${quest.xp_reward} XP` : `${quest.xp_reward} XP`}
-                    </span>
+                    {quest.submission ? (
+                      <div>
+                        <span className={`font-bold text-lg ${
+                          isConquered ? 'text-yellow-400' : 'text-slate-500'
+                        }`}>
+                          {isConquered
+                            ? `+${quest.xp_reward} XP`
+                            : `${quest.submission.score ?? 0} / ${quest.xp_reward} XP`}
+                        </span>
+                      </div>
+                    ) : (
+                      <span className="font-bold text-lg text-slate-600">{quest.xp_reward} XP</span>
+                    )}
                   </div>
                 </div>
               </div>
