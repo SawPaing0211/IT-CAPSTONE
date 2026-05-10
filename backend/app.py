@@ -69,6 +69,7 @@ class User(db.Model):
     email = db.Column(db.String(100), unique=True, nullable=False)
     password_hash = db.Column(db.String(255), nullable=False)
     role = db.Column(db.Enum('student', 'instructor', 'super_admin'), default='student')
+    full_name = db.Column(db.String(200), nullable=True)
     xp = db.Column(db.Integer, default=0)
     level = db.Column(db.Integer, default=1)
     is_active = db.Column(db.Boolean, default=True)
@@ -1412,6 +1413,20 @@ def create_submission():
             "due_date": prob.due_date.isoformat()
         }), 403
 
+    # ✅ Block resubmission — any prior submission locks this problem
+    prior = Submission.query.filter_by(
+        user_id=user_id,
+        problem_id=prob.id
+    ).first()
+    if prior:
+        return jsonify({
+            "error": "Already submitted",
+            "message": "You have already submitted this problem. Use Run to test your code.",
+            "submission_id": prior.id,
+            "status": prior.status,
+            "score": prior.score
+        }), 409
+
     # XP floor table — 10% of xp_reward, minimum guaranteed even on errors
     floor_xp = max(5, int(prob.xp_reward * 0.10))
 
@@ -1504,7 +1519,67 @@ def create_submission():
         sub.score  = floor_xp
         db.session.commit()
         return jsonify({"error": str(e), "xp_earned": floor_xp}), 500
-    
+
+@app.route('/api/problems/<int:problem_id>/my-submission', methods=['GET'])
+@jwt_required()
+def get_my_submission(problem_id):
+    """Check if current student has already submitted this problem"""
+    user_id = int(get_jwt_identity())
+    user = User.query.get(user_id)
+    if user.role != 'student':
+        return jsonify({"has_submitted": False}), 200
+
+    sub = Submission.query.filter_by(
+        user_id=user_id,
+        problem_id=problem_id
+    ).order_by(Submission.submitted_at.desc()).first()
+
+    if not sub:
+        return jsonify({"has_submitted": False}), 200
+
+    return jsonify({
+        "has_submitted": True,
+        "status": sub.status,
+        "score": sub.score,
+        "passed_cases": sub.passed_cases,
+        "total_cases": sub.total_cases,
+        "submitted_at": sub.submitted_at.isoformat(),
+        "language": sub.language
+    }), 200
+
+@app.route('/api/problems/<int:problem_id>/run', methods=['POST'])
+@jwt_required()
+@rate_limit(max_calls=20, period=60)
+def run_problem_code(problem_id):
+    """Students run code against test cases without submitting (no XP, no lock)"""
+    user_id = int(get_jwt_identity())
+    user = User.query.get(user_id)
+
+    data = request.get_json()
+    if not all(k in data for k in ['code', 'language']):
+        return jsonify({"error": "Missing code or language"}), 400
+
+    prob = Problem.query.get_or_404(problem_id)
+    if not prob.is_published:
+        return jsonify({"error": "Problem not available"}), 404
+
+    try:
+        results = evaluate_code(data['code'], prob.test_cases, data['language'])
+        passed = sum(1 for r in results if r['passed'])
+        total = len(results)
+
+        return jsonify({
+            "message": "Run mode — no submission recorded",
+            "test_results": results,
+            "passed": passed,
+            "total": total,
+            "is_run_mode": True,
+            "success_rate": round((passed / total * 100), 1) if total > 0 else 0
+        }), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/api/problems/<int:problem_id>/test', methods=['POST'])
 @jwt_required()
 def test_problem_code(problem_id):
@@ -1869,9 +1944,10 @@ def get_leaderboard():
     
     return jsonify([{
         "id": s.id,
-        "rank": i+1, 
-        "username": s.username, 
-        "xp": s.xp, 
+        "rank": i+1,
+        "username": s.username,
+        "full_name": s.full_name or s.username,
+        "xp": s.xp,
         "level": s.level
     } for i, s in enumerate(students)]), 200
 
@@ -2255,6 +2331,7 @@ def get_problem_submissions(problem_id):
         result_students.append({
             "id": student.id,
             "username": student.username,
+            "full_name": student.full_name or student.username,
             "email": student.email,
             "submitted": sub is not None,
             "score": sub.score if sub else 0,
@@ -2271,6 +2348,7 @@ def get_problem_submissions(problem_id):
                 result_students.append({
                     "id": student.id,
                     "username": student.username,
+                    "full_name": student.full_name or student.username,
                     "email": student.email,
                     "submitted": True,
                     "score": sub.score,
@@ -2631,12 +2709,11 @@ def admin_get_users(admin):
                     blocks_list.append({
                         "id": b.id, 
                         "section_code": b.section_code, 
-                        "name": b.section_code, # Block name is usually the code
+                        "name": b.section_code,
                         "semester": b.semester,
-                        "subjects": subjects # List of subject names
+                        "subjects": subjects
                     })
                 
-                # Fallback for backward compatibility
                 if all_blocks:
                     block_id = all_blocks[0].id
                     block_name = all_blocks[0].section_code
@@ -2662,12 +2739,20 @@ def admin_get_users(admin):
                 block_id = instructor_blocks[0].id
                 block_name = instructor_blocks[0].section_code
         
+        # Check if student has irregular enrollments
+        is_irregular = False
+        if u.role == 'student' and not blocks_list:
+            irr_count = IrregularEnrollment.query.filter_by(student_id=u.id).count()
+            is_irregular = irr_count > 0
+
         result.append({
             "id": u.id, "username": u.username, "email": u.email, "role": u.role,
+            "full_name": getattr(u, 'full_name', None) or None,
             "xp": u.xp, "level": u.level, "is_active": u.is_active,
             "created_at": u.created_at.isoformat(),
             "block_id": block_id, "block_name": block_name,
-            "blocks": blocks_list  # ✅ Send full block list to frontend
+            "blocks": blocks_list,
+            "is_irregular": is_irregular
         })
     return jsonify(result), 200
 
@@ -3602,6 +3687,7 @@ def get_block_students(block_id):
     return jsonify([{
         "id": s.id,
         "username": s.username,
+        "full_name": s.full_name or s.username,
         "email": s.email,
         "xp": s.xp,
         "level": s.level,
@@ -3619,6 +3705,7 @@ def admin_delete_block(admin, block_id):
     db.session.query(block_subjects).filter_by(block_id=block_id).delete()
     db.session.query(student_blocks).filter_by(block_id=block_id).delete()
     db.session.query(block_problems).filter_by(block_id=block_id).delete()
+    TeacherAssignment.query.filter_by(block_id=block_id).delete()
     
     # ✅ Delete the block itself
     db.session.delete(block)
@@ -4148,6 +4235,7 @@ def admin_bulk_enrollment_upload(admin):
             email         = email,
             password_hash = generate_password_hash(plain_pwd),
             role          = "student",
+            full_name     = full_name,
             is_active     = True,
             xp            = 0,
             level         = 1,
@@ -4962,6 +5050,18 @@ with app.app_context():
         print("✅ Seeded 27 Achievements")
     db.create_all()
     
+    # Auto-migration for users table
+    try:
+        inspector = inspect(db.engine)
+        user_columns = [col['name'] for col in inspector.get_columns('users')]
+        if 'full_name' not in user_columns:
+            with db.engine.connect() as conn:
+                conn.execute(text("ALTER TABLE users ADD COLUMN full_name VARCHAR(200) DEFAULT NULL"))
+                conn.commit()
+                print("✅ Added column 'full_name' to users table")
+    except Exception as e:
+        print(f"⚠️ Users migration check skipped: {e}")
+
     # Auto-migration for Problem table
     try:
         inspector = inspect(db.engine)

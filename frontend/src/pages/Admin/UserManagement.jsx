@@ -199,9 +199,10 @@ export default function UserManagement() {
       if (statusFilter === 'inactive' && user.is_active) return false
     }
     if (search) {
-      const searchLower = search.toLowerCase()
-      return user.username.toLowerCase().includes(searchLower) || 
-             user.email.toLowerCase().includes(searchLower)
+      const searchLower = search.toLowerCase().replace(/-/g, '')
+      return user.username.toLowerCase().replace(/-/g, '').includes(searchLower) ||
+             user.email.toLowerCase().includes(search.toLowerCase()) ||
+             (user.full_name && user.full_name.toLowerCase().includes(search.toLowerCase()))
     }
     return true
   })
@@ -236,7 +237,7 @@ export default function UserManagement() {
           <div className="relative">
             <input
               type="text"
-              placeholder="Search users..."
+              placeholder="Search by name, student no., or email..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               autoComplete="off"
@@ -555,23 +556,31 @@ function UserSection({ title, icon, users, onManage, onRecover, onDelete }) {
           <tbody className="divide-y divide-slate-800">
             {users.map(user => (
               <tr key={user.id} className="hover:bg-slate-800/50 transition">
+                {/* USER */}
                 <td className="p-4">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-gradient-to-br from-purple-600 to-pink-600 rounded-full flex items-center justify-center font-bold">
-                      {user.username[0].toUpperCase()}
+                    <div className="w-10 h-10 bg-gradient-to-br from-purple-600 to-pink-600 rounded-full flex items-center justify-center font-bold text-sm flex-shrink-0">
+                      {(user.full_name || user.username)[0].toUpperCase()}
                     </div>
                     <div>
-                      <p className="font-semibold text-white">{user.username}</p>
-                      <p className="text-slate-400 text-sm truncate max-w-[200px]">{user.email}</p>
+                      <p className="font-semibold text-white">
+                        {user.full_name || user.username}
+                      </p>
+                      <p className="text-slate-400 text-xs truncate max-w-[200px]">{user.email}</p>
+                      {user.role === 'student' && (
+                        <span className="font-mono text-xs text-yellow-300 bg-yellow-900/20 border border-yellow-600/30 px-1.5 py-0.5 rounded mt-0.5 inline-block">
+                          {user.username}
+                        </span>
+                      )}
                     </div>
                   </div>
                 </td>
+                {/* BLOCK */}
                 <td className="p-4">
                   {user.blocks && user.blocks.length > 0 ? (
                     <div className="flex flex-wrap gap-1">
-                      {/* ✅ Deduplicate by section_code so we don't see [101] [101] */}
                       {[...new Set(user.blocks.map(b => b.section_code))].map((code, idx) => (
-                        <span 
+                        <span
                           key={idx}
                           className="px-2.5 py-1 bg-purple-600/20 text-purple-300 rounded-lg text-sm font-bold border border-purple-600/40 shadow-sm"
                           title={`Section ${code}`}
@@ -580,12 +589,19 @@ function UserSection({ title, icon, users, onManage, onRecover, onDelete }) {
                         </span>
                       ))}
                     </div>
+                  ) : user.is_irregular ? (
+                    <span className="px-2.5 py-1 bg-orange-600/20 text-orange-300 rounded-lg text-xs font-bold border border-orange-600/40">
+                      IRR
+                    </span>
                   ) : (
                     <span className="text-slate-500 text-sm italic">Unassigned</span>
                   )}
                 </td>
+                {/* LEVEL */}
                 <td className="p-4 text-white font-mono">{user.level}</td>
+                {/* XP */}
                 <td className="p-4 text-yellow-400 font-mono">{user.xp}</td>
+                {/* STATUS */}
                 <td className="p-4">
                   <span className={`px-3 py-1 rounded-lg text-xs font-bold ${
                     user.is_active ? 'bg-green-600/30 text-green-300 border border-green-600/50' : 'bg-red-600/30 text-red-300 border border-red-600/50'
@@ -593,27 +609,24 @@ function UserSection({ title, icon, users, onManage, onRecover, onDelete }) {
                     {user.is_active ? '✅ Active' : '⛔ Inactive'}
                   </span>
                 </td>
-                <td className="p-4">
-                  <div className="flex gap-2 justify-end">
-                    {/* Button 1: Manage (Purple) */}
+                {/* ACTIONS */}
+                <td className="p-4 w-44">
+                  <div className="flex gap-1 items-center">
                     <button
                       onClick={() => onManage(user)}
-                      className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 rounded text-sm transition text-white font-bold"
+                      className="flex-1 px-2 py-1.5 bg-purple-600 hover:bg-purple-500 rounded text-xs transition text-white font-bold whitespace-nowrap"
                     >
                       Manage
                     </button>
-                    {/* Button 2: Recover (Blue) */}
                     <button
                       onClick={() => onRecover(user)}
-                      className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 rounded text-sm transition text-white font-bold"
+                      className="flex-1 px-2 py-1.5 bg-blue-600 hover:bg-blue-500 rounded text-xs transition text-white font-bold whitespace-nowrap"
                     >
                       Recover
                     </button>
-                    {/* Button 3: Delete (Red) */}
                     <button
                       onClick={() => onDelete(user.id)}
-                      className="px-3 py-1.5 bg-red-600/20 hover:bg-red-600 rounded text-sm transition text-red-400 hover:text-white font-bold border border-red-600/50"
-                      title="Delete user"
+                      className="flex-1 px-2 py-1.5 bg-red-600/20 hover:bg-red-600 rounded text-xs transition text-red-400 hover:text-white font-bold border border-red-600/50 whitespace-nowrap"
                     >
                       Delete
                     </button>
