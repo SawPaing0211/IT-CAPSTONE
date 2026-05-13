@@ -618,7 +618,7 @@ export default function StudentDashboard({ user, onLogout }) {
   setActiveTab('spellforge')
 }
   const handleVictory = (xpEarned, newLevel) => {
-  // ✅ Mark quest as completed in localStorage
+  // Mark quest as completed in localStorage
   if (selectedQuest?.id) {
     localStorage.setItem(`quest_completed_${selectedQuest.id}`, 'true')
     console.log(`✅ Quest ${selectedQuest.id} marked as completed`)
@@ -644,7 +644,7 @@ export default function StudentDashboard({ user, onLogout }) {
       name: subject.name,  // Subject name
       semester: subject.semester,
       instructor: subject.instructor,
-      subject_id: subject.id  // ✅ Store the specific subject_id!
+      subject_id: subject.id  // Store the specific subject_id
     })
   setCourseTab('lessons')
 }
@@ -780,18 +780,19 @@ export default function StudentDashboard({ user, onLogout }) {
 
           <div className="relative" ref={profileRef}>
             <button onClick={() => setShowProfileMenu(!showProfileMenu)} className="flex items-center gap-3 px-3 py-2 bg-slate-800/80 hover:bg-slate-700/80 border border-purple-600/40 rounded-xl transition group">
-              <div className="w-9 h-9 bg-gradient-to-br from-purple-600 to-pink-600 rounded-lg flex items-center justify-center font-bold text-sm shadow-lg">{user.username?.[0]?.toUpperCase() || 'U'}</div>
+              <div className="w-9 h-9 bg-gradient-to-br from-purple-600 to-pink-600 rounded-lg flex items-center justify-center font-bold text-sm shadow-lg">{(user.full_name || user.username)?.[0]?.toUpperCase() || 'U'}</div>
               <div className="hidden sm:block text-left">
-                <p className="font-semibold text-sm text-white">{user.username}</p>
-                <p className="text-[10px] text-slate-400">Level {heroStats?.level || 1}</p>
+                <p className="font-semibold text-sm text-white">{user.full_name || user.username}</p>
+                <p className="text-[10px] text-slate-400">{user.username}</p>
               </div>
               <span className="text-slate-400 group-hover:text-white transition">▼</span>
             </button>
             {showProfileMenu && (
               <div className="absolute right-0 mt-2 w-56 bg-slate-900 border border-purple-600/40 rounded-xl shadow-2xl shadow-purple-900/50 z-50 overflow-hidden">
                 <div className="p-4 border-b border-purple-600/30">
-                  <p className="font-bold text-white">{user.username}</p>
-                  <p className="text-xs text-slate-400">{user.email}</p>
+                  <p className="font-bold text-white">{user.full_name || user.username}</p>
+                  <p className="text-xs text-purple-300 font-mono mt-0.5">🎓 {user.username}</p>
+                  <p className="text-xs text-slate-400 mt-0.5 truncate">📧 {user.email}</p>
                   <div className="mt-2 flex items-center gap-2">
                     <span className="px-2 py-0.5 bg-purple-600/30 text-purple-300 text-xs rounded-full">Lvl {heroStats?.level || 1}</span>
                     <span className="px-2 py-0.5 bg-yellow-600/30 text-yellow-300 text-xs rounded-full">{heroStats?.total_xp || 0} XP</span>
@@ -888,7 +889,7 @@ export default function StudentDashboard({ user, onLogout }) {
             {/* Course Navigation Tabs */}
             <div className="flex gap-2 border-b border-purple-600/40 pb-2">
               {[
-                { id: 'lessons', label: '📚 Lessons' },  // ✅ NEW: Added Lessons tab
+                { id: 'lessons', label: '📚 Lessons' },  
                 { id: 'board', label: '🗺️ Quest Board' },
                 { id: 'log', label: '📜 Quest Log' },
                 { id: 'sandbox', label: '🧪 Sandbox' },
@@ -910,7 +911,7 @@ export default function StudentDashboard({ user, onLogout }) {
 
             {/* Course Content Area */}
             <div className="min-h-[500px]">
-              {/* ✅ NEW: Lessons Tab Content */}
+              {/* Lessons Tab Content */}
               {courseTab === 'lessons' && (
                 <StudentLessons subjectId={selectedBlock.subject_id} blockId={selectedBlock.id} blockName={selectedBlock.name} />
               )}

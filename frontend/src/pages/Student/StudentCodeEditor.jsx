@@ -156,7 +156,7 @@ const formatErrorOutput = (rawOutput, language) => {
 
   // Load saved code on mount + detect role + check completion
 useEffect(() => {
-  // ✅ Detect user role from JWT
+  // Detect user role from JWT
   const token = localStorage.getItem('token')
   if (token) {
     try {
@@ -169,7 +169,7 @@ useEffect(() => {
   }
   
   if (quest?.id) {
-    // ✅ Load saved code for this quest + language
+    // Load saved code for this quest + language
     const saved = localStorage.getItem(`quest_code_${quest.id}_${language}`)
     if (saved) {
       setSavedCode(saved)
@@ -181,7 +181,7 @@ useEffect(() => {
       setCode(starter?.[language] || '')
     }
     
-    // ✅ FIXED: Wrap async logic in named async function
+    // FIXED: Wrap async logic in named async function
     const checkSubmission = async () => {
       try {
         const token = localStorage.getItem('token')
@@ -201,7 +201,7 @@ useEffect(() => {
       }
     }
     
-    checkSubmission() // ✅ Call the async function
+    checkSubmission() // Call the async function
   }
 }, [quest, language]) // Re-run when quest or language changes
 
@@ -314,7 +314,7 @@ useEffect(() => {
     }
   }
 
-  // ✅ NEW: Test code for instructors (no submission, no XP)
+  // NEW: Test code for instructors (no submission, no XP)
   const handleTestCode = async () => {
     setIsLoading(true)
     setOutput(null)
@@ -384,12 +384,12 @@ useEffect(() => {
       const data = await api.post('/api/submissions', { problem_id: quest.id, code, language })
       setOutput({ ...data, is_run_mode: false })
       
-      // ✅ Save code to localStorage on submit
+      // Save code to localStorage on submit
       if (quest?.id) {
         localStorage.setItem(`quest_code_${quest.id}_${language}`, code)
       }
       
-      // ✅ Lock submit after ANY submission (accepted, error, partial, etc.)
+      // Lock submit after ANY submission (accepted, error, partial, etc.)
       setHasSubmitted(true)
       setPriorSubmission(data)
 
@@ -800,19 +800,19 @@ useEffect(() => {
               options={editorOptions}
               onMount={(editor, monaco) => {
                 editorRef.current = editor
-                monacoRef.current = monaco   // ← ADD THIS
+                monacoRef.current = monaco   
                 setTimeout(() => editor.layout(), 100)
               }}
             />
           </div>
 
-          {/* Console (fixed 192px, shrink-0 — never grows or shrinks) */}
+          {/* Console */}
           <div
             id="console-wrapper"
             className="flex flex-col bg-slate-900/80 border-t border-purple-600/20"
             style={{ height: '192px', minHeight: '192px', flexShrink: 0, overflow: 'hidden' }}
           >
-            {/* ✅ Instructor mode banner — OUTSIDE the flex header row */}
+            {/* Instructor mode banner */}
             {(userRole === 'instructor' || userRole === 'super_admin') && (
               <div className="px-4 py-1 bg-yellow-600/10 border-b border-yellow-600/20 text-[10px] text-yellow-400 text-center shrink-0">
                 ⚠️ Test mode: Results won't be saved or affect XP
@@ -832,7 +832,7 @@ useEffect(() => {
                 >
                   {isLoading ? '⏳' : '▶'} Run <span className="hidden sm:inline">(Ctrl+Enter)</span>
                 </button>
-                {/* ✅ CONDITIONAL: Instructor sees "Test Code", Student sees "Submit" */}
+                {/* CONDITIONAL: Instructor sees "Test Code", Student sees "Submit" */}
                 {userRole === 'instructor' || userRole === 'super_admin' ? (
                   <button
                     onClick={handleTestCode}

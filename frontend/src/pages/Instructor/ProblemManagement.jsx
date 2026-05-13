@@ -63,7 +63,7 @@ export default function ProblemManagement({ classId }) {
     return (
       <div className="flex flex-col items-center justify-center py-20 gap-4">
         <div className="animate-spin rounded-full h-10 w-10 border-4 border-blue-500 border-t-transparent"></div>
-        <p className="text-slate-500 text-sm animate-pulse">Loading problems...</p>
+        <p className="text-slate-500 text-sm animate-pulse">Loading activities...</p>
       </div>
     )
   }
@@ -74,8 +74,8 @@ export default function ProblemManagement({ classId }) {
       {/* Header */}
       <div className="flex justify-between items-start">
         <div>
-          <h1 className="text-3xl font-bold text-white tracking-tight">Problem Management</h1>
-          <p className="text-slate-400 mt-1 text-sm">Create and manage coding challenges for your students</p>
+          <h1 className="text-3xl font-bold text-white tracking-tight">Activity Management</h1>
+          <p className="text-slate-400 mt-1 text-sm">Create and manage coding activities for your students</p>
         </div>
         <button
           onClick={() => navigate('/instructor/create-problem')}
@@ -105,7 +105,7 @@ export default function ProblemManagement({ classId }) {
         <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 text-base pointer-events-none">🔍</span>
         <input
           type="text"
-          placeholder="Search problems..."
+          placeholder="Search activities..."
           value={search}
           onChange={e => setSearch(e.target.value)}
           className="w-full bg-slate-900 border border-slate-800 rounded-xl px-5 py-3 pl-11 text-white placeholder-slate-600 focus:border-blue-500/60 focus:outline-none transition text-sm"
@@ -117,7 +117,7 @@ export default function ProblemManagement({ classId }) {
         <table className="w-full text-left text-sm">
           <thead>
             <tr className="bg-slate-800/50 text-slate-500 text-xs uppercase tracking-wider">
-              <th className="px-5 py-3.5 font-semibold">Problem</th>
+              <th className="px-5 py-3.5 font-semibold">Activity</th>
               <th className="px-5 py-3.5 font-semibold">Type</th>
               <th className="px-5 py-3.5 font-semibold hidden md:table-cell">Languages</th>
               <th className="px-5 py-3.5 font-semibold">Difficulty</th>
@@ -132,7 +132,7 @@ export default function ProblemManagement({ classId }) {
                 <td colSpan="7" className="py-16 text-center">
                   <div className="flex flex-col items-center gap-3 text-slate-500">
                     <span className="text-5xl">📝</span>
-                    <p className="font-medium">No problems found</p>
+                    <p className="font-medium">No activities found</p>
                     <button
                       onClick={() => navigate('/instructor/create-problem')}
                       className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-bold transition mt-1"
@@ -225,14 +225,14 @@ export default function ProblemManagement({ classId }) {
                       <div className="flex justify-end gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
                         <button
                           onClick={() => navigate(`/instructor/create-problem?edit=${problem.id}`)}
-                          title="Edit Problem"
+                          title="Edit Activity"
                           className="p-2 hover:bg-blue-500/10 rounded-lg transition text-slate-400 hover:text-blue-400"
                         >
                           ✏️
                         </button>
                         <button
                           onClick={() => handleDelete(problem.id)}
-                          title="Delete Problem"
+                          title="Delete Activity"
                           className="p-2 hover:bg-red-500/10 rounded-lg transition text-slate-400 hover:text-red-400"
                         >
                           🗑️
@@ -250,7 +250,7 @@ export default function ProblemManagement({ classId }) {
       {/* Footer count */}
       {filtered.length > 0 && (
         <p className="text-slate-600 text-xs text-right">
-          Showing {filtered.length} of {problems.length} problems
+          Showing {filtered.length} of {problems.length} activities
         </p>
       )}
     </div>

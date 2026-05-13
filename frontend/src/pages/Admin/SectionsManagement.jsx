@@ -287,7 +287,7 @@ function SectionFormModal({ section, subjects, onClose, onSuccess }) {
           {/* Section No + Capacity */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">Section No. *</label>
+              <label className="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">Class Code *</label>
               <input value={form.section_no} onChange={e => setForm({ ...form, section_no: e.target.value })}
                 placeholder="e.g., 29144" className={inputCls} />
             </div>
@@ -314,7 +314,7 @@ function SectionFormModal({ section, subjects, onClose, onSuccess }) {
           {/* Block (optional) */}
           <div>
             <label className="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">
-              Block <span className="text-slate-600 normal-case font-normal">(optional — for regular blocks)</span>
+              Block Code <span className="text-slate-600 normal-case font-normal">(optional — e.g., it101, for regular students only)</span>
             </label>
             <select value={form.block_id} onChange={e => setForm({ ...form, block_id: e.target.value })} className={inputCls}>
               <option value="">— No Block (Irregular) —</option>
@@ -416,15 +416,15 @@ function EnrollmentsModal({ section, onClose }) {
               <p className="text-slate-400">No students enrolled yet</p>
             </div>
           ) : (
-            <div className="space-y-2 max-h-80 overflow-y-auto">
+            <div className="space-y-2 max-h-80 overflow-y-auto will-change-scroll overscroll-contain">
               {data?.students?.map(s => (
-                <div key={s.enrollment_id} className="flex items-center gap-3 p-3 bg-slate-800/60 rounded-xl border border-slate-700">
+                <div key={s.enrollment_id} className="flex items-center gap-3 p-3 bg-slate-800/60 rounded-xl border border-slate-700 transform-gpu">
                   <div className="w-9 h-9 bg-gradient-to-br from-purple-600 to-pink-600 rounded-full flex items-center justify-center font-bold text-sm flex-shrink-0">
-                    {s.username[0].toUpperCase()}
+                    {(s.full_name || s.username)[0].toUpperCase()}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-white font-semibold text-sm truncate">{s.username}</p>
-                    <p className="text-slate-400 text-xs truncate">{s.email}</p>
+                    <p className="text-white font-semibold text-sm truncate">{s.full_name || s.username}</p>
+                    <p className="text-slate-400 text-xs truncate">{s.username} · {s.email}</p>
                   </div>
                   <p className="text-slate-500 text-xs">{new Date(s.enrolled_at).toLocaleDateString()}</p>
                 </div>
@@ -522,7 +522,9 @@ export default function SectionsManagement() {
       <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
         <div>
           <h1 className="text-3xl font-bold text-white">Subject Sections</h1>
-          <p className="text-slate-400 mt-1">Manage subject sections for regular and irregular students</p>
+          <p className="text-slate-400 mt-1">
+            Manage <strong className="text-purple-300">Class Codes</strong> (e.g., 29144) per subject — used for regular &amp; irregular student enrollment
+          </p>
         </div>
         <div className="flex gap-3 flex-wrap">
           <button onClick={fetchSections}
@@ -603,7 +605,7 @@ export default function SectionsManagement() {
             <table className="w-full">
               <thead className="bg-slate-800/80 border-b border-purple-600/30">
                 <tr>
-                  {['Section No.', 'Subject', 'Block', 'Schedule', 'Room', 'Enrolled', 'Status', 'Actions'].map(h => (
+                  {['Class Code', 'Subject', 'Block Code', 'Schedule', 'Room', 'Enrolled', 'Status', 'Actions'].map(h => (
                     <th key={h} className="text-left px-4 py-3 text-slate-400 font-medium text-xs uppercase tracking-wider whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
@@ -630,7 +632,7 @@ export default function SectionsManagement() {
                         </div>
                       </td>
 
-                      {/* Block */}
+                      {/* Block Code (e.g., IT101) */}
                       <td className="px-4 py-3">
                         {s.block_code
                           ? <span className="px-2 py-0.5 bg-blue-600/20 text-blue-300 border border-blue-600/30 rounded text-xs font-bold">{s.block_code}</span>

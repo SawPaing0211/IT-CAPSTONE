@@ -14,18 +14,18 @@ export default function SubjectsManagement() {
     units: '',
     department: '',
     year_level: '',
-    subject_type: 'lecture',
+    subject_type: 'lab',
   })
   const [toast, setToast] = useState(null)
   const [newSubject, setNewSubject] = useState({
-    internal_subject_no: '',  // ✅ Adamson's Subject Number (e.g., 290007)
+    internal_subject_no: '',
     name: '',
     description: '',
-    subject_code: '',         // Course code (e.g., IT115)
+    subject_code: '',
     units: '',
     department: '',
     year_level: '',
-    subject_type: 'lecture',
+    subject_type: 'lab',
   })
 
   useEffect(() => {
@@ -78,7 +78,6 @@ export default function SubjectsManagement() {
 
       if (res.ok) {
         setShowCreateModal(false)
-        // ✅ Reset all fields including internal_subject_no
         setNewSubject({ 
           internal_subject_no: '',
           name: '', 
@@ -87,7 +86,7 @@ export default function SubjectsManagement() {
           units: '', 
           department: '', 
           year_level: '', 
-          subject_type: 'lecture' 
+          subject_type: 'lab' 
         })
         await fetchSubjects()
         alert('✅ Subject created successfully!')
@@ -116,7 +115,7 @@ export default function SubjectsManagement() {
       units: subject.units ? String(subject.units) : '',
       department: subject.department || '',
       year_level: subject.year_level ? String(subject.year_level) : '',
-      subject_type: subject.subject_type || 'lecture',
+      subject_type: subject.subject_type || 'lab',
     })
     setShowEditModal(true)
   }
@@ -267,11 +266,11 @@ export default function SubjectsManagement() {
                   <label className="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">Type</label>
                   <select value={editForm.subject_type} onChange={e => setEditForm({...editForm, subject_type: e.target.value})}
                     className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-white outline-none focus:border-purple-500 transition text-sm">
-                    <option value="lecture">Lecture</option>
-                    <option value="lab">Lab</option>
+                    <option value="lab">Lab ✓</option>
                     <option value="lecture_lab">Lec + Lab</option>
                     <option value="elective">Elective</option>
                   </select>
+                  <p className="text-yellow-500/80 text-[10px] mt-1">Only Lab subjects supported</p>
                 </div>
               </div>
               <div>
@@ -507,11 +506,11 @@ export default function SubjectsManagement() {
                     onChange={(e) => setNewSubject({...newSubject, subject_type: e.target.value})}
                     className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-white outline-none focus:border-purple-500 transition text-sm"
                   >
-                    <option value="lecture">Lecture</option>
-                    <option value="lab">Lab</option>
+                    <option value="lab">Lab ✓</option>
                     <option value="lecture_lab">Lec + Lab</option>
                     <option value="elective">Elective</option>
                   </select>
+                  <p className="text-yellow-500/80 text-[10px] mt-1">Only Lab subjects supported</p>
                 </div>
               </div>
 
@@ -588,7 +587,7 @@ export default function SubjectsManagement() {
                       units: '', 
                       department: '', 
                       year_level: '', 
-                      subject_type: 'lecture' 
+                      subject_type: 'lab' 
                     })
                   }}
                   className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 rounded-xl text-white font-bold transition border border-slate-700"

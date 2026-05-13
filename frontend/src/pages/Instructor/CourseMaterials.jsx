@@ -38,7 +38,7 @@ export default function CourseMaterials({ classId }) {
     fetchSubjects()
   }, [])
 
-  // ✅ Fetch lessons for this class
+  // Fetch lessons for this class
   useEffect(() => {
     const fetchLessons = async () => {
       try {
@@ -48,7 +48,7 @@ export default function CourseMaterials({ classId }) {
         })
         if (res.ok) {
           const data = await res.json()
-          // ✅ Filter lessons by classId (block_id)
+          // Filter lessons by classId (block_id)
           const filtered = classId 
             ? data.filter(l => !l.block_id || l.block_id === parseInt(classId))
             : data
@@ -107,7 +107,7 @@ export default function CourseMaterials({ classId }) {
     setFormData(prev => ({ ...prev, files: prev.files.filter((_, i) => i !== index) }))
   }
 
-  // ✅ NEW: Publish lesson function
+  // Publish lesson function
   const handlePublish = async (lessonId) => {
     try {
       const token = localStorage.getItem('token')
@@ -198,7 +198,7 @@ export default function CourseMaterials({ classId }) {
       setSuccess('🎉 Lesson created successfully!')
       setFormData({ title: '', description: '', week_number: 1, subject_id: '', block_id: '', is_published: false, files: [] })
       setShowCreateForm(false)
-      // ✅ Refresh lessons list after creating
+      // Refresh lessons list after creating
       setLoadingLessons(true)
       const res = await fetch('http://localhost:5000/api/lessons', {
         headers: { 'Authorization': `Bearer ${token}` }
@@ -223,14 +223,14 @@ export default function CourseMaterials({ classId }) {
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-3xl font-bold text-white mb-2">Course Materials & Lessons</h1>
+          <h1 className="text-3xl font-bold text-white mb-2">Course Materials & Modules</h1>
           <p className="text-slate-400">Create structured learning modules with file attachments</p>
         </div>
         <button 
           onClick={() => setShowCreateForm(true)}
           className="px-6 py-3 bg-green-600 hover:bg-green-500 text-white rounded-xl font-bold transition shadow-lg shadow-green-600/20 hover:scale-105 active:scale-95"
         >
-          ➕ New Lesson
+          ➕ New Module
         </button>
       </div>
 
@@ -299,7 +299,7 @@ export default function CourseMaterials({ classId }) {
               </select>
             )}
             
-            {/* ✅ Dynamic helper text showing actual blocks */}
+            {/* Dynamic helper text showing actual blocks */}
             {formData.subject_id && blocks.length > 0 && !loadingBlocks && (
               <p className="text-slate-500 text-xs mt-1">
                 🌐 "All My Blocks" = Visible to sections: {blocks.map(b => b.section_code).join(', ')}
@@ -365,12 +365,12 @@ export default function CourseMaterials({ classId }) {
       ) : lessons.length === 0 ? (
         <div className="text-center py-12 bg-slate-900 border border-slate-800 rounded-2xl">
           <div className="text-5xl mb-4 animate-bounce">📚</div>
-          <p className="text-slate-400 text-lg mb-2">{classId ? 'No lessons for this class yet' : 'No lessons created yet'}</p>
+          <p className="text-slate-400 text-lg mb-2">{classId ? 'No modules for this class yet' : 'No lessons created yet'}</p>
           <p className="text-slate-500 mb-6">Start by creating your first learning module above.</p>
-          <button onClick={() => setShowCreateForm(true)} className="px-6 py-3 bg-green-600 hover:bg-green-500 text-white rounded-xl font-bold transition shadow-lg hover:scale-105 active:scale-95">Create First Lesson</button>
+          <button onClick={() => setShowCreateForm(true)} className="px-6 py-3 bg-green-600 hover:bg-green-500 text-white rounded-xl font-bold transition shadow-lg hover:scale-105 active:scale-95">Create First Module</button>
         </div>
       ) : (
-        // ✅ Lessons List View
+        // Lessons List View
         <div className="space-y-4">
           {/* Filter Tabs */}
           <div className="flex gap-2 mb-4">

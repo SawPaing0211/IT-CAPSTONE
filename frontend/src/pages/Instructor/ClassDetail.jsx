@@ -24,7 +24,7 @@ export default function ClassDetail() {
         const token = localStorage.getItem('token')
         const headers = { 'Authorization': `Bearer ${token}` }
 
-        // ✅ Fetch SINGLE class details (not all classes)
+        // Fetch SINGLE class details (not all classes)
         const classRes = await fetch(`http://localhost:5000/api/instructor/classes/${id}`, { headers })
         if (classRes.ok) {
           const data = await classRes.json()
@@ -51,7 +51,7 @@ export default function ClassDetail() {
       }
     }
     fetchClassDetail()
-  }, [id]) // ✅ Dependency on id
+  }, [id]) 
 
   const filtered = students.filter(s =>
     s.username.toLowerCase().includes(search.toLowerCase()) ||
@@ -66,8 +66,8 @@ export default function ClassDetail() {
 
   // Tabs configuration
   const tabs = [
-    { id: 'lessons', label: '📚 Lessons', component: <CourseMaterials classId={id} /> },
-    { id: 'problems', label: '📝 Problems', component: <ProblemManagement classId={id} /> },
+    { id: 'lessons', label: '📚 Modules', component: <CourseMaterials classId={id} /> },
+    { id: 'problems', label: '📝 Activities', component: <ProblemManagement classId={id} /> },
     { id: 'announcements', label: '📢 Announcements', component: <Announcements classId={id} /> },
     { id: 'plagiarism', label: '🔍 Plagiarism', component: <PlagiarismCheck classId={id} /> },
     { id: 'analytics', label: '📊 Analytics', component: <Analytics classId={id} /> },
@@ -108,7 +108,7 @@ export default function ClassDetail() {
             <p className="text-slate-400">{classInfo.subjects?.join(' · ') || classInfo.name}</p>
           </div>
         </div>
-        {/* ✅ Removed "+ Add Student" button */}
+        {/* Removed "+ Add Student" button */}
         <div className="flex gap-3">
           <button className="px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 font-medium transition">
             📊 View Analytics

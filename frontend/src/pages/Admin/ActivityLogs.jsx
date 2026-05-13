@@ -109,12 +109,6 @@ export default function ActivityLogs() {
           >
             <span>📥</span> Export CSV
           </button>
-          <button 
-            onClick={clearOldLogs}
-            className="px-4 py-2 bg-red-600/20 hover:bg-red-600/40 border border-red-600/50 rounded-lg transition flex items-center gap-2 text-red-300"
-          >
-            <span>🗑️</span> Clear Old Logs
-          </button>
         </div>
       </div>
 

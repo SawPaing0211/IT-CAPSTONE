@@ -1,12 +1,12 @@
 import { useState, useEffect } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'  // ✅ changed useparams to usesearchparams
+import { useNavigate, useSearchParams } from 'react-router-dom'  // changed useparams to usesearchparams
 
 export default function CreateProblem() {
   const navigate = useNavigate()
-  const [searchParams] = useSearchParams()  // ✅ Read query params
-  const problemId = searchParams.get('edit')  // ✅ Get problem ID from ?edit=123
+  const [searchParams] = useSearchParams()  // Read query params
+  const problemId = searchParams.get('edit')  // Get problem ID from ?edit=123
   const [blocks, setBlocks] = useState([])
-  const [isEditing, setIsEditing] = useState(!!problemId)  // ✅ Editing mode if problemId exists
+  const [isEditing, setIsEditing] = useState(!!problemId)  // Editing mode if problemId exists
   const [assignedSubjects, setAssignedSubjects] = useState([])
   const [blocksBySubject, setBlocksBySubject] = useState([])
   const [selectedSubjectId, setSelectedSubjectId] = useState(null)
@@ -42,13 +42,13 @@ export default function CreateProblem() {
     test_cases: [{ input: '', expected: '' }]
   })
 
-  // ✅ Fetch subjects AND blocks (and problem data if editing)
+  // Fetch subjects AND blocks (and problem data if editing)
 useEffect(() => {
   const fetchData = async () => {
     try {
       const token = localStorage.getItem('token')
       
-      // ✅ Check if we're editing an existing problem
+      // Check if we're editing an existing problem
       if (problemId) {
         setIsEditing(true)
         // Fetch existing problem data
@@ -58,7 +58,7 @@ useEffect(() => {
         if (problemRes.ok) {
           const problemData = await problemRes.json()
           
-          // ✅ Populate form with existing data
+          // Populate form with existing data
           setFormData({
             ...formData,
             title: problemData.title,
@@ -81,7 +81,7 @@ useEffect(() => {
             test_cases: problemData.test_cases || [{ input: '', expected: '' }]
           })
           
-          // ✅ Set selected subject (with delay to ensure subjects are loaded)
+          // Set selected subject (with delay to ensure subjects are loaded)
           if (problemData.subject_id) {
             // Wait a tick for assignedSubjects to populate
             setTimeout(() => {
@@ -91,7 +91,7 @@ useEffect(() => {
         }
       }
       
-      // ✅ Fetch assigned subjects
+      // Fetch assigned subjects
       const subjectsRes = await fetch('http://localhost:5000/api/instructor/assigned-subjects', {
         headers: { 'Authorization': `Bearer ${token}` }
       })
@@ -100,7 +100,7 @@ useEffect(() => {
         setAssignedSubjects(subjectsData)
       }
       
-      // ✅ Fetch blocks
+      // Fetch blocks
       const res = await fetch('http://localhost:5000/api/instructor/classes', {
         headers: { 'Authorization': `Bearer ${token}` }
       })
@@ -113,7 +113,7 @@ useEffect(() => {
     }
   }
   fetchData()
-}, [problemId])  // ✅ Re-run if problemId changes
+}, [problemId])  
 
   useEffect(() => {
     if (!selectedSubjectId) {
@@ -201,7 +201,7 @@ useEffect(() => {
   const handleSubmit = async (e) => {
     e.preventDefault()
     
-    // ✅ XP Validation based on difficulty
+    // XP Validation based on difficulty
     const maxXP = {
       'Easy': 100,
       'Medium': 250,
@@ -213,7 +213,7 @@ useEffect(() => {
       return
     }
     
-    // ✅ NEW: Subject validation
+    // Subject validation
     if (!selectedSubjectId) {
       alert('❌ Please select a course subject for this problem.')
       return
@@ -232,7 +232,7 @@ useEffect(() => {
     try {
   const token = localStorage.getItem('token')
   
-  // ✅ Prepare payload with subject_id
+  // Prepare payload with subject_id
   const payload = {
     ...formData,
     subject_id: selectedSubjectId,
@@ -240,7 +240,7 @@ useEffect(() => {
     is_published: true
   }
   
-  // ✅ EDIT vs CREATE logic
+  // EDIT vs CREATE logic
   const url = isEditing 
     ? `http://localhost:5000/api/problems/${problemId}`
     : 'http://localhost:5000/api/problems'
@@ -257,11 +257,11 @@ useEffect(() => {
       })
       
       if (res.ok) {
-        alert(isEditing ? '✅ Problem updated successfully!' : '✅ Problem created successfully!')
+        alert(isEditing ? '✅ Activity updated successfully!' : '✅ Activity created successfully!')
         navigate('/instructor/problems')
       } else {
         const error = await res.json()
-        alert(`❌ Failed to create problem: ${error.error}`)
+        alert(`❌ Failed to create activity: ${error.error}`) 
       }
     } catch (err) {
       console.error('Failed to create problem:', err)
@@ -269,13 +269,14 @@ useEffect(() => {
     }
   }
 
-  const sections = [
+  const sections = [ 
     { id: 1, title: 'Basic Information', icon: '📋' },
     { id: 2, title: 'Problem Type & Languages', icon: '💻' },
     { id: 3, title: 'Visibility & Settings', icon: '🔧' },
     { id: 4, title: 'Starter Code', icon: '📝' },
     { id: 5, title: 'Test Cases', icon: '🧪' },
-    { id: 6, title: 'Hints', icon: '💡' }
+    { id: 6, title: 'Hints', icon: '💡' },
+{ id: 7, title: 'Review', icon: '📋' }
   ]
 
   return (
@@ -287,9 +288,9 @@ useEffect(() => {
         </button>
         <div>
           <h1 className="text-3xl font-bold text-white">
-            {isEditing ? '✏️ Edit Problem' : '➕ Create New Problem'}
+            {isEditing ? '✏️ Edit Activity' : '➕ Create New Activity'}
           </h1> 
-          <p className="text-slate-400">Design a coding challenge for your students</p>
+          <p className="text-slate-400">Design a coding activity for your students</p>
         </div>
       </div>
 
@@ -326,7 +327,7 @@ useEffect(() => {
         {/* Section 1: Basic Information */}
         {activeSection === 1 && (
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6">
-            {/* ✅ NEW: Course Subject Selector */}
+            {/* Course Subject Selector */}
             <div>
               <label className="block text-slate-400 text-sm mb-2">Course Subject *</label>
               <select
@@ -346,7 +347,7 @@ useEffect(() => {
             </div>
 
             <h2 className="text-2xl font-bold text-white flex items-center gap-2">
-              <span>📋</span> Basic Information
+              <span>📋</span> Activity Details
             </h2>
             
             <div>
@@ -392,7 +393,7 @@ useEffect(() => {
               <textarea
                 value={formData.description}
                 onChange={(e) => handleInputChange('description', e.target.value)}
-                placeholder="Describe the problem statement here..."
+                placeholder="Describe the activity details here..."
                 rows="6"
                 className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:border-blue-500 outline-none resize-none"
                 required
@@ -492,7 +493,7 @@ useEffect(() => {
               </label>
             </div>
 
-            {/* ✅ Block Visibility - Filtered by Selected Subject */}
+            {/* Block Visibility - Filtered by Selected Subject */}
             <div>
               <label className="block text-slate-400 text-sm mb-3">Visible To Blocks</label>
               <div className="bg-slate-800 rounded-xl p-4 space-y-2 max-h-60 overflow-y-auto border border-slate-700">
@@ -707,6 +708,43 @@ useEffect(() => {
           </div>
         )}
 
+        {/* Section 7: Review */}
+        {activeSection === 7 && (
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6">
+            <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+              <span>📋</span> Review Activity
+            </h2>
+            <div className="space-y-4">
+              <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700">
+                <p className="text-slate-400 text-xs uppercase tracking-wider mb-1">Title</p>
+                <p className="text-white font-semibold">{formData.title || <span className="text-slate-500 italic">Not set</span>}</p>
+              </div>
+              <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700">
+                <p className="text-slate-400 text-xs uppercase tracking-wider mb-1">Difficulty / XP</p>
+                <p className="text-white font-semibold">{formData.difficulty} — {formData.xp_reward} XP</p>
+              </div>
+              <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700">
+                <p className="text-slate-400 text-xs uppercase tracking-wider mb-1">Type / Languages</p>
+                <p className="text-white font-semibold capitalize">{formData.problem_type} · {formData.languages.join(', ')}</p>
+              </div>
+              <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700">
+                <p className="text-slate-400 text-xs uppercase tracking-wider mb-1">Test Cases</p>
+                <p className="text-white font-semibold">{formData.test_cases.length} test case(s) defined</p>
+              </div>
+              <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700">
+                <p className="text-slate-400 text-xs uppercase tracking-wider mb-1">Hints</p>
+                <p className="text-white font-semibold">{formData.hints.length} hint(s) added</p>
+              </div>
+              <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700">
+                <p className="text-slate-400 text-xs uppercase tracking-wider mb-1">Visible To Blocks</p>
+                <p className="text-white font-semibold">
+                  {formData.visible_to_blocks.length === 0 ? 'All blocks' : `${formData.visible_to_blocks.length} block(s) selected`}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Navigation Buttons */}
         <div className="flex justify-between pt-6 border-t border-slate-800">
           <button
@@ -731,7 +769,7 @@ useEffect(() => {
               type="submit"
               className="px-8 py-3 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 rounded-xl text-white font-bold transition shadow-lg shadow-blue-600/20"
             >
-              {isEditing ? '✨ Update Problem' : '✨ Create Problem'}
+              {isEditing ? '✨ Update Activity' : '✨ Create Activity'}
             </button>
           )}
         </div>

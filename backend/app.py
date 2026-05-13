@@ -23,6 +23,8 @@ db = SQLAlchemy(app)
 
 # ===== RATE LIMITING =====
 rate_limit_store = {}
+login_fail_store = {}   # { ip: {'count': n, 'locked_until': timestamp} }
+
 def rate_limit(max_calls=5, period=60):
     def decorator(f):
         @wraps(f)
@@ -74,6 +76,8 @@ class User(db.Model):
     level = db.Column(db.Integer, default=1)
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    login_attempts = db.Column(db.Integer, default=0)
+    locked_until = db.Column(db.DateTime, nullable=True)
 
 class Problem(db.Model):
     __tablename__ = 'problems'
@@ -169,7 +173,9 @@ class Subject(db.Model):
     semester            = db.Column(db.Integer,      nullable=True)
     subject_type        = db.Column(
                             db.Enum('lecture', 'lab', 'lecture_lab', 'elective'),
-                            nullable=True, default='lecture')
+                            nullable=True, default='lab')
+    # Forge.dev supports Lab-type subjects only. Each subject should be offered
+    # in 3-5 Class Codes (sections) to accommodate regular and irregular students.
     supported_languages = db.Column(db.String(100),  nullable=False, default='python')
     default_difficulty  = db.Column(db.String(10),   nullable=False, default='easy')
     is_active           = db.Column(db.Boolean,      nullable=False, default=True)
@@ -711,11 +717,68 @@ def login():
     if not data.get('username') or not data.get('password'): 
         return jsonify({"error": "Missing credentials"}), 400
     
-    user = User.query.filter_by(username=data['username']).first()
-    if not user or not check_password_hash(user.password_hash, data['password']): 
+    identifier = data['username'].strip()
+    ip = request.remote_addr
+    now = time.time()
+
+    # Check if IP is locked out
+    fail_record = login_fail_store.get(ip, {'count': 0, 'locked_until': 0})
+    if fail_record['locked_until'] > now:
+        remaining = int(fail_record['locked_until'] - now)
+        return jsonify({"error": f"Too many failed attempts. Try again in {remaining} seconds."}), 429
+
+    user = (
+        User.query.filter_by(username=identifier).first() or
+        User.query.filter_by(email=identifier).first()
+    )
+
+    # Check account-level lockout first
+    if user and user.locked_until:
+        if user.locked_until > datetime.utcnow():
+            remaining = int((user.locked_until - datetime.utcnow()).total_seconds())
+            return jsonify({
+                "error": "Account locked",
+                "message": f"Your account has been locked after 3 failed attempts. Please contact your administrator.",
+                "contact": "admin@adamson.edu.ph",
+                "locked_until": user.locked_until.isoformat(),
+                "remaining_seconds": remaining
+            }), 423
+        else:
+            # Auto-unlock after 15 min
+            user.login_attempts = 0
+            user.locked_until = None
+            db.session.commit()
+
+    if not user or not check_password_hash(user.password_hash, data['password']):
+        if user:
+            user.login_attempts = (user.login_attempts or 0) + 1
+            if user.login_attempts >= 3:
+                user.locked_until = datetime.utcnow() + timedelta(minutes=15)
+                db.session.commit()
+                return jsonify({
+                    "error": "Account locked",
+                    "message": "Your account has been locked after 3 failed attempts. Please contact your administrator.",
+                    "contact": "admin@adamson.edu.ph",
+                    "locked_until": user.locked_until.isoformat(),
+                    "remaining_seconds": 900
+                }), 423
+            db.session.commit()
+            attempts_left = 3 - user.login_attempts
+            return jsonify({
+                "error": "Invalid credentials",
+                "attempts_left": attempts_left,
+                "warning": f"{attempts_left} attempt(s) remaining before account lockout."
+            }), 401
         return jsonify({"error": "Invalid credentials"}), 401
+
     if not user.is_active: 
         return jsonify({"error": "Account disabled"}), 403
+
+    # Clear fail record and login attempts on successful login
+    login_fail_store.pop(ip, None)
+    user.login_attempts = 0
+    user.locked_until = None
+    db.session.commit()
     
     # 🔒 ADD THESE TWO LINES:
     refresh_token = create_access_token(identity=str(user.id), expires_delta=timedelta(days=7))
@@ -726,7 +789,9 @@ def login():
         "refresh_token": refresh_token,  # 🔒 ADD THIS LINE
         "user": {
             "id": user.id, 
-            "username": user.username, 
+            "username": user.username,
+            "full_name": user.full_name,
+            "email": user.email,
             "role": user.role, 
             "xp": user.xp, 
             "level": user.level
@@ -742,7 +807,9 @@ def get_current_user():
         return jsonify({"error": "Not found"}), 404
     return jsonify({
         "id": user.id, 
-        "username": user.username, 
+        "username": user.username,
+        "full_name": user.full_name,
+        "email": user.email,
         "role": user.role, 
         "xp": user.xp, 
         "level": user.level
@@ -2643,6 +2710,8 @@ def admin_create_user(admin):
         return jsonify({"error": "Missing required fields"}), 400
     if data['role'] not in ['student', 'instructor', 'super_admin']:
         return jsonify({"error": "Invalid role"}), 400
+    if not data['email'].lower().endswith('@adamson.edu.ph'):
+        return jsonify({"error": "Only Adamson University email addresses (@adamson.edu.ph) are allowed."}), 400
     if User.query.filter_by(username=data['username']).first():
         return jsonify({"error": "Username already exists"}), 400
     if User.query.filter_by(email=data['email']).first():
@@ -2685,7 +2754,7 @@ def admin_get_users(admin):
     if role and role != 'all': q = q.filter_by(role=role)
     if status == 'active': q = q.filter_by(is_active=True)
     elif status == 'inactive': q = q.filter_by(is_active=False)
-    if search: q = q.filter((User.username.ilike(f'%{search}%')) | (User.email.ilike(f'%{search}%')))
+    if search: q = q.filter((User.username.ilike(f'%{search}%')) | (User.email.ilike(f'%{search}%')) | (User.full_name.ilike(f'%{search}%')))
     
     users = q.order_by(User.created_at.desc()).limit(500).all()
     
@@ -2695,7 +2764,7 @@ def admin_get_users(admin):
         block_id, block_name = None, None
         
         if u.role == 'student':
-            # ✅ Get ALL blocks this student is enrolled in (NEW TABLE)
+            # Get ALL blocks this student is enrolled in (NEW TABLE)
             enrollments = db.session.query(student_blocks.c.block_id).filter_by(student_id=u.id).all()
             block_ids = [e.block_id for e in enrollments]
             
@@ -2752,7 +2821,10 @@ def admin_get_users(admin):
             "created_at": u.created_at.isoformat(),
             "block_id": block_id, "block_name": block_name,
             "blocks": blocks_list,
-            "is_irregular": is_irregular
+            "is_irregular": is_irregular,
+            "login_attempts": u.login_attempts or 0,
+            "locked_until": u.locked_until.isoformat() if u.locked_until else None,
+            "is_locked": bool(u.locked_until and u.locked_until > datetime.utcnow())
         })
     return jsonify(result), 200
 
@@ -2836,20 +2908,20 @@ def admin_reset_password(admin, user_id):
     log_admin_action(admin.id, "PASSWORD_RESET", f"Reset password for {target.username}")
     return jsonify({"message": "Password reset successfully"}), 200
 
+@app.route('/api/admin/users/<int:user_id>/unlock', methods=['POST'])
+@admin_required
+def admin_unlock_user(admin, user_id):
+    target = User.query.get_or_404(user_id)
+    target.login_attempts = 0
+    target.locked_until = None
+    db.session.commit()
+    log_admin_action(admin.id, "USER_UNLOCKED", f"Unlocked account for {target.username}")
+    return jsonify({"message": f"Account {target.username} has been unlocked."}), 200
+
 @app.route('/api/admin/users/<int:user_id>/email', methods=['PUT'])
 @admin_required
 def admin_update_email(admin, user_id):
-    target = User.query.get_or_404(user_id)
-    data = request.get_json()
-    new_email = data.get('new_email')
-    if not new_email:
-        return jsonify({"error": "New email required"}), 400
-    if User.query.filter_by(email=new_email).first():
-        return jsonify({"error": "Email already in use"}), 400
-    target.email = new_email
-    db.session.commit()
-    log_admin_action(admin.id, "EMAIL_UPDATED", f"Updated email for {target.username} to {new_email}")
-    return jsonify({"message": "Email updated successfully"}), 200
+    return jsonify({"error": "Adamson email addresses are permanent and cannot be changed."}), 403
 
 @app.route('/api/admin/config', methods=['GET'])
 @admin_required
@@ -3324,10 +3396,10 @@ def admin_create_subject(admin):
             return jsonify({"error": "Year level must be a valid integer"}), 400
 
     # ── subject_type ──────────────────────────────────────────────────
-    allowed_types = {'lecture', 'lab', 'lecture_lab', 'elective'}
-    subject_type = data.get('subject_type', 'lecture')
+    allowed_types = {'lab', 'lecture_lab', 'elective'}
+    subject_type = data.get('subject_type', 'lab')
     if subject_type not in allowed_types:
-        return jsonify({"error": f"subject_type must be one of: {', '.join(sorted(allowed_types))}"}), 400
+        return jsonify({"error": f"subject_type must be one of: {', '.join(sorted(allowed_types))}. Note: 'lecture' type is no longer accepted for new subjects."}), 400
 
     # ── department ────────────────────────────────────────────────────
     department = data.get('department', '').strip() or None
@@ -3408,28 +3480,52 @@ def admin_get_subjects(admin):
 @app.route('/api/admin/subjects/<int:subject_id>', methods=['DELETE'])
 @admin_required
 def admin_delete_subject(admin, subject_id):
-    """Delete a subject"""
+    """
+    Delete a subject.
+    Cascades through junction tables before removing the subject row so
+    that no FK constraint fires:
+      1. TeacherAssignment rows that reference this subject
+      2. block_subjects junction rows
+      3. SubjectSection rows (and their IrregularEnrollment children)
+      4. Problems that reference this subject (subject_id set to NULL)
+    """
     subject = Subject.query.get_or_404(subject_id)
-    
-    # Check if subject is used in any blocks (via block_subjects junction table)
-    usage = db.session.query(block_subjects.c.block_id).filter_by(
-        subject_id=subject_id
-    ).first()
-    
-    if usage:
-        return jsonify({"error": "Cannot delete subject - it's assigned to blocks. Remove it from blocks first."}), 400
-    
-    # Check if subject is used in any problems
-    problem_usage = Problem.query.filter_by(subject_id=subject_id).first()
-    if problem_usage:
-        return jsonify({"error": "Cannot delete subject - it's used in problems. Delete or reassign problems first."}), 400
-    
-    # Safe to delete
+    subject_name = subject.name  # capture before deletion
+
+    # 1. Remove teacher assignments for this subject
+    TeacherAssignment.query.filter_by(subject_id=subject_id).delete()
+
+    # 2. Remove block ↔ subject links
+    db.session.query(block_subjects).filter(
+        block_subjects.c.subject_id == subject_id
+    ).delete(synchronize_session=False)
+
+    # 3. Remove every SubjectSection that belongs to this subject,
+    #    but first remove the IrregularEnrollment rows that point to them
+    sections = SubjectSection.query.filter_by(subject_id=subject_id).all()
+    for sec in sections:
+        IrregularEnrollment.query.filter_by(section_id=sec.id).delete()
+        db.session.delete(sec)
+
+    # 4. Nullify subject_id on Problems (keeps the problems, just unlinks them)
+    Problem.query.filter_by(subject_id=subject_id).update(
+        {'subject_id': None}, synchronize_session=False
+    )
+
+    # 5. Also remove any Lesson rows linked to this subject
+    Lesson.query.filter_by(subject_id=subject_id).delete()
+
+    # 6. Finally delete the subject itself
     db.session.delete(subject)
     db.session.commit()
-    
-    log_admin_action(admin.id, "SUBJECT_DELETED", f"Deleted subject: {subject.name}")
-    
+
+    log_admin_action(
+        admin.id, "SUBJECT_DELETED",
+        f"Deleted subject: {subject_name} (ID {subject_id}) — "
+        f"cascade-removed teacher assignments, block links, and sections.",
+        target_id=subject_id,       
+    )
+
     return jsonify({"message": "Subject deleted successfully"}), 200
 
 @app.route('/api/admin/subjects/<int:subject_id>', methods=['PUT'])
@@ -3507,9 +3603,9 @@ def admin_update_subject(admin, subject_id):
 
     # ── subject_type ──────────────────────────────────────────────────
     if 'subject_type' in data:
-        allowed_types = {'lecture', 'lab', 'lecture_lab', 'elective'}
+        allowed_types = {'lab', 'lecture_lab', 'elective'}
         if data['subject_type'] not in allowed_types:
-            return jsonify({"error": f"subject_type must be one of: {', '.join(sorted(allowed_types))}"}), 400
+            return jsonify({"error": f"subject_type must be one of: {', '.join(sorted(allowed_types))}. Note: 'lecture' type is no longer accepted."}), 400
         subject.subject_type = data['subject_type']
         changes.append(f"subject_type → {data['subject_type']}")
 
@@ -4262,15 +4358,19 @@ def admin_bulk_enrollment_upload(admin):
         return new_user, plain_pwd, True
 
     # ── 5. Process REGULAR students ───────────────────────────────────────
+    # Regular students are assigned to a BLOCK CODE (e.g., "IT101").
+    # The block_code column in the CSV must match a Block.section_code in the DB.
     for idx, row in regular_rows:
         sid        = row["student_id"].strip()
-        block_code = row["block_code"].strip().upper()
+        block_code = row["block_code"].strip().upper()  # e.g., "IT101"
 
         if not block_code:
             skipped_count += 1
             results.append({"row": idx, "student_id": sid, "status": "error",
-                             "reason": "block_code missing for regular student"})
-            row_errors.append(f"Row {idx} (student_id={sid}): block_code is empty — skipped")
+                             "reason": "block_code (e.g., IT101) missing for regular student"})
+            row_errors.append(
+                f"Row {idx} (student_id={sid}): block_code (Block Code, e.g. IT101) is empty — skipped"
+            )
             continue
 
         block = blocks_by_code.get(block_code)
@@ -4324,6 +4424,23 @@ def admin_bulk_enrollment_upload(admin):
         )
         enrolled_count += 1
 
+        # ✅ Auto-enroll into all sections belonging to this block
+        block_sections = SubjectSection.query.filter_by(
+            block_id=block.id, is_active=True
+        ).all()
+        for section in block_sections:
+            already_in_section = IrregularEnrollment.query.filter_by(
+                student_id=user.id,
+                section_id=section.id
+            ).first()
+            if not already_in_section:
+                db.session.add(IrregularEnrollment(
+                    student_id  = user.id,
+                    section_id  = section.id,
+                    enrolled_at = datetime.utcnow(),
+                ))
+                section.current_count = (section.current_count or 0) + 1
+
         # Auto-close block when it reaches 40
         new_count = current_count + 1
         if new_count >= 40:
@@ -4341,6 +4458,9 @@ def admin_bulk_enrollment_upload(admin):
         })
 
     # ── 6. Process IRREGULAR students ─────────────────────────────────────
+    # Irregular students are assigned to specific CLASS CODES (section_no, e.g., "29144").
+    # Each row for an irregular student maps to one SubjectSection.section_no in the DB.
+    # A single irregular student can have multiple rows — one per class code they attend.
     for sid, sid_rows in irregular_dict.items():
         # Use the FIRST row to create / fetch the user
         first_idx, first_row = sid_rows[0]
@@ -4355,11 +4475,15 @@ def admin_bulk_enrollment_upload(admin):
         for idx, row in sid_rows:
             section_no = row["section_no"].strip()
 
+            section_no = row["section_no"].strip()
+
             if not section_no:
                 skipped_count += 1
                 results.append({"row": idx, "student_id": sid, "status": "error",
-                                 "reason": "section_no missing for irregular student"})
-                row_errors.append(f"Row {idx} (student_id={sid}): section_no is empty — skipped")
+                                 "reason": "section_no (Class Code, e.g. 29144) missing for irregular student"})
+                row_errors.append(
+                    f"Row {idx} (student_id={sid}): section_no (Class Code, e.g. 29144) is empty — skipped"
+                )
                 continue
 
             section = sections_by_no.get(section_no)
@@ -4860,6 +4984,7 @@ def admin_get_section_enrollments(admin, section_id):
                 "enrollment_id": e.id,
                 "student_id":    student.id,
                 "username":      student.username,
+                "full_name":     student.full_name or student.username,
                 "email":         student.email,
                 "enrolled_at":   e.enrolled_at.isoformat(),
             })
@@ -5019,15 +5144,15 @@ with app.app_context():
             {"name": "Leaderboard Champ", "desc": "Reach Top 10 on Leaderboard", "icon": "", "xp": 50, "type": "leaderboard", "val": 10, "cat": "student"},
 
             # --- INSTRUCTOR BADGES (15) ---
-            {"name": "First Lesson", "desc": "Create your first lesson", "icon": "📖", "xp": 25, "type": "lesson_count", "val": 1, "cat": "instructor"},
-            {"name": "Problem Architect", "desc": "Create 10 problems", "icon": "🧩", "xp": 60, "type": "problem_count", "val": 10, "cat": "instructor"},
+            {"name": "First Module", "desc": "Create your first module", "icon": "📖", "xp": 25, "type": "lesson_count", "val": 1, "cat": "instructor"},
+            {"name": "Activity Architect", "desc": "Create 10 activities", "icon": "🧩", "xp": 60, "type": "problem_count", "val": 10, "cat": "instructor"},
             {"name": "Class Starter", "desc": "Have a student complete a quest", "icon": "🚀", "xp": 20, "type": "student_quest", "val": 1, "cat": "instructor"},
             {"name": "Engagement Booster", "desc": "80%+ students attempt a quest", "icon": "📈", "xp": 40, "type": "engagement", "val": 80, "cat": "instructor"},
             {"name": "Curriculum Builder", "desc": "Create lessons for 3 weeks", "icon": "🗂️", "xp": 50, "type": "lesson_weeks", "val": 3, "cat": "instructor"},
             {"name": "Resource Curator", "desc": "Attach files to 10 lessons", "icon": "📎", "xp": 30, "type": "file_count", "val": 10, "cat": "instructor"},
             {"name": "Multimedia Master", "desc": "Add videos to 5 lessons", "icon": "🎬", "xp": 25, "type": "video_count", "val": 5, "cat": "instructor"},
             {"name": "Clear Explainer", "desc": "Lesson with 95% completion", "icon": "🗣️", "xp": 45, "type": "lesson_completion", "val": 95, "cat": "instructor"},
-            {"name": "Problem Solver", "desc": "Problem with <10% error rate", "icon": "🔍", "xp": 40, "type": "problem_quality", "val": 10, "cat": "instructor"},
+            {"name": "Activity Solver", "desc": "Activity with <10% error rate", "icon": "🔍", "xp": 40, "type": "problem_quality", "val": 10, "cat": "instructor"},
             {"name": "Innovation Award", "desc": "Create a quest with hints", "icon": "💡", "xp": 50, "type": "hints_used", "val": 1, "cat": "instructor"},
             {"name": "Student Success", "desc": "70%+ students pass all quests", "icon": "🎓", "xp": 75, "type": "class_pass_rate", "val": 70, "cat": "instructor"},
             {"name": "Daily Educator", "desc": "Login and act for 14 days", "icon": "📅", "xp": 30, "type": "instructor_streak", "val": 14, "cat": "instructor"},
@@ -5085,7 +5210,9 @@ with app.app_context():
         add_col_if_missing('partial_credit', "INTEGER DEFAULT 100")
         add_col_if_missing('auto_grade', "BOOLEAN DEFAULT 1")
         add_col_if_missing('plagiarism_threshold', "FLOAT DEFAULT 0.85")
-        add_col_if_missing('due_date', "DATETIME DEFAULT NULL")  # ✅ NEW
+        add_col_if_missing('due_date', "DATETIME DEFAULT NULL") 
+        add_col_if_missing('login_attempts', "INT DEFAULT 0")
+        add_col_if_missing('locked_until', "DATETIME DEFAULT NULL")
     except Exception as e:
         print(f"⚠️ Migration check skipped: {e}")
     

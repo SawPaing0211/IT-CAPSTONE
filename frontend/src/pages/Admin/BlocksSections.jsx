@@ -220,7 +220,9 @@ export default function BlocksSections() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-white">Blocks & Sections</h1>
-          <p className="text-slate-400 mt-1">Manage class blocks and course assignments</p>
+          <p className="text-slate-400 mt-1">
+            Manage <strong className="text-purple-300">Block Codes</strong> (e.g., IT101) — groups of students assigned to subjects each semester
+          </p>
         </div>
         <div className="flex gap-3">
           <button
@@ -266,7 +268,7 @@ export default function BlocksSections() {
           <div className="flex-1">
             <input
               type="text"
-              placeholder="🔍 Search by block code, course name, or instructor..."
+              placeholder="🔍 Search by Block Code (e.g., IT101), subject name, or instructor..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white placeholder-slate-500 outline-none focus:border-purple-500"
@@ -479,10 +481,13 @@ export default function BlocksSections() {
             </h2>
             <div className="space-y-4">
               <div>
-                <label className="block text-slate-400 text-sm mb-2">Block Code</label>
+                <label className="block text-slate-400 text-sm mb-2">
+                  Block Code <span className="text-slate-500 font-normal text-xs">(e.g., IT101)</span>
+                </label>
                 <input
                   type="text"
                   value={editForm.section_code}
+                  placeholder="e.g., IT101"
                   onChange={(e) => setEditForm({...editForm, section_code: e.target.value})}
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white outline-none focus:border-purple-500"
                 />
@@ -576,4 +581,4 @@ export default function BlocksSections() {
       )}
     </div>
   )
-}
+} 

@@ -1,11 +1,10 @@
 import { useState, useEffect } from 'react'
 import DashboardOverview from './DashboardOverview'
 import UserManagement from './UserManagement'
-import BlocksSections from './BlocksSections'
 import InstructorAssignments from './InstructorAssignments'
 import ActivityLogs from './ActivityLogs'
 import SubjectsManagement from './SubjectsManagement'
-import SectionsManagement from './SectionsManagement'  // ✅ NEW IMPORT
+import SectionsManagement from './SectionsManagement'
 
 export default function AdminDashboard({ user, onLogout }) {
   const [activeTab, setActiveTab] = useState('dashboard')
@@ -28,11 +27,10 @@ export default function AdminDashboard({ user, onLogout }) {
 
   const tabs = [
     { id: 'dashboard', label: 'Dashboard', icon: '📊' },
+    { id: 'subjects', label: 'Subjects', icon: '📖' },
+    { id: 'sections', label: 'Subject Sections', icon: '🗂️' },
     { id: 'users', label: 'User Management', icon: '👥' },
     { id: 'assignments', label: 'Instructor Assignments', icon: '👨‍🏫' },
-    { id: 'blocks', label: 'Blocks & Sections', icon: '📚' },
-    { id: 'subjects', label: 'Subjects', icon: '📖' },
-    { id: 'sections', label: 'Subject Sections', icon: '🗂️' },  // ✅ NEW TAB
     { id: 'activity', label: 'Activity Logs', icon: '📜' },
   ]
 
@@ -137,7 +135,6 @@ export default function AdminDashboard({ user, onLogout }) {
                 {activeTab === 'users' && 'Manage students, instructors, and super administrators'}
                 {activeTab === 'assignments' && 'Manage instructor subject and block assignments'}
                 {activeTab === 'subjects' && 'Create and manage course subjects'}
-                {activeTab === 'blocks' && 'Manage class blocks and course assignments'}
                 {activeTab === 'sections' && 'Manage subject sections, schedules, and irregular enrollments'}
                 {activeTab === 'activity' && 'Comprehensive audit trail of all administrative actions'}
               </p>
@@ -189,8 +186,7 @@ export default function AdminDashboard({ user, onLogout }) {
           {activeTab === 'users' && <UserManagement />}
           {activeTab === 'assignments' && <InstructorAssignments />}
           {activeTab === 'subjects' && <SubjectsManagement />}
-          {activeTab === 'blocks' && <BlocksSections />}
-          {activeTab === 'sections' && <SectionsManagement />}  {/* ✅ NEW RENDER */}
+          {activeTab === 'sections' && <SectionsManagement />}
           {activeTab === 'activity' && <ActivityLogs />}
         </div>
       </main>

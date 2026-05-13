@@ -39,7 +39,7 @@ function StudentsModal({ block, onClose }) {
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-slate-800">
           <div>
-            <h2 className="text-xl font-bold text-white">Block {block.name} — Students</h2>
+            <h2 className="text-xl font-bold text-white">Class Code {block.name} — Students</h2>
             <p className="text-slate-400 text-sm mt-0.5">{block.title} · {students.length} enrolled</p>
           </div>
           <button
@@ -179,8 +179,8 @@ export default function MyClasses() {
 
   const statItems = [
     { icon: '👥', key: 'students', label: 'Students', clickable: true },
-    { icon: '📝', key: 'problems', label: 'Problems', clickable: false },
-    { icon: '📚', key: 'lessons',  label: 'Lessons',  clickable: false },
+    { icon: '📝', key: 'problems', label: 'Activities', clickable: false },
+    { icon: '📚', key: 'lessons',  label: 'Modules',  clickable: false },
     { icon: '📢', key: 'announcements', label: 'Announcements', clickable: false },
   ]
 
@@ -199,7 +199,7 @@ export default function MyClasses() {
       <div className="flex justify-between items-start">
         <div>
           <h1 className="text-3xl font-bold text-white tracking-tight">My Classes</h1>
-          <p className="text-slate-400 mt-1 text-sm">View and manage your assigned class blocks</p>
+          <p className="text-slate-400 mt-1 text-sm">View and manage your assigned class codes</p>
         </div>
       </div>
 
@@ -208,7 +208,7 @@ export default function MyClasses() {
         <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 text-lg pointer-events-none">🔍</span>
         <input
           type="text"
-          placeholder="Search by block number, course name, or subject..."
+          placeholder="Search by class code, course name, or subject..."
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
           className="w-full bg-slate-900 border border-slate-800 rounded-xl px-5 py-3.5 pl-12 text-white placeholder-slate-600 focus:border-blue-500/60 focus:outline-none transition text-sm"
@@ -265,7 +265,7 @@ export default function MyClasses() {
                     <div>
                       <div className="flex items-center gap-2.5 mb-1">
                         <h3 className="text-xl font-bold text-white group-hover:text-blue-300 transition">
-                          Block {cls.name}
+                          Class Code {cls.name}
                         </h3>
                         <span className="px-2 py-0.5 bg-green-500/10 text-green-400 border border-green-500/20 rounded-full text-xs font-bold">
                           {cls.status}
@@ -325,7 +325,7 @@ export default function MyClasses() {
             <span className="text-5xl mb-4">🏫</span>
             <p className="text-slate-300 text-lg font-semibold mb-1">No classes found</p>
             <p className="text-slate-500 text-sm">
-              {searchTerm ? 'Try adjusting your search terms' : 'No classes assigned yet'}
+              {searchTerm ? 'Try adjusting your search terms' : 'No class codes assigned yet'}
             </p>
           </div>
         )}

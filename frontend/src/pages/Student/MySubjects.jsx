@@ -19,7 +19,7 @@ export default function MySubjects({ onSelectSubject }) {
         const userData = await userRes.json()
         setUser(userData)
         
-        // ✅ Get enrolled subjects (individual, not grouped by block)
+        // Get enrolled subjects
         const subjectsRes = await fetch('http://localhost:5000/api/student/subjects', {
           headers: { 'Authorization': `Bearer ${token}` }
         })
@@ -83,9 +83,9 @@ export default function MySubjects({ onSelectSubject }) {
           <div
             key={subject.id}
             onClick={() => {
-            // ✅ Pass BOTH subject and block info
+            // Pass BOTH subject and block info
             const subjectData = {
-              id: subject.id,              // ✅ SUBJECT ID (8 or 9) - THIS IS THE KEY FIX!
+              id: subject.id,              // SUBJECT ID
               name: subject.name,          // Subject name
               block_id: subject.block_id,  // Block ID
               block_code: subject.block_code,
@@ -94,7 +94,7 @@ export default function MySubjects({ onSelectSubject }) {
             }
             
             if (onSelectSubject) {
-              onSelectSubject(subjectData)  // ✅ Pass subjectData
+              onSelectSubject(subjectData) 
             } else {
               navigate(`/student/subject/${subject.block_id}`)
             }
@@ -111,19 +111,19 @@ export default function MySubjects({ onSelectSubject }) {
               </span>
             </div>
 
-            {/* ✅ Subject Name (Big Text - this is now the main heading) */}
+            {/* Subject Name (Big Text - this is now the main heading) */}
             <h3 className="text-xl font-bold text-white mb-2 group-hover:text-purple-300 transition">
               {subject.name}
             </h3>
             
-            {/* ✅ Block Code Badge (Small Text) */}
+            {/* Block Code Badge (Small Text) */}
             <div className="mb-3">
               <span className="px-2.5 py-0.5 bg-slate-700 rounded text-xs font-bold text-slate-300">
                 Block {subject.block_code}
               </span>
             </div>
             
-            {/* ✅ Instructor */}
+            {/* Instructor */}
             <div className="flex items-center gap-2 pt-2 border-t border-slate-700">
               <span className="text-xs text-slate-500">👨‍🏫 Instructor</span>
               <span className="text-xs text-slate-400">•</span>
