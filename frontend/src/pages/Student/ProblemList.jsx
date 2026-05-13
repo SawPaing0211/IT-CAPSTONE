@@ -181,7 +181,7 @@ export default function ProblemList({ onSelectQuest, currentLevel, blockId, subj
                 {/* Instructor & Block Info */}
                 <div className="flex items-center gap-2 text-[10px] text-slate-400 mb-3 pb-3 border-b border-slate-700/50">
                   <span>👨‍🏫 {quest.instructor_name}</span>
-                  {/* ✅ Only show block name if NOT in course context */}
+                  {/* Only show block name if NOT in course context */}
                   {!blockId && (
                     <>
                       <span>•</span>

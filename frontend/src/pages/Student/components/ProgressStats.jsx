@@ -11,11 +11,11 @@ export default function ProgressStats({ stats, username }) {
   const [loadingAchievements, setLoadingAchievements] = useState(true)
   const [showAllBadges, setShowAllBadges] = useState(false)
   
-  // ✅ For celebration effects
+  // For celebration effects
   const [newBadge, setNewBadge] = useState(null)
   const [prevEarnedCount, setPrevEarnedCount] = useState(0)
 
-  // ✅ Fetch achievements from API
+  // Fetch achievements from API
   useEffect(() => {
     const fetchAchievements = async () => {
       try {
@@ -36,7 +36,7 @@ export default function ProgressStats({ stats, username }) {
     fetchAchievements()
   }, [])
 
-  // ✅ Detect newly earned badges and trigger celebration
+  // Detect newly earned badges and trigger celebration
   useEffect(() => {
     if (achievements.length > 0 && !loadingAchievements) {
       const earnedBadges = achievements.filter(b => b.is_earned)
@@ -390,7 +390,7 @@ export default function ProgressStats({ stats, username }) {
             )}
           </div>
 
-          {/* ✅ Achievement Modal */}
+          {/* Achievement Modal */}
           {showAllBadges && (
             <AchievementModal 
               achievements={achievements}

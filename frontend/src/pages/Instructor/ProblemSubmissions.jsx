@@ -188,7 +188,7 @@ export default function ProblemSubmissions() {
                         {(student.full_name || student.username)[0].toUpperCase()}
                       </div>
                       <div>
-                        <p className="font-bold text-white">{student.full_name}</p>
+                        <p className="font-bold text-white">{student.full_name || student.username}</p>
                         <p className="text-slate-500 text-xs">{student.username} · {student.email}</p>
                       </div>
                     </div>

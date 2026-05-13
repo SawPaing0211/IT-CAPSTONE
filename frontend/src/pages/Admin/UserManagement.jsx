@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import EditUserModal from './EditUserModal'
+import SubjectManagement from './SubjectsManagement'
 import RecoveryModal from './RecoveryModal'
 import UploadCSVModal from './UploadCSVModal'
 
@@ -21,6 +22,14 @@ export default function UserManagement() {
   const [addUserError, setAddUserError] = useState('')
   const [addUserSuccess, setAddUserSuccess] = useState('')
   const [csvModal, setCsvModal] = useState(false)
+  const [activeTab, setActiveTab] = useState('users')
+
+  const isMasterAdmin = (() => {
+    try {
+      const u = JSON.parse(localStorage.getItem('user') || '{}')
+      return u.email === 'admin@adamson.edu.ph'
+    } catch { return false }
+  })()
 
   const resetAddUserForm = () => {
     setAddUserForm({ username: '', email: '', password: '', role: 'student', block_id: '' })
@@ -183,6 +192,25 @@ export default function UserManagement() {
     }
   }
 
+  const handleUnlockUser = async (userId, username) => {
+    try {
+      const token = localStorage.getItem('token')
+      const res = await fetch(`http://localhost:5000/api/admin/users/${userId}/unlock`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      if (res.ok) {
+        await fetchUsers()
+        alert(`✅ Account "${username}" has been unlocked.`)
+      } else {
+        const err = await res.json()
+        alert(`Failed: ${err.error}`)
+      }
+    } catch (err) {
+      alert('Network error. Please try again.')
+    }
+  }
+
   // Group users by role
   const groupedUsers = {
     admin: users.filter(u => u.role === 'admin'),
@@ -200,15 +228,37 @@ export default function UserManagement() {
     }
     if (search) {
       const searchLower = search.toLowerCase().replace(/-/g, '')
+      const fullNameLower = (user.full_name || '').toLowerCase()
       return user.username.toLowerCase().replace(/-/g, '').includes(searchLower) ||
-             user.email.toLowerCase().includes(search.toLowerCase()) ||
-             (user.full_name && user.full_name.toLowerCase().includes(search.toLowerCase()))
+             user.email.toLowerCase().includes(searchLower) ||
+             fullNameLower.includes(searchLower) ||
+             fullNameLower.replace(/-/g, '').includes(searchLower.replace(/-/g, ''))
     }
     return true
   })
 
   return (
     <div className="space-y-6">
+      {/* Tab Switcher */}
+      <div className="flex gap-2 border-b border-slate-800 pb-2">
+        <button
+          onClick={() => setActiveTab('users')}
+          className={`px-5 py-2 rounded-t-lg font-semibold text-sm transition ${activeTab === 'users' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
+        >
+          👤 Users
+        </button>
+        <button
+          onClick={() => setActiveTab('subjects')}
+          className={`px-5 py-2 rounded-t-lg font-semibold text-sm transition ${activeTab === 'subjects' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
+        >
+          📚 Subjects
+        </button>
+      </div>
+
+      {activeTab === 'subjects' && <SubjectManagement />}
+
+      {activeTab === 'users' && <>
+
       {/* Header Actions */}
       <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
         <div className="flex gap-3 flex-wrap">
@@ -263,7 +313,7 @@ export default function UserManagement() {
             onChange={(e) => setBlockFilter(e.target.value)}
             className="bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white focus:border-purple-500 outline-none transition"
           >
-            <option value="all">All Blocks</option>
+            <option value="all">All Class Codes</option>
             {blocks.map(block => (
               <option key={block.id} value={block.id}>{block.section_code}</option>
             ))}
@@ -317,6 +367,7 @@ export default function UserManagement() {
               onManage={(user) => setManageModal(user)}
               onRecover={(user) => setRecoveryModal(user)}
               onDelete={handleDeleteUser}
+              onUnlock={handleUnlockUser}
             />
           )}
 
@@ -329,6 +380,7 @@ export default function UserManagement() {
               onManage={(user) => setManageModal(user)}
               onRecover={(user) => setRecoveryModal(user)}
               onDelete={handleDeleteUser}
+              onUnlock={handleUnlockUser}
             />
           )}
 
@@ -341,6 +393,7 @@ export default function UserManagement() {
               onManage={(user) => setManageModal(user)}
               onRecover={(user) => setRecoveryModal(user)}
               onDelete={handleDeleteUser}
+              onUnlock={handleUnlockUser}
             />
           )}
 
@@ -391,7 +444,7 @@ export default function UserManagement() {
                 </div>
                 <div>
                   <h2 className="text-xl font-black text-white">Add New User</h2>
-                  <p className="text-slate-400 text-xs">Create a student, instructor, or super admin</p>
+                  <p className="text-slate-400 text-xs">Create a student or instructor account</p>
                 </div>
               </div>
               <button onClick={() => { setAddUserModal(false); resetAddUserForm() }}
@@ -459,39 +512,50 @@ export default function UserManagement() {
               </div>
 
               <div>
-                <label className="block text-sm text-slate-400 mb-1.5">Role <span className="text-red-400">*</span></label>
-                <div className="grid grid-cols-3 gap-2">
+                <label className="block text-sm text-slate-400 mb-1.5 font-medium">
+                  Role <span className="text-red-400">*</span>
+                </label>
+                <div className={`grid gap-3 ${isMasterAdmin ? 'grid-cols-3' : 'grid-cols-2'}`}>
                   {[
-                    { value: 'student', label: 'Student', icon: '🎓' },
-                    { value: 'instructor', label: 'Instructor', icon: '👨‍🏫' },
-                    { value: 'super_admin', label: 'Super Admin', icon: '🛡️' }
+                    { value: 'student',    label: 'Student',     icon: '🎓',  desc: 'Enrolled learner'    },
+                    { value: 'instructor', label: 'Instructor',  icon: '👨‍🏫', desc: 'Course facilitator'  },
+                    ...(isMasterAdmin ? [{ value: 'super_admin', label: 'Super Admin', icon: '🛡️', desc: 'Full system access' }] : []),
                   ].map(role => (
                     <button
                       key={role.value}
                       type="button"
                       onClick={() => setAddUserForm({...addUserForm, role: role.value})}
-                      className={`flex flex-col items-center gap-1 p-3 rounded-xl border-2 transition ${
+                      className={`flex flex-col items-center gap-1.5 p-4 rounded-xl border-2 transition ${
                         addUserForm.role === role.value
-                          ? 'border-purple-500 bg-purple-600/20 text-white'
-                          : 'border-slate-700 bg-slate-800 text-slate-400 hover:border-slate-600'
+                          ? role.value === 'super_admin'
+                            ? 'border-yellow-500 bg-yellow-600/20 text-white shadow-lg shadow-yellow-600/20'
+                            : 'border-purple-500 bg-purple-600/20 text-white shadow-lg shadow-purple-600/20'
+                          : 'border-slate-700 bg-slate-800/60 text-slate-400 hover:border-slate-600 hover:bg-slate-800'
                       }`}
                     >
-                      <span className="text-xl">{role.icon}</span>
-                      <span className="text-xs font-bold">{role.label}</span>
+                      <span className="text-2xl">{role.icon}</span>
+                      <span className={`text-sm font-bold ${addUserForm.role === role.value && role.value === 'super_admin' ? 'text-yellow-300' : ''}`}>{role.label}</span>
+                      <span className="text-xs text-slate-500">{role.desc}</span>
                     </button>
                   ))}
                 </div>
+                {!isMasterAdmin && (
+                  <div className="mt-2 flex items-center gap-2 p-2.5 bg-yellow-600/10 border border-yellow-600/30 rounded-lg">
+                    <span className="text-yellow-400 text-sm">🔒</span>
+                    <p className="text-yellow-300/80 text-xs">Super Admin accounts are managed exclusively by <span className="font-semibold text-yellow-300">admin@adamson.edu.ph</span></p>
+                  </div>
+                )}
               </div>
 
               {(addUserForm.role === 'student') && (
                 <div>
-                  <label className="block text-sm text-slate-400 mb-1.5">Assign to Block <span className="text-slate-500">(optional)</span></label>
+                  <label className="block text-sm text-slate-400 mb-1.5">Assign to Class Code <span className="text-slate-500">(optional)</span></label>
                   <select
                     value={addUserForm.block_id}
                     onChange={e => setAddUserForm({...addUserForm, block_id: e.target.value})}
                     className="w-full bg-slate-800 border border-slate-700 focus:border-purple-500 rounded-lg px-4 py-2.5 text-white outline-none transition"
                   >
-                    <option value="">No block assigned</option>
+                    <option value="">No class code assigned</option>
                     {blocks.map(block => (
                       <option key={block.id} value={block.id}>{block.section_code} — {block.semester || 'Current'}</option>
                     ))}
@@ -523,12 +587,13 @@ export default function UserManagement() {
           </div>
         </div>
       )}
+    </>}
     </div>
   )
 }
 
 // User Section Component with 3 Buttons
-function UserSection({ title, icon, users, onManage, onRecover, onDelete }) {
+function UserSection({ title, icon, users, onManage, onRecover, onDelete, onUnlock }) {
   return (
     <div className="bg-slate-900/80 rounded-2xl border border-purple-600/30 overflow-hidden">
       <div className="bg-slate-800/80 border-b border-purple-600/30 px-6 py-4">
@@ -546,7 +611,7 @@ function UserSection({ title, icon, users, onManage, onRecover, onDelete }) {
           <thead className="bg-slate-800/60">
             <tr>
               <th className="text-left p-4 text-slate-400 font-medium text-sm">USER</th>
-              <th className="text-left p-4 text-slate-400 font-medium text-sm">BLOCK</th>
+              <th className="text-left p-4 text-slate-400 font-medium text-sm">CLASS CODE</th>
               <th className="text-left p-4 text-slate-400 font-medium text-sm">LEVEL</th>
               <th className="text-left p-4 text-slate-400 font-medium text-sm">XP</th>
               <th className="text-left p-4 text-slate-400 font-medium text-sm">STATUS</th>
@@ -603,33 +668,55 @@ function UserSection({ title, icon, users, onManage, onRecover, onDelete }) {
                 <td className="p-4 text-yellow-400 font-mono">{user.xp}</td>
                 {/* STATUS */}
                 <td className="p-4">
-                  <span className={`px-3 py-1 rounded-lg text-xs font-bold ${
-                    user.is_active ? 'bg-green-600/30 text-green-300 border border-green-600/50' : 'bg-red-600/30 text-red-300 border border-red-600/50'
-                  }`}>
-                    {user.is_active ? '✅ Active' : '⛔ Inactive'}
-                  </span>
+                  <div className="flex flex-col gap-1">
+                    <span className={`px-3 py-1 rounded-lg text-xs font-bold w-fit ${
+                      user.is_active ? 'bg-green-600/30 text-green-300 border border-green-600/50' : 'bg-red-600/30 text-red-300 border border-red-600/50'
+                    }`}>
+                      {user.is_active ? '✅ Active' : '⛔ Inactive'}
+                    </span>
+                    {user.is_locked && (
+                      <span className="px-3 py-1 rounded-lg text-xs font-bold w-fit bg-orange-600/30 text-orange-300 border border-orange-600/50">
+                        🔒 Locked
+                      </span>
+                    )}
+                    {!user.is_locked && user.login_attempts > 0 && (
+                      <span className="px-3 py-1 rounded-lg text-xs font-bold w-fit bg-yellow-600/20 text-yellow-400 border border-yellow-600/40">
+                        ⚠️ {user.login_attempts}/3 attempts
+                      </span>
+                    )}
+                  </div>
                 </td>
                 {/* ACTIONS */}
-                <td className="p-4 w-44">
-                  <div className="flex gap-1 items-center">
-                    <button
-                      onClick={() => onManage(user)}
-                      className="flex-1 px-2 py-1.5 bg-purple-600 hover:bg-purple-500 rounded text-xs transition text-white font-bold whitespace-nowrap"
-                    >
-                      Manage
-                    </button>
-                    <button
-                      onClick={() => onRecover(user)}
-                      className="flex-1 px-2 py-1.5 bg-blue-600 hover:bg-blue-500 rounded text-xs transition text-white font-bold whitespace-nowrap"
-                    >
-                      Recover
-                    </button>
-                    <button
-                      onClick={() => onDelete(user.id)}
-                      className="flex-1 px-2 py-1.5 bg-red-600/20 hover:bg-red-600 rounded text-xs transition text-red-400 hover:text-white font-bold border border-red-600/50 whitespace-nowrap"
-                    >
-                      Delete
-                    </button>
+                <td className="p-4 w-52">
+                  <div className="flex flex-col gap-1">
+                    <div className="flex gap-1">
+                      <button
+                        onClick={() => onManage(user)}
+                        className="flex-1 px-2 py-1.5 bg-purple-600 hover:bg-purple-500 rounded text-xs transition text-white font-bold whitespace-nowrap"
+                      >
+                        Manage
+                      </button>
+                      <button
+                        onClick={() => onRecover(user)}
+                        className="flex-1 px-2 py-1.5 bg-blue-600 hover:bg-blue-500 rounded text-xs transition text-white font-bold whitespace-nowrap"
+                      >
+                        Recover
+                      </button>
+                      <button
+                        onClick={() => onDelete(user.id)}
+                        className="flex-1 px-2 py-1.5 bg-red-600/20 hover:bg-red-600 rounded text-xs transition text-red-400 hover:text-white font-bold border border-red-600/50 whitespace-nowrap"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                    {user.is_locked && (
+                      <button
+                        onClick={() => onUnlock(user.id, user.username)}
+                        className="w-full px-2 py-1.5 bg-orange-600 hover:bg-orange-500 rounded text-xs transition text-white font-black whitespace-nowrap flex items-center justify-center gap-1"
+                      >
+                        🔓 Unlock Account
+                      </button>
+                    )}
                   </div>
                 </td>
               </tr>

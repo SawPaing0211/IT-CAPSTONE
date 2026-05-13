@@ -4,6 +4,8 @@ export default function Auth({ onLogin, initialMode = 'login' }) {
   const [isLogin, setIsLogin] = useState(initialMode === 'login')
   const [formData, setFormData] = useState({ username: '', email: '', password: '' })
   const [error, setError] = useState('')
+  const [lockedInfo, setLockedInfo] = useState(null)
+  const [countdown, setCountdown] = useState(0)
   const [loading, setLoading] = useState(false)
   const [selectedClass, setSelectedClass] = useState('student')
 
@@ -29,7 +31,28 @@ export default function Auth({ onLogin, initialMode = 'login' }) {
     })
     const data = await res.json()
     
-    if (!res.ok) throw new Error(data.error || 'Request failed')
+    if (res.status === 423) {
+      setLockedInfo(data)
+      setCountdown(data.remaining_seconds || 900)
+      // Start countdown timer
+      const timer = setInterval(() => {
+        setCountdown(prev => {
+          if (prev <= 1) { clearInterval(timer); setLockedInfo(null); return 0 }
+          return prev - 1
+        })
+      }, 1000)
+      setLoading(false)
+      return
+    }
+    if (!res.ok) {
+      if (data.attempts_left !== undefined) {
+        setError(`${data.error} — ${data.warning}`)
+      } else {
+        throw new Error(data.error || 'Request failed')
+      }
+      setLoading(false)
+      return
+    }
     
     if (isLogin) {
       // Save tokens
@@ -39,7 +62,7 @@ export default function Auth({ onLogin, initialMode = 'login' }) {
         localStorage.setItem('refresh_token', data.refresh_token)
       }
       
-      // ✅ Redirect based on role
+      
       const role = data.user.role
       console.log('Login successful, role:', role)
       
@@ -70,7 +93,6 @@ export default function Auth({ onLogin, initialMode = 'login' }) {
   const classOptions = [
   { id: 'student', icon: '🗡️', name: 'Student', desc: 'Learn & conquer', color: 'from-purple-600 to-pink-600' },
   { id: 'instructor', icon: '📚', name: 'Instructor', desc: 'Teach & guide', color: 'from-blue-600 to-cyan-600' },
-  { id: 'super_admin', icon: '👑', name: 'Admin', desc: 'Rule & manage', color: 'from-yellow-600 to-orange-600' } 
 ]
 
   return (
@@ -111,8 +133,34 @@ export default function Auth({ onLogin, initialMode = 'login' }) {
           </div>
 
           <form onSubmit={handleSubmit} className="p-6 space-y-5">
+            {/* Locked Account Message */}
+            {lockedInfo && (
+              <div className="bg-red-900/30 border-2 border-red-500/60 rounded-xl p-4 space-y-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-2xl">🔒</span>
+                  <p className="text-red-300 font-black text-sm">Account Locked</p>
+                </div>
+                <p className="text-slate-300 text-xs leading-relaxed">
+                  Your account has been locked after <strong>3 failed attempts</strong>. 
+                  Please contact your administrator to unlock your account.
+                </p>
+                <div className="flex items-center gap-2 p-2 bg-slate-800/60 rounded-lg">
+                  <span className="text-blue-400">📧</span>
+                  <span className="text-blue-300 text-xs font-mono">admin@adamson.edu.ph</span>
+                </div>
+                <div className="flex items-center gap-2 p-2 bg-slate-800/60 rounded-lg">
+                  <span className="text-yellow-400">⏱️</span>
+                  <span className="text-yellow-300 text-xs">
+                    Auto-unlocks in: <strong className="font-mono">
+                      {Math.floor(countdown / 60)}:{String(countdown % 60).padStart(2, '0')}
+                    </strong>
+                  </span>
+                </div>
+              </div>
+            )}
+
             {/* Error Message */}
-            {error && (
+            {error && !lockedInfo && (
               <div className="bg-red-500/10 border-2 border-red-500/50 rounded-lg p-3 flex items-center gap-2">
                 <span className="text-red-400">⚠️</span>
                 <span className="text-red-300 text-sm">{error}</span>
@@ -174,7 +222,7 @@ export default function Auth({ onLogin, initialMode = 'login' }) {
                 <label className="text-sm font-bold text-purple-300 uppercase tracking-wider flex items-center gap-2">
                   <span>⚔️</span> Choose Your Class
                 </label>
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-2 gap-3">
                   {classOptions.map((cls) => (
                     <button
                       key={cls.id}

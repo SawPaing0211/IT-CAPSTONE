@@ -41,6 +41,24 @@ export default function CreateBlockModal({ onClose, onSuccess }) {
     } catch (err) { console.error(err) }
   }
 
+  const SECTION_SUBJECT_MAP = {
+    '1': ['Introduction to Computing Lec', 'Introduction to Computing Lab', 'Fundamentals of Programming Lec', 'Fundamentals of Programming Lab'],
+    '2': ['Computer Programming 1 Lec', 'Computer Programming 1 Lab', 'Data Structure & Algorithm Lec', 'Data Structure & Algorithm Lab'],
+    '3': ['Database Management System Lec', 'Database Management System Lab', 'Computer Programming 2 Lec', 'Computer Programming 2 Lab'],
+    '4': ['Object Oriented Programming Lec', 'Object Oriented Programming Lab', 'Adv. Database Mgt System Lec', 'Adv. Database Mgt System Lab'],
+  }
+
+  const handleSectionCodeChange = (code) => {
+    setForm(prev => ({ ...prev, section_code: code }))
+    const yearDigit = code.replace(/\D/g, '')[0]  // e.g. "IT101" → "1"
+    const suggested = SECTION_SUBJECT_MAP[yearDigit] || []
+    const available = subjects.map(s => s.name)
+    const matched = suggested.filter(name => available.includes(name))
+    if (matched.length > 0) {
+      setForm(prev => ({ ...prev, section_code: code, selected_subjects: matched }))
+    }
+  }
+
   const toggleSubject = (name) => {
     setForm(prev => ({
       ...prev,
@@ -113,8 +131,8 @@ export default function CreateBlockModal({ onClose, onSuccess }) {
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-gradient-to-br from-purple-500 to-pink-500 rounded-xl flex items-center justify-center text-xl">📚</div>
             <div>
-              <h2 className="text-xl font-black text-white">Create New Block</h2>
-              <p className="text-purple-300/70 text-xs">{step === 1 ? 'Set up a new class section' : 'Block created successfully'}</p>
+              <h2 className="text-xl font-black text-white">Create New Class Code</h2>
+              <p className="text-purple-300/70 text-xs">{step === 1 ? 'Set up a new class code' : 'Block created successfully'}</p>
             </div>
           </div>
           <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition text-lg">×</button>
@@ -125,9 +143,9 @@ export default function CreateBlockModal({ onClose, onSuccess }) {
 
             {/* Section Code */}
             <div>
-              <label className="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">Block / Section Code *</label>
-              <input type="text" value={form.section_code} onChange={e => setForm({ ...form, section_code: e.target.value })}
-                placeholder="e.g., 101, A1, BSCS-1A"
+              <label className="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">Class Code *</label>
+              <input type="text" value={form.section_code} onChange={e => handleSectionCodeChange(e.target.value)}
+                placeholder="e.g., IT101, IT102, IT201"
                 className={`w-full bg-slate-800 border rounded-lg px-4 py-2.5 text-white placeholder-slate-500 outline-none focus:border-purple-500 transition font-mono tracking-widest ${errors.section_code ? 'border-red-500' : 'border-slate-700'}`} />
               {errors.section_code && <p className="text-red-400 text-xs mt-1">{errors.section_code}</p>}
             </div>
@@ -233,9 +251,9 @@ export default function CreateBlockModal({ onClose, onSuccess }) {
           /* Success */
           <div className="p-6 text-center space-y-4">
             <div className="w-20 h-20 bg-purple-600/20 border-2 border-purple-500/50 rounded-full flex items-center justify-center text-4xl mx-auto">📚</div>
-            <h3 className="text-2xl font-black text-white">Block Created!</h3>
+            <h3 className="text-2xl font-black text-white">Class Code Created!</h3>
             <div className="bg-slate-800/80 rounded-xl p-4 text-left space-y-2 border border-slate-700">
-              <InfoRow label="Block Code" value={<span className="font-mono font-bold text-purple-300">{createdBlock?.section_code}</span>} />
+              <InfoRow label="Class Code" value={<span className="font-mono font-bold text-purple-300">{createdBlock?.section_code}</span>} />
               <InfoRow label="Semester" value={createdBlock?.semester} />
               <InfoRow label="Subjects" value={createdBlock?.subjects?.length > 0 ? createdBlock.subjects.join(', ') : '—'} />
             </div>

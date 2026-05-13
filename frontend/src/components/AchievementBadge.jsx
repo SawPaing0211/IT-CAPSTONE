@@ -83,7 +83,7 @@ export default function AchievementBadge({ badge, showTooltip = true, size = 'md
         )}
       </button>
 
-      {/* ✅ Portal renders the tooltip directly on the page body, breaking out of all boxes! */}
+      {/*Portal renders the tooltip directly on the page body, breaking out of all boxes! */}
       {showTip && showTooltip && portalElement && createPortal(
         <div 
           className="fixed z-[100] w-64 p-4 bg-slate-900 border border-purple-600/40 rounded-xl shadow-2xl shadow-purple-900/50 animate-fade-in pointer-events-none"

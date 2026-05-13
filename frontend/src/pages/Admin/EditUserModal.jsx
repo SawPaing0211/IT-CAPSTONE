@@ -59,8 +59,7 @@ export default function EditUserModal({ user, blocks, onClose, onSave }) {
               className="w-full bg-slate-800 border border-slate-700 rounded p-2 text-white"
             >
               <option value="student">Student</option>
-              <option value="instructor">Instructor</option>
-              <option value="super_admin">Super Admin</option>
+              <option value="instructor">Instructor</option>              
             </select>
           </div>
 
