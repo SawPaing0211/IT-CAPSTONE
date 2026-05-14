@@ -52,14 +52,13 @@ export default function Leaderboard({ currentUsername }) {
       // Determine block_id for "My Block" filter
       let url = 'http://localhost:5000/api/leaderboard'
       if (filter === 'block') {
-        // Try to get the student's block from their subjects
         const subjRes = await fetch('http://localhost:5000/api/student/subjects', {
           headers: { 'Authorization': `Bearer ${token}` }
         })
         if (subjRes.ok) {
           const subjects = await subjRes.json()
           if (subjects.length > 0) {
-            url += `?block_id=${subjects[0].block_id}`
+            url += `?section_id=${subjects[0].section_id}`
           }
         }
       }

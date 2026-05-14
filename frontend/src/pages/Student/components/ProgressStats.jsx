@@ -10,10 +10,33 @@ export default function ProgressStats({ stats, username }) {
   const [achievements, setAchievements] = useState([])
   const [loadingAchievements, setLoadingAchievements] = useState(true)
   const [showAllBadges, setShowAllBadges] = useState(false)
-  
+  const [realStats, setRealStats] = useState(null)
+  const [recentSubmissions, setRecentSubmissions] = useState([])
+
   // For celebration effects
   const [newBadge, setNewBadge] = useState(null)
   const [prevEarnedCount, setPrevEarnedCount] = useState(0)
+
+  // Fetch real stats + recent submissions
+  useEffect(() => {
+    const fetchStats = async () => {
+      try {
+        const token = localStorage.getItem('token')
+        const [statsRes, subsRes] = await Promise.all([
+          fetch('http://localhost:5000/api/student/stats', { headers: { 'Authorization': `Bearer ${token}` } }),
+          fetch('http://localhost:5000/api/student/submissions?limit=50', { headers: { 'Authorization': `Bearer ${token}` } })
+        ])
+        if (statsRes.ok) setRealStats(await statsRes.json())
+        if (subsRes.ok) {
+          const subsData = await subsRes.json()
+          setRecentSubmissions(subsData.submissions || [])
+        }
+      } catch (err) {
+        console.error('Failed to fetch stats:', err)
+      }
+    }
+    fetchStats()
+  }, [])
 
   // Fetch achievements from API
   useEffect(() => {
@@ -64,66 +87,60 @@ export default function ProgressStats({ stats, username }) {
 
   // ALL MOCK DATA - No backend connection needed for demo
   const mockData = {
-    level: 1,
-    xp: 0,
-    questsCompleted: 0,
-    streak: 1,
-    totalAttempts: 5,
-    failedAttempts: 5,
-    successRate: 0,
-    completionRate: 0,
-    languages: [
-      { name: 'Python', solved: 3, total: 5, color: 'from-cyan-500 to-blue-500', icon: '🐍' },
-      { name: 'Java', solved: 0, total: 0, color: 'from-orange-500 to-red-500', icon: '☕' },
-      { name: 'C#', solved: 0, total: 0, color: 'from-purple-500 to-pink-500', icon: '🔷' }
-    ],
+    level: realStats?.level ?? 1,
+    xp: realStats?.total_xp ?? 0,
+    questsCompleted: realStats?.accepted_submissions ?? 0,
+    streak: realStats?.streak ?? 0,
+    totalAttempts: realStats?.total_submissions ?? 0,
+    failedAttempts: (realStats?.total_submissions ?? 0) - (realStats?.accepted_submissions ?? 0),
+    successRate: realStats?.success_rate ?? 0,
+    completionRate: realStats?.success_rate ?? 0,
+    languages: (() => {
+      const langDefs = [
+        { name: 'Python', key: 'python', color: 'from-cyan-500 to-blue-500', icon: '🐍' },
+        { name: 'Java',   key: 'java',   color: 'from-orange-500 to-red-500', icon: '☕' },
+        { name: 'C#',     key: 'csharp', color: 'from-purple-500 to-pink-500', icon: '🔷' },
+      ]
+      return langDefs.map(lang => ({
+        ...lang,
+        solved: recentSubmissions.filter(s => s.language === lang.key && s.status === 'accepted').length,
+        total:  recentSubmissions.filter(s => s.language === lang.key).length || 0,
+      }))
+    })(),
     difficulty: [
       { level: 'Easy', completed: 3, total: 5, color: 'text-green-400', bg: 'bg-green-500', borderColor: 'border-green-500' },
       { level: 'Medium', completed: 0, total: 0, color: 'text-yellow-400', bg: 'bg-yellow-500', borderColor: 'border-yellow-500' },
       { level: 'Hard', completed: 0, total: 0, color: 'text-red-400', bg: 'bg-red-500', borderColor: 'border-red-500' }
     ],
-    // Enhanced activity data with dates and counts
-    activityData: [
-      { date: 'Apr 1', count: 3, level: 3 },
-      { date: 'Apr 2', count: 0, level: 0 },
-      { date: 'Apr 3', count: 5, level: 4 },
-      { date: 'Apr 4', count: 2, level: 2 },
-      { date: 'Apr 5', count: 7, level: 5 },
-      { date: 'Apr 6', count: 1, level: 1 },
-      { date: 'Apr 7', count: 0, level: 0 },
-      { date: 'Apr 8', count: 4, level: 3 },
-      { date: 'Apr 9', count: 6, level: 4 },
-      { date: 'Apr 10', count: 2, level: 2 },
-      { date: 'Apr 11', count: 8, level: 5 },
-      { date: 'Apr 12', count: 3, level: 3 },
-      { date: 'Apr 13', count: 0, level: 0 },
-      { date: 'Apr 14', count: 0, level: 0 },
-      { date: 'Apr 15', count: 5, level: 4 },
-      { date: 'Apr 16', count: 2, level: 2 },
-      { date: 'Apr 17', count: 4, level: 3 },
-      { date: 'Apr 18', count: 6, level: 4 },
-      { date: 'Apr 19', count: 1, level: 1 },
-      { date: 'Apr 20', count: 0, level: 0 },
-      { date: 'Apr 21', count: 0, level: 0 },
-      { date: 'Apr 22', count: 7, level: 5 },
-      { date: 'Apr 23', count: 3, level: 3 },
-      { date: 'Apr 24', count: 5, level: 4 },
-      { date: 'Apr 25', count: 2, level: 2 },
-      { date: 'Apr 26', count: 4, level: 3 },
-      { date: 'Apr 27', count: 0, level: 0 },
-      { date: 'Apr 28', count: 0, level: 0 }
-    ],
+    // Real 28-day activity computed from submissions
+    activityData: (() => {
+      const days = []
+      const now = new Date()
+      for (let i = 27; i >= 0; i--) {
+        const d = new Date(now)
+        d.setDate(now.getDate() - i)
+        const dateStr = d.toISOString().slice(0, 10)
+        const label = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+        const count = recentSubmissions.filter(s => s.submitted_at?.slice(0, 10) === dateStr).length
+        const level = count === 0 ? 0 : count === 1 ? 1 : count <= 3 ? 2 : count <= 5 ? 3 : count <= 7 ? 4 : 5
+        days.push({ date: label, count, level })
+      }
+      return days
+    })(),
     achievements: [
       { name: 'First Steps', desc: 'Complete your first quest', icon: '🎯', earned: true, date: 'Apr 15, 2024' },
       { name: 'Week Warrior', desc: 'Maintain a 7-day streak', icon: '🔥', earned: false, progress: '1/7' },
       { name: 'Problem Solver', desc: 'Complete 10 quests', icon: '⚔️', earned: false, progress: '0/10' },
       { name: 'Python Novice', desc: 'Solve 5 Python problems', icon: '🐍', earned: false, progress: '3/5' }
     ],
-    recentQuests: [
-      { title: 'Array Sum', xp: 50, date: '2 days ago', difficulty: 'Easy', icon: '', status: 'completed' },
-      { title: 'Simple Addition', xp: 75, date: '2 days ago', difficulty: 'Easy', icon: '➕', status: 'completed' },
-      { title: 'Hello World', xp: 50, date: '3 days ago', difficulty: 'Easy', icon: '👋', status: 'completed' }
-    ]
+    recentQuests: recentSubmissions.map(s => ({
+      title: s.problem_title || 'Quest',
+      xp: s.score || 0,
+      date: new Date(s.submitted_at).toLocaleDateString(),
+      difficulty: 'Easy',
+      icon: s.status === 'accepted' ? '✅' : s.status === 'partial' ? '⚡' : '❌',
+      status: s.status
+    }))
   }
 
   return (

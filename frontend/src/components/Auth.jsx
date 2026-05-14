@@ -67,7 +67,7 @@ export default function Auth({ onLogin, initialMode = 'login' }) {
       console.log('Login successful, role:', role)
       
       setTimeout(() => {
-        if (role === 'super_admin') {
+        if (role === 'administrator') {
           window.location.href = '/admin'
         } else if (role === 'instructor') {
           window.location.href = '/instructor'

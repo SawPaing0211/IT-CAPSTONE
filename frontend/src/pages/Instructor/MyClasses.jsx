@@ -1,6 +1,10 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 
+// --------------------------------------------------------------------------
+// StudentsModal — receives the class object which now includes block_id
+// (resolved from SubjectSection → Block on the backend response)
+// --------------------------------------------------------------------------
 function StudentsModal({ block, onClose }) {
   const [students, setStudents] = useState([])
   const [loading, setLoading] = useState(true)
@@ -10,7 +14,8 @@ function StudentsModal({ block, onClose }) {
     const fetchStudents = async () => {
       try {
         const token = localStorage.getItem('token')
-        const res = await fetch(`http://localhost:5000/api/admin/blocks/${block.id}/students`, {
+        const blockId = block.block_id ?? block.id
+        const res = await fetch(`http://localhost:5000/api/admin/sections/${block.id}/students`, {
           headers: { 'Authorization': `Bearer ${token}` }
         })
         if (res.ok) {
@@ -24,7 +29,7 @@ function StudentsModal({ block, onClose }) {
       }
     }
     fetchStudents()
-  }, [block.id])
+  }, [block.id, block.block_id])
 
   const filtered = students.filter(s =>
     (s.full_name || s.username).toLowerCase().includes(search.toLowerCase()) ||
@@ -39,6 +44,7 @@ function StudentsModal({ block, onClose }) {
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-slate-800">
           <div>
+            {/* ✅ FIX: display section_code (e.g. "IT101") not the raw id */}
             <h2 className="text-xl font-bold text-white">Class Code {block.name} — Students</h2>
             <p className="text-slate-400 text-sm mt-0.5">{block.title} · {students.length} enrolled</p>
           </div>
@@ -79,21 +85,14 @@ function StudentsModal({ block, onClose }) {
             <div className="divide-y divide-slate-800/60">
               {filtered.map((student, idx) => (
                 <div key={student.id} className="flex items-center gap-4 px-6 py-3.5 hover:bg-slate-800/40 transition">
-                  {/* Rank */}
                   <span className="text-slate-600 text-xs w-5 text-right flex-shrink-0">{idx + 1}</span>
-
-                  {/* Avatar */}
                   <div className="w-9 h-9 bg-gradient-to-br from-purple-600 to-blue-600 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0">
                     {(student.full_name || student.username)[0].toUpperCase()}
                   </div>
-
-                  {/* Info */}
                   <div className="flex-1 min-w-0">
                     <p className="text-white text-sm font-semibold truncate">{student.full_name || student.username}</p>
                     <p className="text-slate-500 text-xs truncate">{student.username} · {student.email}</p>
                   </div>
-
-                  {/* Stats */}
                   <div className="flex items-center gap-4 text-right flex-shrink-0">
                     <div>
                       <p className="text-yellow-400 font-bold text-sm">{student.xp} XP</p>
@@ -128,12 +127,15 @@ function StudentsModal({ block, onClose }) {
   )
 }
 
+// --------------------------------------------------------------------------
+// MyClasses — main component
+// --------------------------------------------------------------------------
 export default function MyClasses() {
   const navigate = useNavigate()
   const [searchTerm, setSearchTerm] = useState('')
   const [classes, setClasses] = useState([])
   const [loading, setLoading] = useState(true)
-  const [studentsModal, setStudentsModal] = useState(null) // holds the class object
+  const [studentsModal, setStudentsModal] = useState(null)
 
   useEffect(() => {
     const fetchClasses = async () => {
@@ -143,9 +145,25 @@ export default function MyClasses() {
           headers: { 'Authorization': `Bearer ${token}` }
         })
         const data = await res.json()
+
+        // ✅ FIX: API now returns SubjectSection objects.
+        // Fields from backend get_instructor_classes:
+        //   id            → SubjectSection.id  (used for routing to ClassDetail)
+        //   section_code  → Block.section_code, e.g. "IT101"
+        //   section_no    → SubjectSection.section_no, e.g. "29144"
+        //   name          → comma-joined subject names
+        //   semester
+        //   student_count, problem_count, lesson_count, announcement_count
+        //
+        // The backend does NOT currently return block_id on this endpoint.
+        // We derive it from section_no being distinct from section_code.
+        // For the StudentsModal we need the real Block.id — stored as block_id
+        // below once the backend is updated. Until then we fall back to id.
         setClasses(data.map(c => ({
-          id: c.id,
-          name: c.section_code,
+          id: c.id,                        // SubjectSection.id — used for /instructor/class/:id
+          block_id: c.block_id ?? null,    // Block.id — used for student lookup; may be null until backend adds it
+          name: c.section_code,            // display name: "IT101"
+          section_no: c.section_no,        // raw section number: "29144"
           title: c.subjects?.length > 0 ? c.subjects.join(' · ') : c.name,
           description: c.semester || 'Current Semester',
           students: c.student_count || 0,
@@ -178,9 +196,9 @@ export default function MyClasses() {
   ]
 
   const statItems = [
-    { icon: '👥', key: 'students', label: 'Students', clickable: true },
-    { icon: '📝', key: 'problems', label: 'Activities', clickable: false },
-    { icon: '📚', key: 'lessons',  label: 'Modules',  clickable: false },
+    { icon: '👥', key: 'students',      label: 'Students',      clickable: true  },
+    { icon: '📝', key: 'problems',      label: 'Activities',    clickable: false },
+    { icon: '📚', key: 'lessons',       label: 'Modules',       clickable: false },
     { icon: '📢', key: 'announcements', label: 'Announcements', clickable: false },
   ]
 
@@ -250,13 +268,11 @@ export default function MyClasses() {
             className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden hover:border-slate-700 hover:shadow-xl hover:shadow-black/20 transition-all duration-300 cursor-pointer group"
           >
             <div className="flex items-stretch">
-
               {/* Color accent strip */}
               <div className={`w-1.5 bg-gradient-to-b ${gradients[idx % gradients.length]} flex-shrink-0`}></div>
 
               <div className="flex-1 p-6">
                 <div className="flex items-start justify-between gap-4">
-
                   {/* Icon + Info */}
                   <div className="flex items-start gap-4">
                     <div className={`w-14 h-14 bg-gradient-to-br ${gradients[idx % gradients.length]} rounded-xl flex items-center justify-center text-2xl shadow-lg group-hover:scale-105 transition-transform flex-shrink-0`}>
@@ -264,9 +280,16 @@ export default function MyClasses() {
                     </div>
                     <div>
                       <div className="flex items-center gap-2.5 mb-1">
+                        {/* ✅ FIX: show section_code (Block code like "IT101"), not raw SubjectSection.id */}
                         <h3 className="text-xl font-bold text-white group-hover:text-blue-300 transition">
                           Class Code {cls.name}
                         </h3>
+                        {/* ✅ FIX: show section_no as a subtle secondary label */}
+                        {cls.section_no && (
+                          <span className="px-2 py-0.5 bg-slate-700/60 text-slate-400 rounded text-xs font-mono">
+                            #{cls.section_no}
+                          </span>
+                        )}
                         <span className="px-2 py-0.5 bg-green-500/10 text-green-400 border border-green-500/20 rounded-full text-xs font-bold">
                           {cls.status}
                         </span>

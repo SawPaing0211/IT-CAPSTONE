@@ -13,8 +13,6 @@ import Analytics from './Analytics'
 import CourseMaterials from './CourseMaterials'
 import InstructorAchievements from './InstructorAchievements'
 
-// No mock data here anymore - use props
-
 export default function InstructorDashboard({ user, onLogout }) {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const navigate = useNavigate()

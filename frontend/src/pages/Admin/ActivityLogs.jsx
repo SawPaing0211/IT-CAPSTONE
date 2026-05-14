@@ -24,7 +24,7 @@ export default function ActivityLogs() {
       })
       if (res.ok) {
         const data = await res.json()
-        // ✅ Backend now returns { logs, stats, total, pages }
+        // Backend now returns { logs, stats, total, pages }
         setLogs(data.logs || [])
         setStats(data.stats || { total: 0, today: 0, unique_users: 0, last_activity: null })
         setTotalPages(data.pages || 1)
@@ -40,7 +40,7 @@ export default function ActivityLogs() {
   const exportCSV = async () => {
     try {
       const token = localStorage.getItem('token')
-      const res = await fetch('http://localhost:5000/api/admin/export-activity-logs', {
+      const res = await fetch('http://localhost:5000/api/admin/reports?format=csv', {
         headers: { 'Authorization': `Bearer ${token}` }
       })
       if (res.ok) {

@@ -12,6 +12,9 @@ export default function DashboardOverview() {
   const [newProblemsThisWeek, setNewProblemsThisWeek] = useState(0)
   const [recentActivity, setRecentActivity] = useState([])
   const [topPerformers, setTopPerformers] = useState([])
+  const [assignedSections, setAssignedSections] = useState([])
+  const [activityFilter, setActivityFilter] = useState('all')
+  const [activityLoading, setActivityLoading] = useState(false)
 
   useEffect(() => {
     const fetchDashboardData = async () => {
@@ -39,6 +42,7 @@ export default function DashboardOverview() {
           setNewProblemsThisWeek(statsData.new_problems_this_week)
           setRecentActivity(statsData.recent_activity)
           setTopPerformers(statsData.top_performers)
+          setAssignedSections(statsData.assigned_sections || [])
         }
       } catch (err) {
         console.error('Dashboard fetch error:', err)
@@ -48,6 +52,29 @@ export default function DashboardOverview() {
     }
     fetchDashboardData()
   }, [])
+
+  useEffect(() => {
+    if (activityFilter === 'all' && assignedSections.length === 0) return
+    const fetchFiltered = async () => {
+      setActivityLoading(true)
+      try {
+        const token = localStorage.getItem('token')
+        const url = activityFilter === 'all'
+          ? 'http://localhost:5000/api/instructor/dashboard-stats'
+          : `http://localhost:5000/api/instructor/dashboard-stats?class_code=${activityFilter}`
+        const res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } })
+        if (res.ok) {
+          const data = await res.json()
+          setRecentActivity(data.recent_activity)
+        }
+      } catch (err) {
+        console.error('Filter fetch error:', err)
+      } finally {
+        setActivityLoading(false)
+      }
+    }
+    fetchFiltered()
+  }, [activityFilter])
 
   if (loading) {
     return (
@@ -192,7 +219,7 @@ export default function DashboardOverview() {
                       🏫
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="font-bold text-white text-sm group-hover:text-blue-300 transition">Block {cls.section_code}</p>
+                      <p className="font-bold text-white text-sm group-hover:text-blue-300 transition">{cls.section_no || cls.name}</p>
                       <p className="text-slate-500 text-xs truncate">{cls.name}</p>
                     </div>
                     <div className="flex items-center gap-5 text-right">
@@ -214,17 +241,34 @@ export default function DashboardOverview() {
 
           {/* Recent Activity */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
-            <div className="px-6 py-5 border-b border-slate-800">
-              <h2 className="text-lg font-bold text-white flex items-center gap-2">
+            <div className="px-6 py-5 border-b border-slate-800 flex items-center justify-between gap-4">
+              <h2 className="text-lg font-bold text-white flex items-center gap-2 flex-shrink-0">
                 <span className="text-yellow-400">⚡</span> Recent Activity
               </h2>
+              <select
+                value={activityFilter}
+                onChange={e => setActivityFilter(e.target.value)}
+                className="bg-slate-800 border border-slate-700 text-slate-300 text-xs rounded-lg px-3 py-1.5 focus:outline-none focus:border-blue-500/60 transition cursor-pointer"
+              >
+                <option value="all">All Classes</option>
+                {assignedSections.map(sec => (
+                  <option key={sec.id} value={sec.section_no}>
+                    Class {sec.section_no}
+                  </option>
+                ))}
+              </select>
             </div>
 
             <div className="divide-y divide-slate-800/60">
-              {recentActivity.length === 0 ? (
+              {activityLoading ? (
+                <div className="flex items-center justify-center py-10">
+                  <div className="animate-spin rounded-full h-6 w-6 border-2 border-blue-500 border-t-transparent"></div>
+                </div>
+              ) : recentActivity.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-12 text-slate-500">
                   <span className="text-4xl mb-3">📭</span>
-                  <p className="text-sm">No recent activity yet</p>
+                  <p className="text-sm">No recent activity
+                    {activityFilter !== 'all' ? ` for class ${activityFilter}` : ''}</p>
                 </div>
               ) : (
                 recentActivity.map((activity) => (
@@ -241,10 +285,20 @@ export default function DashboardOverview() {
                         <span className="text-slate-400"> submitted </span>
                         <span className="text-blue-400">{activity.problem}</span>
                       </p>
-                      <p className="text-slate-500 text-xs mt-0.5">
-                        {new Date(activity.submitted_at).toLocaleDateString()} at{' '}
-                        {new Date(activity.submitted_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </p>
+                      <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                        {activity.subject && (
+                          <span className="text-slate-500 text-xs truncate">{activity.subject}</span>
+                        )}
+                        {activity.section_no && (
+                          <span className="px-1.5 py-0.5 bg-slate-700/60 text-slate-400 rounded text-xs font-mono flex-shrink-0">
+                            #{activity.section_no}
+                          </span>
+                        )}
+                        <span className="text-slate-600 text-xs flex-shrink-0">
+                          {new Date(activity.submitted_at).toLocaleDateString()} ·{' '}
+                          {new Date(activity.submitted_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      </div>
                     </div>
                     <span className={`px-2.5 py-1 rounded-full text-xs font-bold flex-shrink-0 ${
                       activity.status === 'accepted' ? 'bg-green-500/10 text-green-400 border border-green-500/20' :
@@ -332,7 +386,7 @@ export default function DashboardOverview() {
                         {(student.username || 'U')[0].toUpperCase()}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-white text-sm font-semibold truncate">{student.username}</p>
+                        <p className="text-white text-sm font-semibold truncate">{student.full_name || student.username}</p>
                         <p className="text-slate-500 text-xs">Level {student.level}</p>
                       </div>
                       <span className="text-yellow-400 font-bold text-sm tabular-nums">{student.xp} XP</span>

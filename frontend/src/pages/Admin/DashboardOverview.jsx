@@ -1,38 +1,40 @@
 import { useState, useEffect } from 'react'
 import CreateUserModal from './CreateUserModal'
-import CreateBlockModal from './CreateBlockModal'
 import BackupDatabaseModal from './BackupDatabaseModal'
 import SystemSettingsModal from './SystemSettingsModal'
 
 export default function DashboardOverview() {
   const [stats, setStats] = useState(null)
+  const [sections, setSections] = useState([])
   const [loading, setLoading] = useState(true)
 
-  // Modal states
   const [showCreateUserModal, setShowCreateUserModal] = useState(false)
-  const [showCreateBlockModal, setShowCreateBlockModal] = useState(false)
   const [showBackupModal, setShowBackupModal] = useState(false)
   const [showSettingsModal, setShowSettingsModal] = useState(false)
 
   useEffect(() => {
     fetchStats()
-    const interval = setInterval(fetchStats, 30000) // Refresh every 30s
+    fetchSections()
+    const interval = setInterval(fetchStats, 30000)
     return () => clearInterval(interval)
   }, [])
 
-  // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (e.ctrlKey || e.metaKey) {
         switch (e.key) {
           case 'u': e.preventDefault(); setShowCreateUserModal(true); break
-          case 'b': e.preventDefault(); setShowCreateBlockModal(true); break
+          case 's': e.preventDefault(); navigateToSections(); break
         }
       }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [])
+
+  const navigateToSections = () => {
+    window.dispatchEvent(new CustomEvent('navigate-tab', { detail: 'sections' }))
+  }
 
   const fetchStats = async () => {
     try {
@@ -51,6 +53,21 @@ export default function DashboardOverview() {
     }
   }
 
+  const fetchSections = async () => {
+    try {
+      const token = localStorage.getItem('token')
+      const res = await fetch('http://localhost:5000/api/admin/sections', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setSections(Array.isArray(data) ? data : [])
+      }
+    } catch (err) {
+      console.error('Failed to fetch sections:', err)
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-96">
@@ -65,19 +82,19 @@ export default function DashboardOverview() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <StatCard
           title="Today's Logins"
-          value={stats?.today_logins || 156}
+          value={stats?.today_logins ?? 0}
           icon="📈"
           trend="+12%"
           color="green"
-          tooltip="Number of unique user logins in the last 24 hours. Tracks platform engagement and daily active users."
+          tooltip="Number of unique user logins in the last 24 hours."
         />
         <StatCard
           title="Submissions"
-          value={stats?.today_submissions || 89}
+          value={stats?.today_submissions ?? 0}
           icon="📝"
           trend="+5%"
           color="blue"
-          tooltip="Total code submissions across all quests and classes. Measures student activity and platform usage. Includes Python, Java, and C#."
+          tooltip="Total code submissions across all quests today."
         />
         <StatCard
           title="Avg Response"
@@ -85,7 +102,7 @@ export default function DashboardOverview() {
           icon="⏱️"
           trend="-8%"
           color="yellow"
-          tooltip="Average time to execute and grade code submissions. Measures Docker sandbox performance. Excellent: <3s, Acceptable: 3-5s, Slow: >5s."
+          tooltip="Average time to execute and grade code submissions."
         />
         <StatCard
           title="Success Rate"
@@ -93,7 +110,7 @@ export default function DashboardOverview() {
           icon="✅"
           trend="+2%"
           color="green"
-          tooltip="Percentage of submissions that executed without errors or timeouts. Indicates system stability and code quality."
+          tooltip="Percentage of submissions that executed without errors."
         />
       </div>
 
@@ -101,40 +118,39 @@ export default function DashboardOverview() {
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         <UserStatCard
           title="Total Students"
-          value={stats?.total_students || 1}
+          value={stats?.total_students ?? 0}
           subtitle="Active student accounts"
           icon="🎓"
           trend="+12%"
         />
         <UserStatCard
           title="Total Instructors"
-          value={stats?.total_instructors || 2}
+          value={stats?.total_instructors ?? 0}
           subtitle="Active instructor accounts"
-          icon="👨‍"
+          icon="👨‍🏫"
           trend="+5%"
         />
         <UserStatCard
-          title="Total Blocks"
-          value={stats?.total_blocks || 1}
-          subtitle="Class sections"
-          icon="📚"
+          title="Class Codes"
+          value={stats?.total_sections ?? sections.length}
+          subtitle="Active subject sections"
+          icon="🗂️"
           trend="+8%"
         />
         <UserStatCard
-          title="Active Sessions"
-          value={stats?.active_sessions || 24}
-          subtitle="Current active users"
-          icon="👥"
-          trend="-3%"
-          trendDown
+          title="Total Problems"
+          value={stats?.total_problems ?? 0}
+          subtitle="Problems created"
+          icon="🧩"
+          trend="+3%"
         />
       </div>
 
-      {/* Quick Actions — FUNCTIONAL */}
+      {/* Quick Actions */}
       <div className="bg-slate-900/80 rounded-2xl border border-purple-600/30 p-6">
         <div className="flex items-center justify-between mb-5">
           <h3 className="text-xl font-bold text-white">Quick Actions</h3>
-          <span className="text-xs text-slate-500 hidden sm:block">Keyboard: Ctrl+U (User) · Ctrl+B (Block)</span>
+          <span className="text-xs text-slate-500 hidden sm:block">Keyboard: Ctrl+U (User) · Ctrl+S (Class Codes)</span>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           <QuickActionCard
@@ -146,12 +162,12 @@ export default function DashboardOverview() {
             onClick={() => setShowCreateUserModal(true)}
           />
           <QuickActionCard
-            icon="📚"
-            title="Create New Block"
-            description="Set up class sections"
+            icon="🗂️"
+            title="Manage Class Codes"
+            description="View and create sections"
             color="purple"
-            shortcut="Ctrl+B"
-            onClick={() => setShowCreateBlockModal(true)}
+            shortcut="Ctrl+S"
+            onClick={navigateToSections}
           />
           <QuickActionCard
             icon="💾"
@@ -175,23 +191,25 @@ export default function DashboardOverview() {
         <div className="lg:col-span-2 bg-slate-900/80 rounded-2xl border border-purple-600/30 p-6">
           <h3 className="text-xl font-bold text-white mb-4">Recent Activity</h3>
           <div className="space-y-3">
-            {stats?.recent_activity?.map((activity, index) => (
+            {stats?.recent_activity?.length > 0 ? stats.recent_activity.map((activity, index) => (
               <div key={index} className="flex items-center justify-between p-3 bg-slate-800/50 rounded-lg">
                 <div className="flex items-center gap-3">
                   <div className="w-8 h-8 bg-purple-600/30 rounded-lg flex items-center justify-center">
                     ⚙️
                   </div>
                   <div>
-                    <p className="font-semibold text-white">{activity.admin || activity.user}</p>
-                    <p className="text-xs text-slate-400">{activity.action}</p>
+                    <p className="font-semibold text-white">{activity.admin || activity.student || 'System'}</p>
+                    <p className="text-xs text-slate-400">{activity.action || activity.status}</p>
                   </div>
                 </div>
                 <div className="text-right">
-                  <p className="text-xs text-slate-400">{activity.details}</p>
-                  <p className="text-xs text-slate-500">{new Date(activity.created_at).toLocaleString()}</p>
+                  <p className="text-xs text-slate-400 max-w-[180px] truncate">{activity.details || activity.problem}</p>
+                  <p className="text-xs text-slate-500">{new Date(activity.submitted_at || activity.created_at).toLocaleString()}</p>
                 </div>
               </div>
-            ))}
+            )) : (
+              <p className="text-slate-500 text-sm text-center py-6">No recent activity</p>
+            )}
           </div>
         </div>
 
@@ -200,23 +218,39 @@ export default function DashboardOverview() {
           <div className="space-y-4">
             <StatusItem label="Database" status="Connected" color="green" />
             <StatusItem label="API Server" status="Operational" color="green" />
-            <StatusItem label="Last Backup" status="Apr 20, 08:59 PM" color="yellow" />
+            <StatusItem label="Code Sandbox" status="Active" color="green" />
             <StatusItem label="Uptime" status="99.9%" color="green" />
+          </div>
+
+          {/* Section summary */}
+          <div className="mt-6 pt-4 border-t border-slate-800">
+            <p className="text-slate-400 text-xs font-semibold uppercase tracking-wider mb-3">Class Code Summary</p>
+            <div className="space-y-2">
+              <div className="flex justify-between text-sm">
+                <span className="text-slate-400">Total sections</span>
+                <span className="text-white font-bold">{sections.length}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-slate-400">Active sections</span>
+                <span className="text-green-400 font-bold">{sections.filter(s => s.is_active).length}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-slate-400">Total enrolled</span>
+                <span className="text-blue-400 font-bold">
+                  {sections.reduce((sum, s) => sum + (s.current_count || s.student_count || 0), 0)}
+                </span>
+              </div>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* ── MODALS ── */}
+      {/* Modals */}
       {showCreateUserModal && (
         <CreateUserModal
+          sections={sections}
           onClose={() => setShowCreateUserModal(false)}
           onSuccess={() => { setShowCreateUserModal(false); fetchStats() }}
-        />
-      )}
-      {showCreateBlockModal && (
-        <CreateBlockModal
-          onClose={() => setShowCreateBlockModal(false)}
-          onSuccess={() => { setShowCreateBlockModal(false); fetchStats() }}
         />
       )}
       {showBackupModal && (
@@ -231,120 +265,30 @@ export default function DashboardOverview() {
 
 function StatCard({ title, value, icon, trend, color, trendDown, tooltip }) {
   const colors = {
-    green: {
-      gradient: 'from-emerald-900/40 to-teal-900/40',
-      border: 'border-emerald-600/30 hover:border-emerald-500/60',
-      glow: 'shadow-emerald-600/20',
-      text: 'text-emerald-400 group-hover:text-emerald-300',
-      iconBg: 'bg-emerald-600/20',
-      tooltipBorder: 'border-emerald-600/50',
-      tooltipShadow: 'shadow-emerald-600/20'
-    },
-    blue: {
-      gradient: 'from-blue-900/40 to-indigo-900/40',
-      border: 'border-blue-600/30 hover:border-blue-500/60',
-      glow: 'shadow-blue-600/20',
-      text: 'text-blue-400 group-hover:text-blue-300',
-      iconBg: 'bg-blue-600/20',
-      tooltipBorder: 'border-blue-600/50',
-      tooltipShadow: 'shadow-blue-600/20'
-    },
-    yellow: {
-      gradient: 'from-amber-900/40 to-orange-900/40',
-      border: 'border-amber-600/30 hover:border-amber-500/60',
-      glow: 'shadow-amber-600/20',
-      text: 'text-amber-400 group-hover:text-amber-300',
-      iconBg: 'bg-amber-600/20',
-      tooltipBorder: 'border-amber-600/50',
-      tooltipShadow: 'shadow-amber-600/20'
-    },
-    purple: {
-      gradient: 'from-purple-900/40 to-pink-900/40',
-      border: 'border-purple-600/30 hover:border-purple-500/60',
-      glow: 'shadow-purple-600/20',
-      text: 'text-purple-400 group-hover:text-purple-300',
-      iconBg: 'bg-purple-600/20',
-      tooltipBorder: 'border-purple-600/50',
-      tooltipShadow: 'shadow-purple-600/20'
-    }
+    green:  { border: 'border-emerald-600/30 hover:border-emerald-500/60', text: 'text-emerald-400', iconBg: 'bg-emerald-600/20' },
+    blue:   { border: 'border-blue-600/30 hover:border-blue-500/60',       text: 'text-blue-400',    iconBg: 'bg-blue-600/20' },
+    yellow: { border: 'border-amber-600/30 hover:border-amber-500/60',     text: 'text-amber-400',   iconBg: 'bg-amber-600/20' },
+    purple: { border: 'border-purple-600/30 hover:border-purple-500/60',   text: 'text-purple-400',  iconBg: 'bg-purple-600/20' },
   }
-
-  const theme = colors[color] || colors.blue;
-
-  // Default tooltips if not provided
-  const tooltips = {
-    "Today's Logins": "Number of unique user logins in the last 24 hours. Tracks platform engagement and daily active users.",
-    "Submissions": "Total code submissions across all quests and classes. Measures student activity and platform usage. Includes Python, Java, and C#.",
-    "Avg Response": "Average time to execute and grade code submissions. Measures Docker sandbox performance. Excellent: <3s, Acceptable: 3-5s, Slow: >5s.",
-    "Success Rate": "Percentage of submissions that executed without errors or timeouts. Indicates system stability and code quality."
-  }
-
-  const description = tooltip || tooltips[title] || "System metric for monitoring platform health.";
+  const theme = colors[color] || colors.blue
 
   return (
-    <div className="group relative">
-      <div className={`relative bg-gradient-to-br ${theme.gradient} rounded-2xl border-2 ${theme.border} p-6 
-                hover:shadow-2xl ${theme.glow} transition-all duration-300 
-                hover:scale-105 hover:-translate-y-1 cursor-help overflow-visible`}>
-        
-        {/* Animated glow overlay */}
-        <div className={`absolute inset-0 bg-gradient-to-br ${theme.gradient.replace('900', '600').replace('/40', '/10')} 
-                        opacity-0 group-hover:opacity-100 transition-opacity duration-300`}></div>
-        
-        {/* Content */}
-        <div className="relative flex items-start justify-between mb-4">
-          <div>
-            <p className="text-slate-400 text-sm font-semibold mb-1">{title}</p>
-            <h3 className={`text-4xl font-black ${theme.text} transition-colors`}>
-              {value}
-            </h3>
-          </div>
-          <div className={`w-10 h-10 ${theme.iconBg} rounded-xl flex items-center justify-center 
-                          group-hover:scale-110 group-hover:rotate-12 transition-transform duration-300`}>
-            <span className="text-2xl">{icon}</span>
-          </div>
+    <div className={`bg-slate-900/80 rounded-2xl border-2 ${theme.border} p-6 hover:shadow-xl transition-all duration-300 group cursor-help`}
+         title={tooltip}>
+      <div className="flex items-start justify-between mb-4">
+        <div>
+          <p className="text-slate-400 text-sm font-semibold mb-1">{title}</p>
+          <h3 className={`text-4xl font-black ${theme.text}`}>{value}</h3>
         </div>
-        
-        {/* Trend */}
-        <div className="relative flex items-center gap-2">
-          <span className={`${trendDown ? 'text-red-400' : 'text-green-400'} font-bold text-sm flex items-center gap-1
-                          group-hover:scale-110 transition-transform`}>
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
-                    d={trendDown ? "M13 17h8m0 0V9m0 8l-8-8-4 4-6-6" : "M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"} />
-            </svg>
-            {trend}
-          </span>
-          <span className="text-slate-500 text-xs">vs yesterday</span>
+        <div className={`w-10 h-10 ${theme.iconBg} rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform duration-300`}>
+          <span className="text-2xl">{icon}</span>
         </div>
-        
-        {/* Tooltip - Positioned BELOW card to avoid header */}
-        <div 
-          className="absolute top-full left-1/2 -translate-x-1/2 mt-2 
-                    opacity-0 invisible group-hover:opacity-100 group-hover:visible 
-                    transition-all duration-300 z-[9999] pointer-events-none"
-          style={{ 
-            filter: 'drop-shadow(0 20px 25px rgba(0,0,0,0.5))'
-          }}
-        >
-          <div className={`bg-slate-900 border ${theme.tooltipBorder} rounded-xl p-4 
-                          shadow-2xl ${theme.tooltipShadow} min-w-[300px] max-w-[400px]`}>
-            <div className="flex items-center gap-2 mb-2">
-              <span className={`${theme.text} text-lg`}>{icon}</span>
-              <p className={`${theme.text} font-bold text-sm`}>{title}</p>
-            </div>
-            <p className="text-slate-400 text-xs leading-relaxed">{description}</p>
-            <div className="mt-2 pt-2 border-t border-slate-800">
-              <p className="text-slate-500 text-xs">
-                <span className={`${theme.text} font-semibold`}>💡 Tip:</span> Monitor this metric for system health
-              </p>
-            </div>
-            {/* Arrow pointer - flipped to point UP */}
-            <div className="absolute -top-2 left-1/2 -translate-x-1/2 
-                            w-4 h-4 bg-slate-900 border-l border-t border-slate-700 
-                            rotate-45"></div>
-          </div>
-        </div>
+      </div>
+      <div className="flex items-center gap-2">
+        <span className={`${trendDown ? 'text-red-400' : 'text-green-400'} font-bold text-sm`}>
+          {trendDown ? '↓' : '↑'} {trend}
+        </span>
+        <span className="text-slate-500 text-xs">vs yesterday</span>
       </div>
     </div>
   )
@@ -354,9 +298,7 @@ function UserStatCard({ title, value, subtitle, icon, trend, trendDown }) {
   return (
     <div className="bg-slate-900/80 rounded-2xl border border-purple-600/30 p-6 hover:border-purple-600/50 transition">
       <div className="flex justify-between items-start mb-4">
-        <div className="w-12 h-12 bg-purple-600/30 rounded-xl flex items-center justify-center text-2xl">
-          {icon}
-        </div>
+        <div className="w-12 h-12 bg-purple-600/30 rounded-xl flex items-center justify-center text-2xl">{icon}</div>
         <span className={`text-sm font-bold ${trendDown ? 'text-red-400' : 'text-green-400'}`}>
           {trendDown ? '↓' : '↑'} {trend}
         </span>
@@ -393,12 +335,7 @@ function QuickActionCard({ icon, title, description, color, shortcut, onClick })
 }
 
 function StatusItem({ label, status, color }) {
-  const colors = {
-    green: 'text-green-400',
-    yellow: 'text-yellow-400',
-    red: 'text-red-400'
-  }
-
+  const colors = { green: 'text-green-400', yellow: 'text-yellow-400', red: 'text-red-400' }
   return (
     <div className="flex justify-between items-center p-3 bg-slate-800/50 rounded-lg">
       <span className="text-slate-400">{label}</span>

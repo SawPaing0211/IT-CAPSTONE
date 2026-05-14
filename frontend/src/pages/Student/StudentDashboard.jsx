@@ -581,9 +581,29 @@ export default function StudentDashboard({ user, onLogout }) {
   useEffect(() => {
     const fetch_ = async () => {
       try {
-        setHeroStats({ total_xp: 0, level: 1, streak: 1, total_submissions: 5, accepted_submissions: 0, success_rate: 0 })
-      } catch (err) { console.error(err) }
-      finally { setLoading(false) }
+        const token = localStorage.getItem('token')
+        const res = await fetch('http://localhost:5000/api/student/stats', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        })
+        if (res.ok) {
+          const data = await res.json()
+          setHeroStats({
+            total_xp: data.total_xp ?? 0,
+            level: data.level ?? 1,
+            streak: data.streak ?? 0,
+            total_submissions: data.total_submissions ?? 0,
+            accepted_submissions: data.accepted_submissions ?? 0,
+            success_rate: data.success_rate ?? 0,
+          })
+        } else {
+          setHeroStats({ total_xp: 0, level: 1, streak: 0, total_submissions: 0, accepted_submissions: 0, success_rate: 0 })
+        }
+      } catch (err) {
+        console.error(err)
+        setHeroStats({ total_xp: 0, level: 1, streak: 0, total_submissions: 0, accepted_submissions: 0, success_rate: 0 })
+      } finally {
+        setLoading(false)
+      }
     }
     fetch_()
   }, [])

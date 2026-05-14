@@ -6,13 +6,13 @@ export default function MySubjects({ onSelectSubject }) {
   const [subjects, setSubjects] = useState([])
   const [loading, setLoading] = useState(true)
   const [user, setUser] = useState(null)
+  const [stats, setStats] = useState(null)
 
   useEffect(() => {
     const fetchData = async () => {
       try {
         const token = localStorage.getItem('token')
-        
-        // Get current user info
+
         const userRes = await fetch('http://localhost:5000/api/auth/me', {
           headers: { 'Authorization': `Bearer ${token}` }
         })
@@ -25,6 +25,11 @@ export default function MySubjects({ onSelectSubject }) {
         })
         const subjectsData = await subjectsRes.json()
         setSubjects(subjectsData)
+
+        const statsRes = await fetch('http://localhost:5000/api/student/stats', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        })
+        if (statsRes.ok) setStats(await statsRes.json())
       } catch (err) {
         console.error('Failed to load subjects:', err)
       } finally {
@@ -85,12 +90,12 @@ export default function MySubjects({ onSelectSubject }) {
             onClick={() => {
             // Pass BOTH subject and block info
             const subjectData = {
-              id: subject.id,              // SUBJECT ID
-              name: subject.name,          // Subject name
-              block_id: subject.block_id,  // Block ID
-              block_code: subject.block_code,
+              id: subject.id,
+              name: subject.name,
+              block_id: subject.section_id,
+              block_code: subject.section_no,
               semester: subject.semester,
-              instructor: subject.instructor
+              instructor: subject.instructor,
             }
             
             if (onSelectSubject) {
@@ -135,7 +140,7 @@ export default function MySubjects({ onSelectSubject }) {
             {/* Action Button */}
             <div className="mt-6 pt-4 border-t border-slate-700">
               <button className="w-full py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-lg text-white font-bold text-sm transition shadow-lg shadow-purple-600/20 group-hover:shadow-purple-600/40">
-                View Quest Log →
+                Open Course →
               </button>
             </div>
           </div>
@@ -149,11 +154,11 @@ export default function MySubjects({ onSelectSubject }) {
           <div className="text-xs text-slate-500 uppercase tracking-wider mt-1">Total Subjects</div>
         </div>
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 text-center">
-          <div className="text-3xl font-bold text-green-400">0</div>
+          <div className="text-3xl font-bold text-green-400">{stats?.accepted_submissions ?? 0}</div>
           <div className="text-xs text-slate-500 uppercase tracking-wider mt-1">Quests Completed</div>
         </div>
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 text-center">
-          <div className="text-3xl font-bold text-yellow-400">0</div>
+          <div className="text-3xl font-bold text-yellow-400">{stats?.total_xp ?? 0}</div>
           <div className="text-xs text-slate-500 uppercase tracking-wider mt-1">Total XP Earned</div>
         </div>
       </div>

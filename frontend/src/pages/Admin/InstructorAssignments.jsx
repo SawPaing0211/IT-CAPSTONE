@@ -1,72 +1,60 @@
 import { useState, useEffect } from 'react'
 
+const API = 'http://localhost:5000'
+
 export default function InstructorAssignments() {
   const [assignments, setAssignments] = useState([])
   const [instructors, setInstructors] = useState([])
   const [subjects, setSubjects] = useState([])
-  const [blocks, setBlocks] = useState([])
-  const [filteredBlocks, setFilteredBlocks] = useState([])
+  const [sections, setSections] = useState([])
+  const [filteredSections, setFilteredSections] = useState([])
   const [loading, setLoading] = useState(true)
   const [showCreateModal, setShowCreateModal] = useState(false)
-  
-  // Form state
+
   const [formData, setFormData] = useState({
     instructor_id: '',
     subject_id: '',
-    block_id: ''
+    section_id: '',
   })
-  
-  // Edit state
+
   const [editingAssignment, setEditingAssignment] = useState(null)
-  
-  // Filter state
+
   const [filterInstructor, setFilterInstructor] = useState('all')
   const [filterSubject, setFilterSubject] = useState('all')
-  const [filterBlock, setFilterBlock] = useState('all')
+  const [filterSection, setFilterSection] = useState('all')
   const [searchTerm, setSearchTerm] = useState('')
 
   useEffect(() => {
     fetchAssignments()
     fetchInstructors()
     fetchSubjects()
-    fetchBlocks()
+    fetchSections()
   }, [])
 
-  // ✅ NEW: Filter blocks when subject changes
-useEffect(() => {
-  if (!formData.subject_id) {
-    setFilteredBlocks([])
-    return
-  }
-  
-  // Find the selected subject name
-  const selectedSubject = subjects.find(s => s.id == formData.subject_id)
-  
-  // Filter blocks that have the selected subject (block.subjects is an array of names)
-  const blocksWithSubject = blocks.filter(block => 
-    block.subjects && selectedSubject && block.subjects.includes(selectedSubject.name)
-  )
-  
-  setFilteredBlocks(blocksWithSubject)
-  
-  // Reset block selection if current block doesn't have this subject
-  if (formData.block_id && !blocksWithSubject.some(b => b.id == formData.block_id)) {
-    setFormData(prev => ({ ...prev, block_id: '' }))
-  }
-}, [formData.subject_id, blocks, subjects])  // ✅ Added subjects to dependencies
+  // Filter sections when subject changes (optional UX improvement)
+  useEffect(() => {
+    if (!formData.subject_id) {
+      setFilteredSections(sections)
+      return
+    }
+    // Show all sections — backend controls which are valid per subject
+    setFilteredSections(sections)
+
+    // Reset section if not already set
+    if (formData.section_id) {
+      setFormData(prev => ({ ...prev, section_id: '' }))
+    }
+  }, [formData.subject_id, sections])
 
   const fetchAssignments = async () => {
     try {
       const token = localStorage.getItem('token')
-      let url = 'http://localhost:5000/api/admin/instructor-assignments?'
+      let url = `${API}/api/admin/instructor-assignments?`
       if (filterInstructor !== 'all') url += `instructor_id=${filterInstructor}&`
       if (filterSubject !== 'all') url += `subject_id=${filterSubject}&`
-      if (filterBlock !== 'all') url += `block_id=${filterBlock}&`
-      
-      const res = await fetch(url, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      })
-      
+      if (filterSection !== 'all') url += `section_id=${filterSection}&`
+
+      const res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } })
       if (res.ok) {
         const data = await res.json()
         setAssignments(Array.isArray(data) ? data : [])
@@ -81,77 +69,69 @@ useEffect(() => {
   const fetchInstructors = async () => {
     try {
       const token = localStorage.getItem('token')
-      const res = await fetch('http://localhost:5000/api/admin/users?role=instructor', {
+      const res = await fetch(`${API}/api/admin/users?role=instructor`, {
         headers: { 'Authorization': `Bearer ${token}` }
       })
       if (res.ok) {
         const data = await res.json()
         setInstructors(Array.isArray(data) ? data : [])
       }
-    } catch (err) {
-      console.error('Failed to fetch instructors:', err)
-    }
+    } catch (err) { console.error('Failed to fetch instructors:', err) }
   }
 
   const fetchSubjects = async () => {
     try {
       const token = localStorage.getItem('token')
-      const res = await fetch('http://localhost:5000/api/admin/subjects', {
+      const res = await fetch(`${API}/api/admin/subjects`, {
         headers: { 'Authorization': `Bearer ${token}` }
       })
       if (res.ok) {
         const data = await res.json()
         setSubjects(Array.isArray(data) ? data : [])
       }
-    } catch (err) {
-      console.error('Failed to fetch subjects:', err)
-    }
+    } catch (err) { console.error('Failed to fetch subjects:', err) }
   }
 
-  const fetchBlocks = async () => {
+  // Fetch sections (was fetchBlocks)
+  const fetchSections = async () => {
     try {
       const token = localStorage.getItem('token')
-      const res = await fetch('http://localhost:5000/api/admin/blocks', {
+      const res = await fetch(`${API}/api/admin/sections`, {
         headers: { 'Authorization': `Bearer ${token}` }
       })
       if (res.ok) {
         const data = await res.json()
-        setBlocks(Array.isArray(data) ? data : [])
+        const list = Array.isArray(data) ? data : []
+        setSections(list)
+        setFilteredSections(list)
       }
-    } catch (err) {
-      console.error('Failed to fetch blocks:', err)
-    }
+    } catch (err) { console.error('Failed to fetch sections:', err) }
   }
 
   const handleEditAssignment = (assignment) => {
     setEditingAssignment(assignment)
     setFormData({
       instructor_id: assignment.instructor?.id || '',
-      subject_id: assignment.subject?.id || '',
-      block_id: assignment.block?.id || ''
+      subject_id:    assignment.subject?.id    || '',
+      section_id:    assignment.section?.id    || '',
     })
   }
 
   const handleUpdateAssignment = async () => {
-    if (!formData.instructor_id || !formData.subject_id || !formData.block_id) {
+    if (!formData.instructor_id || !formData.subject_id || !formData.section_id) {
       alert('Please fill in all fields')
       return
     }
-
     try {
       const token = localStorage.getItem('token')
-      const res = await fetch(`http://localhost:5000/api/admin/instructor-assignments/${editingAssignment.id}`, {
+      const res = await fetch(`${API}/api/admin/instructor-assignments/${editingAssignment.id}`, {
         method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(formData)
       })
-
       if (res.ok) {
         setEditingAssignment(null)
-        setFormData({ instructor_id: '', subject_id: '', block_id: '' })
+        setFormData({ instructor_id: '', subject_id: '', section_id: '' })
         await fetchAssignments()
         alert('✅ Assignment updated successfully!')
       } else {
@@ -162,28 +142,23 @@ useEffect(() => {
       console.error('Failed to update assignment:', err)
       alert('Failed to update assignment')
     }
-  } 
-  
+  }
+
   const handleCreateAssignment = async () => {
-    if (!formData.instructor_id || !formData.subject_id || !formData.block_id) {
+    if (!formData.instructor_id || !formData.subject_id || !formData.section_id) {
       alert('Please fill in all fields')
       return
     }
-
     try {
       const token = localStorage.getItem('token')
-      const res = await fetch('http://localhost:5000/api/admin/instructor-assignments', {
+      const res = await fetch(`${API}/api/admin/instructor-assignments`, {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(formData)
       })
-
       if (res.ok) {
         setShowCreateModal(false)
-        setFormData({ instructor_id: '', subject_id: '', block_id: '' })
+        setFormData({ instructor_id: '', subject_id: '', section_id: '' })
         await fetchAssignments()
         alert('✅ Instructor assigned successfully!')
       } else {
@@ -197,19 +172,14 @@ useEffect(() => {
   }
 
   const handleDeleteAssignment = async (assignmentId) => {
-    const confirmText = prompt(`Type "DELETE" to confirm removal of this assignment:`)
-    if (confirmText !== 'DELETE') {
-      alert('Deletion cancelled.')
-      return
-    }
-
+    const confirmText = prompt('Type "DELETE" to confirm removal of this assignment:')
+    if (confirmText !== 'DELETE') { alert('Deletion cancelled.'); return }
     try {
       const token = localStorage.getItem('token')
-      const res = await fetch(`http://localhost:5000/api/admin/instructor-assignments/${assignmentId}`, {
+      const res = await fetch(`${API}/api/admin/instructor-assignments/${assignmentId}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       })
-
       if (res.ok) {
         await fetchAssignments()
         alert('✅ Assignment removed successfully!')
@@ -223,30 +193,25 @@ useEffect(() => {
     }
   }
 
-  // Filter assignments
   const filteredAssignments = assignments.filter(assignment => {
     if (filterInstructor !== 'all' && assignment.instructor?.id != filterInstructor) return false
     if (filterSubject !== 'all' && assignment.subject?.id != filterSubject) return false
-    if (filterBlock !== 'all' && assignment.block?.id != filterBlock) return false
-    
+    if (filterSection !== 'all' && assignment.section?.id != filterSection) return false
     if (searchTerm) {
       const term = searchTerm.toLowerCase()
       const instructorName = assignment.instructor?.username?.toLowerCase() || ''
-      const subjectName = assignment.subject?.name?.toLowerCase() || ''
-      const blockCode = assignment.block?.section_code?.toLowerCase() || ''
-      
-      return instructorName.includes(term) || subjectName.includes(term) || blockCode.includes(term)
+      const subjectName    = assignment.subject?.name?.toLowerCase()         || ''
+      const sectionCode    = assignment.section?.section_no?.toLowerCase()   || ''
+      return instructorName.includes(term) || subjectName.includes(term) || sectionCode.includes(term)
     }
-    
     return true
   })
 
-  // Stats
   const stats = {
-    total: assignments.length,
+    total:            assignments.length,
     uniqueInstructors: new Set(assignments.map(a => a.instructor?.id)).size,
-    uniqueSubjects: new Set(assignments.map(a => a.subject?.id)).size,
-    uniqueBlocks: new Set(assignments.map(a => a.block?.id)).size
+    uniqueSubjects:   new Set(assignments.map(a => a.subject?.id)).size,
+    uniqueSections:   new Set(assignments.map(a => a.section?.id)).size,
   }
 
   if (loading) {
@@ -260,13 +225,94 @@ useEffect(() => {
     )
   }
 
+  const AssignmentForm = ({ onSubmit, onCancel, title }) => (
+    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50">
+      <div className="bg-slate-900 border-2 border-purple-600/50 rounded-2xl p-6 w-full max-w-md shadow-2xl">
+        <h2 className="text-2xl font-bold text-white mb-4 flex items-center gap-2">
+          <span>{title.includes('Edit') ? '✏️' : '👨‍🏫'}</span> {title}
+        </h2>
+        <div className="space-y-4">
+          {/* Instructor */}
+          <div>
+            <label className="block text-slate-400 text-sm mb-2">Instructor *</label>
+            <select
+              value={formData.instructor_id}
+              onChange={e => setFormData({ ...formData, instructor_id: e.target.value })}
+              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white outline-none focus:border-purple-500"
+            >
+              <option value="">Select Instructor</option>
+              {instructors.map(inst => (
+                <option key={inst.id} value={inst.id}>{inst.username}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Subject */}
+          <div>
+            <label className="block text-slate-400 text-sm mb-2">Subject *</label>
+            <select
+              value={formData.subject_id}
+              onChange={e => setFormData({ ...formData, subject_id: e.target.value })}
+              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white outline-none focus:border-purple-500"
+            >
+              <option value="">Select Subject</option>
+              {subjects.map(sub => (
+                <option key={sub.id} value={sub.id}>
+                  {sub.subject_code ? `[${sub.subject_code}] ` : ''}{sub.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Class Code (Section) */}
+          <div>
+            <label className="block text-slate-400 text-sm mb-2">Class Code *</label>
+            <select
+              value={formData.section_id}
+              onChange={e => setFormData({ ...formData, section_id: e.target.value })}
+              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white outline-none focus:border-purple-500"
+            >
+              <option value="">Select Class Code</option>
+              {filteredSections.map(s => (
+                <option key={s.id} value={s.id}>
+                  {s.section_no}
+                  {s.subject_code ? ` — ${s.subject_code}` : ''}
+                  {s.subject_name ? ` · ${s.subject_name}` : ''}
+                  {s.semester ? ` (${s.semester})` : ''}
+                </option>
+              ))}
+            </select>
+            {filteredSections.length === 0 && (
+              <p className="text-yellow-400 text-xs mt-1">⚠️ No class codes found — create sections first</p>
+            )}
+          </div>
+        </div>
+
+        <div className="flex gap-3 mt-6">
+          <button
+            onClick={onCancel}
+            className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-white font-bold transition"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onSubmit}
+            className="flex-1 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-lg text-white font-bold transition shadow-lg shadow-purple-600/30"
+          >
+            {title.includes('Edit') ? 'Save Changes' : 'Assign Instructor'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-white">Instructor Assignments</h1>
-          <p className="text-slate-400 mt-1">Manage which instructors teach which subjects in each block</p>
+          <p className="text-slate-400 mt-1">Manage which instructors teach which subjects in each class code</p>
         </div>
         <div className="flex gap-3">
           <button
@@ -276,7 +322,7 @@ useEffect(() => {
             <span>🔄</span> Refresh
           </button>
           <button
-            onClick={() => setShowCreateModal(true)}
+            onClick={() => { setFormData({ instructor_id: '', subject_id: '', section_id: '' }); setShowCreateModal(true) }}
             className="px-4 py-2 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-lg text-white font-bold transition shadow-lg shadow-purple-600/30"
           >
             <span className="text-xl">+</span> Assign Instructor
@@ -295,33 +341,30 @@ useEffect(() => {
           <p className="text-3xl font-bold text-blue-300 mt-1">{stats.uniqueInstructors}</p>
         </div>
         <div className="bg-gradient-to-br from-green-900/30 to-slate-900 border border-green-600/30 rounded-xl p-4">
-          <p className="text-slate-400 text-sm">Subjects Taught</p>
+          <p className="text-slate-400 text-sm">Subjects Covered</p>
           <p className="text-3xl font-bold text-green-300 mt-1">{stats.uniqueSubjects}</p>
         </div>
         <div className="bg-gradient-to-br from-yellow-900/30 to-slate-900 border border-yellow-600/30 rounded-xl p-4">
-          <p className="text-slate-400 text-sm">Blocks Covered</p>
-          <p className="text-3xl font-bold text-yellow-300 mt-1">{stats.uniqueBlocks}</p>
+          <p className="text-slate-400 text-sm">Class Codes Used</p>
+          <p className="text-3xl font-bold text-yellow-300 mt-1">{stats.uniqueSections}</p>
         </div>
       </div>
 
       {/* Filters */}
       <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-4">
         <div className="flex flex-col md:flex-row gap-4">
-          {/* Search */}
           <div className="flex-1">
             <input
               type="text"
-              placeholder="🔍 Search by instructor, subject, or block..."
+              placeholder="🔍 Search by instructor, subject, or class code..."
               value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              onChange={e => setSearchTerm(e.target.value)}
               className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white placeholder-slate-500 outline-none focus:border-purple-500"
             />
           </div>
-
-          {/* Instructor Filter */}
           <select
             value={filterInstructor}
-            onChange={(e) => setFilterInstructor(e.target.value)}
+            onChange={e => setFilterInstructor(e.target.value)}
             className="bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white outline-none focus:border-purple-500"
           >
             <option value="all">All Instructors</option>
@@ -329,40 +372,38 @@ useEffect(() => {
               <option key={inst.id} value={inst.id}>{inst.username}</option>
             ))}
           </select>
-
-          {/* Subject Filter */}
           <select
             value={filterSubject}
-            onChange={(e) => setFilterSubject(e.target.value)}
+            onChange={e => setFilterSubject(e.target.value)}
             className="bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white outline-none focus:border-purple-500"
           >
             <option value="all">All Subjects</option>
             {subjects.map(sub => (
-              <option key={sub.id} value={sub.id}>{sub.name}</option>
+              <option key={sub.id} value={sub.id}>
+                {sub.subject_code ? `[${sub.subject_code}] ` : ''}{sub.name}
+              </option>
             ))}
           </select>
-
-          {/* Block Filter */}
           <select
-            value={filterBlock}
-            onChange={(e) => setFilterBlock(e.target.value)}
+            value={filterSection}
+            onChange={e => setFilterSection(e.target.value)}
             className="bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white outline-none focus:border-purple-500"
           >
-            <option value="all">All Blocks</option>
-            {blocks.map(block => (
-              <option key={block.id} value={block.id}>{block.section_code}</option>
+            <option value="all">All Class Codes</option>
+            {sections.map(s => (
+              <option key={s.id} value={s.id}>{s.section_no}</option>
             ))}
           </select>
         </div>
 
-        {/* Results count */}
         <div className="flex items-center justify-between text-sm">
           <span className="text-slate-400">
-            Showing <span className="text-white font-bold">{filteredAssignments.length}</span> of <span className="text-white font-bold">{assignments.length}</span> assignments
+            Showing <span className="text-white font-bold">{filteredAssignments.length}</span> of{' '}
+            <span className="text-white font-bold">{assignments.length}</span> assignments
           </span>
-          {(searchTerm || filterInstructor !== 'all' || filterSubject !== 'all' || filterBlock !== 'all') && (
+          {(searchTerm || filterInstructor !== 'all' || filterSubject !== 'all' || filterSection !== 'all') && (
             <button
-              onClick={() => { setSearchTerm(''); setFilterInstructor('all'); setFilterSubject('all'); setFilterBlock('all') }}
+              onClick={() => { setSearchTerm(''); setFilterInstructor('all'); setFilterSubject('all'); setFilterSection('all') }}
               className="text-purple-400 hover:text-purple-300"
             >
               Clear filters
@@ -371,7 +412,7 @@ useEffect(() => {
         </div>
       </div>
 
-      {/* Assignments List — grouped by instructor */}
+      {/* Assignments grouped by instructor */}
       {filteredAssignments.length === 0 ? (
         <div className="bg-slate-900/60 border border-dashed border-slate-700 rounded-2xl p-16 text-center">
           <div className="text-6xl mb-4">📋</div>
@@ -382,7 +423,6 @@ useEffect(() => {
         </div>
       ) : (
         <div className="space-y-4">
-          {/* Group by instructor */}
           {Object.entries(
             filteredAssignments.reduce((groups, assignment) => {
               const key = assignment.instructor?.id || 'unknown'
@@ -392,7 +432,7 @@ useEffect(() => {
             }, {})
           ).map(([instructorId, group]) => (
             <div key={instructorId} className="bg-slate-900/80 border border-slate-800 rounded-2xl overflow-hidden hover:border-purple-600/30 transition">
-              {/* Instructor Header */}
+              {/* Instructor header */}
               <div className="flex items-center gap-4 px-6 py-4 bg-slate-800/60 border-b border-slate-700/50">
                 <div className="w-11 h-11 bg-gradient-to-br from-purple-600 to-pink-600 rounded-xl flex items-center justify-center text-lg font-black text-white shadow-lg shadow-purple-600/30 flex-shrink-0">
                   {group.instructor?.username?.[0]?.toUpperCase() || '?'}
@@ -406,43 +446,51 @@ useEffect(() => {
                 </span>
               </div>
 
-              {/* Assignment Rows */}
+              {/* Assignment rows grouped by subject */}
               <div className="divide-y divide-slate-800/60">
-                {group.assignments.map(assignment => (
-                  <div key={assignment.id} className="flex items-center justify-between px-6 py-3.5 hover:bg-slate-800/30 transition group">
+                {Object.entries(
+                  group.assignments.reduce((acc, a) => {
+                    const key = a.subject?.id || 'unknown'
+                    if (!acc[key]) acc[key] = { subject: a.subject, assignments: [] }
+                    acc[key].assignments.push(a)
+                    return acc
+                  }, {})
+                ).map(([subjectId, subjectGroup]) => (
+                  <div key={subjectId} className="flex items-center justify-between px-6 py-3.5 hover:bg-slate-800/30 transition group">
                     <div className="flex items-center gap-3 flex-wrap">
-                      {/* Subject */}
-                      <div className="flex items-center gap-2">
-                        <span className="text-slate-500 text-xs uppercase tracking-wider font-bold">Subject</span>
-                        <span className="px-3 py-1 bg-green-600/15 text-green-300 rounded-lg text-sm font-bold border border-green-600/25">
-                          {assignment.subject?.name || 'Unknown'}
-                        </span>
+                      <span className="text-slate-500 text-xs uppercase tracking-wider font-bold">Subject</span>
+                      <span className="px-3 py-1 bg-green-600/15 text-green-300 rounded-lg text-sm font-bold border border-green-600/25">
+                        {subjectGroup.subject?.name || 'Unknown'}
+                      </span>
+                      <span className="text-slate-500 text-xs uppercase tracking-wider font-bold ml-2">Class Codes</span>
+                      <div className="flex gap-1.5 flex-wrap">
+                        {subjectGroup.assignments.map(a => (
+                          <span key={a.id} className="px-3 py-1 bg-purple-600/15 text-purple-300 rounded-lg text-sm font-bold border border-purple-600/25 font-mono">
+                            {a.section?.section_no || 'Unknown'}
+                          </span>
+                        ))}
                       </div>
-                      <span className="text-slate-600 text-xs">in</span>
-                      {/* Block */}
-                      <div className="flex items-center gap-2">
-                        <span className="text-slate-500 text-xs uppercase tracking-wider font-bold">Block</span>
-                        <span className="px-3 py-1 bg-purple-600/15 text-purple-300 rounded-lg text-sm font-bold border border-purple-600/25">
-                          {assignment.block?.section_code || 'Unknown'}
-                        </span>
-                      </div>
-                      <span className="text-slate-700 text-xs ml-2">#{assignment.id}</span>
                     </div>
-
-                    {/* Actions */}
+                    {/* Per-assignment edit/delete */}
                     <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition ml-4 flex-shrink-0">
-                      <button
-                        onClick={() => handleEditAssignment(assignment)}
-                        className="px-3 py-1.5 bg-purple-600/20 hover:bg-purple-600/40 text-purple-300 rounded-lg text-xs font-bold transition border border-purple-600/30"
-                      >
-                        ✏️ Edit
-                      </button>
-                      <button
-                        onClick={() => handleDeleteAssignment(assignment.id)}
-                        className="px-3 py-1.5 bg-red-600/20 hover:bg-red-600/40 text-red-300 rounded-lg text-xs font-bold transition border border-red-600/30"
-                      >
-                        🗑️ Remove
-                      </button>
+                      {subjectGroup.assignments.map(a => (
+                        <div key={a.id} className="flex gap-1">
+                          <button
+                            onClick={() => handleEditAssignment(a)}
+                            className="px-2.5 py-1.5 bg-purple-600/20 hover:bg-purple-600/40 text-purple-300 rounded-lg text-xs font-bold transition border border-purple-600/30"
+                            title={`Edit ${a.section?.section_no}`}
+                          >
+                            ✏️ {a.section?.section_no}
+                          </button>
+                          <button
+                            onClick={() => handleDeleteAssignment(a.id)}
+                            className="px-2 py-1.5 bg-red-600/20 hover:bg-red-600/40 text-red-300 rounded-lg text-xs font-bold transition border border-red-600/30"
+                            title={`Remove ${a.section?.section_no}`}
+                          >
+                            🗑️
+                          </button>
+                        </div>
+                      ))}
                     </div>
                   </div>
                 ))}
@@ -452,158 +500,22 @@ useEffect(() => {
         </div>
       )}
 
-      {/* Edit Assignment Modal */}
+      {/* Edit Modal */}
       {editingAssignment && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50">
-          <div className="bg-slate-900 border-2 border-purple-600/50 rounded-2xl p-6 w-full max-w-md shadow-2xl">
-            <h2 className="text-2xl font-bold text-white mb-4 flex items-center gap-2">
-              <span>✏️</span> Edit Assignment
-            </h2>
-            <div className="space-y-4">
-              {/* Instructor Select */}
-              <div>
-                <label className="block text-slate-400 text-sm mb-2">Instructor *</label>
-                <select
-                  value={formData.instructor_id}
-                  onChange={(e) => setFormData({...formData, instructor_id: e.target.value})}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white outline-none focus:border-purple-500"
-                >
-                  <option value="">Select Instructor</option>
-                  {instructors.map(inst => (
-                    <option key={inst.id} value={inst.id}>{inst.username}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Subject Select */}
-              <div>
-                <label className="block text-slate-400 text-sm mb-2">Subject *</label>
-                <select
-                  value={formData.subject_id}
-                  onChange={(e) => setFormData({...formData, subject_id: e.target.value})}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white outline-none focus:border-purple-500"
-                >
-                  <option value="">Select Subject</option>
-                  {subjects.map(sub => (
-                    <option key={sub.id} value={sub.id}>{sub.name}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Block Select */}
-              <div>
-                <label className="block text-slate-400 text-sm mb-2">Block *</label>
-                <select
-                  value={formData.block_id}
-                  onChange={(e) => setFormData({...formData, block_id: e.target.value})}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white outline-none focus:border-purple-500"
-                  disabled={!formData.subject_id}
-                >
-                  <option value="">
-                    {formData.subject_id ? 'Select Block' : 'Please select a subject first'}
-                  </option>
-                  {filteredBlocks.map(block => (
-                    <option key={block.id} value={block.id}>{block.section_code} - {block.semester || 'No Semester'}</option>
-                  ))}
-                </select>
-                {formData.subject_id && filteredBlocks.length === 0 && (
-                  <p className="text-yellow-400 text-xs mt-1">⚠️ No blocks found with this subject</p>
-                )}
-              </div>
-            </div>
-            <div className="flex gap-3 mt-6">
-              <button
-                onClick={() => { setEditingAssignment(null); setFormData({ instructor_id: '', subject_id: '', block_id: '' }) }}
-                className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-white font-bold transition"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleUpdateAssignment}
-                className="flex-1 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-lg text-white font-bold transition shadow-lg shadow-purple-600/30"
-              >
-                Save Changes
-              </button>
-            </div>
-          </div>
-        </div>
+        <AssignmentForm
+          title="Edit Assignment"
+          onSubmit={handleUpdateAssignment}
+          onCancel={() => { setEditingAssignment(null); setFormData({ instructor_id: '', subject_id: '', section_id: '' }) }}
+        />
       )}
 
-      {/* Create Assignment Modal */}
+      {/* Create Modal */}
       {showCreateModal && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50">
-          <div className="bg-slate-900 border-2 border-purple-600/50 rounded-2xl p-6 w-full max-w-md shadow-2xl">
-            <h2 className="text-2xl font-bold text-white mb-4 flex items-center gap-2">
-              <span>👨‍🏫</span> Assign Instructor
-            </h2>
-            <div className="space-y-4">
-              {/* Instructor Select */}
-              <div>
-                <label className="block text-slate-400 text-sm mb-2">Instructor *</label>
-                <select
-                  value={formData.instructor_id}
-                  onChange={(e) => setFormData({...formData, instructor_id: e.target.value})}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white outline-none focus:border-purple-500"
-                >
-                  <option value="">Select Instructor</option>
-                  {instructors.map(inst => (
-                    <option key={inst.id} value={inst.id}>{inst.username}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Subject Select */}
-              <div>
-                <label className="block text-slate-400 text-sm mb-2">Subject *</label>
-                <select
-                  value={formData.subject_id}
-                  onChange={(e) => setFormData({...formData, subject_id: e.target.value})}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white outline-none focus:border-purple-500"
-                >
-                  <option value="">Select Subject</option>
-                  {subjects.map(sub => (
-                    <option key={sub.id} value={sub.id}>{sub.name}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Block Select */}
-              <div>
-                <label className="block text-slate-400 text-sm mb-2">Block *</label>
-                <select
-                  value={formData.block_id}
-                  onChange={(e) => setFormData({...formData, block_id: e.target.value})}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white outline-none focus:border-purple-500"
-                  disabled={!formData.subject_id}
-                >
-                  <option value="">
-                    {formData.subject_id ? 'Select Block' : 'Please select a subject first'}
-                  </option>
-                  {filteredBlocks.map(block => (
-                    <option key={block.id} value={block.id}>{block.section_code} - {block.semester || 'No Semester'}</option>
-                  ))}
-                </select>
-                {formData.subject_id && filteredBlocks.length === 0 && (
-                  <p className="text-yellow-400 text-xs mt-1">⚠️ No blocks found with this subject</p>
-                )}
-              </div>
-            </div>
-            <div className="flex gap-3 mt-6">
-              <button
-                onClick={() => { setShowCreateModal(false); setFormData({ instructor_id: '', subject_id: '', block_id: '' }) }}
-                className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-white font-bold transition"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleCreateAssignment}
-                className="flex-1 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-lg text-white font-bold transition shadow-lg shadow-purple-600/30"
-              >
-                Assign Instructor
-              </button>
-            </div>
-          </div>
-        </div>
+        <AssignmentForm
+          title="Assign Instructor"
+          onSubmit={handleCreateAssignment}
+          onCancel={() => { setShowCreateModal(false); setFormData({ instructor_id: '', subject_id: '', section_id: '' }) }}
+        />
       )}
     </div>
   )

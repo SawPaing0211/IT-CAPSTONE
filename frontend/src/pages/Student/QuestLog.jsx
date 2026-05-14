@@ -6,71 +6,74 @@ export default function QuestLog({ blockId }) {
   const [selectedBlock, setSelectedBlock] = useState(null)
   const [loading, setLoading] = useState(true)
 
-  // If blockId is provided (course context), use it directly
-  // Otherwise, fetch enrolled blocks (dashboard context)
   useEffect(() => {
-  if (blockId) {
-    // Course context - fetch block info to display properly
     const fetchBlockInfo = async () => {
       try {
         const token = localStorage.getItem('token')
-        // Get subjects to find block info
         const subjectsRes = await fetch('http://localhost:5000/api/student/subjects', {
           headers: { 'Authorization': `Bearer ${token}` }
         })
         const subjects = await subjectsRes.json()
-        
-        // Find the subject for this block
-        const subject = subjects.find(s => s.block_id === blockId)
-        
-        if (subject) {
-          setSelectedBlock({
-            id: subject.block_id,
-            section_code: subject.block_code,
-            name: subject.name,
-            semester: subject.semester
-          })
+
+        if (blockId) {
+          // Course context — blockId is actually a section_id
+          const subject = subjects.find(s => s.section_id === blockId)
+          if (subject) {
+            setSelectedBlock({
+              id: subject.section_id,
+              section_code: subject.section_no,
+              name: subject.name,
+              subject_id: subject.id,
+              semester: subject.semester
+            })
+          } else {
+            setSelectedBlock({
+              id: blockId,
+              section_code: 'Section',
+              name: 'Current Subject',
+              subject_id: null
+            })
+          }
+        } else {
+          // Dashboard context — show all enrolled subjects as options
+          const blocks = subjects.map(s => ({
+            id: s.section_id,
+            section_code: s.section_no,
+            name: s.name,
+            subject_id: s.id,
+            semester: s.semester
+          }))
+          setEnrolledBlocks(blocks)
+          if (blocks.length > 0) setSelectedBlock(blocks[0])
         }
       } catch (err) {
         console.error('Failed to fetch block info:', err)
-        // Fallback
-        setSelectedBlock({ id: blockId, section_code: 'Block', name: 'Current Subject' })
+        if (blockId) setSelectedBlock({ id: blockId, section_code: 'Section', name: 'Current Subject', subject_id: null })
       }
     }
     fetchBlockInfo()
-    return
-  }
-  
-  // Dashboard context - fetch enrolled blocks (existing code)
-  const fetchData = async () => {
-    // ... your existing dashboard context code ...
-  }
-  fetchData()
-}, [blockId])
+  }, [blockId])
 
-  // Fetch submissions when block changes
   useEffect(() => {
     if (!selectedBlock) return
-    
+
     const fetchSubmissions = async () => {
-  setLoading(true)
-  try {
-    const token = localStorage.getItem('token')
-    
-    // Fetch ALL quests for this block
-    const questsRes = await fetch(
-      `http://localhost:5000/api/problems?block_id=${selectedBlock.id}&subject_id=${selectedBlock.subject_id || ''}`,
-      { headers: { 'Authorization': `Bearer ${token}` } }
-    )
-    const allQuests = await questsRes.json()
-    
-    // Fetch student's submissions
-    const subsRes = await fetch(
-      `http://localhost:5000/api/student/submissions/by-block?block_id=${selectedBlock.id}`,
-      { headers: { 'Authorization': `Bearer ${token}` } }
-    )
-    const subsData = await subsRes.json()
-    const submissions = subsData.submissions || []
+      setLoading(true)
+      try {
+        const token = localStorage.getItem('token')
+
+        const questsRes = await fetch(
+          `http://localhost:5000/api/problems${selectedBlock.subject_id ? `?subject_id=${selectedBlock.subject_id}` : ''}`,
+          { headers: { 'Authorization': `Bearer ${token}` } }
+        )
+        const allQuests = await questsRes.json()
+
+        const subsRes = await fetch(
+          `http://localhost:5000/api/student/submissions/by-section?section_id=${selectedBlock.id}`,
+          { headers: { 'Authorization': `Bearer ${token}` } }
+        )
+        const subsData = await subsRes.json()
+        const submissions = subsData.submissions || []
     
     // Merge: Each quest appears once with its best submission
     const questsWithStatus = allQuests.map(quest => {
@@ -142,8 +145,8 @@ if (!blockId && enrolledBlocks.length === 0) {
         <select
           value={selectedBlock?.id || ''}
           onChange={(e) => {
-            const block = enrolledBlocks.find(b => b.id === parseInt(e.target.value))
-            setSelectedBlock(block)
+            const block = enrolledBlocks.find(b => String(b.id) === e.target.value)
+            if (block) setSelectedBlock({ ...block, subject_id: block.subject_id })
           }}
           className="px-4 py-2 bg-slate-900 border border-purple-600/40 rounded-lg text-white text-sm outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 transition cursor-pointer"
         >

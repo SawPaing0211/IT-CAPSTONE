@@ -282,7 +282,7 @@ useEffect(() => {
     }
     try {
       const token = localStorage.getItem('token')
-      const endpoint = (userRole === 'instructor' || userRole === 'super_admin')
+      const endpoint = (userRole === 'instructor' || userRole === 'administrator')
         ? `http://localhost:5000/api/problems/${quest.id}/test`
         : `http://localhost:5000/api/problems/${quest.id}/run`
 
@@ -813,7 +813,7 @@ useEffect(() => {
             style={{ height: '192px', minHeight: '192px', flexShrink: 0, overflow: 'hidden' }}
           >
             {/* Instructor mode banner */}
-            {(userRole === 'instructor' || userRole === 'super_admin') && (
+            {(userRole === 'instructor' || userRole === 'administrator') && (
               <div className="px-4 py-1 bg-yellow-600/10 border-b border-yellow-600/20 text-[10px] text-yellow-400 text-center shrink-0">
                 ⚠️ Test mode: Results won't be saved or affect XP
               </div>
@@ -833,7 +833,7 @@ useEffect(() => {
                   {isLoading ? '⏳' : '▶'} Run <span className="hidden sm:inline">(Ctrl+Enter)</span>
                 </button>
                 {/* CONDITIONAL: Instructor sees "Test Code", Student sees "Submit" */}
-                {userRole === 'instructor' || userRole === 'super_admin' ? (
+                {userRole === 'instructor' || userRole === 'administrator' ? (
                   <button
                     onClick={handleTestCode}
                     disabled={isLoading}

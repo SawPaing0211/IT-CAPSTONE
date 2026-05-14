@@ -33,7 +33,6 @@ import QuestLog from './pages/Student/QuestLog'
 
 // Admin Pages
 import UserManagement from './pages/Admin/UserManagement'
-import BlocksSections from './pages/Admin/BlocksSections'
 import ActivityLogs from './pages/Admin/ActivityLogs'
 
 function AppContent() {
@@ -70,7 +69,7 @@ function AppContent() {
   // Redirect based on role
   if (userData.role === 'instructor') navigate('/instructor')
   else if (userData.role === 'student') navigate('/student')
-  else if (userData.role === 'super_admin') navigate('/admin')  // ✅ Updated
+  else if (userData.role === 'administrator') navigate('/admin')  
 }
   
   const handleLogout = () => { 
@@ -146,14 +145,13 @@ function AppContent() {
       <Route 
         path="/admin/*" 
         element={
-          <ProtectedRoute allowedRoles={['super_admin']}>  // ✅ Updated
+          <ProtectedRoute allowedRoles={['administrator']}> 
             <AdminDashboard user={user} onLogout={handleLogout} />
           </ProtectedRoute>
         }
       >
         <Route index element={<UserManagement />} />
         <Route path="users" element={<UserManagement />} />
-        <Route path="blocks" element={<BlocksSections />} />
         <Route path="logs" element={<ActivityLogs />} />
       </Route>
 
