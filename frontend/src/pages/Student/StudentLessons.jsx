@@ -36,24 +36,30 @@ export default function StudentLessons({ subjectId, blockId, blockName }) {
   const handleDownload = async (lessonId, fileId, filename) => {
     try {
       const token = localStorage.getItem('token')
-      const res = await fetch(`http://localhost:5000/api/lessons/${lessonId}/files/${fileId}/download`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      })
-      if (res.ok) {
-        const blob = await res.blob()
-        const url = window.URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = filename
-        document.body.appendChild(a)
-        a.click()
-        window.URL.revokeObjectURL(url)
-        document.body.removeChild(a)
-      }
+      const res = await fetch(
+        `http://localhost:5000/api/lessons/${lessonId}/files/${fileId}/download`,
+        { headers: { 'Authorization': `Bearer ${token}` } }
+      )
+      if (!res.ok) { alert('Download failed'); return }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = filename
+      a.click()
+      URL.revokeObjectURL(url)
     } catch (err) {
-      console.error('Download failed:', err)
-      alert('Failed to download file')
+      console.error('Download error:', err)
+      alert('Download failed')
     }
+  }
+
+  const getFileIcon = (fileType) => {
+    if (fileType === 'pdf') return '📄'
+    if (fileType === 'ppt' || fileType === 'pptx') return '📊'
+    if (fileType === 'doc' || fileType === 'docx') return '📝'
+    if (fileType === 'zip') return '📦'
+    return '📎'
   }
 
   if (loading) {
@@ -113,20 +119,22 @@ export default function StudentLessons({ subjectId, blockId, blockName }) {
                       <div className="space-y-2">
                         <p className="text-xs text-slate-500 uppercase tracking-wider font-bold">📎 Files</p>
                         {lesson.files.map(file => (
-                          <button
+                          <div
                             key={file.id}
-                            onClick={() => handleDownload(lesson.id, file.id, file.filename)}
-                            className="flex items-center gap-3 w-full px-3 py-2 bg-slate-700/50 hover:bg-slate-700 rounded-lg text-left transition group"
+                            className="flex items-center gap-3 w-full px-3 py-2 bg-slate-700/50 rounded-lg"
                           >
-                            <span className="text-lg">
-                              {file.file_type === 'pdf' ? '📄' : 
-                               file.file_type === 'ppt' || file.file_type === 'pptx' ? '📊' : 
-                               file.file_type === 'doc' || file.file_type === 'docx' ? '📝' : 
-                               file.file_type === 'zip' ? '📦' : '📎'}
+                            <span className="text-lg">{getFileIcon(file.file_type)}</span>
+                            <span className="text-sm text-slate-300 flex-1 truncate">{file.filename}</span>
+                            <span className="text-xs text-slate-600 flex-shrink-0 italic mr-2">
+                              .{file.file_type}
                             </span>
-                            <span className="text-sm text-slate-300 group-hover:text-white flex-1">{file.filename}</span>
-                            <span className="text-xs text-slate-500">⬇️ Download</span>
-                          </button>
+                            <button
+                              onClick={() => handleDownload(lesson.id, file.id, file.filename)}
+                              className="flex-shrink-0 px-2 py-1 bg-purple-600/30 hover:bg-purple-600/50 border border-purple-600/40 rounded text-xs text-purple-300 hover:text-white transition"
+                            >
+                              ⬇ Download
+                            </button>
+                          </div>
                         ))}
                       </div>
                     )}

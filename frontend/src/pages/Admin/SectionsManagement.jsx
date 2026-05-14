@@ -70,9 +70,9 @@ function CSVUploadModal({ onClose, onSuccess }) {
 
   const downloadTemplate = () => {
     const csv = [
-      'section_no,subject_code,block_code,schedule,room,capacity,semester,academic_year',
-      '29144,IT115,,Mon 18:00-21:00,CL5,40,1st Semester,2024-2025',
-      '29145,IT116,IT101,Tue 13:00-16:00,CL3,35,1st Semester,2024-2025',
+      'section_no,subject_code,schedule,room,capacity,semester,academic_year',
+      '29144,IT115,Mon 18:00-21:00,CL5,40,1st Semester,2024-2025',
+      '29145,IT116,Tue 13:00-16:00,CL3,35,1st Semester,2024-2025',
     ].join('\n')
     const blob = new Blob([csv], { type: 'text/csv' })
     const url = URL.createObjectURL(blob)
@@ -126,7 +126,7 @@ function CSVUploadModal({ onClose, onSuccess }) {
                   {['section_no', 'subject_code'].map(c => (
                     <span key={c} className="px-2 py-0.5 bg-purple-600/20 text-purple-300 rounded text-xs font-mono border border-purple-600/40">{c} *</span>
                   ))}
-                  {['block_code', 'schedule', 'room', 'capacity', 'semester', 'academic_year'].map(c => (
+                  {['schedule', 'room', 'capacity', 'semester', 'academic_year'].map(c => (
                     <span key={c} className="px-2 py-0.5 bg-slate-700 text-slate-400 rounded text-xs font-mono border border-slate-600">{c}</span>
                   ))}
                 </div>
@@ -213,7 +213,6 @@ function SectionFormModal({ section, subjects, onClose, onSuccess }) {
   const [form, setForm] = useState({
     section_no:    section?.section_no    ?? '',
     subject_id:    section?.subject_id    ?? '',
-    block_id:      section?.block_id      ?? '',
     schedule:      section?.schedule      ?? '',
     room:          section?.room          ?? '',
     capacity:      section?.capacity      ?? 40,
@@ -221,16 +220,10 @@ function SectionFormModal({ section, subjects, onClose, onSuccess }) {
     academic_year: section?.academic_year ?? '',
     is_active:     section?.is_active     ?? true,
   })
-  const [blocks, setBlocks] = useState([])
   const [loading, setLoading] = useState(false)
   const [toast, setToast] = useState(null)
 
   const showToast = (msg, type = 'success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 4000) }
-
-  useEffect(() => {
-    fetch(`${API}/api/admin/blocks`, { headers: { 'Authorization': `Bearer ${token()}` } })
-      .then(r => r.json()).then(d => setBlocks(Array.isArray(d) ? d : [])).catch(() => {})
-  }, [])
 
   const handleSubmit = async () => {
     if (!form.section_no.trim()) { showToast('Section number is required', 'error'); return }
@@ -246,7 +239,6 @@ function SectionFormModal({ section, subjects, onClose, onSuccess }) {
         body: JSON.stringify({
           ...form,
           subject_id: parseInt(form.subject_id),
-          block_id:   form.block_id ? parseInt(form.block_id) : null,
           capacity:   parseInt(form.capacity) || 40,
         })
       })
@@ -307,19 +299,6 @@ function SectionFormModal({ section, subjects, onClose, onSuccess }) {
                 <option key={s.id} value={s.id}>
                   {s.subject_code ? `[${s.subject_code}] ` : ''}{s.name}
                 </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Block (optional) */}
-          <div>
-            <label className="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">
-              Block Code <span className="text-slate-600 normal-case font-normal">(optional — e.g., it101, for regular students only)</span>
-            </label>
-            <select value={form.block_id} onChange={e => setForm({ ...form, block_id: e.target.value })} className={inputCls}>
-              <option value="">— No Block (Irregular) —</option>
-              {blocks.map(b => (
-                <option key={b.id} value={b.id}>{b.section_code}{b.semester ? ` · ${b.semester}` : ''}</option>
               ))}
             </select>
           </div>
@@ -496,8 +475,7 @@ export default function SectionsManagement() {
         (s.subject_name || '').toLowerCase().includes(q) ||
         (s.subject_code || '').toLowerCase().includes(q) ||
         (s.room || '').toLowerCase().includes(q) ||
-        (s.schedule || '').toLowerCase().includes(q) ||
-        (s.block_code || '').toLowerCase().includes(q)
+        (s.schedule || '').toLowerCase().includes(q)
       )
     }
     return true

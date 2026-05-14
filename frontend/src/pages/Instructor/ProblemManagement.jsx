@@ -134,7 +134,10 @@ export default function ProblemManagement({ classId }) {
                     <span className="text-5xl">📝</span>
                     <p className="font-medium">No activities found</p>
                     <button
-                      onClick={() => navigate('/instructor/create-problem')}
+                      onClick={() => {
+            const from = classId ? `/instructor/class/${classId}` : '/instructor/problems'
+            navigate(`/instructor/create-problem?from=${encodeURIComponent(from)}`)
+          }}
                       className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-bold transition mt-1"
                     >
                       Create Your First Quest
@@ -224,7 +227,10 @@ export default function ProblemManagement({ classId }) {
                     <td className="px-5 py-4 text-right" onClick={e => e.stopPropagation()}>
                       <div className="flex justify-end gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
                         <button
-                          onClick={() => navigate(`/instructor/create-problem?edit=${problem.id}`)}
+                          onClick={() => {
+                            const from = classId ? `/instructor/class/${classId}` : '/instructor/problems'
+                            navigate(`/instructor/create-problem?edit=${problem.id}&from=${encodeURIComponent(from)}`)
+                          }}
                           title="Edit Activity"
                           className="p-2 hover:bg-blue-500/10 rounded-lg transition text-slate-400 hover:text-blue-400"
                         >

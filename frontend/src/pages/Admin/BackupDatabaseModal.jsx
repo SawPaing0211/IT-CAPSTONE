@@ -4,9 +4,8 @@ const API = 'http://localhost:5000'
 
 const TABLES = [
   { key: 'users', label: 'Users', icon: '👥', desc: 'All user accounts' },
-  { key: 'blocks', label: 'Blocks', icon: '📚', desc: 'Class sections' },
   { key: 'subjects', label: 'Subjects', icon: '📖', desc: 'Course subjects' },
-  { key: 'problems', label: 'Problems', icon: '🧩', desc: 'Coding quests' },
+  { key: 'problems', label: 'Activities', icon: '🧩', desc: 'Coding quests' },
   { key: 'submissions', label: 'Submissions', icon: '📝', desc: 'Student submissions' },
   { key: 'audit_logs', label: 'Audit Logs', icon: '📜', desc: 'Activity history' },
   { key: 'achievements', label: 'Achievements', icon: '🏆', desc: 'Badge definitions' },
