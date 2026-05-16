@@ -7,9 +7,9 @@ export default function StudentCodeEditor({
   onVictory, 
   onReturn, 
   heroLevel,
-  onOpenSandbox  // ← NEW: Added onOpenSandbox prop
+  onOpenSandbox  
 }) {
-  const LANG_LINE_OFFSET = { python: 2, java: 1, csharp: 0 }
+  const LANG_LINE_OFFSET = { python: 0, java: 0, csharp: 7 }
 
   const [code, setCode] = useState('')
   const [language, setLanguage] = useState('python')
@@ -61,18 +61,50 @@ const parseAndHighlightErrors = (errorText, language) => {
   }
 
   else if (language === 'java') {
-    const javaRegex = /(?:[\w/.-]+\.java|Main\.java):(\d+):\s*(?:error|warning):\s*(.+)/g
-    let match
-    while ((match = javaRegex.exec(errorText)) !== null) {
-      const studentLine = Math.max(1, parseInt(match[1]) - offset)
-      markers.push({
-        startLineNumber: studentLine,
-        startColumn:     1,
-        endLineNumber:   studentLine,
-        endColumn:       100,
-        message:  match[2],
-        severity: monacoRef.current.MarkerSeverity.Error,
-      })
+    const lines = errorText.split('\n')
+    const seen = new Set()
+
+    for (const line of lines) {
+      const trimmed = line.trim()
+      if (!trimmed) continue
+
+      const firstColon = trimmed.indexOf(':')
+      if (firstColon === -1) continue
+
+      const filename = trimmed.substring(0, firstColon).trim()
+      if (!filename.endsWith('.java')) continue
+
+      const afterFilename = trimmed.substring(firstColon + 1)
+      const secondColon = afterFilename.indexOf(':')
+      if (secondColon === -1) continue
+
+      const lineNumStr = afterFilename.substring(0, secondColon).trim()
+      const lineNum = parseInt(lineNumStr, 10)
+      if (isNaN(lineNum)) continue
+
+      const rest = afterFilename.substring(secondColon + 1).trim()
+      const thirdColon = rest.indexOf(':')
+      if (thirdColon === -1) continue
+
+      const errorType = rest.substring(0, thirdColon).trim()
+      if (errorType !== 'error' && errorType !== 'warning') continue
+
+      const message = rest.substring(thirdColon + 1).trim()
+
+      const studentLine = Math.max(1, lineNum - offset)
+      const key = studentLine + ':' + message
+
+      if (!seen.has(key)) {
+        seen.add(key)
+        markers.push({
+          startLineNumber: studentLine,
+          startColumn:     1,
+          endLineNumber:   studentLine,
+          endColumn:       200,
+          message:         message,
+          severity:        monacoRef.current.MarkerSeverity.Error,
+        })
+      }
     }
   }
 
@@ -91,8 +123,8 @@ const parseAndHighlightErrors = (errorText, language) => {
         startColumn:     1,
         endLineNumber:   studentLine,
         endColumn:       200,
-        message:  errorDesc,
-        severity: monacoRef.current.MarkerSeverity.Error,
+        message:         errorDesc,
+        severity:        monacoRef.current.MarkerSeverity.Error,
       })
     }
   }
@@ -103,28 +135,59 @@ const parseAndHighlightErrors = (errorText, language) => {
 // ── Format raw compiler output into clean readable message ────────────
 const formatErrorOutput = (rawOutput, language) => {
   if (!rawOutput) return rawOutput
-  const offset = LANG_LINE_OFFSET[language] ?? 0
+
+  if (language === 'java') {
+    const javaErrors = []
+    const seen = new Set()
+    const lines = rawOutput.split('\n')
+
+    for (const line of lines) {
+      const trimmed = line.trim()
+      if (!trimmed) continue
+
+      const firstColon = trimmed.indexOf(':')
+      if (firstColon === -1) continue
+
+      const filename = trimmed.substring(0, firstColon).trim()
+      if (!filename.endsWith('.java')) continue
+
+      const afterFilename = trimmed.substring(firstColon + 1)
+      const secondColon = afterFilename.indexOf(':')
+      if (secondColon === -1) continue
+
+      const lineNumStr = afterFilename.substring(0, secondColon).trim()
+      const lineNum = parseInt(lineNumStr, 10)
+      if (isNaN(lineNum)) continue
+
+      const rest = afterFilename.substring(secondColon + 1).trim()
+      const thirdColon = rest.indexOf(':')
+      if (thirdColon === -1) continue
+
+      const errorType = rest.substring(0, thirdColon).trim()
+      if (errorType !== 'error' && errorType !== 'warning') continue
+
+      const message = rest.substring(thirdColon + 1).trim()
+      const formatted = 'Line ' + lineNum + ': ' + message
+
+      if (!seen.has(formatted)) {
+        seen.add(formatted)
+        javaErrors.push(formatted)
+      }
+    }
+
+    if (javaErrors.length > 0) return javaErrors.join('\n')
+  }
 
   if (language === 'csharp') {
     const csErrors = []
     const csRegex = /\((\d+),(\d+)\):\s*(error|warning)\s+(\w+):\s*(.+?)(?:\s*\[.*?\])?$/gm
     let match
     while ((match = csRegex.exec(rawOutput)) !== null) {
-      const studentLine = parseInt(match[1]) - offset
-      csErrors.push(`Line ${studentLine}, Col ${match[2]}: ${match[5].trim()} (${match[4]})`)
+      csErrors.push(
+        'Line ' + match[1] + ', Col ' + match[2] + ': ' + match[5].trim() + ' (' + match[4] + ')'
+      )
     }
     if (csErrors.length > 0) return csErrors.join('\n')
-  }
-
-  if (language === 'java') {
-    const javaErrors = []
-    const javaRegex = /(?:[\w/.-]+\.java|Main\.java):(\d+):\s*(?:error|warning):\s*(.+)/g
-    let match
-    while ((match = javaRegex.exec(rawOutput)) !== null) {
-      const studentLine = parseInt(match[1]) - offset
-      javaErrors.push(`Line ${studentLine}: ${match[2]}`)
-    }
-    if (javaErrors.length > 0) return javaErrors.join('\n')
   }
 
   if (language === 'python') {
@@ -137,18 +200,10 @@ const formatErrorOutput = (rawOutput, language) => {
 
     if (lineMatches.length > 0) {
       const rawLine = parseInt(lineMatches[lineMatches.length - 1][1])
-      const studentLine = Math.max(1, rawLine - offset)
       return errorLine
-        ? `Line ${studentLine}: ${errorLine}`
-        : `Line ${studentLine}: Runtime error`
+        ? 'Line ' + rawLine + ': ' + errorLine
+        : 'Line ' + rawLine + ': Runtime error'
     }
-
-    const lastMeaningful = rawOutput
-      .split('\n')
-      .map(l => l.trim())
-      .filter(Boolean)
-      .pop()
-    return lastMeaningful || rawOutput
   }
 
   return rawOutput
@@ -893,8 +948,8 @@ useEffect(() => {
                       {output.status !== 'error' && (
                         <p className="text-xs text-slate-400">
                           {output.is_run_mode
-  ? `Run mode • Passed ${output.passed ?? output.test_results?.filter(t => t.passed)?.length ?? 0}/${output.total ?? output.test_results?.length ?? 0} tests`
-  : output.scoring_note || `Score: ${output.score} XP • Passed ${output.passed_cases ?? 0}/${output.total_cases ?? 0} tests`}
+                            ? `Run mode • Passed ${output.passed ?? output.test_results?.filter(t => t.passed)?.length ?? 0}/${output.total ?? output.test_results?.length ?? 0} tests`
+                            : output.scoring_note || `Score: ${output.score} XP • Passed ${output.passed_cases ?? 0}/${output.total_cases ?? 0} tests`}
                         </p>
                       )}
                     </div>
@@ -952,9 +1007,8 @@ useEffect(() => {
               )}
             </div>
           </div>
-
         </div>{/* end right panel */}
       </div>{/* end main body grid */}
     </div>/* end root */
   )
-}
+} 

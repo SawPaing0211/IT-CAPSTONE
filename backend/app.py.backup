@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from functools import wraps
 import subprocess, sys, time, csv, json, io, unicodedata, re, base64, secrets, string
 from io import StringIO
-from sqlalchemy import text, inspect, distinct
+from sqlalchemy import text, inspect
 from routes.sandbox import sandbox_bp, _run_in_docker
 
 app = Flask(__name__)
@@ -2482,163 +2482,48 @@ def get_student_announcements():
 @app.route('/api/admin/dashboard-stats', methods=['GET'])
 @admin_required
 def admin_dashboard_stats(admin):
-    """
-    Redesigned dashboard stats endpoint.
-
-    Returns
-    -------
-    {
-        # ── Primary metrics ──────────────────────────────────────────────
-        "system_health":       "operational" | "degraded" | "down",
-        "active_users_today":  <int>,   # unique users who submitted today
-        "enrollment_alerts":   <int>,   # students stuck in inactive sections
-
-        # ── Secondary (compact) metrics ──────────────────────────────────
-        "total_students":      <int>,
-        "total_instructors":   <int>,
-        "total_sections":      <int>,   # active sections only
-        "total_enrolled":      <int>,   # sum of current_count across active sections
-
-        # ── Maintenance / misc ───────────────────────────────────────────
-        "maintenance_mode":    <bool>,
-        "today_logins":        <int>,   # kept for backwards-compat
-        "today_submissions":   <int>,   # kept for backwards-compat
-
-        # ── Activity feed ────────────────────────────────────────────────
-        "recent_activity":     [ { id, action, details, created_at, admin }, … ]
-    }
-    """
-    from sqlalchemy import func, distinct
-
-    today = datetime.utcnow().date()
-
-    # ── 1. System health ─────────────────────────────────────────────────────
-    # Lightweight probe: if we can reach the DB we're operational.
-    # You can extend this to ping Docker / sandbox in the future.
-    try:
-        db.session.execute(text('SELECT 1'))
-        db_ok = True
-    except Exception:
-        db_ok = False
-
-    system_health = 'operational' if db_ok else 'down'
-
-    # ── 2. Active users today ────────────────────────────────────────────────
-    # Definition: unique users (any role) who made a submission today.
-    # This is more meaningful than "account created today" (the old metric).
-    try:
-        active_users_today = (
-            db.session.query(func.count(distinct(Submission.user_id)))
-            .filter(func.date(Submission.submitted_at) == today)
-            .scalar() or 0
-        )
-    except Exception:
-        active_users_today = 0
-
-    # ── 3. Enrollment alerts ─────────────────────────────────────────────────
-    # Students enrolled in a section that is currently inactive →
-    # they exist in the DB but cannot access course content.
-    try:
-        enrollment_alerts = (
-            db.session.query(func.count(distinct(IrregularEnrollment.student_id)))
-            .join(SubjectSection, IrregularEnrollment.section_id == SubjectSection.id)
-            .filter(SubjectSection.is_active == False)           # noqa: E712
-            .scalar() or 0
-        )
-    except Exception:
-        enrollment_alerts = 0
-
-    # ── 4. Totals ─────────────────────────────────────────────────────────────
-    total_students    = User.query.filter_by(role='student',    is_active=True).count()
+    """Get dashboard statistics for admin overview"""
+    from sqlalchemy import func
+    
+    # Get counts
+    total_students = User.query.filter_by(role='student', is_active=True).count()
     total_instructors = User.query.filter_by(role='instructor', is_active=True).count()
-
-    # Sections: count only active ones — inactive sections are the problem,
-    # not the baseline.
-    total_sections = SubjectSection.query.filter_by(is_active=True).count()
-
-    # Total enrolled: sum current_count on active sections.
-    # IrregularEnrollment rows are the source of truth; current_count is a
-    # denormalised cache that may lag.  We query the real count here.
-    try:
-        total_enrolled = (
-            db.session.query(func.count(IrregularEnrollment.id))
-            .join(SubjectSection, IrregularEnrollment.section_id == SubjectSection.id)
-            .filter(SubjectSection.is_active == True)            # noqa: E712
-            .scalar() or 0
-        )
-    except Exception:
-        # Fallback: sum the denormalised column
-        total_enrolled = (
-            db.session.query(func.sum(SubjectSection.current_count))
-            .filter(SubjectSection.is_active == True)            # noqa: E712
-            .scalar() or 0
-        )
-
-    # ── 5. Backwards-compat values (old frontend uses these) ─────────────────
-    today_logins = (
-        db.session.query(func.count(distinct(Submission.user_id)))
-        .filter(func.date(Submission.submitted_at) == today)
-        .scalar() or 0
-    )
-    today_submissions = (
-        Submission.query
-        .filter(func.date(Submission.submitted_at) == today)
-        .count()
-    )
-
-    # ── 6. Maintenance mode ───────────────────────────────────────────────────
-    maint_row = SystemConfig.query.filter_by(key='maintenance_mode').first()
-    maintenance_mode = (maint_row.value == 'true') if maint_row else False
-
-    # If maintenance_mode is ON, reflect that in system_health so the
-    # frontend primary card shows the right state.
-    if maintenance_mode and system_health == 'operational':
-        system_health = 'maintenance'
-
-    # ── 7. Recent activity (last 10 audit log entries) ────────────────────────
-    recent_logs = (
-        AuditLog.query
-        .order_by(AuditLog.created_at.desc())
-        .limit(10)
-        .all()
-    )
-    recent_activity = [
-        {
-            'id':         log.id,
-            'action':     log.action,
-            'details':    log.details,
-            'created_at': log.created_at.isoformat(),
-            'admin':      (
-                User.query.get(log.admin_id).username
-                if log.admin_id else 'System'
-            ),
-        }
-        for log in recent_logs
-    ]
-
-    # ── 8. Response ───────────────────────────────────────────────────────────
+    total_sections = SubjectSection.query.count()
+    total_subjects = Subject.query.count()
+    total_problems = Problem.query.count()
+    total_submissions = Submission.query.count()
+    
+    # Get today's stats
+    today = datetime.utcnow().date()
+    today_logins = User.query.filter(
+        User.role == 'student',
+        func.date(User.created_at) == today
+    ).count()
+    
+    today_submissions = Submission.query.filter(
+        func.date(Submission.submitted_at) == today
+    ).count()
+    
+    # Get recent activity (last 10 audit logs)
+    recent_activity = AuditLog.query.order_by(AuditLog.created_at.desc()).limit(10).all()
+    activity_list = [{
+        "id": a.id,
+        "action": a.action,
+        "details": a.details,
+        "created_at": a.created_at.isoformat(),
+        "admin": User.query.get(a.admin_id).username if a.admin_id else "System"
+    } for a in recent_activity]
+    
     return jsonify({
-        # Primary metrics
-        'system_health':       system_health,
-        'active_users_today':  active_users_today,
-        'enrollment_alerts':   enrollment_alerts,
-
-        # Secondary metrics
-        'total_students':      total_students,
-        'total_instructors':   total_instructors,
-        'total_sections':      total_sections,
-        'total_enrolled':      total_enrolled,
-
-        # Maintenance / misc
-        'maintenance_mode':    maintenance_mode,
-
-        # Backwards-compat
-        'today_logins':        today_logins,
-        'today_submissions':   today_submissions,
-        'total_problems':      0,   # kept for compat; fetched lazily by frontend
-
-        # Activity feed
-        'recent_activity':     recent_activity,
+        "total_students": total_students,
+        "total_instructors": total_instructors,
+        "total_sections": total_sections,
+        "total_subjects": total_subjects,
+        "total_problems": total_problems,
+        "total_submissions": total_submissions,
+        "today_logins": today_logins,
+        "today_submissions": today_submissions,
+        "recent_activity": activity_list
     }), 200
 
 # ===== ADMIN ROUTES =====
@@ -2926,159 +2811,57 @@ def admin_update_config(admin):
 @app.route('/api/admin/audit-logs', methods=['GET'])
 @admin_required
 def admin_get_logs(admin):
-    """
-    Enhanced audit-log endpoint.
+    search = request.args.get('search', '')
+    action_filter = request.args.get('action', '')
+    page = request.args.get('page', 1, type=int)
+    limit = min(request.args.get('limit', 20, type=int), 200)
 
-    Query params
-    ────────────
-    search     : str   – free-text search across action, details, ip_address
-    action     : str   – comma-separated list of action names, OR a single name
-                         (e.g. "USER_DELETED,SUBJECT_DELETED"  or  "USER_CREATED")
-    date_from  : str   – ISO date  (YYYY-MM-DD), inclusive
-    date_to    : str   – ISO date  (YYYY-MM-DD), inclusive
-    sort       : str   – "asc" | "desc"  (default: desc)
-    page       : int   – 1-based page number
-    limit      : int   – rows per page, max 200
-
-    Response
-    ────────
-    {
-        "logs":  [ { id, admin, action, details, ip, created_at } … ],
-        "total": <int>,
-        "page":  <int>,
-        "pages": <int>,
-        "stats": {
-            "total":             <int>,   # all-time log count
-            "today":             <int>,   # logs created today (UTC)
-            "unique_users":      <int>,   # distinct admin accounts that have logged an action
-            "critical_total":    <int>,   # all-time count of critical-tier actions
-            "last_activity":     <str>,   # ISO timestamp of most recent log
-            "most_active_admin": <str|null>  # username of admin with most logs ever
-        }
-    }
-    """
-    from sqlalchemy import func
-
-    # ── 1. Parse query params ─────────────────────────────────────────────
-    search       = request.args.get('search', '').strip()
-    action_param = request.args.get('action', '').strip()
-    date_from    = request.args.get('date_from', '').strip()
-    date_to      = request.args.get('date_to',   '').strip()
-    sort_dir     = request.args.get('sort', 'desc').strip().lower()
-    page         = request.args.get('page',  1, type=int)
-    limit        = min(request.args.get('limit', 20, type=int), 200)
-
-    # ── 2. Build base query ────────────────────────────────────────────────
     q = AuditLog.query
-
-    # Action filter: comma-separated multi-select OR legacy single value
-    if action_param and action_param.lower() != 'all':
-        actions = [a.strip() for a in action_param.split(',') if a.strip()]
-        if len(actions) == 1:
-            q = q.filter(AuditLog.action == actions[0])
-        elif len(actions) > 1:
-            q = q.filter(AuditLog.action.in_(actions))
-
-    # Date range filter
-    if date_from:
-        try:
-            dt_from = datetime.strptime(date_from, '%Y-%m-%d')
-            q = q.filter(AuditLog.created_at >= dt_from)
-        except ValueError:
-            pass  # malformed date — ignore
-
-    if date_to:
-        try:
-            # Include the full end day (up to 23:59:59)
-            dt_to = datetime.strptime(date_to, '%Y-%m-%d') + timedelta(days=1)
-            q = q.filter(AuditLog.created_at < dt_to)
-        except ValueError:
-            pass
-
-    # Free-text search
+    if action_filter and action_filter != 'all':
+        q = q.filter(AuditLog.action == action_filter)
     if search:
-        like = f'%{search}%'
         q = q.filter(
-            (AuditLog.action.ilike(like))     |
-            (AuditLog.details.ilike(like))    |
-            (AuditLog.ip_address.ilike(like))
+            (AuditLog.action.ilike(f'%{search}%')) |
+            (AuditLog.details.ilike(f'%{search}%')) |
+            (AuditLog.ip_address.ilike(f'%{search}%'))
         )
 
-    # ── 3. Sort ────────────────────────────────────────────────────────────
-    if sort_dir == 'asc':
-        q = q.order_by(AuditLog.created_at.asc())
-    else:
-        q = q.order_by(AuditLog.created_at.desc())
+    total = q.count()
+    logs = q.order_by(AuditLog.created_at.desc()).offset((page-1)*limit).limit(limit).all()
 
-    # ── 4. Paginate ────────────────────────────────────────────────────────
-    total    = q.count()
-    logs     = q.offset((page - 1) * limit).limit(limit).all()
-    pages    = max(1, (total + limit - 1) // limit)
-
-    # ── 5. Stats ───────────────────────────────────────────────────────────
-    today_date  = datetime.utcnow().date()
-    today_count = AuditLog.query.filter(
-        func.date(AuditLog.created_at) == today_date
-    ).count()
-
-    unique_admins = db.session.query(AuditLog.admin_id).distinct().count()
-
+    today = datetime.utcnow().date()
+    today_count = AuditLog.query.filter(db.func.date(AuditLog.created_at) == today).count()
+    unique_users = db.session.query(AuditLog.admin_id).distinct().count()
     last_log = AuditLog.query.order_by(AuditLog.created_at.desc()).first()
 
-    # Critical-tier actions (destructive / high-impact)
-    CRITICAL_ACTIONS = [
-        'USER_DELETED', 'SUBJECT_DELETED', 'SECTION_DELETED',
-        'DATABASE_BACKUP',
-    ]
-    critical_total = AuditLog.query.filter(
-        AuditLog.action.in_(CRITICAL_ACTIONS)
-    ).count()
-
-    # Most active admin (by total log count, all time)
-    most_active_row = (
-        db.session.query(AuditLog.admin_id, func.count(AuditLog.id).label('cnt'))
-        .group_by(AuditLog.admin_id)
-        .order_by(func.count(AuditLog.id).desc())
-        .first()
-    )
-    most_active_admin = None
-    if most_active_row:
-        u = User.query.get(most_active_row.admin_id)
-        most_active_admin = u.username if u else None
-
-    stats = {
-        'total':             AuditLog.query.count(),
-        'today':             today_count,
-        'unique_users':      unique_admins,   # kept for legacy; means unique admins
-        'critical_total':    critical_total,
-        'last_activity':     last_log.created_at.isoformat() if last_log else None,
-        'most_active_admin': most_active_admin,
-    }
-
-    # ── 6. Serialise ───────────────────────────────────────────────────────
-    def _admin_name(admin_id):
-        u = User.query.get(admin_id)
-        return u.username if u else 'System'
-
-    serialised = [
-        {
-            'id':         l.id,
-            'admin':      _admin_name(l.admin_id),
-            'action':     l.action,
-            'details':    l.details,
-            'ip':         l.ip_address,
-            'created_at': l.created_at.isoformat(),
-        }
-        for l in logs
-    ]
-
     return jsonify({
-        'logs':  serialised,
-        'total': total,
-        'page':  page,
-        'pages': pages,
-        'stats': stats,
+        "logs": [{
+            "id": l.id,
+            "admin": User.query.get(l.admin_id).username if l.admin_id else "System",
+            "action": l.action,
+            "details": l.details,
+            "ip": l.ip_address,
+            "created_at": l.created_at.isoformat()
+        } for l in logs],
+        "total": total,
+        "page": page,
+        "pages": max(1, (total + limit - 1) // limit),
+        "stats": {
+            "total": AuditLog.query.count(),
+            "today": today_count,
+            "unique_users": unique_users,
+            "last_activity": last_log.created_at.isoformat() if last_log else None
+        }
     }), 200
+
+@app.route('/api/admin/audit-logs/clear', methods=['DELETE'])
+@admin_required
+def admin_clear_logs(admin):
+    cutoff = datetime.utcnow() - timedelta(days=30)
+    deleted = AuditLog.query.filter(AuditLog.created_at < cutoff).delete()
+    db.session.commit()
+    log_admin_action(admin.id, "LOGS_CLEARED", f"Cleared {deleted} logs older than 30 days")
+    return jsonify({"message": f"Cleared {deleted} old logs"}), 200
 
 @app.route('/api/admin/reports', methods=['GET'])
 @admin_required

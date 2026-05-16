@@ -657,14 +657,14 @@ export default function StudentDashboard({ user, onLogout }) {
   // Navigation handlers for nested subject view
   const handleEnterSubject = (subject) => {
     console.log('📚 Entering subject:', subject)
-  // subject contains: { id, name, block_id, block_code, semester, instructor }
+  // subject contains: { id, name, section_id, section_no, semester, instructor }
     setSelectedBlock({
-      id: subject.block_id,
-      section_code: subject.block_code,
-      name: subject.name,  // Subject name
+      id: subject.section_id,        
+      section_code: subject.section_no, 
+      name: subject.name,
       semester: subject.semester,
       instructor: subject.instructor,
-      subject_id: subject.id  // Store the specific subject_id
+      subject_id: subject.id
     })
   setCourseTab('lessons')
 }
