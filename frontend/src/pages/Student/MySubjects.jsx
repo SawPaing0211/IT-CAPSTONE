@@ -73,7 +73,7 @@ export default function MySubjects({ onSelectSubject }) {
             My Subjects
           </h1>
           <p className="text-slate-400 mt-1">
-            Welcome back, <span className="text-purple-400 font-semibold">{user?.username}</span>! 
+            Welcome back, <span className="text-purple-400 font-semibold">{user?.full_name || user?.username}</span>! 
             Here are your enrolled subjects.
           </p>
         </div>
@@ -88,22 +88,21 @@ export default function MySubjects({ onSelectSubject }) {
           <div
             key={subject.id}
             onClick={() => {
-            // Pass BOTH subject and block info
-            const subjectData = {
-              id: subject.id,
-              name: subject.name,
-              block_id: subject.section_id,
-              block_code: subject.section_no,
-              semester: subject.semester,
-              instructor: subject.instructor,
-            }
-            
-            if (onSelectSubject) {
-              onSelectSubject(subjectData) 
-            } else {
-              navigate(`/student/subject/${subject.block_id}`)
-            }
-          }}
+              const subjectData = {
+                id: subject.id,
+                name: subject.name,
+                section_id: subject.section_id,   
+                section_no: subject.section_no,  
+                semester: subject.semester,
+                instructor: subject.instructor,
+              }
+              
+              if (onSelectSubject) {
+                onSelectSubject(subjectData)
+              } else {
+                navigate(`/student/subject/${subject.section_id}`) 
+              }
+            }}
             className="group bg-gradient-to-br from-slate-900 to-slate-800 border border-slate-700 rounded-2xl p-6 hover:border-purple-500 hover:shadow-lg hover:shadow-purple-600/20 transition-all duration-300 cursor-pointer transform hover:scale-105"
           >
             {/* Subject Icon & Badge */}
@@ -121,10 +120,10 @@ export default function MySubjects({ onSelectSubject }) {
               {subject.name}
             </h3>
             
-            {/* Block Code Badge (Small Text) */}
+            {/* Class Code Badge */}
             <div className="mb-3">
               <span className="px-2.5 py-0.5 bg-slate-700 rounded text-xs font-bold text-slate-300">
-                Block {subject.block_code}
+                🏷️ {subject.section_no || subject.block_code || 'No Class Code'}
               </span>
             </div>
             

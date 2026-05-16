@@ -6,9 +6,6 @@ export default function CourseMaterials({ classId }) {
   const [loadingLessons, setLoadingLessons] = useState(true)
   const [filter, setFilter] = useState('all')
   const [subjects, setSubjects] = useState([])
-  // ✅ sections returned by /api/instructor/blocks-by-subject
-  //    Each section: { id (SubjectSection.id), section_no, schedule, semester, block_id }
-  //    Lesson.block_id must be a real Block.id — the backend returns block_id on each section
   const [sections, setSections] = useState([])
   const [loadingSubjects, setLoadingSubjects] = useState(true)
   const [loadingSections, setLoadingSections] = useState(false)
@@ -18,8 +15,6 @@ export default function CourseMaterials({ classId }) {
     description: '',
     week_number: 1,
     subject_id: '',
-    // ✅ FIX: we now store the selected SubjectSection.id here so we can
-    //    look up its block_id when submitting. Empty string = all sections.
     section_id: '',
     is_published: false,
     files: []
@@ -56,9 +51,6 @@ export default function CourseMaterials({ classId }) {
         })
         if (res.ok) {
           const data = await res.json()
-          // classId is a SubjectSection.id; lessons are filtered by block_id on the backend
-          // The backend already filters by block_id when classId is provided so this
-          // client-side filter is a safety net only.
           setLessons(data)
         }
       } catch (err) {
@@ -181,9 +173,6 @@ export default function CourseMaterials({ classId }) {
 
     try {
       const token = localStorage.getItem('token')
-      let resolvedBlockId = null
-      // block_id removed from schema; lessons are scoped by subject_id only
-
       const lessonRes = await fetch('http://localhost:5000/api/lessons', {
         method: 'POST',
         headers: {
@@ -195,7 +184,7 @@ export default function CourseMaterials({ classId }) {
           description: formData.description,
           week_number: parseInt(formData.week_number),
           subject_id: parseInt(formData.subject_id),
-          block_id: resolvedBlockId,   // ✅ real Block.id or null
+          block_id: null,
           is_published: formData.is_published
         })
       })

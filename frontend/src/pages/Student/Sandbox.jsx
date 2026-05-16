@@ -163,7 +163,7 @@ export default function Sandbox({ onClose, initialCode = null, initialLanguage =
     const start = Date.now()
 
     try {
-      // ✅ Centralized API client handles auth & auto-refresh
+      // Centralized API client handles auth & auto-refresh
       const data = await api.post('/api/sandbox/run', { code, language })
       const elapsed = Date.now() - start
       const result = { ...data, elapsed }
@@ -696,4 +696,4 @@ export default function Sandbox({ onClose, initialCode = null, initialLanguage =
       `}</style>
     </div>
   )
-}
+} 
