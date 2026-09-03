@@ -1,3 +1,5 @@
+from dotenv import load_dotenv
+load_dotenv()
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity, decode_token
@@ -9,6 +11,9 @@ import subprocess, sys, time, csv, json, io, unicodedata, re, base64, secrets, s
 from io import StringIO
 from sqlalchemy import text, inspect, distinct
 from routes.sandbox import sandbox_bp, _run_in_docker
+import re as _re
+from datetime import datetime as _dt, timedelta as _td
+from collections import defaultdict as _dd
 
 app = Flask(__name__)
 app.register_blueprint(sandbox_bp)
@@ -1218,6 +1223,85 @@ def upload_lesson_file(lesson_id):
         "filename": file.filename
     }), 201
 
+@app.route('/api/lessons/<int:lesson_id>', methods=['PUT'])
+@jwt_required()
+def update_lesson(lesson_id):
+    user_id = int(get_jwt_identity())
+    user = User.query.get(user_id)
+    if not is_instructor_or_admin(user):
+        return jsonify({"error": "Unauthorized"}), 403
+
+    lesson = Lesson.query.get_or_404(lesson_id)
+    if lesson.created_by != user_id and user.role != 'administrator':
+        return jsonify({"error": "Not your lesson"}), 403
+
+    data = request.get_json()
+    if 'title'        in data: lesson.title        = data['title'].strip()
+    if 'description'  in data: lesson.description  = data['description'].strip()
+    if 'week_number'  in data: lesson.week_number  = int(data['week_number'])
+    if 'is_published' in data: lesson.is_published = bool(data['is_published'])
+
+    db.session.commit()
+    return jsonify({"message": "Lesson updated"}), 200
+
+
+@app.route('/api/lessons/<int:lesson_id>', methods=['DELETE'])
+@jwt_required()
+def delete_lesson(lesson_id):
+    user_id = int(get_jwt_identity())
+    user = User.query.get(user_id)
+    if not is_instructor_or_admin(user):
+        return jsonify({"error": "Unauthorized"}), 403
+
+    lesson = Lesson.query.get_or_404(lesson_id)
+    if lesson.created_by != user_id and user.role != 'administrator':
+        return jsonify({"error": "Not your lesson"}), 403
+
+    # delete physical files from disk first
+    import os
+    files = LessonFile.query.filter_by(lesson_id=lesson_id).all()
+    for f in files:
+        if f.storage_path and os.path.exists(f.storage_path):
+            try:
+                os.remove(f.storage_path)
+            except OSError:
+                pass  # file already gone, no big deal
+        db.session.delete(f)
+
+    db.session.delete(lesson)
+    db.session.commit()
+    return jsonify({"message": "Lesson deleted"}), 200
+
+
+@app.route('/api/lessons/<int:lesson_id>/files/<int:file_id>/download', methods=['GET'])
+@jwt_required()
+def download_lesson_file_instructor(lesson_id, file_id):
+    # instructors download their own lesson files.
+    # students have a separate download route elsewhere.
+    import os
+    from flask import send_file
+    user_id = int(get_jwt_identity())
+    user = User.query.get(user_id)
+    if not is_instructor_or_admin(user):
+        return jsonify({"error": "Unauthorized"}), 403
+
+    lesson = Lesson.query.get_or_404(lesson_id)
+    if lesson.created_by != user_id and user.role != 'administrator':
+        return jsonify({"error": "Not your lesson"}), 403
+
+    f = LessonFile.query.get_or_404(file_id)
+    if f.lesson_id != lesson_id:
+        return jsonify({"error": "File not found"}), 404
+
+    if not f.storage_path or not os.path.exists(f.storage_path):
+        return jsonify({"error": "File not found on disk"}), 404
+
+    return send_file(
+        f.storage_path,
+        as_attachment=True,
+        download_name=f.original_filename
+    )
+
 @app.route('/api/lessons', methods=['GET'])
 @jwt_required()
 def get_lessons():
@@ -1247,6 +1331,7 @@ def get_lessons():
             "files": [{
                 "id": f.id,
                 "filename": f.original_filename,
+                "file_size": f.file_size or 0,
                 "file_type": f.file_type
             } for f in files]
         })
@@ -1553,6 +1638,9 @@ def get_student_submissions():
             "id": s.id, 
             "problem_id": s.problem_id, 
             "problem_title": Problem.query.get(s.problem_id).title if Problem.query.get(s.problem_id) else "Unknown", 
+            # ✅ added: frontend needs this to show real difficulty stats
+            # instead of guessing/hardcoding it (see ProgressStats.jsx)
+            "difficulty": Problem.query.get(s.problem_id).difficulty if Problem.query.get(s.problem_id) else None,
             "status": s.status, 
             "score": s.score, 
             "language": s.language, 
@@ -2095,6 +2183,236 @@ def get_instructor_class_detail(classId):
         "announcement_count": announcement_count
     }), 200
 
+@app.route('/api/instructor/classes/<int:class_id>/analytics', methods=['GET'])
+@jwt_required()
+def get_class_analytics(class_id):
+    user_id = int(get_jwt_identity())
+    user    = User.query.get(user_id)
+    if not is_instructor_or_admin(user):
+        return jsonify({"error": "Unauthorized"}), 403
+
+    enrollments = IrregularEnrollment.query.filter_by(section_id=class_id).all()
+    student_ids = [e.student_id for e in enrollments]
+    total_students = len(student_ids)
+
+    if not student_ids:
+        return jsonify({
+            "total_students": 0, "total_submissions": 0,
+            "accepted_submissions": 0, "success_rate": 0,
+            "top_performers": [], "challenging_problems": [],
+            "activity_heatmap": [], "at_risk_students": [], "avg_xp": 0,
+        }), 200
+
+    subs           = Submission.query.filter(Submission.user_id.in_(student_ids)).all()
+    total_subs     = len(subs)
+    accepted_subs  = [s for s in subs if s.status == 'accepted']
+    success_rate   = round(len(accepted_subs) / total_subs * 100, 1) if total_subs > 0 else 0
+
+    # top 5 by XP
+    top_students = User.query.filter(User.id.in_(student_ids)).order_by(User.xp.desc()).limit(5).all()
+    top_performers = [{
+        "id": s.id, "username": s.username,
+        "full_name": s.full_name or s.username,
+        "xp": s.xp, "level": s.level,
+        "solved": Submission.query.filter_by(user_id=s.id, status='accepted').count(),
+    } for s in top_students]
+
+    all_students = User.query.filter(User.id.in_(student_ids)).all()
+    avg_xp = round(sum(s.xp for s in all_students) / total_students, 1) if total_students > 0 else 0
+
+    # most challenging problems — lowest success rate, min 3 attempts
+    prob_stats = _dd(lambda: {"total": 0, "accepted": 0, "title": "", "difficulty": ""})
+    for s in subs:
+        prob = Problem.query.get(s.problem_id)
+        if prob:
+            prob_stats[s.problem_id]["total"]      += 1
+            prob_stats[s.problem_id]["title"]      = prob.title
+            prob_stats[s.problem_id]["difficulty"] = prob.difficulty
+            if s.status == 'accepted':
+                prob_stats[s.problem_id]["accepted"] += 1
+
+    challenging = []
+    for pid, stat in prob_stats.items():
+        if stat["total"] >= 3:
+            rate = round(stat["accepted"] / stat["total"] * 100, 1)
+            challenging.append({
+                "problem_id": pid, "title": stat["title"],
+                "difficulty": stat["difficulty"],
+                "success_rate": rate, "attempts": stat["total"],
+            })
+    challenging.sort(key=lambda x: x["success_rate"])
+    challenging = challenging[:5]
+
+    # activity heatmap — submissions grouped by hour
+    hour_counts = _dd(int)
+    for s in subs:
+        hour_counts[s.submitted_at.hour] += 1
+    activity_heatmap = [
+        {"hour": f"{h}:00", "submissions": hour_counts.get(h, 0)}
+        for h in range(0, 24, 4)
+    ]
+
+    # at-risk = no submissions in last 14 days
+    two_weeks_ago = _dt.utcnow() - _td(days=14)
+    recent_user_ids = set(s.user_id for s in subs if s.submitted_at >= two_weeks_ago)
+    at_risk = []
+    for sid in student_ids:
+        s = User.query.get(sid)
+        if s and sid not in recent_user_ids:
+            at_risk.append({
+                "id": s.id, "username": s.username,
+                "full_name": s.full_name or s.username,
+                "xp": s.xp, "level": s.level,
+            })
+
+    return jsonify({
+        "total_students":       total_students,
+        "total_submissions":    total_subs,
+        "accepted_submissions": len(accepted_subs),
+        "success_rate":         success_rate,
+        "avg_xp":               avg_xp,
+        "top_performers":       top_performers,
+        "challenging_problems": challenging,
+        "activity_heatmap":     activity_heatmap,
+        "at_risk_students":     at_risk,
+    }), 200
+
+
+@app.route('/api/instructor/plagiarism/scan', methods=['POST'])
+@jwt_required()
+def plagiarism_scan():
+    user_id = int(get_jwt_identity())
+    user    = User.query.get(user_id)
+    if not is_instructor_or_admin(user):
+        return jsonify({"error": "Unauthorized"}), 403
+
+    data       = request.get_json()
+    problem_id = data.get('problem_id')
+    class_id   = data.get('class_id')
+    threshold  = int(data.get('threshold', 85)) / 100.0
+
+    if not problem_id:
+        return jsonify({"error": "problem_id required"}), 400
+
+    query = Submission.query.filter_by(problem_id=problem_id)
+    if class_id:
+        enrolled    = IrregularEnrollment.query.filter_by(section_id=class_id).all()
+        student_ids = [e.student_id for e in enrolled]
+        query       = query.filter(Submission.user_id.in_(student_ids))
+
+    all_subs = query.order_by(Submission.submitted_at.desc()).all()
+    seen, unique_subs = {}, []
+    for s in all_subs:
+        if s.user_id not in seen:
+            seen[s.user_id] = s
+            unique_subs.append(s)
+
+    if len(unique_subs) < 2:
+        return jsonify({
+            "pairs": [], "total_compared": len(unique_subs),
+            "flagged": 0, "threshold": int(threshold * 100)
+        }), 200
+
+    def tokenize(code):
+        code = _re.sub(r'#[^\n]*',   '', code)
+        code = _re.sub(r'//[^\n]*',  '', code)
+        code = _re.sub(r'/\*.*?\*/', '', code, flags=_re.DOTALL)
+        tokens = _re.findall(r'\b\w+\b', code.lower())
+        keywords = {
+            'int','string','bool','void','return','if','else','for','while',
+            'def','class','import','print','public','private','static','new',
+            'this','self','true','false','null','none','and','or','not',
+            'in','is','pass','break','continue'
+        }
+        return [t for t in tokens if t not in keywords]
+
+    def jaccard(code1, code2):
+        t1, t2 = set(tokenize(code1)), set(tokenize(code2))
+        if not t1 or not t2:
+            return 0.0
+        return len(t1 & t2) / len(t1 | t2)
+
+    flagged_pairs = []
+    for i in range(len(unique_subs)):
+        for j in range(i + 1, len(unique_subs)):
+            s1, s2 = unique_subs[i], unique_subs[j]
+            sim = jaccard(s1.code or '', s2.code or '')
+            if sim >= threshold:
+                u1 = User.query.get(s1.user_id)
+                u2 = User.query.get(s2.user_id)
+                flagged_pairs.append({
+                    "student1": {
+                        "id": s1.user_id, "name": u1.full_name or u1.username,
+                        "username": u1.username, "sub_id": s1.id,
+                        "status": s1.status, "language": s1.language,
+                    },
+                    "student2": {
+                        "id": s2.user_id, "name": u2.full_name or u2.username,
+                        "username": u2.username, "sub_id": s2.id,
+                        "status": s2.status, "language": s2.language,
+                    },
+                    "similarity":    round(sim * 100, 1),
+                    "code_preview1": (s1.code or '')[:600],
+                    "code_preview2": (s2.code or '')[:600],
+                    "ai_verdict":    None,
+                })
+
+    flagged_pairs.sort(key=lambda x: x["similarity"], reverse=True)
+
+    # layer 2: gemini flash writes plain-english verdict for each flagged pair
+    # gemini flash is free (1500 requests/day), smart enough for code analysis,
+    # and needs GEMINI_API_KEY set in your .env file.
+    # if the key is missing or the API fails, verdicts just stay None —
+    # the similarity scores and code previews still show up fine.
+    try:
+        from google import genai
+        import os
+        api_key = os.environ.get('GEMINI_API_KEY')
+        if not api_key:
+            raise ValueError("GEMINI_API_KEY not set in environment")
+        client = genai.Client(api_key=api_key)
+
+        for pair in flagged_pairs[:10]:
+            prompt = f"""You are helping a university instructor review potential plagiarism in student code submissions.
+
+Two students submitted very similar code ({pair['similarity']}% similarity score) for the same programming problem.
+
+Student 1 ({pair['student1']['name']}) code preview:
+```
+{pair['code_preview1']}
+```
+
+Student 2 ({pair['student2']['name']}) code preview:
+```
+{pair['code_preview2']}
+```
+
+Write a brief 2-3 sentence verdict for the instructor. Be direct and specific:
+- What specific patterns make these similar (same variable names, same structure, same logic)?
+- Does this look like one student copied from the other, or could it be coincidental?
+- What should the instructor look for when reviewing the full submissions?
+
+Keep it concise and practical. Do not be accusatory — just describe what you observe."""
+
+            response = client.models.generate_content(
+                # gemini-1.5-flash-8b is dead — all 1.5 models were shut down by
+                # Google in 2026 and now 404. 2.5 Flash is the current free-tier
+                # workhorse (2.5 Flash-Lite also works if you want more headroom
+                # on the free daily quota — swap the string below if you hit limits).
+                model='gemini-2.5-flash',
+                contents=prompt
+            )
+            pair["ai_verdict"] = response.text
+    except Exception as e:
+        print(f"Gemini API unavailable for plagiarism verdicts: {e}")
+
+    return jsonify({
+        "pairs":          flagged_pairs,
+        "total_compared": len(unique_subs),
+        "flagged":        len(flagged_pairs),
+        "threshold":      int(threshold * 100),
+    }), 200
+
 @app.route('/api/instructor/dashboard-stats', methods=['GET'])
 @jwt_required()
 def get_instructor_dashboard_stats():
@@ -2454,6 +2772,49 @@ def get_announcements():
         "instructor": User.query.get(a.instructor_id).username if a.instructor_id else "System"
     } for a in q.order_by(Announcement.is_pinned.desc(), Announcement.created_at.desc()).all()]), 200
 
+@app.route('/api/announcements/<int:announcement_id>', methods=['DELETE'])
+@jwt_required()
+def delete_announcement(announcement_id):
+    user_id = int(get_jwt_identity())
+    user = User.query.get(user_id)
+    if not is_instructor_or_admin(user):
+        return jsonify({"error": "Unauthorized"}), 403
+
+    ann = Announcement.query.get_or_404(announcement_id)
+
+    if ann.instructor_id != user_id and user.role != 'administrator':
+        return jsonify({"error": "Not your announcement"}), 403
+
+    db.session.delete(ann)
+    db.session.commit()
+    return jsonify({"message": "Announcement deleted"}), 200
+
+
+@app.route('/api/announcements/<int:announcement_id>', methods=['PUT'])
+@jwt_required()
+def update_announcement(announcement_id):
+    user_id = int(get_jwt_identity())
+    user = User.query.get(user_id)
+    if not is_instructor_or_admin(user):
+        return jsonify({"error": "Unauthorized"}), 403
+
+    ann = Announcement.query.get_or_404(announcement_id)
+
+    if ann.instructor_id != user_id and user.role != 'administrator':
+        return jsonify({"error": "Not your announcement"}), 403
+
+    data = request.get_json()
+    if not data.get('title') or not data.get('content'):
+        return jsonify({"error": "Title and content are required"}), 400
+
+    ann.title     = data['title'].strip()
+    ann.content   = data['content'].strip()
+    ann.priority  = data.get('priority', ann.priority)
+    ann.is_pinned = data.get('is_pinned', ann.is_pinned)
+    db.session.commit()
+
+    return jsonify({"message": "Announcement updated"}), 200
+
 # ✅ NEW: Student-specific announcements endpoint
 @app.route('/api/student/announcements', methods=['GET'])
 @jwt_required()
@@ -2464,10 +2825,16 @@ def get_student_announcements():
     if user.role != 'student':
         return jsonify({"error": "Students only"}), 403
     
+    # ✅ FIX: this used to only match class_id == None (global announcements),
+    # so anything an instructor posted to a specific class was invisible to
+    # students in that class. Now also matches the student's own section.
     announcements = Announcement.query.filter(
-        Announcement.class_id == None
+        db.or_(
+            Announcement.class_id == None,
+            Announcement.class_id == user.section_id
+        )
     ).order_by(Announcement.is_pinned.desc(), Announcement.created_at.desc()).all()
-    
+
     return jsonify([{
         "id": a.id,
         "title": a.title,
@@ -2476,7 +2843,7 @@ def get_student_announcements():
         "priority": a.priority,
         "created_at": a.created_at.isoformat(),
         "instructor": User.query.get(a.instructor_id).username if a.instructor_id else "System",
-        "block_name": "All Classes"
+        "block_name": "All Classes" if a.class_id is None else "My Class"
     } for a in announcements]), 200
 
 @app.route('/api/admin/dashboard-stats', methods=['GET'])
@@ -2586,6 +2953,16 @@ def admin_dashboard_stats(admin):
         .count()
     )
 
+# ── 5b. Audit log count for today — feeds the Activity Logs sidebar badge ──
+    # frontend AdminDashboard.jsx reads dashStats.stats?.today, expects this
+    # exact shape. without this the badge is permanently stuck at 0/blank
+    # because the field straight up didn't exist before.
+    audit_logs_today = (
+        AuditLog.query
+        .filter(func.date(AuditLog.created_at) == today)
+        .count()
+    )
+
     # ── 6. Maintenance mode ───────────────────────────────────────────────────
     maint_row = SystemConfig.query.filter_by(key='maintenance_mode').first()
     maintenance_mode = (maint_row.value == 'true') if maint_row else False
@@ -2636,6 +3013,12 @@ def admin_dashboard_stats(admin):
         'today_logins':        today_logins,
         'today_submissions':   today_submissions,
         'total_problems':      0,   # kept for compat; fetched lazily by frontend
+
+        # nested under 'stats' on purpose — AdminDashboard.jsx sidebar badge
+        # for the Activity Logs tab reads dashStats.stats?.today specifically
+        'stats': {
+            'today': audit_logs_today,
+        },
 
         # Activity feed
         'recent_activity':     recent_activity,
@@ -2811,6 +3194,48 @@ def admin_update_user(admin, user_id):
                         section_id=int(sid)
                     ))
                 changes.append(f"Enrolled in {len(section_ids)} class codes")
+            else:
+                changes.append("Removed from all class codes")
+        elif target.role == 'instructor':
+            # this branch didn't exist before — the modal let you PICK class
+            # codes for an instructor, but nothing ever saved it. same
+            # "replace everything" pattern as the student branch above:
+            # wipe existing assignments for this instructor, then recreate
+            # from what was just picked.
+            TeacherAssignment.query.filter_by(instructor_id=user_id).delete()
+            if section_ids:
+                assigned = 0
+                conflicts = []  # class codes that belong to someone else
+                for sid in section_ids:
+                    section = SubjectSection.query.get(int(sid))
+                    # a section always has exactly one subject (set when the
+                    # section itself was created), so we don't need the
+                    # frontend to send subject_id separately — just look it
+                    # up here.
+                    if section and section.subject_id:
+                        # ✅ one instructor per class code — added [this
+                        # pass]. we already deleted THIS instructor's own
+                        # rows above, so if a row still exists for this
+                        # subject+section, it belongs to a different
+                        # instructor. skip it instead of double-booking,
+                        # and say so, rather than silently dropping it.
+                        taken_by = TeacherAssignment.query.filter_by(
+                            subject_id=section.subject_id,
+                            section_id=int(sid)
+                        ).first()
+                        if taken_by:
+                            other = User.query.get(taken_by.instructor_id)
+                            conflicts.append(f"{section.section_no} (already taught by {other.username if other else 'another instructor'})")
+                            continue
+                        db.session.add(TeacherAssignment(
+                            instructor_id=user_id,
+                            subject_id=section.subject_id,
+                            section_id=int(sid)
+                        ))
+                        assigned += 1
+                changes.append(f"Assigned to {assigned} class codes")
+                if conflicts:
+                    changes.append(f"Skipped (already taken): {', '.join(conflicts)}")
             else:
                 changes.append("Removed from all class codes")
     
@@ -3079,6 +3504,81 @@ def admin_get_logs(admin):
         'pages': pages,
         'stats': stats,
     }), 200
+
+# ============================================================================
+# paste this into app.py, near admin_get_logs (same area, they share logic)
+#
+# why this exists: the old "Export CSV" button on Activity Logs was calling
+# /api/admin/reports, which only ever exported SUBMISSIONS data (student
+# quiz scores) — there was never an endpoint that actually exports audit
+# log rows. clicking "Export Logs" silently gave you the wrong file. this
+# is the real one.
+#
+# reuses the same filter params as GET /api/admin/audit-logs (search,
+# action, date_from, date_to) so "export what i'm currently looking at"
+# actually works — no pagination limit here though, exports everything
+# that matches the filter, not just the current page.
+# ============================================================================
+
+@app.route('/api/admin/audit-logs/export', methods=['GET'])
+@admin_required
+def admin_export_audit_logs(admin):
+    search       = request.args.get('search', '').strip()
+    action_param = request.args.get('action', '').strip()
+    date_from    = request.args.get('date_from', '').strip()
+    date_to      = request.args.get('date_to', '').strip()
+
+    q = AuditLog.query
+
+    if action_param and action_param.lower() != 'all':
+        actions = [a.strip() for a in action_param.split(',') if a.strip()]
+        if len(actions) == 1:
+            q = q.filter(AuditLog.action == actions[0])
+        elif len(actions) > 1:
+            q = q.filter(AuditLog.action.in_(actions))
+
+    if date_from:
+        try:
+            q = q.filter(AuditLog.created_at >= datetime.strptime(date_from, '%Y-%m-%d'))
+        except ValueError:
+            pass
+
+    if date_to:
+        try:
+            dt_to = datetime.strptime(date_to, '%Y-%m-%d') + timedelta(days=1)
+            q = q.filter(AuditLog.created_at < dt_to)
+        except ValueError:
+            pass
+
+    if search:
+        like = f'%{search}%'
+        q = q.filter(
+            (AuditLog.action.ilike(like))  |
+            (AuditLog.details.ilike(like)) |
+            (AuditLog.ip_address.ilike(like))
+        )
+
+    logs = q.order_by(AuditLog.created_at.desc()).all()
+
+    si = StringIO()
+    cw = csv.writer(si)
+    cw.writerow(["ID", "Admin", "Action", "Details", "IP Address", "Timestamp"])
+    for log in logs:
+        admin_user = User.query.get(log.admin_id)
+        cw.writerow([
+            log.id,
+            admin_user.username if admin_user else 'System',
+            log.action,
+            log.details,
+            log.ip_address,
+            log.created_at.isoformat(),
+        ])
+
+    return app.response_class(
+        si.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=audit_logs_export.csv"}
+    )
 
 @app.route('/api/admin/reports', methods=['GET'])
 @admin_required
@@ -3623,6 +4123,23 @@ def admin_create_instructor_assignment(admin):
     if existing:
         return jsonify({"error": "Assignment already exists"}), 409
 
+    # ✅ one instructor per class code — added [this pass]. the check above
+    # only caught the exact same instructor being assigned twice; this is
+    # the actual rule: this subject+section combo can only ever have ONE
+    # instructor. if someone else is already on it, the admin has to
+    # unassign them first — no silent double-booking.
+    taken_by = TeacherAssignment.query.filter_by(
+        subject_id=subject_id,
+        section_id=section_id
+    ).first()
+    if taken_by:
+        current_instructor = User.query.get(taken_by.instructor_id)
+        current_name = current_instructor.username if current_instructor else 'another instructor'
+        return jsonify({
+            "error": f"This class code already has an instructor ({current_name}). "
+                     f"Remove them first before assigning someone new."
+        }), 409
+
     assignment = TeacherAssignment(
         instructor_id=instructor_id,
         subject_id=subject_id,
@@ -3667,6 +4184,22 @@ def admin_update_instructor_assignment(admin, assignment_id):
     ).first()
     if duplicate:
         return jsonify({"error": "This assignment already exists"}), 409
+
+    # ✅ same one-instructor-per-class-code rule as the create route.
+    # excluding this assignment's own id — editing an assignment shouldn't
+    # conflict with itself.
+    taken_by = TeacherAssignment.query.filter(
+        TeacherAssignment.subject_id == subject_id,
+        TeacherAssignment.section_id == section_id,
+        TeacherAssignment.id != assignment_id
+    ).first()
+    if taken_by:
+        current_instructor = User.query.get(taken_by.instructor_id)
+        current_name = current_instructor.username if current_instructor else 'another instructor'
+        return jsonify({
+            "error": f"This class code already has an instructor ({current_name}). "
+                     f"Remove them first before assigning someone new."
+        }), 409
 
     instructor = User.query.get(instructor_id)
     if not instructor or instructor.role != 'instructor':
@@ -4126,7 +4659,12 @@ def admin_bulk_enrollment_upload(admin):
     # ── 5. Process REGULAR students ───────────────────────────────────────
     for idx, row in regular_rows:
         sid        = row["student_id"].strip()
-        section_no = row.get("block_code", "").strip()
+        # was reading row.get("block_code", ...) here — leftover from before
+        # blocks got removed from this system. block_code doesn't mean
+        # anything anymore (see the "blocks removed" comment above), everyone
+        # uses section_no now, same as irregular students below. this one
+        # line just never got updated when the rest of the system moved on.
+        section_no = row.get("section_no", "").strip()
 
         if not section_no:
             skipped_count += 1
@@ -4857,6 +5395,16 @@ def health():
     return jsonify({"status": "running", "version": "1.0"}), 200
 
 with app.app_context():
+    # this has to run FIRST, before literally anything else in this block —
+    # everything below (seeding achievements, the teacher_assignments
+    # migrations, the problems table column check) queries or ALTERs tables
+    # that only exist after this line runs. used to be called down at the
+    # bottom of this same block instead, which only "worked" because
+    # whoever ran this locally already had the tables from a previous run.
+    # on a brand new empty database it broke immediately — the achievement
+    # seed-check below has no try/except, so it just crashed on startup.
+    db.create_all()
+
         # ===== SEED ACHIEVEMENTS =====
     if not Achievement.query.first():
         achievements_data = [
@@ -4974,8 +5522,9 @@ with app.app_context():
     except Exception as e:
         print(f"⚠️ visible_to_blocks removal skipped: {e}")
 
-    db.create_all()
-    
+    # db.create_all() used to be called right here — moved to the top of
+    # this same `with app.app_context():` block, see the comment up there.
+
     # Auto-migration for users table
     try:
         inspector = inspect(db.engine)

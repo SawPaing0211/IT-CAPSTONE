@@ -1,42 +1,38 @@
+// subjects list — first thing student sees after login, shows their
+// enrolled courses as cards, click one to go into that course
+//
+// used to fetch user info (/api/auth/me) and stats (/api/student/stats)
+// itself, but StudentDashboard.jsx ALREADY has both of those (user comes
+// from App.jsx as a prop, heroStats gets fetched once in StudentDashboard).
+// so this was hitting the same 2 endpoints a second time for no reason —
+// every page load fired me/stats twice as much as needed. fixed by just
+// accepting user + stats as props instead of re-fetching. only fetch left
+// here is /api/student/subjects since nothing else already has that.
+
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 
-export default function MySubjects({ onSelectSubject }) {
+export default function MySubjects({ onSelectSubject, user, stats }) {
   const navigate = useNavigate()
   const [subjects, setSubjects] = useState([])
   const [loading, setLoading] = useState(true)
-  const [user, setUser] = useState(null)
-  const [stats, setStats] = useState(null)
 
   useEffect(() => {
-    const fetchData = async () => {
+    const fetchSubjects = async () => {
       try {
         const token = localStorage.getItem('token')
-
-        const userRes = await fetch('http://localhost:5000/api/auth/me', {
-          headers: { 'Authorization': `Bearer ${token}` }
-        })
-        const userData = await userRes.json()
-        setUser(userData)
-        
-        // Get enrolled subjects
         const subjectsRes = await fetch('http://localhost:5000/api/student/subjects', {
           headers: { 'Authorization': `Bearer ${token}` }
         })
         const subjectsData = await subjectsRes.json()
         setSubjects(subjectsData)
-
-        const statsRes = await fetch('http://localhost:5000/api/student/stats', {
-          headers: { 'Authorization': `Bearer ${token}` }
-        })
-        if (statsRes.ok) setStats(await statsRes.json())
       } catch (err) {
         console.error('Failed to load subjects:', err)
       } finally {
         setLoading(false)
       }
     }
-    fetchData()
+    fetchSubjects()
   }, [])
 
   if (loading) {

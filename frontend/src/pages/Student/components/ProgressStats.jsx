@@ -85,8 +85,11 @@ export default function ProgressStats({ stats, username }) {
     setAnimated(true)
   }, [])
 
-  // ALL MOCK DATA - No backend connection needed for demo
-  const mockData = {
+  // this used to say "ALL MOCK DATA" and it was true back then — not
+  // anymore. everything below pulls from realStats / recentSubmissions,
+  // both fetched from the backend above. kept the var name change
+  // (mockData -> heroData) so nobody reads "mock" and assumes it's fake.
+  const heroData = {
     level: realStats?.level ?? 1,
     xp: realStats?.total_xp ?? 0,
     questsCompleted: realStats?.accepted_submissions ?? 0,
@@ -107,11 +110,26 @@ export default function ProgressStats({ stats, username }) {
         total:  recentSubmissions.filter(s => s.language === lang.key).length || 0,
       }))
     })(),
-    difficulty: [
-      { level: 'Easy', completed: 3, total: 5, color: 'text-green-400', bg: 'bg-green-500', borderColor: 'border-green-500' },
-      { level: 'Medium', completed: 0, total: 0, color: 'text-yellow-400', bg: 'bg-yellow-500', borderColor: 'border-yellow-500' },
-      { level: 'Hard', completed: 0, total: 0, color: 'text-red-400', bg: 'bg-red-500', borderColor: 'border-red-500' }
-    ],
+    // was hardcoded before: Easy 3/5, Medium 0/0, Hard 0/0, always, no
+    // matter what the student actually did. now it's a real count from
+    // real submissions. needs "difficulty" on each submission object,
+    // which /api/student/submissions didn't send until [this pass] —
+    // if this ever shows all zeros again, check that field is still there.
+    difficulty: (() => {
+      const levels = [
+        { level: 'Easy',   color: 'text-green-400',  bg: 'bg-green-500',  borderColor: 'border-green-500' },
+        { level: 'Medium', color: 'text-yellow-400', bg: 'bg-yellow-500', borderColor: 'border-yellow-500' },
+        { level: 'Hard',   color: 'text-red-400',    bg: 'bg-red-500',    borderColor: 'border-red-500' },
+      ]
+      return levels.map(lvl => {
+        const atThisLevel = recentSubmissions.filter(s => s.difficulty === lvl.level)
+        return {
+          ...lvl,
+          completed: atThisLevel.filter(s => s.status === 'accepted').length,
+          total: atThisLevel.length,
+        }
+      })
+    })(),
     // Real 28-day activity computed from submissions
     activityData: (() => {
       const days = []
@@ -127,17 +145,11 @@ export default function ProgressStats({ stats, username }) {
       }
       return days
     })(),
-    achievements: [
-      { name: 'First Steps', desc: 'Complete your first quest', icon: '🎯', earned: true, date: 'Apr 15, 2024' },
-      { name: 'Week Warrior', desc: 'Maintain a 7-day streak', icon: '🔥', earned: false, progress: '1/7' },
-      { name: 'Problem Solver', desc: 'Complete 10 quests', icon: '⚔️', earned: false, progress: '0/10' },
-      { name: 'Python Novice', desc: 'Solve 5 Python problems', icon: '🐍', earned: false, progress: '3/5' }
-    ],
     recentQuests: recentSubmissions.map(s => ({
       title: s.problem_title || 'Quest',
       xp: s.score || 0,
       date: new Date(s.submitted_at).toLocaleDateString(),
-      difficulty: 'Easy',
+      difficulty: s.difficulty || 'Easy', // fallback only for old submissions from before problems had a difficulty on the problem row — shouldn't normally hit this
       icon: s.status === 'accepted' ? '✅' : s.status === 'partial' ? '⚡' : '❌',
       status: s.status
     }))
@@ -161,20 +173,20 @@ export default function ProgressStats({ stats, username }) {
       {/* Main Stats Grid */}
       <div className={`grid grid-cols-2 md:grid-cols-4 gap-3 transition-all duration-700 delay-100 ${animated ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`}>
         <div className="bg-slate-800/60 border border-slate-700 rounded-xl p-4 text-center hover:border-purple-600/40 transition-all duration-300 hover:scale-105 hover:shadow-lg hover:shadow-purple-600/20 group">
-          <p className="text-3xl font-bold text-purple-400 mb-1 group-hover:animate-bounce">{mockData.level}</p>
+          <p className="text-3xl font-bold text-purple-400 mb-1 group-hover:animate-bounce">{heroData.level}</p>
           <p className="text-[10px] text-slate-400 uppercase tracking-wider font-medium">Current Level</p>
         </div>
         <div className="bg-slate-800/60 border border-slate-700 rounded-xl p-4 text-center hover:border-yellow-600/40 transition-all duration-300 hover:scale-105 hover:shadow-lg hover:shadow-yellow-600/20 group">
-          <p className="text-3xl font-bold text-yellow-400 mb-1 group-hover:animate-bounce">{mockData.xp}</p>
+          <p className="text-3xl font-bold text-yellow-400 mb-1 group-hover:animate-bounce">{heroData.xp}</p>
           <p className="text-[10px] text-slate-400 uppercase tracking-wider font-medium">Total XP</p>
         </div>
         <div className="bg-slate-800/60 border border-slate-700 rounded-xl p-4 text-center hover:border-green-600/40 transition-all duration-300 hover:scale-105 hover:shadow-lg hover:shadow-green-600/20 group">
-          <p className="text-3xl font-bold text-green-400 mb-1 group-hover:animate-bounce">{mockData.questsCompleted}</p>
+          <p className="text-3xl font-bold text-green-400 mb-1 group-hover:animate-bounce">{heroData.questsCompleted}</p>
           <p className="text-[10px] text-slate-400 uppercase tracking-wider font-medium">Quests Done</p>
         </div>
         <div className="bg-slate-800/60 border border-slate-700 rounded-xl p-4 text-center hover:border-orange-600/40 transition-all duration-300 hover:scale-105 hover:shadow-lg hover:shadow-orange-600/20">
           <p className="text-3xl font-bold text-orange-400 mb-1 flex items-center justify-center gap-1 animate-pulse">
-            {mockData.streak}🔥
+            {heroData.streak}🔥
           </p>
           <p className="text-[10px] text-slate-400 uppercase tracking-wider font-medium">Day Streak</p>
         </div>
@@ -194,30 +206,30 @@ export default function ProgressStats({ stats, username }) {
               <div>
                 <div className="flex justify-between text-xs mb-1">
                   <span className="text-slate-300">Success Rate</span>
-                  <span className="text-green-400 font-bold">{mockData.successRate}%</span>
+                  <span className="text-green-400 font-bold">{heroData.successRate}%</span>
                 </div>
                 <div className="w-full bg-slate-700 h-2 rounded-full overflow-hidden">
-                  <div className="h-full bg-gradient-to-r from-green-600 to-emerald-500 rounded-full transition-all duration-1000 shadow-lg shadow-green-500/30" style={{ width: `${mockData.successRate}%` }} />
+                  <div className="h-full bg-gradient-to-r from-green-600 to-emerald-500 rounded-full transition-all duration-1000 shadow-lg shadow-green-500/30" style={{ width: `${heroData.successRate}%` }} />
                 </div>
               </div>
               
               <div>
                 <div className="flex justify-between text-xs mb-1">
                   <span className="text-slate-300">Quest Completion</span>
-                  <span className="text-purple-400 font-bold">{mockData.completionRate}%</span>
+                  <span className="text-purple-400 font-bold">{heroData.completionRate}%</span>
                 </div>
                 <div className="w-full bg-slate-700 h-2 rounded-full overflow-hidden">
-                  <div className="h-full bg-gradient-to-r from-purple-600 to-pink-500 rounded-full transition-all duration-1000 shadow-lg shadow-purple-500/30" style={{ width: `${mockData.completionRate}%` }} />
+                  <div className="h-full bg-gradient-to-r from-purple-600 to-pink-500 rounded-full transition-all duration-1000 shadow-lg shadow-purple-500/30" style={{ width: `${heroData.completionRate}%` }} />
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-2 mt-3 pt-3 border-t border-slate-700">
                 <div className="text-center p-2 bg-slate-900/40 rounded-lg hover:bg-slate-900/60 transition">
-                  <p className="text-lg font-bold text-blue-400">{mockData.totalAttempts}</p>
+                  <p className="text-lg font-bold text-blue-400">{heroData.totalAttempts}</p>
                   <p className="text-[9px] text-slate-500">Total Attempts</p>
                 </div>
                 <div className="text-center p-2 bg-slate-900/40 rounded-lg hover:bg-slate-900/60 transition">
-                  <p className="text-lg font-bold text-red-400">{mockData.failedAttempts}</p>
+                  <p className="text-lg font-bold text-red-400">{heroData.failedAttempts}</p>
                   <p className="text-[9px] text-slate-500">Failed</p>
                 </div>
               </div>
@@ -230,7 +242,7 @@ export default function ProgressStats({ stats, username }) {
               <span>💻</span> Language Skills
             </h3>
             <div className="space-y-3">
-              {mockData.languages.map((lang) => (
+              {heroData.languages.map((lang) => (
                 <div key={lang.name} className="group">
                   <div className="flex items-center justify-between mb-1">
                     <div className="flex items-center gap-2">
@@ -256,7 +268,7 @@ export default function ProgressStats({ stats, username }) {
               <span>📊</span> Difficulty Progress
             </h3>
             <div className="space-y-2">
-              {mockData.difficulty.map((diff) => (
+              {heroData.difficulty.map((diff) => (
                 <div key={diff.level} className={`flex items-center justify-between p-2 bg-slate-900/40 rounded-lg border-l-2 ${diff.borderColor} hover:bg-slate-900/60 transition group`}>
                   <span className={`text-sm font-bold ${diff.color}`}>{diff.level}</span>
                   <div className="flex items-center gap-3">
@@ -291,7 +303,7 @@ export default function ProgressStats({ stats, username }) {
             
             {/* Activity grid */}
             <div className="grid grid-cols-7 gap-1">
-              {mockData.activityData.map((day, idx) => {
+              {heroData.activityData.map((day, idx) => {
                 const getColorClass = (level) => {
                   if (level === 0) return 'bg-slate-700/60 border-slate-600/40'
                   if (level === 1) return 'bg-green-900/60 border-green-700/40'
@@ -301,7 +313,7 @@ export default function ProgressStats({ stats, username }) {
                   return 'bg-green-300 border-green-200'
                 }
                 
-                const isToday = idx === mockData.activityData.length - 1
+                const isToday = idx === heroData.activityData.length - 1
                 
                 return (
                   <div
@@ -421,7 +433,7 @@ export default function ProgressStats({ stats, username }) {
               <span>⚔️</span> Recent Quests
             </h3>
             <div className="space-y-2">
-              {mockData.recentQuests.map((quest, idx) => (
+              {heroData.recentQuests.map((quest, idx) => (
                 <div key={idx} className="flex items-center justify-between p-3 bg-slate-900/60 rounded-lg border border-slate-700 hover:border-purple-600/40 transition-all duration-300 hover:scale-[1.02] group cursor-pointer">
                   <div className="flex items-center gap-2">
                     <span className="text-lg group-hover:scale-110 transition-transform">{quest.icon}</span>

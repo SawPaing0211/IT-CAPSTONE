@@ -4,6 +4,32 @@ import SubjectManagement from './SubjectsManagement'
 import RecoveryModal from './RecoveryModal'
 import UploadCSVModal from './UploadCSVModal'
 
+// same hand-drawn line icons as the Class Codes page (SectionsManagement.jsx)
+// — copied exactly, not redrawn, so both admin pages use the literal same
+// icon instead of two different ones that just look similar.
+const Icon = {
+  Download: ({ size = 14, color = 'currentColor' }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="8 17 12 21 16 17" /><line x1="12" y1="12" x2="12" y2="21" />
+      <path d="M20.88 18.09A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.29" />
+    </svg>
+  ),
+  Upload: ({ size = 14, color = 'currentColor' }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="16 16 12 12 8 16" /><line x1="12" y1="12" x2="12" y2="21" />
+      <path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3" />
+    </svg>
+  ),
+  Users: ({ size = 14, color = 'currentColor' }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+    </svg>
+  ),
+}
+
 export default function UserManagement() {
   const [users, setUsers] = useState([])
   const [sections, setSections] = useState([])
@@ -24,6 +50,16 @@ export default function UserManagement() {
   const [addUserSuccess, setAddUserSuccess] = useState('')
   const [csvModal, setCsvModal] = useState(false)
   const [activeTab, setActiveTab] = useState('users')
+
+  // toast — replaces every alert() in this file. alert() is that plain
+  // browser popup that doesn't match anything else in the app (purple
+  // theme, rounded corners, etc). this is just a message + a type
+  // ('success' or 'error') that auto-dismisses after a few seconds.
+  const [toast, setToast] = useState(null)
+  const showToast = (msg, type = 'success') => {
+    setToast({ msg, type })
+    setTimeout(() => setToast(null), type === 'warning' ? 6500 : 4000)
+  }
 
   const isMasterAdmin = (() => {
     try {
@@ -96,9 +132,9 @@ export default function UserManagement() {
       const res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } })
 
       if (res.status === 401) {
-        alert('Session expired. Please login again.')
+        showToast('Session expired — logging you out...', 'error')
         localStorage.removeItem('token')
-        window.location.href = '/'
+        setTimeout(() => { window.location.href = '/' }, 1200)
         return
       }
       if (res.ok) {
@@ -136,39 +172,48 @@ export default function UserManagement() {
         body: JSON.stringify(updates)
       })
       if (res.status === 401) {
-        alert('Session expired. Please login again.')
+        showToast('Session expired — logging you out...', 'error')
         localStorage.removeItem('token')
-        window.location.href = '/'
+        setTimeout(() => { window.location.href = '/' }, 1200)
         return
       }
       if (res.ok) {
+        const data = await res.json()
         await fetchUsers()
         setManageModal(null)
-        alert('✅ User updated successfully!')
+        // backend reports skipped class codes as a "Skipped (already
+        // taken): ..." entry in changes — surface that instead of just
+        // saying "success" and burying the actual conflict info.
+        const skippedNote = (data.changes || []).find(c => c.startsWith('Skipped'))
+        if (skippedNote) {
+          showToast(`Saved, but some class codes were skipped — ${skippedNote.replace('Skipped (already taken): ', '')}`, 'warning')
+        } else {
+          showToast('User updated successfully!')
+        }
       } else {
         const error = await res.json()
-        alert(`Failed to update user: ${error.error}`)
+        showToast(`Failed to update user: ${error.error}`, 'error')
       }
     } catch (err) {
       console.error('Failed to update user:', err)
-      alert('Failed to update user')
+      showToast('Failed to update user', 'error')
     }
   }
 
   const handleDeleteUser = async (userId) => {
     const confirmText = prompt(`Type "DELETE" to confirm deletion of user ID ${userId}:`)
-    if (confirmText !== 'DELETE') { alert('Deletion cancelled.'); return }
+    if (confirmText !== 'DELETE') { showToast('Deletion cancelled.', 'error'); return }
     try {
       const token = localStorage.getItem('token')
       const res = await fetch(`http://localhost:5000/api/admin/users/${userId}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       })
-      if (res.ok) { await fetchUsers(); alert('✅ User deleted successfully!') }
-      else { const error = await res.json(); alert(`Failed to delete user: ${error.error}`) }
+      if (res.ok) { await fetchUsers(); showToast('User deleted successfully!') }
+      else { const error = await res.json(); showToast(`Failed to delete user: ${error.error}`, 'error') }
     } catch (err) {
       console.error('Failed to delete user:', err)
-      alert('Failed to delete user')
+      showToast('Failed to delete user', 'error')
     }
   }
 
@@ -179,9 +224,9 @@ export default function UserManagement() {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` }
       })
-      if (res.ok) { await fetchUsers(); alert(`✅ Account "${username}" has been unlocked.`) }
-      else { const err = await res.json(); alert(`Failed: ${err.error}`) }
-    } catch { alert('Network error. Please try again.') }
+      if (res.ok) { await fetchUsers(); showToast(`Account "${username}" has been unlocked.`) }
+      else { const err = await res.json(); showToast(`Failed: ${err.error}`, 'error') }
+    } catch { showToast('Network error. Please try again.', 'error') }
   }
 
   // Filter users by section if selected
@@ -215,6 +260,20 @@ export default function UserManagement() {
 
   return (
     <div className="space-y-6">
+
+      {/* Toast — replaces every alert() popup in this page */}
+      {toast && (
+        <div className={`fixed top-6 right-6 z-[9999] max-w-md px-5 py-3 rounded-xl font-semibold text-white shadow-2xl border transition ${
+          toast.type === 'error'
+            ? 'bg-red-600 border-red-500/50'
+            : toast.type === 'warning'
+              ? 'bg-amber-600 border-amber-500/50'
+              : 'bg-gradient-to-r from-purple-600 to-pink-600 border-purple-400/50'
+        }`}>
+          {toast.type === 'error' ? '❌' : toast.type === 'warning' ? '⚠️' : '✅'} {toast.msg}
+        </div>
+      )}
+
       {/* Tab Switcher */}
       <div className="flex gap-2 border-b border-slate-800 pb-2">
         <button
@@ -254,21 +313,21 @@ export default function UserManagement() {
                     URL.revokeObjectURL(url)
                   }
                 }}
-                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg transition flex items-center gap-2"
+                className="px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2 transition hover:opacity-85 hover:brightness-110 bg-white/5 border border-white/10 text-slate-300"
               >
-                <span>📥</span> Export CSV
+                <Icon.Download size={14} /> Export CSV
               </button>
               <button
                 onClick={() => setCsvModal(true)}
-                className="px-4 py-2 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 rounded-lg transition flex items-center gap-2 font-bold shadow-lg shadow-green-600/30"
+                className="px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2 transition hover:opacity-85 hover:brightness-110 bg-green-600/15 border border-green-400/30 text-green-400"
               >
-                <span>📤</span> Upload CSV
+                <Icon.Upload size={14} /> Upload CSV
               </button>
               <button
                 onClick={() => setAddUserModal(true)}
-                className="px-4 py-2 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-lg transition flex items-center gap-2 font-bold shadow-lg shadow-purple-600/30"
+                className="px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2 transition hover:opacity-85 hover:brightness-110 bg-gradient-to-r from-purple-600 to-pink-600 text-white"
               >
-                <span>👤</span> Add User
+                <Icon.Users size={14} /> Add User
               </button>
             </div>
           </div>
