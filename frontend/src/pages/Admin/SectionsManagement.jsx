@@ -861,19 +861,35 @@ function CSVUploadModal({ onClose, onSuccess }) {
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
-            {[
-              { label: 'Total',   val: result.summary?.total_rows ?? 0, color: '#e2e8f0' },
-              { label: 'Created', val: result.summary?.created    ?? 0, color: '#4ade80' },
-              { label: 'Skipped', val: result.summary?.skipped    ?? 0, color: '#facc15' },
-              { label: 'Errors',  val: result.summary?.errors     ?? 0, color: '#f87171' },
-            ].map((c) => (
-              <div key={c.label} style={{ background: 'rgba(255,255,255,0.04)', borderRadius: 10, padding: '0.625rem', textAlign: 'center' }}>
-                <p style={{ margin: 0, fontSize: '1.4rem', fontWeight: 700, color: c.color }}>{c.val}</p>
-                <p style={{ margin: 0, fontSize: '0.7rem', color: '#64748b' }}>{c.label}</p>
-              </div>
-            ))}
-          </div>
+          {result.error ? (
+            // hard failure — backend never got far enough to produce a
+            // summary (missing columns, empty file, bad CSV, DB error).
+            // used to fall through to the zeros grid below with no
+            // explanation at all — this is the fix for that.
+            <div style={{ background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.3)', borderRadius: 10, padding: '1rem' }}>
+              <p style={{ margin: 0, color: '#f87171', fontWeight: 700, fontSize: '0.9rem' }}>❌ Upload failed</p>
+              <p style={{ margin: '0.35rem 0 0', color: '#fca5a5', fontSize: '0.8rem' }}>{result.error}</p>
+              {result.missing && (
+                <p style={{ margin: '0.35rem 0 0', color: '#fca5a5', fontSize: '0.75rem' }}>
+                  Missing columns: {result.missing.join(', ')}
+                </p>
+              )}
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
+              {[
+                { label: 'Total',   val: result.summary?.total_rows ?? 0, color: '#e2e8f0' },
+                { label: 'Created', val: result.summary?.created    ?? 0, color: '#4ade80' },
+                { label: 'Skipped', val: result.summary?.skipped    ?? 0, color: '#facc15' },
+                { label: 'Errors',  val: result.summary?.errors     ?? 0, color: '#f87171' },
+              ].map((c) => (
+                <div key={c.label} style={{ background: 'rgba(255,255,255,0.04)', borderRadius: 10, padding: '0.625rem', textAlign: 'center' }}>
+                  <p style={{ margin: 0, fontSize: '1.4rem', fontWeight: 700, color: c.color }}>{c.val}</p>
+                  <p style={{ margin: 0, fontSize: '0.7rem', color: '#64748b' }}>{c.label}</p>
+                </div>
+              ))}
+            </div>
+          )}
           <div style={{ display: 'flex', gap: '0.75rem' }}>
             <button onClick={() => { setResult(null); setFile(null) }} style={{ flex: 1, padding: '0.625rem', borderRadius: 10, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: '#cbd5e1', cursor: 'pointer', fontWeight: 600 }}>
               Upload Another

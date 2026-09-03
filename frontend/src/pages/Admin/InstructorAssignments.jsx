@@ -1,51 +1,47 @@
-// InstructorAssignments.jsx
 // ─────────────────────────────────────────────────────────────────────────────
-// This is the admin page where you assign instructors to teach a subject
-// inside a specific class code (section). Think of it like a scheduling board:
-//   - One instructor can teach multiple subjects
-//   - One subject can have multiple class codes (e.g. IT125L has 29101, 29102...)
-//   - Each assignment = one instructor + one subject + one class code
+// InstructorAssignments.jsx
+// Admin page: assign an instructor to teach a subject in a specific class code.
 //
-// The page has:
-//   1. Stat cards at the top (totals at a glance)
-//   2. A filter bar (search + dropdowns to narrow the list)
-//   3. Cards grouped by instructor showing their assignments
-//   4. A modal to create or edit an assignment
+// HOW THIS PAGE WORKS (plain english for future-me):
+//   - Admin picks an instructor, then a subject, then a class code.
+//   - The class code list is FILTERED — you only see sections that belong to
+//     the currently selected subject. Before this fix, ALL 31 sections showed
+//     regardless of what subject you chose, which was confusing.
+//   - The instructor picker is a styled dark dropdown (NOT the ugly white browser
+//     default select). It uses the same PortalDropdown trick as the Subject and
+//     Class Code pickers so it can't be clipped by overflow:hidden on the modal.
+//   - Every assignment shows as an instructor "card" on the main page, with
+//     edit/delete buttons that appear on hover.
 //
-// THE BIG THING TO REMEMBER about the dropdowns:
-//   The old version had dropdowns getting CUT OFF by the modal's overflow:hidden.
-//   We fixed this by using React Portals — the dropdown panel renders directly
-//   on <body> instead of inside the modal, so nothing clips it.
+// THE PORTAL TRICK (why we render dropdowns outside the modal):
+//   Normally a dropdown inside a modal gets cut off because the modal has
+//   overflow:hidden. createPortal() renders the dropdown directly on <body>
+//   so it floats freely on top of everything. We use getBoundingClientRect()
+//   on the trigger button to position it in exactly the right spot.
 //
-// ── FIX LOG ──────────────────────────────────────────────────────────────────
-// BUG 1 — Selection not applying (SubjectPicker & ClassCodePicker):
-//   ROOT CAUSE: The PortalDropdown's outside-click handler used a setTimeout(0)
-//   delay to avoid self-closing, but this delay also caused a RACE CONDITION:
-//   the item's onClick fired, called onChange+setOpen(false), but then the
-//   outside-click handler fired milliseconds later and could re-trigger onClose.
-//   Additionally, using `document.addEventListener('mousedown', handler)` meant
-//   the handler sometimes caught the SAME mousedown that triggered the item click
-//   if the portal re-rendered between mousedown and mouseup.
+// DATA FLOW:
+//   Page loads → fetch assignments + instructors + subjects + sections in parallel
+//   Admin selects subject in the form → sectionsBySubject filtered client-side
+//   Admin submits → POST /api/admin/instructor-assignments → refetch → re-render
 //
-//   FIX: Switched to `mousedown` with `e.stopPropagation()` on the panel itself
-//   so clicks inside the panel never bubble to the document listener. The item
-//   buttons now call `e.preventDefault()` + `e.stopPropagation()` before
-//   invoking onChange and setOpen(false), giving React time to flush the state
-//   update cleanly before the portal closes.
-//
-// BUG 2 — ClassCodePicker too narrow:
-//   Increased minWidth from 380 → 520px and widened the section number column
-//   and capacity bar for better readability.
+// KEY BACKEND ENDPOINTS USED:
+//   GET  /api/admin/instructor-assignments  → list all assignments
+//   POST /api/admin/instructor-assignments  → create one
+//   PUT  /api/admin/instructor-assignments/:id → edit one
+//   DELETE /api/admin/instructor-assignments/:id → remove one
+//   GET  /api/admin/users?role=instructor    → instructor list for dropdown
+//   GET  /api/admin/subjects                 → subject list
+//   GET  /api/admin/sections-list            → all sections (we filter client-side)
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { useState, useEffect, useRef } from 'react'
-import { createPortal } from 'react-dom' // needed for the portal dropdown trick
+import { createPortal } from 'react-dom'
 
-// Backend URL — change this if you move the Flask server
+// The backend base URL — change this when deploying to a real server
 const API = 'http://localhost:5000'
 
-// Grabs the JWT token from localStorage and formats it as an auth header.
-// Almost every fetch() call in this file uses this.
+// Attaches the JWT token from localStorage to every fetch call.
+// Without this, the backend returns 401 Unauthorized on every request.
 const authHeader = () => ({
   'Authorization': `Bearer ${localStorage.getItem('token')}`,
   'Content-Type': 'application/json',
@@ -54,19 +50,16 @@ const authHeader = () => ({
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TOAST
-// A small pop-up notification in the bottom-right corner.
-// Pass type = 'success' | 'error' | 'warning' and it picks the right color.
-// It auto-disappears after 3.2 seconds — the parent sets toast back to null
-// via the onDone callback.
+// Small pop-up notification (bottom-right corner).
+// Shows for ~3 seconds then disappears via the onDone callback.
+// type = 'success' | 'error' | 'warning'
 // ─────────────────────────────────────────────────────────────────────────────
 function Toast({ message, type, onDone }) {
-  // Start the auto-close timer the moment this renders
   useEffect(() => {
     const t = setTimeout(onDone, 3200)
-    return () => clearTimeout(t) // clean up if the component unmounts early
-  }, [])
+    return () => clearTimeout(t)
+  }, [onDone])
 
-  // Each type gets its own color palette (Tailwind gradient + border + text)
   const colors = {
     success: 'from-emerald-500/20 to-emerald-600/10 border-emerald-500/40 text-emerald-300',
     error:   'from-red-500/20 to-red-600/10 border-red-500/40 text-red-300',
@@ -88,97 +81,68 @@ function Toast({ message, type, onDone }) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ANIMATED NUMBER
-// Used inside the stat cards. Instead of just showing "42" instantly,
-// it counts up from 0 to the target number like a slot machine.
-// It does ~20 steps total regardless of how big the number is.
+// Counts up from 0 to the target value like a slot machine.
+// Used in the stat cards at the top of the page.
 // ─────────────────────────────────────────────────────────────────────────────
 function AnimatedNumber({ value }) {
   const [display, setDisplay] = useState(0)
-
   useEffect(() => {
     let start = 0
     const end = Number(value) || 0
     if (end === 0) { setDisplay(0); return }
-
-    // How big each "tick" is — larger numbers jump more per tick
     const step = Math.max(1, Math.floor(end / 20))
-
     const t = setInterval(() => {
-      start = Math.min(start + step, end) // don't overshoot
+      start = Math.min(start + step, end)
       setDisplay(start)
-      if (start >= end) clearInterval(t) // stop when we hit the target
-    }, 30) // fires every 30ms
-
+      if (start >= end) clearInterval(t)
+    }, 30)
     return () => clearInterval(t)
   }, [value])
-
   return <>{display}</>
 }
 
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PORTAL DROPDOWN
-// This is the core fix for the clipping bug.
+// The core fix for dropdowns getting clipped by overflow:hidden on the modal.
 //
-// THE PROBLEM: Dropdowns inside a modal with overflow:hidden get cut off
-// because the browser clips anything that overflows the modal box.
+// HOW IT WORKS:
+//   - Renders its children directly on document.body via createPortal().
+//   - Uses the trigger button's getBoundingClientRect() to position itself
+//     in the exact right spot on screen.
+//   - Auto-flips upward if there isn't enough space below the trigger.
+//   - Auto-shifts left if the panel would go off the right edge of the screen.
+//   - Outside clicks close it (but clicks INSIDE the panel are stopped from
+//     bubbling to the document listener, preventing race conditions).
 //
-// THE FIX: Instead of rendering the dropdown panel inside the modal,
-// we render it directly on <body> using createPortal(). It then uses
-// position:fixed + the trigger button's exact screen coordinates
-// (getBoundingClientRect) to place itself in the right spot visually.
-//
-// It also auto-flips upward if there's not enough room below the button.
-//
-// ── SELECTION BUG FIX ────────────────────────────────────────────────────────
-// OLD approach: setTimeout(0) + document.addEventListener('mousedown', handler)
-//   Problem: The 0ms timer was supposed to skip the opening click, but it also
-//   raced with item-click handlers. When a user clicked an item, the sequence was:
-//     1. mousedown on item  →  item onClick fired  →  setOpen(false) queued
-//     2. 0ms later the document listener attached
-//     3. React re-rendered, portal closed
-//     BUT sometimes the document listener fired before React flushed, catching
-//     the same event and calling onClose() again — disrupting state updates.
-//
-// NEW approach: attach the document listener immediately (no setTimeout), but
-//   add an `onMouseDown={e => e.stopPropagation()}` on the portal panel itself.
-//   This means any click INSIDE the panel never reaches the document listener,
-//   so the document listener ONLY fires for genuine outside clicks. Item buttons
-//   still call their own onClick normally — no race condition.
+// Props:
+//   triggerRef  — ref attached to the button that opens the dropdown
+//   open        — whether the dropdown is currently visible
+//   onClose     — called when user clicks outside
+//   minWidth    — minimum width of the panel in px (default 320)
 // ─────────────────────────────────────────────────────────────────────────────
 function PortalDropdown({ triggerRef, open, onClose, children, minWidth = 320 }) {
-  // Stores where to draw the panel on screen
   const [pos, setPos] = useState({ top: 0, left: 0, width: 0 })
 
-  // Recalculate position whenever the dropdown opens, or if user scrolls/resizes
+  // Recalculate position every time the dropdown opens or the window changes
   useEffect(() => {
     if (!open || !triggerRef.current) return
-
     const update = () => {
       const rect = triggerRef.current.getBoundingClientRect()
       const spaceBelow = window.innerHeight - rect.bottom
-      const dropHeight = 380 // rough max height of the panel (bumped from 320)
-
-      // If there's not enough room below, show it above the button instead
+      const dropHeight = 380
       const showAbove = spaceBelow < dropHeight && rect.top > dropHeight
-
-      // ── Horizontal overflow guard ─────────────────────────────────────────
-      // If the panel would extend past the right edge of the viewport, shift it
-      // left so it stays on screen. This matters now that panels can be 520px wide.
       const panelWidth = Math.max(rect.width, minWidth)
-      const leftRaw    = rect.left
-      const maxLeft    = window.innerWidth - panelWidth - 8  // 8px margin
-      const left       = Math.min(leftRaw, Math.max(0, maxLeft))
-
+      const leftRaw = rect.left
+      const maxLeft = window.innerWidth - panelWidth - 8
+      const left = Math.min(leftRaw, Math.max(0, maxLeft))
       setPos({
-        top:   showAbove ? rect.top - dropHeight - 4 : rect.bottom + 4,
+        top: showAbove ? rect.top - dropHeight - 4 : rect.bottom + 4,
         left,
         width: panelWidth,
       })
     }
-
     update()
-    // Keep position synced if the user scrolls or resizes while it's open
     window.addEventListener('scroll', update, true)
     window.addEventListener('resize', update)
     return () => {
@@ -187,78 +151,161 @@ function PortalDropdown({ triggerRef, open, onClose, children, minWidth = 320 })
     }
   }, [open, triggerRef, minWidth])
 
-  // ── Outside-click handler (no setTimeout — see fix notes above) ──────────
+  // Close when clicking anywhere outside the panel
   useEffect(() => {
     if (!open) return
-
     const handler = (e) => {
-      // If the click was on the trigger button, ignore it — the button toggles
-      // the dropdown itself. Without this guard the dropdown would open and
-      // immediately close on the same click.
       if (triggerRef.current && triggerRef.current.contains(e.target)) return
       onClose()
     }
-
-    // Attach immediately — the panel has stopPropagation so clicks inside
-    // the panel will never reach this listener. No race condition possible.
     document.addEventListener('mousedown', handler)
-    return () => {
-      document.removeEventListener('mousedown', handler)
-    }
+    return () => document.removeEventListener('mousedown', handler)
   }, [open, onClose, triggerRef])
 
-  // Don't render anything if the dropdown is closed
   if (!open) return null
 
-  // createPortal renders the panel as a child of <body>, escaping all parent
-  // overflow:hidden containers. The panel floats freely over everything.
   return createPortal(
     <div
-      // ── KEY FIX: stopPropagation on the panel ────────────────────────────
-      // Any mousedown inside this panel stops bubbling to the document listener
-      // registered above. This means only OUTSIDE clicks trigger onClose().
-      // Item buttons inside can fire their own onClick freely without racing.
+      // stopPropagation here means clicks inside the panel NEVER reach the
+      // document listener above — no accidental closures, no race conditions
       onMouseDown={e => e.stopPropagation()}
       style={{
-        position:  'fixed',
-        top:       pos.top,
-        left:      pos.left,
-        width:     pos.width,
-        zIndex:    99999, // above everything, including the modal
+        position: 'fixed',
+        top: pos.top,
+        left: pos.left,
+        width: pos.width,
+        zIndex: 99999,
         animation: 'dropIn 0.15s ease-out',
       }}
       className="bg-slate-800 border border-slate-600 rounded-xl shadow-2xl overflow-hidden"
     >
       {children}
     </div>,
-    document.body // attach to body, not inside the modal
+    document.body
+  )
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// INSTRUCTOR PICKER  (NEW — replaces the ugly native <select>)
+// A custom searchable dropdown for picking an instructor.
+// Renders via PortalDropdown so it's never clipped by the modal.
+//
+// Why replace the native select?
+//   The browser's default <select> ignores any custom CSS and renders as a
+//   white box that looks completely wrong in the dark theme.
+//
+// Props:
+//   value      — currently selected instructor ID (string or number)
+//   onChange   — called with the new instructor ID when one is picked
+//   instructors — array of { id, username, full_name } from the backend
+// ─────────────────────────────────────────────────────────────────────────────
+function InstructorPicker({ value, onChange, instructors }) {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const triggerRef = useRef(null)
+  const inputRef = useRef(null)
+
+  // Which instructor object matches the currently selected ID
+  const selected = instructors.find(i => String(i.id) === String(value))
+
+  // Filter the list by whatever the admin typed
+  const filtered = instructors.filter(i => {
+    const q = query.toLowerCase()
+    return (
+      (i.username  || '').toLowerCase().includes(q) ||
+      (i.full_name || '').toLowerCase().includes(q)
+    )
+  })
+
+  const handleOpen = () => {
+    setOpen(o => !o)
+    setQuery('')
+    setTimeout(() => inputRef.current?.focus(), 50)
+  }
+
+  // Select an instructor — update state then close the panel
+  const handleSelect = (e, id) => {
+    e.preventDefault()
+    onChange(id)
+    setOpen(false)
+  }
+
+  return (
+    <div>
+      {/* The trigger button — looks like a select box */}
+      <button
+        ref={triggerRef}
+        type="button"
+        onClick={handleOpen}
+        className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-left flex items-center justify-between outline-none focus:border-purple-500 transition-all hover:border-slate-600"
+      >
+        <span className={selected ? 'text-white' : 'text-slate-500'}>
+          {selected ? (selected.full_name || selected.username) : 'Select Instructor'}
+        </span>
+        <span className={`text-slate-500 text-xs transition-transform duration-200 ${open ? 'rotate-180' : ''}`}>▼</span>
+      </button>
+
+      {/* Dropdown panel rendered on <body> via PortalDropdown */}
+      <PortalDropdown triggerRef={triggerRef} open={open} onClose={() => setOpen(false)}>
+        {/* Search box at the top */}
+        <div className="p-2 border-b border-slate-700">
+          <input
+            ref={inputRef}
+            type="text"
+            placeholder="Search instructor..."
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-sm placeholder-slate-600 outline-none focus:border-purple-500"
+          />
+        </div>
+
+        {/* Instructor list */}
+        <div className="max-h-60 overflow-y-auto">
+          {filtered.length === 0 ? (
+            <p className="text-slate-600 text-sm text-center py-4">No instructors found</p>
+          ) : filtered.map(inst => (
+            <button
+              key={inst.id}
+              type="button"
+              onClick={e => handleSelect(e, inst.id)}
+              className={`w-full px-4 py-2.5 text-left text-sm flex items-center gap-3 hover:bg-slate-700/50 transition-colors ${
+                String(value) === String(inst.id) ? 'bg-purple-900/30' : ''
+              }`}
+            >
+              {/* Avatar circle with the first letter of their name */}
+              <div className="w-7 h-7 rounded-full bg-gradient-to-br from-purple-600 to-pink-600 flex items-center justify-center text-xs font-bold text-white flex-shrink-0">
+                {(inst.full_name || inst.username || '?')[0].toUpperCase()}
+              </div>
+              <span className={`flex-1 ${String(value) === String(inst.id) ? 'text-purple-200 font-medium' : 'text-slate-300'}`}>
+                {inst.full_name || inst.username}
+              </span>
+              {/* Checkmark on the currently selected item */}
+              {String(value) === String(inst.id) && (
+                <span className="text-purple-400 font-bold text-xs">✓</span>
+              )}
+            </button>
+          ))}
+        </div>
+      </PortalDropdown>
+    </div>
   )
 }
 
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SUBJECT PICKER
-// A custom searchable dropdown for picking a subject.
-// Uses PortalDropdown so it never gets clipped by the modal.
-// Subjects are grouped by year level (Year 1, Year 2, etc.) so the admin
-// doesn't have to scroll through a flat wall of 16 subjects.
-//
-// ── SELECTION FIX ────────────────────────────────────────────────────────────
-// The item buttons previously just called onChange(s.id) and setOpen(false).
-// With the new PortalDropdown (stopPropagation on panel), this now works
-// correctly — but we also added e.preventDefault() on item clicks as an extra
-// guard so no synthetic form events interfere.
+// Searchable dropdown for choosing a subject, grouped by year level.
+// Uses PortalDropdown so it's never clipped.
 // ─────────────────────────────────────────────────────────────────────────────
 function SubjectPicker({ value, onChange, subjects }) {
-  const [open, setOpen]   = useState(false)
+  const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
-  const triggerRef        = useRef(null) // attached to the button that opens the dropdown
-  const inputRef          = useRef(null) // the search box inside the panel
+  const triggerRef = useRef(null)
+  const inputRef = useRef(null)
 
-  // Which subject object matches the currently selected ID
   const selected = subjects.find(s => s.id == value)
 
-  // Filter subjects by whatever the admin typed in the search box
   const filtered = subjects.filter(s => {
     const q = query.toLowerCase()
     return (
@@ -267,8 +314,8 @@ function SubjectPicker({ value, onChange, subjects }) {
     )
   })
 
-  // Group the filtered results by year level for the section headers
-  // e.g. { 'Year 1': [IT115, IT116], 'Year 2': [IT215, IT216] }
+  // Group the filtered subjects by year level for nicer visual organization
+  // e.g. { 'Year 1': [...], 'Year 2': [...] }
   const grouped = filtered.reduce((acc, s) => {
     const yr = s.year_level ? `Year ${s.year_level}` : 'Other'
     if (!acc[yr]) acc[yr] = []
@@ -278,17 +325,10 @@ function SubjectPicker({ value, onChange, subjects }) {
 
   const handleOpen = () => {
     setOpen(o => !o)
-    setQuery('') // reset search each time you open
-    // Small delay before focusing the search input so the panel is in the DOM first
+    setQuery('')
     setTimeout(() => inputRef.current?.focus(), 50)
   }
 
-  // ── Item selection handler ────────────────────────────────────────────────
-  // e.preventDefault() stops any parent form from reacting.
-  // onChange(id) updates the modal's formData.
-  // setOpen(false) closes the panel.
-  // Order matters: update state BEFORE closing so the trigger button re-renders
-  // with the new selected value while the panel is still mounted.
   const handleSelect = (e, id) => {
     e.preventDefault()
     onChange(id)
@@ -297,7 +337,6 @@ function SubjectPicker({ value, onChange, subjects }) {
 
   return (
     <div>
-      {/* The button that looks like a select box */}
       <button
         ref={triggerRef}
         type="button"
@@ -308,7 +347,6 @@ function SubjectPicker({ value, onChange, subjects }) {
           {selected ? (
             <span className="flex items-center gap-2">
               {selected.subject_code && (
-                // Show the code badge (e.g. IT125L) next to the full name
                 <span className="font-mono text-xs px-1.5 py-0.5 bg-slate-700 rounded text-purple-300">
                   {selected.subject_code}
                 </span>
@@ -317,13 +355,10 @@ function SubjectPicker({ value, onChange, subjects }) {
             </span>
           ) : 'Select Subject'}
         </span>
-        {/* Chevron arrow that flips when open */}
         <span className={`text-slate-500 text-xs transition-transform duration-200 ${open ? 'rotate-180' : ''}`}>▼</span>
       </button>
 
-      {/* The dropdown panel — rendered via portal on <body> */}
       <PortalDropdown triggerRef={triggerRef} open={open} onClose={() => setOpen(false)}>
-        {/* Search input at the top of the panel */}
         <div className="p-2 border-b border-slate-700">
           <input
             ref={inputRef}
@@ -334,24 +369,18 @@ function SubjectPicker({ value, onChange, subjects }) {
             className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-sm placeholder-slate-600 outline-none focus:border-purple-500"
           />
         </div>
-
-        {/* Scrollable list, grouped by Year */}
         <div className="max-h-60 overflow-y-auto">
           {Object.keys(grouped).length === 0 ? (
             <p className="text-slate-600 text-sm text-center py-4">No subjects found</p>
           ) : Object.entries(grouped).map(([yr, items]) => (
             <div key={yr}>
-              {/* Year group header — e.g. "YEAR 1" */}
               <div className="px-3 py-1.5 bg-slate-900/60 border-b border-slate-700/50">
                 <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">{yr}</span>
               </div>
-
-              {/* Subject rows under this year */}
               {items.map(s => (
                 <button
                   key={s.id}
                   type="button"
-                  // ── FIXED: use handleSelect which calls e.preventDefault() ──
                   onClick={e => handleSelect(e, s.id)}
                   className={`w-full px-3 py-2.5 text-left text-sm flex items-center gap-2 hover:bg-slate-700/50 transition-colors ${value == s.id ? 'bg-purple-900/30' : ''}`}
                 >
@@ -363,7 +392,6 @@ function SubjectPicker({ value, onChange, subjects }) {
                   <span className={`truncate ${value == s.id ? 'text-purple-200 font-medium' : 'text-slate-300'}`}>
                     {s.name}
                   </span>
-                  {/* Checkmark next to the currently selected item */}
                   {value == s.id && <span className="ml-auto text-purple-400 font-bold text-xs flex-shrink-0">✓</span>}
                 </button>
               ))}
@@ -377,70 +405,54 @@ function SubjectPicker({ value, onChange, subjects }) {
 
 
 // ─────────────────────────────────────────────────────────────────────────────
-// CLASS CODE PICKER
-// A custom searchable dropdown for picking a section (class code).
-// Uses PortalDropdown so it never gets clipped by the modal.
+// CLASS CODE PICKER  (KEY FIX: now receives sectionsBySubject, not ALL sections)
+// Shows only the class codes that belong to the currently selected subject.
 //
-// Sections are grouped by subject so the admin sees something like:
-//   IT125L — Computer Programming 1 Lab   (5 sections)
-//     29101  TTh 7:30  Room 301  ████░░ 32/40
-//     29102  MW 10:00  Room 302  ██░░░░ 18/40
-//   IT126L — Data Structure & Algorithm Lab  (3 sections)
-//     ...
+// Before this fix: all 31 sections appeared regardless of which subject was chosen.
+// After this fix:  the list is pre-filtered to only sections for that subject.
 //
-// The colored bar shows how full each section is:
-//   green = plenty of space, amber = getting full, red = almost full
+// How the filtering works:
+//   The parent component (AssignmentModal) passes in sectionsBySubject, which is
+//   already the filtered subset. This component just displays what it receives —
+//   no extra filtering needed here.
 //
-// ── SIZE FIX ─────────────────────────────────────────────────────────────────
-// Increased minWidth from 380 → 520px so there's room for all columns.
-// Also increased max-h-72 → max-h-80 for a taller scrollable area.
-// The capacity bar was widened from w-16 → w-20 for better readability.
-//
-// ── SELECTION FIX ────────────────────────────────────────────────────────────
-// Same fix as SubjectPicker — handleSelect with e.preventDefault().
+// Props:
+//   value            — currently selected section ID
+//   onChange         — called with the new section ID
+//   sectionsBySubject — array of sections already filtered for the chosen subject
+//   subjectSelected  — boolean, true when a subject has been chosen
 // ─────────────────────────────────────────────────────────────────────────────
-function ClassCodePicker({ value, onChange, sections }) {
-  const [open, setOpen]   = useState(false)
+function ClassCodePicker({ value, onChange, sectionsBySubject, subjectSelected }) {
+  const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
-  const triggerRef        = useRef(null)
-  const inputRef          = useRef(null)
+  const triggerRef = useRef(null)
+  const inputRef = useRef(null)
 
-  const selected = sections.find(s => s.id == value)
+  const selected = sectionsBySubject.find(s => s.id == value)
 
-  // Search works across section number, subject code, subject name, and semester
-  const filtered = sections.filter(s => {
+  // Local search within the already-filtered list
+  const filtered = sectionsBySubject.filter(s => {
     const q = query.toLowerCase()
     return (
       (s.section_no   || '').toLowerCase().includes(q) ||
-      (s.subject_code || '').toLowerCase().includes(q) ||
-      (s.subject_name || '').toLowerCase().includes(q) ||
+      (s.schedule     || '').toLowerCase().includes(q) ||
       (s.semester     || '').toLowerCase().includes(q)
     )
   })
 
-  // Group filtered sections by subject name.
-  // Each group also stores the subject code so we can sort groups alphabetically.
-  const grouped = filtered.reduce((acc, s) => {
-    const key = s.subject_name || 'Unknown Subject'
-    if (!acc[key]) acc[key] = { code: s.subject_code || '', items: [] }
-    acc[key].items.push(s)
-    return acc
-  }, {})
-
-  // Sort groups alphabetically by subject code (IT115L before IT125L, etc.)
-  const sortedGroups = Object.entries(grouped).sort(([, a], [, b]) =>
-    (a.code || '').localeCompare(b.code || '')
+  // Sort numerically so 29101 comes before 29110
+  const sorted = [...filtered].sort((a, b) =>
+    (parseInt(a.section_no) || 0) - (parseInt(b.section_no) || 0)
   )
 
   const handleOpen = () => {
+    // Don't open if no subject is selected yet — guide the admin to pick subject first
+    if (!subjectSelected) return
     setOpen(o => !o)
     setQuery('')
     setTimeout(() => inputRef.current?.focus(), 50)
   }
 
-  // ── Item selection handler ────────────────────────────────────────────────
-  // Same pattern as SubjectPicker. e.preventDefault() prevents any parent
-  // form from intercepting. State update (onChange) fires before close (setOpen).
   const handleSelect = (e, id) => {
     e.preventDefault()
     onChange(id)
@@ -449,149 +461,114 @@ function ClassCodePicker({ value, onChange, sections }) {
 
   return (
     <div>
-      {/* Trigger button — shows the currently selected section or placeholder */}
       <button
         ref={triggerRef}
         type="button"
         onClick={handleOpen}
-        className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-left flex items-center justify-between outline-none focus:border-purple-500 transition-all hover:border-slate-600"
+        disabled={!subjectSelected}
+        className={`w-full bg-slate-800 border rounded-xl px-4 py-2.5 text-sm text-left flex items-center justify-between outline-none transition-all ${
+          !subjectSelected
+            ? 'border-slate-700/40 opacity-50 cursor-not-allowed'
+            : 'border-slate-700 hover:border-slate-600 focus:border-purple-500'
+        }`}
       >
         {selected ? (
           <span className="flex items-center gap-2 text-white min-w-0">
             <span className="font-mono font-bold text-purple-300 flex-shrink-0">{selected.section_no}</span>
-            {selected.subject_code && (
-              <span className="text-xs px-1.5 py-0.5 bg-slate-700 rounded text-slate-400 font-mono flex-shrink-0">
-                {selected.subject_code}
-              </span>
+            {selected.schedule && (
+              <span className="text-slate-400 text-xs truncate">{selected.schedule}</span>
             )}
-            {selected.subject_name && (
-              <span className="text-slate-400 text-xs truncate">{selected.subject_name}</span>
+            {selected.semester && (
+              <span className="text-xs px-1.5 py-0.5 bg-slate-700 rounded text-slate-400 font-mono flex-shrink-0">
+                {selected.semester}
+              </span>
             )}
           </span>
         ) : (
-          <span className="text-slate-500">Select Class Code</span>
+          <span className="text-slate-500">
+            {subjectSelected ? 'Select Class Code' : 'Select a subject first'}
+          </span>
         )}
         <span className={`text-slate-500 text-xs transition-transform duration-200 flex-shrink-0 ml-2 ${open ? 'rotate-180' : ''}`}>▼</span>
       </button>
 
-      {/* The dropdown panel — rendered via portal, wider than subject picker.
-          minWidth bumped from 380 → 520 for more breathing room per row. */}
-      <PortalDropdown triggerRef={triggerRef} open={open} onClose={() => setOpen(false)} minWidth={520}>
-
+      <PortalDropdown triggerRef={triggerRef} open={open} onClose={() => setOpen(false)} minWidth={480}>
         {/* Search bar */}
         <div className="p-2 border-b border-slate-700 bg-slate-800">
           <input
             ref={inputRef}
             type="text"
-            placeholder="Search section no, subject code, name..."
+            placeholder="Search section no, schedule..."
             value={query}
             onChange={e => setQuery(e.target.value)}
             className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-sm placeholder-slate-600 outline-none focus:border-purple-500"
           />
         </div>
 
-        {/* Grouped section list — max height bumped from max-h-72 → max-h-80 */}
-        <div className="max-h-80 overflow-y-auto">
-          {sortedGroups.length === 0 ? (
+        {/* Section list */}
+        <div className="max-h-72 overflow-y-auto">
+          {sorted.length === 0 ? (
             <div className="text-center py-6">
               <p className="text-slate-500 text-sm">
-                {query ? `No results for "${query}"` : 'No class codes available'}
+                {query ? `No results for "${query}"` : 'No class codes for this subject'}
               </p>
-              {!query && (
-                <p className="text-slate-700 text-xs mt-1">Create sections under Class Codes first</p>
-              )}
             </div>
-          ) : sortedGroups.map(([subjectName, { code, items }]) => {
-            // Sort sections within each subject group numerically by section number
-            // (so 29101 comes before 29110 — parseInt prevents alphabetical sorting)
-            const sorted = [...items].sort((a, b) =>
-              (parseInt(a.section_no) || 0) - (parseInt(b.section_no) || 0)
-            )
+          ) : sorted.map(s => (
+            <button
+              key={s.id}
+              type="button"
+              onClick={e => handleSelect(e, s.id)}
+              className={`w-full px-3 py-2.5 text-left flex items-center gap-3 hover:bg-slate-700/40 transition-colors ${value == s.id ? 'bg-purple-900/25' : ''}`}
+            >
+              {/* Section number */}
+              <span className={`font-mono font-bold text-sm flex-shrink-0 w-16 ${value == s.id ? 'text-purple-300' : 'text-slate-200'}`}>
+                {s.section_no}
+              </span>
 
-            return (
-              <div key={subjectName}>
-                {/* Sticky subject group header — stays visible as you scroll */}
-                <div className="flex items-center gap-2 px-3 py-2 bg-slate-900/70 border-b border-slate-700/60 sticky top-0 z-10">
-                  {code && (
-                    <span className="font-mono text-xs font-bold px-2 py-0.5 bg-purple-900/50 border border-purple-700/40 rounded text-purple-300">
-                      {code}
-                    </span>
-                  )}
-                  <span className="text-xs font-semibold text-slate-400 truncate">{subjectName}</span>
-                  <span className="ml-auto text-xs text-slate-600 flex-shrink-0">
-                    {sorted.length} section{sorted.length !== 1 ? 's' : ''}
+              {/* Schedule and room */}
+              <div className="flex items-center gap-2 flex-1 min-w-0">
+                {s.schedule && (
+                  <span className="text-xs text-slate-400 flex-shrink-0">🕐 {s.schedule}</span>
+                )}
+                {s.semester && (
+                  <span className="text-xs px-1.5 py-0.5 bg-slate-800 border border-slate-700 rounded text-slate-500 flex-shrink-0">
+                    {s.semester}
+                  </span>
+                )}
+                {s.room && (
+                  <span className="text-xs text-slate-500 flex-shrink-0">📍 {s.room}</span>
+                )}
+              </div>
+
+              {/* Capacity bar — color goes red as it fills up */}
+              {s.student_count !== undefined && s.capacity && (
+                <div className="flex items-center gap-1.5 flex-shrink-0">
+                  <div className="w-16 h-1.5 bg-slate-700 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all ${
+                        s.student_count / s.capacity > 0.85 ? 'bg-red-500'
+                        : s.student_count / s.capacity > 0.6  ? 'bg-amber-500'
+                        : 'bg-emerald-500'
+                      }`}
+                      style={{ width: `${Math.min(100, (s.student_count / s.capacity) * 100)}%` }}
+                    />
+                  </div>
+                  <span className="text-xs text-slate-500 w-12 text-right tabular-nums">
+                    {s.student_count}/{s.capacity}
                   </span>
                 </div>
+              )}
 
-                {/* One row per section inside this group */}
-                <div className="divide-y divide-slate-800/40">
-                  {sorted.map(s => (
-                    <button
-                      key={s.id}
-                      type="button"
-                      // ── FIXED: use handleSelect which calls e.preventDefault() ──
-                      onClick={e => handleSelect(e, s.id)}
-                      className={`w-full px-3 py-2.5 text-left flex items-center gap-3 hover:bg-slate-700/40 transition-colors ${value == s.id ? 'bg-purple-900/25' : ''}`}
-                    >
-                      {/* Section number — widened from w-14 → w-16 for 5-digit codes */}
-                      <span className={`font-mono font-bold text-sm flex-shrink-0 w-16 ${value == s.id ? 'text-purple-300' : 'text-slate-200'}`}>
-                        {s.section_no}
-                      </span>
-
-                      {/* Schedule and room info — more space now that panel is wider */}
-                      <div className="flex items-center gap-2 flex-1 min-w-0">
-                        {s.schedule && (
-                          <span className="text-xs text-slate-400 flex items-center gap-1 flex-shrink-0">
-                            <span className="opacity-50">🕐</span>
-                            {s.schedule}
-                          </span>
-                        )}
-                        {s.semester && (
-                          <span className="text-xs px-1.5 py-0.5 bg-slate-800 border border-slate-700 rounded text-slate-500 flex-shrink-0">
-                            {s.semester}
-                          </span>
-                        )}
-                        {s.room && (
-                          <span className="text-xs text-slate-500 flex-shrink-0">
-                            📍 {s.room}
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Capacity bar — widened from w-16 → w-20 for better readability */}
-                      {s.student_count !== undefined && s.capacity && (
-                        <div className="flex items-center gap-1.5 flex-shrink-0">
-                          <div className="w-20 h-1.5 bg-slate-700 rounded-full overflow-hidden">
-                            <div
-                              className={`h-full rounded-full transition-all ${
-                                s.student_count / s.capacity > 0.85 ? 'bg-red-500'    // almost full
-                                : s.student_count / s.capacity > 0.6 ? 'bg-amber-500' // getting full
-                                : 'bg-emerald-500'                                     // plenty of room
-                              }`}
-                              style={{ width: `${Math.min(100, (s.student_count / s.capacity) * 100)}%` }}
-                            />
-                          </div>
-                          {/* Count text — slightly wider column (w-14 → w-16) */}
-                          <span className="text-xs text-slate-500 w-16 text-right tabular-nums">
-                            {s.student_count}/{s.capacity}
-                          </span>
-                        </div>
-                      )}
-
-                      {/* Checkmark on the selected row */}
-                      {value == s.id && <span className="text-purple-400 font-bold text-xs flex-shrink-0">✓</span>}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )
-          })}
+              {value == s.id && <span className="text-purple-400 font-bold text-xs flex-shrink-0">✓</span>}
+            </button>
+          ))}
         </div>
 
-        {/* Footer: result count + clear search button */}
+        {/* Footer: how many sections are shown */}
         <div className="px-3 py-2 border-t border-slate-700/50 bg-slate-800/60 flex items-center justify-between">
           <span className="text-slate-600 text-xs">
-            {filtered.length} of {sections.length} class codes
+            {sorted.length} of {sectionsBySubject.length} class codes
+            {query && ` matching "${query}"`}
           </span>
           {query && (
             <button type="button" onClick={() => setQuery('')}
@@ -608,31 +585,56 @@ function ClassCodePicker({ value, onChange, sections }) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ASSIGNMENT MODAL
-// Used for both creating a new assignment AND editing an existing one.
-// The `mode` prop switches between 'create' and 'edit'.
+// The form that pops up when clicking "+ Assign Instructor" or the ✏ edit button.
 //
-// IMPORTANT: No overflow:hidden on the modal card.
-// The subject and class code pickers use portals so they escape the modal.
-// If you ever add overflow:hidden back here, the dropdowns will get clipped again.
+// KEY CHANGE: when the admin picks a subject, the component now filters the
+// full sections list to only the sections that belong to that subject.
+// It passes that filtered list to ClassCodePicker instead of all sections.
+//
+// Also resets the selected section whenever the subject changes — you don't want
+// a section from the old subject still selected when the subject switches.
+//
+// mode = 'create' | 'edit'
+// allSections = ALL sections from the backend (we filter here)
 // ─────────────────────────────────────────────────────────────────────────────
-function AssignmentModal({ mode, formData, setFormData, instructors, subjects, sections, onSubmit, onCancel }) {
+function AssignmentModal({ mode, formData, setFormData, instructors, subjects, allSections, onSubmit, onCancel }) {
   const isEdit = mode === 'edit'
 
+  // Filter sections to only those belonging to the currently selected subject.
+  // This is the CORE FIX — before, ClassCodePicker received all sections.
+  // Now it only receives sections where subject_id matches the chosen subject.
+  const sectionsBySubject = formData.subject_id
+    ? allSections.filter(s => String(s.subject_id) === String(formData.subject_id))
+    : []
+
+  // When the subject changes, clear the previously selected section.
+  // Without this, you could end up with a section from a different subject still selected.
+  const handleSubjectChange = (subjectId) => {
+    setFormData(p => ({
+      ...p,
+      subject_id: subjectId,
+      section_id: '',  // ← reset section whenever subject changes
+    }))
+  }
+
   return (
-    // Dark blurred overlay that sits behind the modal
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
       style={{ background: 'rgba(0,0,0,0.80)', backdropFilter: 'blur(6px)' }}
     >
-      {/* The modal card — deliberately NO overflow:hidden (see note above) */}
+      {/* Modal card — deliberately NO overflow:hidden so portal dropdowns can escape */}
       <div
         className="bg-slate-900 border border-slate-700/60 rounded-2xl w-full max-w-md shadow-2xl"
         style={{ animation: 'modalIn 0.2s ease-out' }}
       >
-        {/* Header — icon and title change between create and edit */}
+        {/* Header */}
         <div className="px-6 py-5 border-b border-slate-800 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg shadow-lg ${isEdit ? 'bg-gradient-to-br from-violet-600 to-purple-700' : 'bg-gradient-to-br from-purple-600 to-pink-600'}`}>
+            <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg shadow-lg ${
+              isEdit
+                ? 'bg-gradient-to-br from-violet-600 to-purple-700'
+                : 'bg-gradient-to-br from-purple-600 to-pink-600'
+            }`}>
               {isEdit ? '✏️' : '＋'}
             </div>
             <div>
@@ -650,42 +652,34 @@ function AssignmentModal({ mode, formData, setFormData, instructors, subjects, s
           </button>
         </div>
 
-        {/* The three form fields */}
+        {/* Form fields */}
         <div className="px-6 py-5 space-y-4">
 
-          {/* Instructor — plain <select> is fine, usually < 20 instructors,
-              no need for a custom searchable picker here */}
+          {/* INSTRUCTOR — now uses InstructorPicker instead of native <select> */}
           <div>
             <label className="block text-xs font-semibold text-slate-400 uppercase tracking-widest mb-2">
               Instructor <span className="text-pink-500">*</span>
             </label>
-            <select
+            <InstructorPicker
               value={formData.instructor_id}
-              onChange={e => setFormData(p => ({ ...p, instructor_id: e.target.value }))}
-              className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2.5 text-white text-sm outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500/30 transition-all cursor-pointer"
-            >
-              <option value="">Select Instructor</option>
-              {instructors.map(inst => (
-                <option key={inst.id} value={inst.id}>
-                  {inst.full_name || inst.username}
-                </option>
-              ))}
-            </select>
+              onChange={id => setFormData(p => ({ ...p, instructor_id: id }))}
+              instructors={instructors}
+            />
           </div>
 
-          {/* Subject — uses the custom portal picker, grouped by year level */}
+          {/* SUBJECT — grouped by year level */}
           <div>
             <label className="block text-xs font-semibold text-slate-400 uppercase tracking-widest mb-2">
               Subject <span className="text-pink-500">*</span>
             </label>
             <SubjectPicker
               value={formData.subject_id}
-              onChange={id => setFormData(p => ({ ...p, subject_id: id }))}
+              onChange={handleSubjectChange}
               subjects={subjects}
             />
           </div>
 
-          {/* Class Code — uses the custom portal picker, grouped by subject with capacity bars */}
+          {/* CLASS CODE — filtered to the selected subject only */}
           <div>
             <label className="block text-xs font-semibold text-slate-400 uppercase tracking-widest mb-2">
               Class Code <span className="text-pink-500">*</span>
@@ -693,16 +687,27 @@ function AssignmentModal({ mode, formData, setFormData, instructors, subjects, s
             <ClassCodePicker
               value={formData.section_id}
               onChange={id => setFormData(p => ({ ...p, section_id: id }))}
-              sections={sections}
+              sectionsBySubject={sectionsBySubject}
+              subjectSelected={!!formData.subject_id}
             />
-            <p className="text-xs text-slate-600 mt-1.5">
-              Sections are grouped by subject. The bar shows enrollment capacity.
-            </p>
-          </div>
 
+            {/* Hint text: tells admin how many codes are available for this subject */}
+            {formData.subject_id && (
+              <p className="text-xs text-slate-600 mt-1.5">
+                {sectionsBySubject.length > 0
+                  ? `${sectionsBySubject.length} class code${sectionsBySubject.length !== 1 ? 's' : ''} available for this subject`
+                  : 'No class codes found for this subject — create some first'}
+              </p>
+            )}
+            {!formData.subject_id && (
+              <p className="text-xs text-slate-600 mt-1.5">
+                Pick a subject above to see its class codes
+              </p>
+            )}
+          </div>
         </div>
 
-        {/* Cancel and submit buttons */}
+        {/* Cancel / Submit buttons */}
         <div className="px-6 pb-5 flex gap-3">
           <button type="button" onClick={onCancel}
             className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl text-slate-300 text-sm font-medium transition-colors">
@@ -721,9 +726,8 @@ function AssignmentModal({ mode, formData, setFormData, instructors, subjects, s
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CONFIRM DIALOG
-// A small "are you sure?" popup that appears before deleting an assignment.
-// The actual delete only runs when the admin clicks "Remove".
-// This replaces the old browser prompt() which looked terrible.
+// "Are you sure?" popup before deleting an assignment.
+// Replaces the old browser-native prompt() which looked terrible.
 // ─────────────────────────────────────────────────────────────────────────────
 function ConfirmDialog({ message, onConfirm, onCancel }) {
   return (
@@ -752,9 +756,8 @@ function ConfirmDialog({ message, onConfirm, onCancel }) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // STAT CARD
-// One of the four number boxes at the top of the page.
-// Pass color = 'purple' | 'blue' | 'emerald' | 'amber'
-// The number inside uses AnimatedNumber so it counts up on load.
+// One of the four count boxes at the top of the page.
+// The number inside counts up with AnimatedNumber for a nice effect on load.
 // ─────────────────────────────────────────────────────────────────────────────
 function StatCard({ label, value, color, icon }) {
   const colorMap = {
@@ -780,16 +783,12 @@ function StatCard({ label, value, color, icon }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // INSTRUCTOR CARD
 // One card per instructor in the main list.
-// The top row shows the instructor's name and total assignment count.
-// Below that, their assignments are grouped by subject — so if they teach
-// IT125L in sections 29101 AND 29102, both codes show on the same row.
-//
-// The edit/delete buttons are invisible by default and appear on row hover
-// (group-hover/row in Tailwind). Keeps the list visually clean.
+// Groups their assignments by subject so if they teach the same subject
+// in multiple sections, those sections appear on the same row.
+// Edit/Delete buttons are hidden by default and appear on row hover.
 // ─────────────────────────────────────────────────────────────────────────────
 function InstructorCard({ group, onEdit, onDelete }) {
-  // group.items is an array of individual assignments for this instructor.
-  // We re-group them by subject so same-subject assignments share one row.
+  // Re-group assignments by subject for cleaner display
   const bySubject = group.items.reduce((acc, a) => {
     const key = a.subject?.id || 'unknown'
     if (!acc[key]) acc[key] = { subject: a.subject, rows: [] }
@@ -800,9 +799,8 @@ function InstructorCard({ group, onEdit, onDelete }) {
   return (
     <div className="card-row bg-slate-900/60 border border-slate-800 rounded-2xl overflow-hidden hover:border-slate-700/80 transition-all duration-200 group/card">
 
-      {/* Instructor header row */}
+      {/* Instructor name header */}
       <div className="flex items-center gap-4 px-5 py-4 bg-slate-800/40 border-b border-slate-800">
-        {/* Avatar — just the first letter of their username */}
         <div className="w-10 h-10 bg-gradient-to-br from-purple-600 to-pink-600 rounded-xl flex items-center justify-center text-sm font-bold text-white shadow-lg shadow-purple-600/20 flex-shrink-0">
           {(group.instructor?.username || '?')[0].toUpperCase()}
         </div>
@@ -827,7 +825,7 @@ function InstructorCard({ group, onEdit, onDelete }) {
             key={subject?.id || 'unknown'}
             className="flex flex-col sm:flex-row sm:items-center gap-3 px-5 py-3.5 hover:bg-slate-800/20 transition-colors group/row"
           >
-            {/* Subject name badge */}
+            {/* Subject badge */}
             <div className="flex items-center gap-2 flex-shrink-0">
               <span className="text-xs text-slate-600 uppercase tracking-wider font-semibold w-14">Subject</span>
               <span className="px-3 py-1 bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 rounded-lg text-xs font-semibold truncate max-w-[200px]">
@@ -835,7 +833,7 @@ function InstructorCard({ group, onEdit, onDelete }) {
               </span>
             </div>
 
-            {/* Class code badges — one per section they teach for this subject */}
+            {/* Class code badges — one per section for this subject */}
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-xs text-slate-600 uppercase tracking-wider font-semibold">Codes</span>
               {rows.map(a => (
@@ -845,7 +843,7 @@ function InstructorCard({ group, onEdit, onDelete }) {
               ))}
             </div>
 
-            {/* Edit / Delete buttons — hidden until you hover the row */}
+            {/* Edit/Delete buttons — appear on row hover */}
             <div className="flex gap-1.5 sm:ml-auto opacity-100 sm:opacity-0 sm:group-hover/row:opacity-100 transition-opacity flex-shrink-0">
               {rows.map(a => (
                 <div key={a.id} className="flex gap-1">
@@ -878,68 +876,63 @@ function InstructorCard({ group, onEdit, onDelete }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // MAIN COMPONENT — InstructorAssignments
 //
-// This is the default export — the whole page.
-//
-// STATE OVERVIEW:
-//   assignments      — full list from the API (all instructor+subject+section links)
-//   instructors      — all instructor users (for the modal dropdown)
-//   subjects         — all subjects (for the modal dropdown)
-//   sections         — all active sections (for the modal dropdown + capacity bars)
-//   loading          — true while the initial 4 fetches are running in parallel
+// State overview:
+//   assignments      — all assignments fetched from the backend
+//   instructors      — all instructor users (for the picker dropdown)
+//   subjects         — all subjects (for the picker dropdown)
+//   allSections      — ALL sections (we filter this client-side for ClassCodePicker)
+//   loading          — true while the initial 4 fetches are running
 //   showCreate       — controls whether the create modal is open
-//   editingId        — the assignment ID currently being edited (null = modal closed)
-//   deleteTarget     — the assignment object waiting for delete confirmation
-//   toast            — current notification { message, type } or null
-//   searchTerm       — text in the search input
-//   filterInstructor — selected instructor in the filter bar ('all' or an ID)
-//   filterSubject    — selected subject in the filter bar
-//   filterSection    — selected class code in the filter bar
-//   formData         — the 3 fields the modal edits: instructor_id, subject_id, section_id
+//   editingId        — if set, the edit modal is open for this assignment ID
+//   deleteTarget     — assignment waiting for delete confirmation
+//   toast            — current notification or null
+//   searchTerm       — text in the search box
+//   filterInstructor — 'all' or a specific instructor ID
+//   filterSubject    — 'all' or a specific subject ID
+//   filterSection    — 'all' or a specific section ID
+//   formData         — the three fields the modal edits
 //
-// DATA FLOW:
-//   Page loads → fetch 4 things in parallel → render
-//   Admin creates / edits / deletes → call API → re-fetch assignments → re-render
+// allSections vs sectionsBySubject:
+//   allSections is fetched once and stored here.
+//   sectionsBySubject is computed inside AssignmentModal by filtering allSections.
+//   This avoids extra API calls when the subject changes in the form.
 // ─────────────────────────────────────────────────────────────────────────────
 export default function InstructorAssignments() {
 
-  // ── Data from the API ──────────────────────────────────────────────────────
   const [assignments,      setAssignments]      = useState([])
   const [instructors,      setInstructors]      = useState([])
   const [subjects,         setSubjects]         = useState([])
-  const [sections,         setSections]         = useState([])
+  const [allSections,      setAllSections]      = useState([])  // all sections, unfiltered
 
-  // ── UI state ───────────────────────────────────────────────────────────────
   const [loading,          setLoading]          = useState(true)
   const [showCreate,       setShowCreate]       = useState(false)
   const [editingId,        setEditingId]        = useState(null)
   const [deleteTarget,     setDeleteTarget]     = useState(null)
   const [toast,            setToast]            = useState(null)
 
-  // ── Filter bar state ───────────────────────────────────────────────────────
   const [searchTerm,       setSearchTerm]       = useState('')
   const [filterInstructor, setFilterInstructor] = useState('all')
   const [filterSubject,    setFilterSubject]    = useState('all')
   const [filterSection,    setFilterSection]    = useState('all')
 
-  // ── Modal form state ───────────────────────────────────────────────────────
-  // Shared between create and edit. EMPTY_FORM resets it after a modal closes.
+  // Empty form template — used to reset the modal after it closes
   const EMPTY_FORM = { instructor_id: '', subject_id: '', section_id: '' }
   const [formData, setFormData] = useState(EMPTY_FORM)
 
-  // Shortcut to trigger a toast: notify('Saved!') or notify('Something broke', 'error')
+  // Shortcut to show a toast notification
   const notify = (message, type = 'success') => setToast({ message, type })
 
 
-  // ── Fetch everything in parallel on first load ─────────────────────────────
-  // Promise.all fires all 4 fetches at the same time (faster than sequential).
-  // .finally() runs setLoading(false) after ALL of them finish or fail.
+  // ── Fetch everything in parallel on mount ─────────────────────────────────
+  // Promise.all fires all 4 fetches at once — faster than one at a time.
+  // .finally() always runs setLoading(false) even if one fetch fails.
   useEffect(() => {
     Promise.all([fetchAssignments(), fetchInstructors(), fetchSubjects(), fetchSections()])
       .finally(() => setLoading(false))
-  }, []) // empty [] means this only runs once when the component mounts
+  }, [])
 
 
-  // ── Data fetchers ──────────────────────────────────────────────────────────
+  // ── Data fetchers ─────────────────────────────────────────────────────────
 
   const fetchAssignments = async () => {
     try {
@@ -949,7 +942,7 @@ export default function InstructorAssignments() {
   }
 
   const fetchInstructors = async () => {
-    // ?role=instructor so we don't get students and admins in the dropdown
+    // ?role=instructor filters to only instructor accounts — no students or admins
     try {
       const res = await fetch(`${API}/api/admin/users?role=instructor`, { headers: authHeader() })
       if (res.ok) setInstructors(await res.json())
@@ -964,21 +957,19 @@ export default function InstructorAssignments() {
   }
 
   const fetchSections = async () => {
-    // Using /sections-list (not /sections) because it includes subject_name
-    // and subject_code, which we need for the grouped class code picker
+    // /sections-list includes subject_id, subject_name, subject_code — needed for filtering
     try {
       const res = await fetch(`${API}/api/admin/sections-list`, { headers: authHeader() })
       if (res.ok) {
         const data = await res.json()
-        setSections(Array.isArray(data) ? data : []) // guard against unexpected API shape
+        setAllSections(Array.isArray(data) ? data : [])
       }
     } catch (err) { console.error('sections fetch failed:', err) }
   }
 
 
-  // ── Create ─────────────────────────────────────────────────────────────────
+  // ── Create ────────────────────────────────────────────────────────────────
   const handleCreate = async () => {
-    // Basic validation before hitting the network
     if (!formData.instructor_id || !formData.subject_id || !formData.section_id) {
       notify('Please fill in all three fields', 'warning')
       return
@@ -992,8 +983,8 @@ export default function InstructorAssignments() {
       const data = await res.json()
       if (res.ok) {
         setShowCreate(false)
-        setFormData(EMPTY_FORM)       // reset so the form is blank next time
-        await fetchAssignments()      // refresh the list
+        setFormData(EMPTY_FORM)
+        await fetchAssignments()
         notify('Instructor assigned successfully!')
       } else {
         notify(data.error || 'Failed to assign instructor', 'error')
@@ -1004,7 +995,7 @@ export default function InstructorAssignments() {
   }
 
 
-  // ── Open edit modal pre-filled with the existing assignment values ──────────
+  // ── Open edit modal pre-filled with existing values ───────────────────────
   const openEdit = (assignment) => {
     setEditingId(assignment.id)
     setFormData({
@@ -1015,7 +1006,7 @@ export default function InstructorAssignments() {
   }
 
 
-  // ── Save edited assignment ─────────────────────────────────────────────────
+  // ── Save edited assignment ────────────────────────────────────────────────
   const handleUpdate = async () => {
     if (!formData.instructor_id || !formData.subject_id || !formData.section_id) {
       notify('Please fill in all three fields', 'warning')
@@ -1029,7 +1020,7 @@ export default function InstructorAssignments() {
       })
       const data = await res.json()
       if (res.ok) {
-        setEditingId(null)            // close the modal
+        setEditingId(null)
         setFormData(EMPTY_FORM)
         await fetchAssignments()
         notify('Assignment updated!')
@@ -1042,7 +1033,7 @@ export default function InstructorAssignments() {
   }
 
 
-  // ── Delete (only runs after the ConfirmDialog is confirmed) ────────────────
+  // ── Delete (runs only after ConfirmDialog is confirmed) ───────────────────
   const handleDelete = async () => {
     if (!deleteTarget) return
     try {
@@ -1051,7 +1042,7 @@ export default function InstructorAssignments() {
         headers: authHeader(),
       })
       if (res.ok) {
-        setDeleteTarget(null)         // close the confirm dialog
+        setDeleteTarget(null)
         await fetchAssignments()
         notify('Assignment removed')
       } else {
@@ -1066,7 +1057,7 @@ export default function InstructorAssignments() {
   }
 
 
-  // ── Manual refresh ─────────────────────────────────────────────────────────
+  // ── Manual refresh button ─────────────────────────────────────────────────
   const handleRefresh = async () => {
     setLoading(true)
     await fetchAssignments()
@@ -1075,9 +1066,9 @@ export default function InstructorAssignments() {
   }
 
 
-  // ── Client-side filtering ──────────────────────────────────────────────────
-  // All 4 conditions must pass for an assignment to show up.
-  // Runs on every render — fine because the list is small (usually < 100).
+  // ── Client-side filtering ─────────────────────────────────────────────────
+  // All four conditions must pass for an assignment to appear.
+  // Runs on every render — fine because the list is typically < 100 items.
   const filtered = assignments.filter(a => {
     if (filterInstructor !== 'all' && a.instructor?.id != filterInstructor) return false
     if (filterSubject    !== 'all' && a.subject?.id    != filterSubject)    return false
@@ -1093,9 +1084,7 @@ export default function InstructorAssignments() {
     return true
   })
 
-  // True if any filter is active — shows the "Clear filters" link
   const hasFilters = searchTerm || filterInstructor !== 'all' || filterSubject !== 'all' || filterSection !== 'all'
-
   const clearFilters = () => {
     setSearchTerm('')
     setFilterInstructor('all')
@@ -1103,8 +1092,7 @@ export default function InstructorAssignments() {
     setFilterSection('all')
   }
 
-
-  // ── Stat numbers ───────────────────────────────────────────────────────────
+  // ── Stats ─────────────────────────────────────────────────────────────────
   // Set deduplicates — an instructor with 5 assignments still counts as 1 instructor
   const stats = {
     total:       assignments.length,
@@ -1113,9 +1101,7 @@ export default function InstructorAssignments() {
     sections:    new Set(assignments.map(a => a.section?.id)).size,
   }
 
-
-  // ── Group filtered assignments by instructor for the card layout ───────────
-  // Result shape: { "42": { instructor: {...}, items: [...] }, "17": { ... } }
+  // ── Group filtered assignments by instructor for the card layout ──────────
   const grouped = filtered.reduce((acc, a) => {
     const key = a.instructor?.id || 'unknown'
     if (!acc[key]) acc[key] = { instructor: a.instructor, items: [] }
@@ -1124,7 +1110,7 @@ export default function InstructorAssignments() {
   }, {})
 
 
-  // ── Loading state ──────────────────────────────────────────────────────────
+  // ── Loading skeleton ──────────────────────────────────────────────────────
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
@@ -1135,16 +1121,15 @@ export default function InstructorAssignments() {
   }
 
 
-  // ── RENDER ─────────────────────────────────────────────────────────────────
+  // ── RENDER ────────────────────────────────────────────────────────────────
   return (
     <>
-      {/* CSS keyframe animations — defined here because Tailwind can't do keyframes inline */}
+      {/* CSS keyframe animations */}
       <style>{`
         @keyframes slideUp  { from { opacity:0; transform:translateY(12px) } to { opacity:1; transform:translateY(0) } }
         @keyframes modalIn  { from { opacity:0; transform:scale(0.96) }      to { opacity:1; transform:scale(1) } }
         @keyframes fadeIn   { from { opacity:0; transform:translateY(6px) }  to { opacity:1; transform:translateY(0) } }
         @keyframes dropIn   { from { opacity:0; transform:translateY(-6px) } to { opacity:1; transform:translateY(0) } }
-
         /* Stagger the instructor cards so they fade in one after another */
         .card-row { animation: fadeIn 0.25s ease-out both; }
         .card-row:nth-child(1){animation-delay:.04s}
@@ -1156,7 +1141,7 @@ export default function InstructorAssignments() {
 
       <div className="space-y-6">
 
-        {/* Page title + Refresh and Assign buttons */}
+        {/* Page title + action buttons */}
         <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold text-white">Instructor Assignments</h1>
@@ -1180,7 +1165,7 @@ export default function InstructorAssignments() {
           </div>
         </div>
 
-        {/* 4 stat cards */}
+        {/* Stat cards */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <StatCard label="Total Assignments"  value={stats.total}       color="purple"  icon="📋" />
           <StatCard label="Active Instructors" value={stats.instructors} color="blue"    icon="👨‍🏫" />
@@ -1203,8 +1188,8 @@ export default function InstructorAssignments() {
               />
             </div>
 
-            {/* These 3 filter dropdowns are plain <select> elements.
-                They're on the main page (no overflow:hidden parent) so they don't need portals. */}
+            {/* These filter dropdowns are plain <select> — they're on the main page
+                (no overflow:hidden parent) so they don't need the portal trick */}
             <select value={filterInstructor} onChange={e => setFilterInstructor(e.target.value)}
               className="bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-white text-sm outline-none focus:border-purple-500 transition-all cursor-pointer min-w-[160px]">
               <option value="all">All Instructors</option>
@@ -1220,11 +1205,11 @@ export default function InstructorAssignments() {
             <select value={filterSection} onChange={e => setFilterSection(e.target.value)}
               className="bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-white text-sm outline-none focus:border-purple-500 transition-all cursor-pointer min-w-[140px]">
               <option value="all">All Class Codes</option>
-              {sections.map(s => <option key={s.id} value={s.id}>{s.section_no}</option>)}
+              {allSections.map(s => <option key={s.id} value={s.id}>{s.section_no}</option>)}
             </select>
           </div>
 
-          {/* Result count + "Clear filters" link */}
+          {/* Result count + clear link */}
           <div className="flex items-center justify-between text-xs">
             <span className="text-slate-500">
               Showing <span className="text-white font-semibold">{filtered.length}</span> of{' '}
@@ -1240,8 +1225,6 @@ export default function InstructorAssignments() {
 
         {/* Main list of instructor cards */}
         {Object.keys(grouped).length === 0 ? (
-          // Empty state — message differs depending on whether there's no data at all
-          // vs. filters just hiding everything
           <div className="flex flex-col items-center justify-center py-20 text-center">
             <div className="w-16 h-16 bg-slate-800/60 rounded-2xl flex items-center justify-center text-3xl mb-4">📋</div>
             <h3 className="text-white font-semibold mb-2">
@@ -1265,7 +1248,7 @@ export default function InstructorAssignments() {
                 key={group.instructor?.id || idx}
                 group={group}
                 onEdit={openEdit}
-                onDelete={setDeleteTarget} // just sets the target; ConfirmDialog handles the actual delete
+                onDelete={setDeleteTarget}
               />
             ))}
           </div>
@@ -1273,7 +1256,7 @@ export default function InstructorAssignments() {
       </div>
 
 
-      {/* Create modal — mounts when showCreate is true */}
+      {/* Create modal */}
       {showCreate && (
         <AssignmentModal
           mode="create"
@@ -1281,13 +1264,13 @@ export default function InstructorAssignments() {
           setFormData={setFormData}
           instructors={instructors}
           subjects={subjects}
-          sections={sections}
+          allSections={allSections}
           onSubmit={handleCreate}
           onCancel={() => { setShowCreate(false); setFormData(EMPTY_FORM) }}
         />
       )}
 
-      {/* Edit modal — mounts when editingId is not null */}
+      {/* Edit modal */}
       {editingId && (
         <AssignmentModal
           mode="edit"
@@ -1295,13 +1278,13 @@ export default function InstructorAssignments() {
           setFormData={setFormData}
           instructors={instructors}
           subjects={subjects}
-          sections={sections}
+          allSections={allSections}
           onSubmit={handleUpdate}
           onCancel={() => { setEditingId(null); setFormData(EMPTY_FORM) }}
         />
       )}
 
-      {/* Delete confirmation dialog — mounts when deleteTarget is set */}
+      {/* Delete confirmation */}
       {deleteTarget && (
         <ConfirmDialog
           message={`Remove ${deleteTarget.instructor?.username}'s assignment for ${deleteTarget.section?.section_no}? This can't be undone.`}
@@ -1310,7 +1293,7 @@ export default function InstructorAssignments() {
         />
       )}
 
-      {/* Toast notification — auto-clears itself via the onDone callback */}
+      {/* Toast notification */}
       {toast && <Toast message={toast.message} type={toast.type} onDone={() => setToast(null)} />}
     </>
   )

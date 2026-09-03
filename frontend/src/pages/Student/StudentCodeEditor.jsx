@@ -141,7 +141,7 @@ const formatErrorOutput = (rawOutput, language) => {
     const seen = new Set()
     const lines = rawOutput.split('\n')
 
-    for (const line of lines) {
+    for (const line of lines) { 
       const trimmed = line.trim()
       if (!trimmed) continue
 

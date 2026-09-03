@@ -6,7 +6,7 @@ import ActivityLogs from './ActivityLogs'
 import SubjectsManagement from './SubjectsManagement'
 import SectionsManagement from './SectionsManagement'
 
-// Backend lives here. Change this if we are about to deploy to a real server.
+// Backend lives here. Change this if we are about to deploy to a real server.  
 const API = 'http://localhost:5000/api'
 
 // Reads the login token from localStorage and adds it to every API request.

@@ -29,7 +29,7 @@ const SPELL_TEMPLATES = {
   csharp: {
     blank:    { label: 'Blank Scroll', icon: '📄', code: '// ✨ Arcane Sandbox\nusing System;\n\npublic class Program {\n    public static void Main() {\n        \n    }\n}\n' },
     hello:    { label: 'Hello World',  icon: '👋', code: 'using System;\n\npublic class Program {\n    public static void Main() {\n        Console.WriteLine("Greetings, brave coder!");\n    }\n}\n' },
-    loop:     { label: 'Loop Magic',   icon: '🔄', code: 'using System;\n\npublic class Program {\n    public static void Main() {\n        for (int i = 1; i <= 5; i++) {\n            Console.WriteLine($"Casting spell #{i}...");\n        }\n    }\n}\n' },
+    loop:     { label: 'Loop Magic',   icon: '🔄', code: 'using System;\n\npublic class Program {\n    public static void Main() {\n        for (int i = 1; i <= 5; i++)\n        {\n            Console.WriteLine($"Casting spell #{i}...");\n        }\n    }\n}\n' },
     function: { label: 'Functions',   icon: '⚡', code: 'using System;\n\npublic class Program {\n    static int PowerOf(int b, int e) => (int)Math.Pow(b, e);\n\n    public static void Main() {\n        Console.WriteLine($"2^10 = {PowerOf(2, 10)}");\n    }\n}\n' },
   },
 }
@@ -537,6 +537,16 @@ function ArcaneSandbox({ seedCode = null, seedLanguage = 'python', sandboxHealth
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  Main StudentDashboard
+//
+//  bug fixed here: handleReturnFromQuest used to do setActiveTab('quests'),
+//  but the dashboard tab list got renamed at some point — 'quests' became
+//  'subjects' (see the comment a few lines down on the activeTab useState,
+//  somebody already noted the rename but never updated this function to
+//  match it). so the flow was: open a quest -> come back -> exit the
+//  course -> blank dashboard, because activeTab was sitting on a tab id
+//  that doesn't exist in the tabs array below. none of the 4 tab
+//  conditions matched so nothing rendered. fixed by pointing it at
+//  'subjects' instead — see handleReturnFromQuest further down.
 // ═══════════════════════════════════════════════════════════════════════════
 export default function StudentDashboard({ user, onLogout }) {
   const [activeTab, setActiveTab]             = useState('subjects')  // ✅ Changed from 'quests'
@@ -647,7 +657,11 @@ export default function StudentDashboard({ user, onLogout }) {
   setHeroStats(prev => ({ ...prev, total_xp: (prev?.total_xp || 0) + xpEarned, level: newLevel }))
 }
 
-  const handleReturnFromQuest = () => { setSelectedQuest(null); setActiveTab('quests') }
+  // fixed: was setActiveTab('quests') — that tab id doesn't exist anymore,
+  // got renamed to 'subjects' at some point. left the dashboard blank
+  // after returning from a quest then exiting the course. see the big
+  // comment above the component for the full story.
+  const handleReturnFromQuest = () => { setSelectedQuest(null); setActiveTab('subjects') }
   const handleCarryToSandbox = (code, language) => {
     setSandboxSeed({ code, language })
     setActiveTab('sandbox')
@@ -860,7 +874,7 @@ export default function StudentDashboard({ user, onLogout }) {
         {/* ================= MODE 1: DASHBOARD (No Subject Selected) ================= */}
         {!selectedBlock ? (
           <div className="animate-fade-in">
-            {activeTab === 'subjects' && <MySubjects onSelectSubject={handleEnterSubject} />}
+            {activeTab === 'subjects' && <MySubjects onSelectSubject={handleEnterSubject} user={user} stats={heroStats} />}
             {activeTab === 'hall' && (
               <div className="overflow-hidden">
                 <Leaderboard currentUsername={user.username} />

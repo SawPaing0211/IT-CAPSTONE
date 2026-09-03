@@ -327,10 +327,28 @@ export default function ActivityLogs() {
   }
 
   // ── Export ───────────────────────────────────────────────────────────
+  // was hitting /api/admin/reports — that's the SUBMISSIONS report endpoint,
+  // not audit logs. button said "Export Logs" but gave you student quiz
+  // scores instead. now hits the real audit-log export endpoint, and sends
+  // along whatever filters are currently active so "export what i see" works
   const exportCSV = async () => {
     try {
       const token = localStorage.getItem('token')
-      const res = await fetch('http://localhost:5000/api/admin/reports?format=csv', {
+      const params = new URLSearchParams()
+      if (actionFilters.length > 0) params.set('action', actionFilters.join(','))
+      if (search) params.set('search', search)
+      const today = new Date()
+      if (datePreset === 'today') {
+        params.set('date_from', today.toISOString().split('T')[0])
+      } else if (datePreset === '7d') {
+        const d = new Date(today); d.setDate(d.getDate() - 7)
+        params.set('date_from', d.toISOString().split('T')[0])
+      } else if (datePreset === '30d') {
+        const d = new Date(today); d.setDate(d.getDate() - 30)
+        params.set('date_from', d.toISOString().split('T')[0])
+      }
+
+      const res = await fetch(`http://localhost:5000/api/admin/audit-logs/export?${params}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       })
       if (res.ok) {
@@ -343,6 +361,8 @@ export default function ActivityLogs() {
         a.click()
         document.body.removeChild(a)
         showToast('CSV exported successfully')
+      } else {
+        showToast('Export failed', 'error')
       }
     } catch {
       showToast('Export failed', 'error')
