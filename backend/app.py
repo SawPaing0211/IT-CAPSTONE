@@ -139,6 +139,21 @@ class Submission(db.Model):
     error_msg    = db.Column(db.Text,    nullable=True)
     submitted_at = db.Column(db.DateTime, default=datetime.utcnow)
 
+class HintReveal(db.Model):
+    # records that a specific student revealed a specific hint on a
+    # specific problem — one row per (student, problem, hint) combo,
+    # enforced by the unique constraint below so revealing the same
+    # hint twice never creates duplicate rows
+    __tablename__ = 'hint_reveals'
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'problem_id', 'hint_index', name='uq_hint_reveal'),
+    )
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    problem_id = db.Column(db.Integer, db.ForeignKey('problems.id'), nullable=False)
+    hint_index = db.Column(db.Integer, nullable=False)
+    revealed_at = db.Column(db.DateTime, default=datetime.utcnow)
+
 class Announcement(db.Model):
     __tablename__ = 'announcements'
     id = db.Column(db.Integer, primary_key=True)
@@ -589,6 +604,20 @@ def _run_in_docker_with_stdin(code: str, language: str, stdin_input: str) -> dic
             }
 
 
+def sanitize_test_cases_for_student(test_cases):
+    # strips the real input/expected off any test case an instructor
+    # marked hidden, before it ever reaches a student — this covers the
+    # initial quest data (Examples panel, Test Cases tab, Network tab).
+    # grading itself never calls this — it always reads the real values
+    # straight from the database.
+    sanitized = []
+    for tc in (test_cases or []):
+        if tc.get('visible', True) is False:
+            sanitized.append({"input": "🔒 Hidden", "expected": "🔒 Hidden", "visible": False})
+        else:
+            sanitized.append(tc)
+    return sanitized
+
 def evaluate_code(code, test_cases, language):
     """Execute code in Docker sandbox and compare against test cases"""
     results = []
@@ -596,6 +625,7 @@ def evaluate_code(code, test_cases, language):
     for tc in test_cases:
         input_val = tc.get('input', '').strip()
         expected  = tc.get('expected', '').strip()
+        is_hidden = tc.get('visible', True) is False
 
         result = _run_in_docker_with_stdin(code, language, input_val)
 
@@ -604,33 +634,43 @@ def evaluate_code(code, test_cases, language):
         timed_out = result.get('timed_out', False)
         error     = result.get('error', '')
 
+        # grading itself always compares the real values above — this
+        # only controls what gets reported back for a hidden test case,
+        # so students only ever see pass/fail for these, never the
+        # actual input, expected output, or program output
+        shown_case     = "🔒 Hidden" if is_hidden else input_val[:50]
+        shown_expected = "🔒 Hidden" if is_hidden else expected[:50]
+
         if timed_out:
             results.append({
-                "test_case": input_val[:50],
-                "expected":  expected[:50],
+                "test_case": shown_case,
+                "expected":  shown_expected,
                 "passed":    False,
-                "output":    "Timeout: execution exceeded time limit",
+                "output":    "🔒 Hidden" if is_hidden else "Timeout: execution exceeded time limit",
                 "runtime":   f"{result.get('elapsed', 0)/1000:.2f}s",
-                "message":   "Execution timeout"
+                "message":   "Execution timeout",
+                "hidden":    is_hidden
             })
         elif error or (result.get('returncode', 0) != 0 and not actual):
             results.append({
-                "test_case": input_val[:50],
-                "expected":  expected[:50],
+                "test_case": shown_case,
+                "expected":  shown_expected,
                 "passed":    False,
-                "output":    (stderr or error)[:500],
+                "output":    "🔒 Hidden" if is_hidden else (stderr or error)[:500],
                 "runtime":   f"{result.get('elapsed', 0)/1000:.2f}s",
-                "message":   (stderr or error)[:80]
+                "message":   "🔒 Hidden test failed" if is_hidden else (stderr or error)[:80],
+                "hidden":    is_hidden
             })
         else:
             passed = actual == expected
             results.append({
-                "test_case": input_val[:50],
-                "expected":  expected[:50],
+                "test_case": shown_case,
+                "expected":  shown_expected,
                 "passed":    passed,
-                "output":    actual[:100],
+                "output":    "🔒 Hidden" if is_hidden else actual[:100],
                 "runtime":   f"{result.get('elapsed', 0)/1000:.2f}s",
-                "message":   "Passed" if passed else f"Expected: {expected[:50]}"
+                "message":   "Passed" if passed else ("🔒 Hidden test failed" if is_hidden else f"Expected: {expected[:50]}"),
+                "hidden":    is_hidden
             })
 
     return results
@@ -938,7 +978,10 @@ def get_problems():
                 instructor_name = instructor.username
         
         block_names = []
-        
+        if p.visible_to_sections:
+            sections = SubjectSection.query.filter(SubjectSection.id.in_(p.visible_to_sections)).all()
+            block_names = [s.section_no for s in sections]
+
         result.append({
             "id": p.id,
             "title": p.title,
@@ -951,7 +994,7 @@ def get_problems():
             "hints": p.hints or [],
             "tags": p.tags or [],
             "starter_code": starter,
-            "test_cases": p.test_cases,
+            "test_cases": sanitize_test_cases_for_student(p.test_cases),
             "estimated_time": p.estimated_time,
             "partial_credit": p.partial_credit,
             "auto_grade": p.auto_grade,
@@ -986,7 +1029,10 @@ def get_problem_detail(problem_id):
             instructor_name = instructor.username
     
     block_names = []
-    
+    if problem.visible_to_sections:
+        sections = SubjectSection.query.filter(SubjectSection.id.in_(problem.visible_to_sections)).all()
+        block_names = [s.section_no for s in sections]
+
     return jsonify({
         "id": problem.id,
         "title": problem.title,
@@ -998,7 +1044,7 @@ def get_problem_detail(problem_id):
         "languages": problem.languages or ['python'],
         "hints": problem.hints or [],
         "starter_code": starter,
-        "test_cases": problem.test_cases,
+        "test_cases": sanitize_test_cases_for_student(problem.test_cases),
         "estimated_time": problem.estimated_time,
         "due_date": problem.due_date.isoformat() if problem.due_date else None,
         "instructor_name": instructor_name,  # ✅ NEW
@@ -1275,32 +1321,55 @@ def delete_lesson(lesson_id):
 
 @app.route('/api/lessons/<int:lesson_id>/files/<int:file_id>/download', methods=['GET'])
 @jwt_required()
-def download_lesson_file_instructor(lesson_id, file_id):
-    # instructors download their own lesson files.
-    # students have a separate download route elsewhere.
+def download_lesson_file(lesson_id, file_id):
+    # this url is shared by both sides — instructors download from
+    # CourseMaterials.jsx, students download from StudentLessons.jsx.
+    # used to be 2 separate functions both sitting on this same url.
+    # flask just runs whichever one it finds first, so the instructor
+    # check always ran first and every student got blocked with a 403,
+    # even though the student logic further down the file was fine —
+    # it just never got a turn. merged them into one function that
+    # checks the role instead. if downloads ever break again for
+    # students, start here.
     import os
     from flask import send_file
+
     user_id = int(get_jwt_identity())
     user = User.query.get(user_id)
-    if not is_instructor_or_admin(user):
-        return jsonify({"error": "Unauthorized"}), 403
+    if not user:
+        return jsonify({"error": "Unauthorized"}), 401
 
     lesson = Lesson.query.get_or_404(lesson_id)
-    if lesson.created_by != user_id and user.role != 'administrator':
-        return jsonify({"error": "Not your lesson"}), 403
-
     f = LessonFile.query.get_or_404(file_id)
     if f.lesson_id != lesson_id:
         return jsonify({"error": "File not found"}), 404
 
-    if not f.storage_path or not os.path.exists(f.storage_path):
+    if is_instructor_or_admin(user):
+        # instructor has to own the lesson. admins can grab anything.
+        if lesson.created_by != user_id and user.role != 'administrator':
+            return jsonify({"error": "Not your lesson"}), 403
+    else:
+        # student has to be enrolled in a section under this subject
+        enrollments = IrregularEnrollment.query.filter_by(student_id=user_id).all()
+        section_ids = [e.section_id for e in enrollments]
+        if not section_ids:
+            return jsonify({"error": "Not enrolled"}), 403
+
+        student_subject_ids = list(set(
+            s.subject_id for s in SubjectSection.query.filter(
+                SubjectSection.id.in_(section_ids)
+            ).all()
+        ))
+        if lesson.subject_id not in student_subject_ids:
+            return jsonify({"error": "Access denied"}), 403
+
+    # storage_path is relative, so anchor it to this file's own folder —
+    # otherwise it breaks depending on where you launched flask from
+    abs_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), f.storage_path)
+    if not os.path.exists(abs_path):
         return jsonify({"error": "File not found on disk"}), 404
 
-    return send_file(
-        f.storage_path,
-        as_attachment=True,
-        download_name=f.original_filename
-    )
+    return send_file(abs_path, as_attachment=True, download_name=f.original_filename)
 
 @app.route('/api/lessons', methods=['GET'])
 @jwt_required()
@@ -1392,6 +1461,44 @@ def get_student_lessons():
     return jsonify(result), 200
 
 # ===== SUBMISSION ROUTES =====
+@app.route('/api/problems/<int:problem_id>/hints/revealed', methods=['GET'])
+@jwt_required()
+def get_revealed_hints(problem_id):
+    # tells the student-side editor which hints it already revealed for
+    # this problem, so reopening or refreshing the page shows the right
+    # hints as still-unblurred instead of resetting to "nothing revealed"
+    user_id = int(get_jwt_identity())
+    revealed = HintReveal.query.filter_by(user_id=user_id, problem_id=problem_id).all()
+    return jsonify({"revealed": [r.hint_index for r in revealed]}), 200
+
+
+@app.route('/api/problems/<int:problem_id>/hints/<int:hint_index>/reveal', methods=['POST'])
+@jwt_required()
+def reveal_hint(problem_id, hint_index):
+    # saves a hint reveal the moment a student clicks it, so the penalty
+    # applies at submission time based on our own records — refreshing
+    # the page or editing the request afterward can't undo it
+    user_id = int(get_jwt_identity())
+    user = User.query.get(user_id)
+    if user.role != 'student':
+        return jsonify({"error": "Students only"}), 403
+
+    prob = Problem.query.get_or_404(problem_id)
+    if not prob.hints or not (0 <= hint_index < len(prob.hints)):
+        return jsonify({"error": "Invalid hint index"}), 400
+
+    existing = HintReveal.query.filter_by(
+        user_id=user_id, problem_id=problem_id, hint_index=hint_index
+    ).first()
+    if not existing:
+        db.session.add(HintReveal(
+            user_id=user_id, problem_id=problem_id, hint_index=hint_index
+        ))
+        db.session.commit()
+
+    return jsonify({"revealed": True, "xp_penalty": prob.hints[hint_index].get('xp_penalty', 0)}), 200
+
+
 @app.route('/api/submissions', methods=['POST'])
 @jwt_required()
 @rate_limit(max_calls=10, period=60)
@@ -1485,6 +1592,17 @@ def create_submission():
 
         sub.passed_cases = passed
         sub.total_cases  = total
+
+        # each hint's xp_penalty (set by the instructor in createproblem.jsx)
+        # gets subtracted from this submission's score for every hint index
+        # the student revealed, floored at 0 so score never goes negative
+        revealed_hints = HintReveal.query.filter_by(user_id=user_id, problem_id=prob.id).all()
+        hint_penalty = 0
+        if prob.hints:
+            for r in revealed_hints:
+                if 0 <= r.hint_index < len(prob.hints):
+                    hint_penalty += prob.hints[r.hint_index].get('xp_penalty', 0)
+        sub.score = max(0, sub.score - hint_penalty)
 
         # XP delta — only award improvement over student's previous best
         best_prev = (Submission.query
@@ -1632,15 +1750,19 @@ def get_student_submissions():
     subs = Submission.query.filter_by(user_id=user_id)\
         .order_by(Submission.submitted_at.desc())\
         .limit(limit).offset((page-1)*limit).all()
-    
+
+    # one query for every problem this page needs, instead of querying
+    # per row per field — this page used to run up to 4 database queries
+    # per submission just to get its title and difficulty
+    problem_ids = list(set(s.problem_id for s in subs))
+    problems_by_id = {p.id: p for p in Problem.query.filter(Problem.id.in_(problem_ids)).all()}
+
     return jsonify({
         "submissions": [{
             "id": s.id, 
             "problem_id": s.problem_id, 
-            "problem_title": Problem.query.get(s.problem_id).title if Problem.query.get(s.problem_id) else "Unknown", 
-            # ✅ added: frontend needs this to show real difficulty stats
-            # instead of guessing/hardcoding it (see ProgressStats.jsx)
-            "difficulty": Problem.query.get(s.problem_id).difficulty if Problem.query.get(s.problem_id) else None,
+            "problem_title": problems_by_id[s.problem_id].title if s.problem_id in problems_by_id else "Unknown",
+            "difficulty": problems_by_id[s.problem_id].difficulty if s.problem_id in problems_by_id else None,
             "status": s.status, 
             "score": s.score, 
             "language": s.language, 
@@ -1650,6 +1772,27 @@ def get_student_submissions():
         "page": page, 
         "pages": max(1, (total + limit - 1) // limit)
     }), 200
+
+def calculate_streak(subs):
+    # counts consecutive days (counting back from the newest submission)
+    # that a student has submitted something. shared by 2 places:
+    # /api/student/stats (the flame icon) and /api/student/achievements
+    # (streak-type badges) — so both always show the same real number.
+    # achievements used to fake this as xp // 100 instead of checking
+    # real dates. moved the real logic here so nothing can fake it again.
+    if not subs:
+        return 0
+    sorted_subs = sorted(subs, key=lambda x: x.submitted_at, reverse=True)
+    last_date = sorted_subs[0].submitted_at.date()
+    streak = 1
+    for i in range(1, len(sorted_subs)):
+        curr_date = sorted_subs[i].submitted_at.date()
+        if (last_date - curr_date).days == 1:
+            streak += 1
+            last_date = curr_date
+        elif (last_date - curr_date).days > 1:
+            break
+    return min(streak, 30)  # cap it so it never shows a silly huge number
 
 @app.route('/api/student/stats', methods=['GET'])
 @jwt_required()
@@ -1662,22 +1805,7 @@ def get_student_stats():
     
     subs = Submission.query.filter_by(user_id=user.id).all()
     accepted = len([s for s in subs if s.status == 'accepted'])
-    
-    # Better mock streak: count consecutive days with submissions
-    streak = 0
-    if subs:
-        # Sort by date
-        sorted_subs = sorted(subs, key=lambda x: x.submitted_at, reverse=True)
-        last_date = sorted_subs[0].submitted_at.date()
-        streak = 1
-        for i in range(1, len(sorted_subs)):
-            curr_date = sorted_subs[i].submitted_at.date()
-            if (last_date - curr_date).days == 1:
-                streak += 1
-                last_date = curr_date
-            elif (last_date - curr_date).days > 1:
-                break
-        streak = min(streak, 30)  # Cap at 30 for demo
+    streak = calculate_streak(subs)
     
     return jsonify({
         "total_xp": user.xp, 
@@ -1706,7 +1834,11 @@ def get_student_achievements():
     csharp_quests = Submission.query.filter_by(user_id=user_id, status='accepted', language='csharp').count()
     hard_quests = Submission.query.filter_by(user_id=user_id, status='accepted').join(Problem).filter(Problem.difficulty == 'Hard').count()
     debug_quests = Submission.query.filter_by(user_id=user_id, status='accepted').join(Problem).filter(Problem.problem_type == 'debugging').count()
-    
+
+    # need EVERY submission here (not just accepted ones) to work out
+    # the real day-streak below — same rule /api/student/stats uses
+    all_subs = Submission.query.filter_by(user_id=user_id).all()
+
     # Get already earned achievements
     earned = {ua.achievement_id: ua for ua in UserAchievement.query.filter_by(user_id=user_id).all()}
     
@@ -1721,7 +1853,7 @@ def get_student_achievements():
         if ach.requirement_type == 'quest_count': 
             current_progress = total_quests
         elif ach.requirement_type == 'streak': 
-            current_progress = user.xp // 100  # Mock: 100 XP = 1 "streak day"
+            current_progress = calculate_streak(all_subs) 
         elif ach.requirement_type == 'python_count': 
             current_progress = python_quests
         elif ach.requirement_type == 'java_count': 
@@ -1884,6 +2016,71 @@ def get_student_subjects():
     
     return jsonify(list(seen_subjects.values())), 200
 
+@app.route('/api/student/open-quests', methods=['GET'])
+@jwt_required()
+def get_student_open_quests():
+    # every quest across all of a student's enrolled subjects that they
+    # have not yet submitted. running code doesn't count — only a real
+    # Submit removes a quest from this list, since that's the point where
+    # it locks and can't be attempted again. grouped by subject so the
+    # Bounty Board can show a clear section break per subject.
+    user_id = int(get_jwt_identity())
+
+    enrollments = IrregularEnrollment.query.filter_by(student_id=user_id).all()
+    section_ids = [e.section_id for e in enrollments]
+    if not section_ids:
+        return jsonify([]), 200
+
+    submitted_ids = {
+        s.problem_id for s in Submission.query.filter_by(user_id=user_id).all()
+    }
+
+    groups = {}
+    for section in SubjectSection.query.filter(SubjectSection.id.in_(section_ids)).all():
+        subject = Subject.query.get(section.subject_id)
+        if not subject:
+            continue
+        assignment = TeacherAssignment.query.filter_by(
+            subject_id=subject.id, section_id=section.id
+        ).first()
+        instructor = User.query.get(assignment.instructor_id) if assignment else None
+
+        problems = Problem.query.filter_by(subject_id=subject.id, is_published=True).all()
+
+        open_quests = []
+        for p in problems:
+            if p.id in submitted_ids:
+                continue
+            if p.visible_to_sections and section.id not in p.visible_to_sections:
+                continue
+            open_quests.append({
+                "id": p.id,
+                "title": p.title,
+                "difficulty": p.difficulty,
+                "xp_reward": p.xp_reward,
+                "problem_type": p.problem_type,
+                "is_event_quest": p.is_event_quest,
+                "languages": p.languages or ['python'],
+            })
+
+        if not open_quests:
+            continue
+
+        if subject.id not in groups:
+            groups[subject.id] = {
+                "subject_id": subject.id,
+                "subject_name": subject.name,
+                "section_id": section.id,
+                "section_no": section.section_no,
+                "semester": section.semester,
+                "instructor": (instructor.full_name or instructor.username) if instructor else "TBA",
+                "quests": []
+            }
+        groups[subject.id]["quests"].extend(open_quests)
+
+    return jsonify(list(groups.values())), 200
+
+
 @app.route('/api/student/submissions/by-section', methods=['GET'])
 @jwt_required()
 def get_submissions_by_section():
@@ -1907,6 +2104,9 @@ def get_submissions_by_section():
         subject_id=section.subject_id, is_published=True
     ).all()
     problem_ids = [p.id for p in problems_for_subject]
+    # reuses the list already fetched above instead of querying again
+    # per row — this page used to run 2 extra queries per submission
+    problems_by_id = {p.id: p for p in problems_for_subject}
 
     if not problem_ids:
         return jsonify({"submissions": []}), 200
@@ -1920,7 +2120,7 @@ def get_submissions_by_section():
         "submissions": [{
             "id": s.id,
             "problem_id": s.problem_id,
-            "problem_title": Problem.query.get(s.problem_id).title if Problem.query.get(s.problem_id) else "Unknown",
+            "problem_title": problems_by_id[s.problem_id].title if s.problem_id in problems_by_id else "Unknown",
             "status": s.status,
             "score": s.score,
             "language": s.language,
@@ -1999,14 +2199,11 @@ def get_class_problems(class_id):
         if not assignment:
             return jsonify({"error": "Not assigned to any section"}), 403
 
+    section = SubjectSection.query.get(class_id)
+    if not section:
+        return jsonify({"error": "Class not found"}), 404
+
     problems = Problem.query.filter_by(created_by=user_id).all()
-
-    instructor_subject_ids_in_block = list(set(
-        a.subject_id for a in TeacherAssignment.query.filter_by(
-            instructor_id=user_id
-        ).all()
-    ))
-
 
     result = []
     for p in problems:
@@ -2015,7 +2212,10 @@ def get_class_problems(class_id):
             if class_id in p.visible_to_sections:
                 in_scope = True
         else:
-            if p.subject_id in instructor_subject_ids_in_block:
+            # no specific sections chosen = visible to every section under
+            # THIS SAME subject only — not every subject the instructor
+            # happens to teach something for
+            if p.subject_id == section.subject_id:
                 in_scope = True
 
         if not in_scope:
@@ -2172,6 +2372,7 @@ def get_instructor_class_detail(classId):
 
     return jsonify({
         "id": section.id,
+        "subject_id": section.subject_id,
         "section_no": section.section_no,
         "section_code": section.section_no,
         "name": ', '.join(subjects) if subjects else section.section_no,
@@ -2578,8 +2779,15 @@ def get_problem_submissions(problem_id):
     submissions = Submission.query.filter_by(problem_id=problem_id)\
         .order_by(Submission.submitted_at.desc()).all()
 
-    assignments = TeacherAssignment.query.filter_by(instructor_id=user_id).all()
+    assignments = TeacherAssignment.query.filter_by(
+        instructor_id=user_id, subject_id=problem.subject_id
+    ).all()
     section_ids = list(set(a.section_id for a in assignments if a.section_id))
+
+    # if this quest is scoped to specific sections, only count those —
+    # not every section the instructor teaches for this subject
+    if problem.visible_to_sections:
+        section_ids = [sid for sid in section_ids if sid in problem.visible_to_sections]
 
     enrolled_student_ids = []
     if section_ids:
@@ -2819,32 +3027,58 @@ def update_announcement(announcement_id):
 @app.route('/api/student/announcements', methods=['GET'])
 @jwt_required()
 def get_student_announcements():
-    """Get announcements for logged-in student's blocks"""
+    # every announcement visible to this student — global ones (no class_id
+    # set) plus ones posted specifically to any section they're actually
+    # enrolled in. uses IrregularEnrollment like every other multi-subject
+    # student endpoint (Bounty Board, My Subjects) — a student can be in
+    # more than one section, so a single section_id field was never enough.
     user_id = int(get_jwt_identity())
     user = User.query.get(user_id)
     if user.role != 'student':
         return jsonify({"error": "Students only"}), 403
-    
-    # ✅ FIX: this used to only match class_id == None (global announcements),
-    # so anything an instructor posted to a specific class was invisible to
-    # students in that class. Now also matches the student's own section.
+
+    enrollments = IrregularEnrollment.query.filter_by(student_id=user_id).all()
+    section_ids = [e.section_id for e in enrollments]
+
     announcements = Announcement.query.filter(
         db.or_(
             Announcement.class_id == None,
-            Announcement.class_id == user.section_id
+            Announcement.class_id.in_(section_ids)
         )
     ).order_by(Announcement.is_pinned.desc(), Announcement.created_at.desc()).all()
 
-    return jsonify([{
-        "id": a.id,
-        "title": a.title,
-        "content": a.content,
-        "is_pinned": a.is_pinned,
-        "priority": a.priority,
-        "created_at": a.created_at.isoformat(),
-        "instructor": User.query.get(a.instructor_id).username if a.instructor_id else "System",
-        "block_name": "All Classes" if a.class_id is None else "My Class"
-    } for a in announcements]), 200
+    sections_by_id = {s.id: s for s in SubjectSection.query.filter(SubjectSection.id.in_(section_ids)).all()}
+    subjects_by_id = {}
+    if sections_by_id:
+        subj_ids = list(set(s.subject_id for s in sections_by_id.values()))
+        subjects_by_id = {s.id: s for s in Subject.query.filter(Subject.id.in_(subj_ids)).all()}
+
+    result = []
+    for a in announcements:
+        subject_name = "All Subjects"
+        section_no = None
+        if a.class_id and a.class_id in sections_by_id:
+            section = sections_by_id[a.class_id]
+            section_no = section.section_no
+            subject = subjects_by_id.get(section.subject_id)
+            subject_name = subject.name if subject else "Unknown Subject"
+
+        result.append({
+            "id": a.id,
+            "title": a.title,
+            "content": a.content,
+            "is_pinned": a.is_pinned,
+            "priority": a.priority,
+            "created_at": a.created_at.isoformat(),
+            "instructor": User.query.get(a.instructor_id).username if a.instructor_id else "System",
+            "class_id": a.class_id,
+            # numeric subject id — lets the frontend jump straight into the
+            # right subject's tabs when a notification is clicked
+            "subject_id": sections_by_id[a.class_id].subject_id if a.class_id in sections_by_id else None,
+            "subject_name": subject_name,
+            "section_no": section_no
+        })
+    return jsonify(result), 200
 
 @app.route('/api/admin/dashboard-stats', methods=['GET'])
 @admin_required
@@ -5349,45 +5583,6 @@ def admin_bulk_upload_sections(admin):
         "summary": {"total_rows": len(rows), "created": created, "skipped": skipped, "errors": errors},
         "results": results,
     }), (207 if errors else 200)
-
-
-# ===== LESSON FILE DOWNLOAD =====
-@app.route('/api/lessons/<int:lesson_id>/files/<int:file_id>/download')
-@jwt_required()
-def download_lesson_file(lesson_id, file_id):
-    import os
-    from flask import send_file
-    user_id = int(get_jwt_identity())
-    user = User.query.get(user_id)
-    if not user or user.role != 'student':
-        return jsonify({"error": "Students only"}), 403
-
-    lesson_file = LessonFile.query.filter_by(id=file_id, lesson_id=lesson_id).first()
-    if not lesson_file:
-        return jsonify({"error": "File not found"}), 404
-
-    lesson = Lesson.query.get(lesson_id)
-    if not lesson:
-        return jsonify({"error": "Lesson not found"}), 404
-
-    enrollments = IrregularEnrollment.query.filter_by(student_id=user_id).all()
-    section_ids = [e.section_id for e in enrollments]
-    if not section_ids:
-        return jsonify({"error": "Not enrolled"}), 403
-
-    student_subject_ids = list(set(
-        s.subject_id for s in SubjectSection.query.filter(
-            SubjectSection.id.in_(section_ids)
-        ).all()
-    ))
-    if lesson.subject_id not in student_subject_ids:
-        return jsonify({"error": "Access denied"}), 403
-
-    abs_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), lesson_file.storage_path)
-    if not os.path.exists(abs_path):
-        return jsonify({"error": "File not found on disk"}), 404
-
-    return send_file(abs_path, as_attachment=True, download_name=lesson_file.original_filename)
 
 # ===== UTILITY & INIT =====
 @app.route('/api/health')
