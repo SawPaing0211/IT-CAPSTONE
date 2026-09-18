@@ -179,7 +179,7 @@ export default function MyClasses() {
 
   const statItems = [
     { icon: '👥', key: 'students',      label: 'Students',      clickable: true  },
-    { icon: '📝', key: 'problems',      label: 'Activities',    clickable: false },
+    { icon: '📝', key: 'problems',      label: 'Quests',    clickable: false },
     { icon: '📚', key: 'lessons',       label: 'Modules',       clickable: false },
     { icon: '📢', key: 'announcements', label: 'Announcements', clickable: false },
   ]

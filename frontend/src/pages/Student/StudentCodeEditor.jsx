@@ -225,7 +225,7 @@ useEffect(() => {
   
   if (quest?.id) {
     // Load saved code for this quest + language
-    const saved = localStorage.getItem(`quest_code_${quest.id}_${language}`)
+    const saved = localStorage.getItem(`forge_code_${quest.id}_${language}`)
     if (saved) {
       setSavedCode(saved)
       setCode(saved)
@@ -259,6 +259,22 @@ useEffect(() => {
     checkSubmission() // Call the async function
   }
 }, [quest, language]) // Re-run when quest or language changes
+
+  // restores which hints this student already revealed for this quest,
+  // straight from the server — keeps the unblurred/blurred state correct
+  // across page refreshes instead of resetting every time
+  useEffect(() => {
+    if (!quest?.id) return
+    const loadRevealedHints = async () => {
+      try {
+        const res = await api.get(`/api/problems/${quest.id}/hints/revealed`)
+        setUsedHints(res.revealed || [])
+      } catch (err) {
+        console.error('Failed to load revealed hints:', err)
+      }
+    }
+    loadRevealedHints()
+  }, [quest?.id])
 
   // Auto-save every 5 seconds
   useEffect(() => {
@@ -436,12 +452,15 @@ useEffect(() => {
       )
     }
     try {
-      const data = await api.post('/api/submissions', { problem_id: quest.id, code, language })
+      // used_hints now actually reaches the backend. before, this array
+      // only ever lived in the browser — the server had no idea hints
+      // were used, so it always awarded full XP no matter what.
+      const data = await api.post('/api/submissions', { problem_id: quest.id, code, language, used_hints: usedHints })
       setOutput({ ...data, is_run_mode: false })
       
       // Save code to localStorage on submit
       if (quest?.id) {
-        localStorage.setItem(`quest_code_${quest.id}_${language}`, code)
+        localStorage.setItem(`forge_code_${quest.id}_${language}`, code)
       }
       
       // Lock submit after ANY submission (accepted, error, partial, etc.)
@@ -451,11 +470,7 @@ useEffect(() => {
       if (data.status === 'accepted') {
         setIsQuestCompleted(true)
         setShowSuccessAnim(true)
-        const hintPenalty = usedHints.reduce((sum, hId) => {
-          const hint = quest.hints?.find(h => h.id === hId)
-          return sum + (hint?.xp_penalty || 0)
-        }, 0)
-        const gained = Math.max(0, (data.xp_earned || quest.xp_reward || 0) - hintPenalty)
+        const gained = data.xp_earned || 0
         setXpGained(gained)
         if (onVictory) onVictory(gained, data.user_level || heroLevel)
         setTimeout(() => setShowSuccessAnim(false), 3000)
@@ -495,9 +510,15 @@ useEffect(() => {
     a.click()
   }
 
-  const handleUseHint = (hintId) => {
-    if (!usedHints.includes(hintId)) {
-      setUsedHints([...usedHints, hintId])
+  const handleUseHint = async (hintId) => {
+    if (usedHints.includes(hintId)) return
+    setUsedHints([...usedHints, hintId])
+    // records the reveal on the server right away, so it's permanent
+    // the moment it happens rather than only living in this browser tab
+    try {
+      await api.post(`/api/problems/${quest.id}/hints/${hintId}/reveal`, {})
+    } catch (err) {
+      console.error('Failed to record hint reveal:', err)
     }
   }
 
@@ -688,12 +709,12 @@ useEffect(() => {
                 <div>
                   <h3 className="text-sm font-bold text-slate-400 mb-2">Examples</h3>
                   <div className="space-y-3">
-                    {quest.test_cases?.slice(0, 3).map((tc, idx) => (
+                    {quest.test_cases?.filter(tc => tc.visible !== false).slice(0, 3).map((tc, idx) => (
                       <div key={idx} className="bg-slate-900/60 rounded-lg p-3 border border-slate-700/50">
                         <p className="text-[10px] text-slate-500 mb-1 uppercase tracking-wider">Input</p>
-                        <code className="text-green-400 text-xs font-mono block mb-2 break-all">{tc.input}</code>
+                        <code className="text-green-400 text-xs font-mono block mb-2 break-all whitespace-pre-wrap">{tc.input}</code>
                         <p className="text-[10px] text-slate-500 mb-1 uppercase tracking-wider">Expected Output</p>
-                        <code className="text-blue-400 text-xs font-mono block break-all">{tc.expected}</code>
+                        <code className="text-blue-400 text-xs font-mono block break-all whitespace-pre-wrap">{tc.expected}</code>
                       </div>
                     ))}
                   </div>
@@ -729,11 +750,11 @@ useEffect(() => {
                     <div className="space-y-2 text-xs">
                       <div>
                         <p className="text-slate-500 mb-1">Input:</p>
-                        <code className="text-green-400 font-mono block bg-slate-950 p-2 rounded">{tc.input}</code>
+                        <code className="text-green-400 font-mono block bg-slate-950 p-2 rounded whitespace-pre-wrap">{tc.input}</code>
                       </div>
                       <div>
                         <p className="text-slate-500 mb-1">Expected:</p>
-                        <code className="text-blue-400 font-mono block bg-slate-950 p-2 rounded">{tc.expected}</code>
+                        <code className="text-blue-400 font-mono block bg-slate-950 p-2 rounded whitespace-pre-wrap">{tc.expected}</code>
                       </div>
                       {output?.test_results?.[idx] && !output.test_results[idx].passed && (
                         <div>
@@ -752,11 +773,11 @@ useEffect(() => {
             {activeTab === 'hints' && (
               <div className="space-y-3">
                 <h3 className="text-sm font-bold text-slate-400 mb-3">Ancient Scrolls (Hints)</h3>
-                {quest.hints?.map(hint => {
-                  const isUsed = usedHints.includes(hint.id)
+                {quest.hints?.map((hint, idx) => {
+                  const isUsed = usedHints.includes(idx)
                   return (
                     <div
-                      key={hint.id}
+                      key={idx}
                       className={`p-4 rounded-lg border transition-all duration-300 ${
                         isUsed
                           ? 'bg-slate-900/60 border-slate-700'
@@ -765,11 +786,11 @@ useEffect(() => {
                     >
                       <div className="flex justify-between items-start mb-2">
                         <span className={`text-xs font-bold ${isUsed ? 'text-slate-500' : 'text-yellow-400'}`}>
-                          Scroll {hint.id}
+                          Scroll {idx + 1}
                         </span>
                         {!isUsed && (
                           <button
-                            onClick={() => handleUseHint(hint.id)}
+                            onClick={() => handleUseHint(idx)}
                             className="text-[10px] bg-yellow-600/20 hover:bg-yellow-600/30 text-yellow-400 px-2 py-1 rounded transition border border-yellow-600/40"
                           >
                             Reveal (-{hint.xp_penalty} XP)
@@ -978,7 +999,7 @@ useEffect(() => {
                         <div className="space-y-2 mt-2 text-xs">
                           <div>
                             <p className="text-slate-500 mb-1">Expected:</p>
-                            <code className="text-blue-400 font-mono block bg-slate-950 p-2 rounded">{tc.expected}</code>
+                            <code className="text-blue-400 font-mono block bg-slate-950 p-2 rounded whitespace-pre-wrap">{tc.expected}</code>
                           </div>
                           <div>
                             <p className="text-slate-500 mb-1">Your Output:</p>

@@ -11,6 +11,15 @@ export default function CreateProblem() {
   const [sectionsBySubject, setSectionsBySubject] = useState([])
   const [selectedSubjectId, setSelectedSubjectId] = useState(null)
   const [activeSection, setActiveSection] = useState(1)
+  const [toast, setToast] = useState(null) // { message, type: 'success' | 'error' }
+
+  useEffect(() => {
+    if (!toast) return
+    const timer = setTimeout(() => setToast(null), 4000)
+    return () => clearTimeout(timer)
+  }, [toast])
+
+  const showToast = (message, type = 'error') => setToast({ message, type })
 
   const [formData, setFormData] = useState({
     title: '',
@@ -81,6 +90,13 @@ export default function CreateProblem() {
           { headers: { 'Authorization': `Bearer ${token}` } }
         )
         if (subjectsRes.ok) setAssignedSubjects(await subjectsRes.json())
+
+        // when arriving from inside a specific class, the subject is
+        // already known — skip making the instructor pick it again
+        const preselectedSubjectId = searchParams.get('subject_id')
+        if (preselectedSubjectId && !problemId) {
+          setSelectedSubjectId(Number(preselectedSubjectId))
+        }
 
       } catch (err) {
         console.error('Failed to fetch data:', err)
@@ -170,19 +186,19 @@ export default function CreateProblem() {
 
     const maxXP = { Easy: 100, Medium: 250, Hard: 500 }
     if (formData.xp_reward > maxXP[formData.difficulty]) {
-      alert(`❌ XP reward exceeds maximum for ${formData.difficulty} difficulty.\n\nMax: ${maxXP[formData.difficulty]}\nYours: ${formData.xp_reward}`)
+      showToast(`XP reward exceeds maximum for ${formData.difficulty} difficulty.\n\nMax: ${maxXP[formData.difficulty]}\nYours: ${formData.xp_reward}`, 'error')
       return
     }
     if (!selectedSubjectId) {
-      alert('❌ Please select a course subject for this problem.')
+      showToast('Please select a course subject for this problem.', 'error')
       return
     }
     if (!formData.title || !formData.description || formData.test_cases.length === 0) {
-      alert('Please fill in all required fields and add at least one test case.')
+      showToast('Please fill in all required fields and add at least one test case.', 'error')
       return
     }
     if (formData.languages.length === 0) {
-      alert('Please select at least one programming language.')
+      showToast('Please select at least one programming language.', 'error')
       return
     }
 
@@ -207,30 +223,45 @@ export default function CreateProblem() {
       })
 
       if (res.ok) {
-        alert(isEditing ? '✅ Activity updated successfully!' : '✅ Activity created successfully!')
-        navigate('/instructor/problems')
+        showToast(isEditing ? 'Quest updated successfully!' : 'Quest created successfully!', 'success')
+        // gives the toast a moment on screen before leaving the page —
+        // alert() used to force this pause automatically since it blocks
+        // until dismissed; a toast doesn't block, so this does it manually
+        setTimeout(() => navigate('/instructor/problems'), 1200)
       } else {
         const error = await res.json()
-        alert(`❌ Failed to save activity: ${error.error}`)
+        showToast(`Failed to save quest: ${error.error}`, 'error')
       }
     } catch (err) {
       console.error('Failed to save problem:', err)
-      alert('❌ Failed to save problem. Check console for details.')
+      showToast('Failed to save problem. Check console for details.', 'error')
     }
   }
 
   const sections_nav = [
-    { id: 1, title: 'Basic Information',        icon: '📋' },
+    { id: 1, title: 'Basic Information',        icon: '📜' },
     { id: 2, title: 'Problem Type & Languages',  icon: '💻' },
     { id: 3, title: 'Visibility & Settings',     icon: '🔧' },
     { id: 4, title: 'Starter Code',              icon: '📝' },
     { id: 5, title: 'Test Cases',                icon: '🧪' },
     { id: 6, title: 'Hints',                     icon: '💡' },
-    { id: 7, title: 'Review',                    icon: '📋' },
+    { id: 7, title: 'Review',                    icon: '🏆' },
   ]
 
   return (
     <div className="space-y-6">
+      {toast && (
+        <div className={`fixed top-6 right-6 z-[200] max-w-sm rounded-xl border p-4 shadow-2xl ${
+          toast.type === 'success'
+            ? 'bg-green-900/90 border-green-500/50 shadow-green-900/30'
+            : 'bg-red-900/90 border-red-500/50 shadow-red-900/30'
+        }`}>
+          <div className="flex items-start gap-3">
+            <span className="text-xl shrink-0">{toast.type === 'success' ? '✅' : '❌'}</span>
+            <p className="text-white text-sm whitespace-pre-line leading-relaxed">{toast.message}</p>
+          </div>
+        </div>
+      )}
       {/* Header */}
       <div className="flex items-center gap-4">
         <button onClick={() => {
@@ -242,9 +273,9 @@ export default function CreateProblem() {
         </button>
         <div>
           <h1 className="text-3xl font-bold text-white">
-            {isEditing ? '✏️ Edit Activity' : '➕ Create New Activity'}
+            {isEditing ? '✏️ Edit Quest' : '⚔️ Create New Quest'}
           </h1>
-          <p className="text-slate-400">Design a coding activity for your students</p>
+          <p className="text-slate-400">Design a coding quest for your students</p>
         </div>
       </div>
 
@@ -256,22 +287,28 @@ export default function CreateProblem() {
               <button
                 type="button"
                 onClick={() => setActiveSection(sec.id)}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg transition ${
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all duration-300 ${
                   activeSection === sec.id
-                    ? 'bg-blue-600 text-white'
+                    ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-lg shadow-purple-600/40 scale-105'
                     : activeSection > sec.id
                     ? 'text-green-400 hover:bg-slate-800'
                     : 'text-slate-400 hover:bg-slate-800'
                 }`}
               >
-                <span className="text-xl">{sec.icon}</span>
+                <span className={`text-xl transition-transform duration-300 ${activeSection === sec.id ? 'scale-125' : ''}`}>{sec.icon}</span>
                 <span className="hidden lg:inline font-medium text-sm">{sec.title}</span>
               </button>
               {idx < sections_nav.length - 1 && (
-                <div className={`w-16 h-0.5 mx-2 ${activeSection > sec.id ? 'bg-green-600' : 'bg-slate-700'}`} />
+                <div className={`w-16 h-0.5 mx-2 transition-colors duration-500 ${activeSection > sec.id ? 'bg-green-600' : 'bg-slate-700'}`} />
               )}
             </div>
           ))}
+        </div>
+        <div className="mt-5 w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+          <div
+            className="h-full bg-gradient-to-r from-purple-600 to-pink-600 rounded-full transition-all duration-500"
+            style={{ width: `${(activeSection / sections_nav.length) * 100}%` }}
+          />
         </div>
       </div>
 
@@ -279,27 +316,34 @@ export default function CreateProblem() {
 
         {/* ── Section 1: Basic Information ── */}
         {activeSection === 1 && (
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6 animate-fade-in">
             <div>
               <label className="block text-slate-400 text-sm mb-2">Course Subject *</label>
-              <select
-                value={selectedSubjectId || ''}
-                onChange={(e) => setSelectedSubjectId(e.target.value ? parseInt(e.target.value) : null)}
-                className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white outline-none"
-                required
-              >
-                <option value="">Select a subject you teach</option>
-                {assignedSubjects.map(sub => (
-                  <option key={sub.id} value={sub.id}>{sub.name}</option>
-                ))}
-              </select>
+              {searchParams.get('subject_id') ? (
+                <div className="w-full bg-slate-800/50 border border-slate-700 rounded-xl px-4 py-3 text-white flex items-center justify-between">
+                  <span>{assignedSubjects.find(s => s.id === selectedSubjectId)?.name || 'Loading...'}</span>
+                  <span className="text-xs text-slate-500">🔒 Set by this class</span>
+                </div>
+              ) : (
+                <select
+                  value={selectedSubjectId || ''}
+                  onChange={(e) => setSelectedSubjectId(e.target.value ? parseInt(e.target.value) : null)}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white outline-none"
+                  required
+                >
+                  <option value="">Select a subject you teach</option>
+                  {assignedSubjects.map(sub => (
+                    <option key={sub.id} value={sub.id}>{sub.name}</option>
+                  ))}
+                </select>
+              )}
               {!subjectsLoading && assignedSubjects.length === 0 && (
                 <p className="text-amber-400 text-xs mt-1">⚠️ No subjects assigned. Contact admin.</p>
               )}
             </div>
 
             <h2 className="text-2xl font-bold text-white flex items-center gap-2">
-              <span>📋</span> Activity Details
+              <span>📋</span> Quest Details
             </h2>
 
             <div>
@@ -308,7 +352,7 @@ export default function CreateProblem() {
                 type="text" value={formData.title}
                 onChange={(e) => handleInputChange('title', e.target.value)}
                 placeholder="e.g., Sum of Two Numbers"
-                className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:border-blue-500 outline-none"
+                className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:border-purple-500 outline-none"
                 required
               />
             </div>
@@ -342,9 +386,9 @@ export default function CreateProblem() {
               <textarea
                 value={formData.description}
                 onChange={(e) => handleInputChange('description', e.target.value)}
-                placeholder="Describe the activity details here..."
+                placeholder="Describe the quest details here..."
                 rows="6"
-                className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:border-blue-500 outline-none resize-none"
+                className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:border-purple-500 outline-none resize-none"
                 required
               />
             </div>
@@ -353,7 +397,7 @@ export default function CreateProblem() {
 
         {/* ── Section 2: Problem Type & Languages ── */}
         {activeSection === 2 && (
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6 animate-fade-in">
             <h2 className="text-2xl font-bold text-white flex items-center gap-2">
               <span>💻</span> Problem Type & Languages
             </h2>
@@ -370,7 +414,7 @@ export default function CreateProblem() {
                     onClick={() => handleInputChange('problem_type', t.value)}
                     className={`p-4 rounded-xl border-2 transition ${
                       formData.problem_type === t.value
-                        ? 'border-blue-600 bg-blue-600/10 text-blue-400'
+                        ? 'border-purple-600 bg-purple-600/10 text-purple-400'
                         : 'border-slate-700 bg-slate-800 text-slate-400 hover:border-slate-600'
                     }`}
                   >
@@ -395,7 +439,7 @@ export default function CreateProblem() {
                       type="checkbox"
                       checked={formData.languages.includes(lang)}
                       onChange={() => handleLanguageToggle(lang)}
-                      className="w-5 h-5 rounded border-slate-600 text-blue-600 focus:ring-blue-500"
+                      className="w-5 h-5 rounded border-slate-600 text-purple-600 focus:ring-purple-500"
                     />
                     <span className="text-lg">{icon}</span>
                     <span className="text-white font-medium capitalize">{lang}</span>
@@ -408,7 +452,7 @@ export default function CreateProblem() {
 
         {/* ── Section 3: Visibility & Settings ── */}
         {activeSection === 3 && (
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6 animate-fade-in">
             <h2 className="text-2xl font-bold text-white flex items-center gap-2">
               <span>🔧</span> Visibility & Settings
             </h2>
@@ -466,7 +510,7 @@ export default function CreateProblem() {
                             handleInputChange('visible_to_blocks', formData.visible_to_blocks.filter(id => id !== sec.id))
                           }
                         }}
-                        className="w-5 h-5 rounded border-slate-600 text-blue-600 focus:ring-blue-500"
+                        className="w-5 h-5 rounded border-slate-600 text-purple-600 focus:ring-purple-500"
                       />
                       <div className="flex-1">
                         <div className="text-white font-medium">
@@ -516,7 +560,7 @@ export default function CreateProblem() {
 
         {/* ── Section 4: Starter Code ── */}
         {activeSection === 4 && (
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6 animate-fade-in">
             <h2 className="text-2xl font-bold text-white flex items-center gap-2">
               <span>📝</span> Starter Code
             </h2>
@@ -537,7 +581,7 @@ export default function CreateProblem() {
                     : 'using System;\n\nclass Solution {\n    static void Main() {\n        // Your code here\n    }\n}'
                   }
                   rows="8"
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-green-400 font-mono text-sm focus:border-blue-500 outline-none resize-none"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-green-400 font-mono text-sm focus:border-purple-500 outline-none resize-none"
                 />
               </div>
             ))}
@@ -546,14 +590,14 @@ export default function CreateProblem() {
 
         {/* ── Section 5: Test Cases ── */}
         {activeSection === 5 && (
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6 animate-fade-in">
             <div className="flex justify-between items-center">
               <h2 className="text-2xl font-bold text-white flex items-center gap-2">
                 <span>🧪</span> Test Cases
               </h2>
               <button
                 type="button" onClick={handleTestCaseAdd}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-white font-bold transition"
+                className="px-4 py-2 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-lg text-white font-bold transition"
               >
                 + Add Test Case
               </button>
@@ -569,24 +613,39 @@ export default function CreateProblem() {
                       </button>
                     )}
                   </div>
+                  <label className="flex items-center gap-2 text-xs text-slate-400 cursor-pointer w-fit">
+                    <input
+                      type="checkbox"
+                      checked={tc.visible === false}
+                      onChange={(e) => handleTestCaseUpdate(idx, 'visible', !e.target.checked)}
+                      className="rounded border-slate-600"
+                    />
+                    🔒 Hide from students (used for grading only)
+                  </label>
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-slate-500 text-xs mb-1">Input</label>
-                      <input
-                        type="text" value={tc.input}
+                      {/* was a single-line <input>, so there was no way to press
+                          Enter for a real 2nd line of input (needed when a quest
+                          calls input() more than once). textarea = press Enter,
+                          get an actual line break, no hidden tricks needed. */}
+                      <label className="block text-slate-500 text-xs mb-1">Input (press Enter for a new line)</label>
+                      <textarea
+                        value={tc.input}
                         onChange={(e) => handleTestCaseUpdate(idx, 'input', e.target.value)}
-                        placeholder="Input..."
-                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm outline-none"
+                        placeholder={"e.g.\n3\n5"}
+                        rows="3"
+                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm outline-none font-mono resize-y"
                         required
                       />
                     </div>
                     <div>
                       <label className="block text-slate-500 text-xs mb-1">Expected Output</label>
-                      <input
-                        type="text" value={tc.expected}
+                      <textarea
+                        value={tc.expected}
                         onChange={(e) => handleTestCaseUpdate(idx, 'expected', e.target.value)}
                         placeholder="Output..."
-                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm outline-none"
+                        rows="3"
+                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm outline-none font-mono resize-y"
                         required
                       />
                     </div>
@@ -599,14 +658,14 @@ export default function CreateProblem() {
 
         {/* ── Section 6: Hints ── */}
         {activeSection === 6 && (
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6 animate-fade-in">
             <div className="flex justify-between items-center">
               <h2 className="text-2xl font-bold text-white flex items-center gap-2">
                 <span>💡</span> Hints (Optional)
               </h2>
               <button
                 type="button" onClick={handleHintAdd}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-white font-bold transition"
+                className="px-4 py-2 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-lg text-white font-bold transition"
               >
                 + Add Hint
               </button>
@@ -647,9 +706,9 @@ export default function CreateProblem() {
 
         {/* ── Section 7: Review ── */}
         {activeSection === 7 && (
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6 animate-fade-in">
             <h2 className="text-2xl font-bold text-white flex items-center gap-2">
-              <span>📋</span> Review Activity
+              <span>📋</span> Review Quest
             </h2>
             <div className="space-y-4">
               {[
@@ -689,16 +748,16 @@ export default function CreateProblem() {
             <button
               type="button"
               onClick={() => setActiveSection(Math.min(sections_nav.length, activeSection + 1))}
-              className="px-6 py-3 bg-blue-600 hover:bg-blue-500 rounded-xl text-white font-bold transition shadow-lg shadow-blue-600/20"
+              className="px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-xl text-white font-bold transition shadow-lg shadow-purple-600/20"
             >
               Next →
             </button>
           ) : (
             <button
               type="submit"
-              className="px-8 py-3 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 rounded-xl text-white font-bold transition shadow-lg shadow-blue-600/20"
+              className="px-8 py-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-xl text-white font-bold transition shadow-lg shadow-purple-600/20"
             >
-              {isEditing ? '✨ Update Activity' : '✨ Create Activity'}
+              {isEditing ? '✨ Update Quest' : '✨ Create Quest'}
             </button>
           )}
         </div>

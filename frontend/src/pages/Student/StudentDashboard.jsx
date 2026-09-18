@@ -6,8 +6,10 @@ import Leaderboard from './components/Leaderboard'
 import ProgressStats from './components/ProgressStats'
 import QuestLog from './QuestLog'
 import MySubjects from './MySubjects'
+import BountyBoard from './BountyBoard'
 import { api } from '../../api/client'
 import StudentLessons from './StudentLessons'
+import StudentAnnouncements from './StudentAnnouncements'
 
 // ─── Spell templates per language ─────────────────────────────────────────
 const SPELL_TEMPLATES = {
@@ -687,16 +689,69 @@ export default function StudentDashboard({ user, onLogout }) {
     setSelectedBlock(null)
   }
 
-  const notifications = [
-    { id: 1, title: 'Midterm Exam Tomorrow', content: 'Remember to review Array and Looping problems. Exam starts at 9 AM in Block 301.', priority: 'urgent', instructor: 'Prof. Johnson', block: 'Block 301', date: 'Apr 24, 2024', time: '2:30 PM', read: false },
-    { id: 2, title: "New Quest Available: Dragon's Loop", content: 'A new Medium difficulty quest has been added. Practice your looping skills!', priority: 'important', instructor: 'Prof. Smith', block: 'Block 301', date: 'Apr 23, 2024', time: '10:15 AM', read: false },
-    { id: 3, title: 'System Maintenance', content: 'Platform will be down for maintenance on Apr 26 from 2-4 AM. Plan accordingly.', priority: 'info', instructor: 'System', block: 'All Blocks', date: 'Apr 22, 2024', time: '9:00 AM', read: true },
-    { id: 4, title: 'Event Quest: Holiday Challenge', content: 'Limited time event quest available! Complete it for bonus XP and exclusive badge.', priority: 'important', instructor: 'Prof. Martinez', block: 'Block 301', date: 'Apr 20, 2024', time: '3:45 PM', read: true },
-    { id: 5, title: 'Welcome to Forge.Dev!', content: 'Your adventure begins now. Complete your first quest to earn your First Steps badge!', priority: 'info', instructor: 'System', block: 'All Blocks', date: 'Apr 15, 2024', time: '8:00 AM', read: true },
-  ]
+  const handleBountyQuestSelect = (quest, group) => {
+    handleEnterSubject({
+      id: group.subject_id,
+      name: group.subject_name,
+      section_id: group.section_id,
+      section_no: group.section_no,
+      semester: group.semester,
+      instructor: group.instructor
+    })
+    setCourseTab('board')
+    handleQuestSelect(quest)
+  }
+
+  const [notifications, setNotifications] = useState([])
+
+  // real announcements from every subject this student is enrolled in —
+  // reshaped to the same field names the dropdown below already expects
+  // (block/date/time/read), so the render JSX didn't need to change
+  useEffect(() => {
+    const fetchNotifications = async () => {
+      try {
+        const data = await api.get('/api/student/announcements')
+        setNotifications(data.map(a => {
+          const created = new Date(a.created_at)
+          return {
+            id: a.id,
+            title: a.title,
+            content: a.content,
+            priority: a.priority,
+            instructor: a.instructor,
+            block: a.section_no ? `${a.subject_name} · ${a.section_no}` : a.subject_name,
+            date: created.toLocaleDateString(),
+            time: created.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            // no read/unread tracking exists on the backend yet — everything
+            // fetched is treated as unread for this session rather than
+            // inventing a fake "already read" state
+            read: false,
+            // carried through so clicking a notification can navigate to
+            // the right subject's Announcements tab
+            class_id: a.class_id,
+            subject_id: a.subject_id,
+            section_no: a.section_no,
+            subject_name: a.subject_name,
+          }
+        }))
+      } catch (err) {
+        console.error('Failed to load notifications:', err)
+      }
+    }
+    fetchNotifications()
+  }, [])
+
   const unreadCount = notifications.filter(n => !n.read).length
-  const priorityColors = { urgent: 'bg-red-600/20 border-red-600/40 text-red-400', important: 'bg-yellow-600/20 border-yellow-600/40 text-yellow-400', info: 'bg-blue-600/20 border-blue-600/40 text-blue-400' }
-  const priorityIcons  = { urgent: '🔴', important: '🟡', info: '🔵' }
+  // matches the real priority values instructors actually pick from
+  // (low/medium/high/urgent) — the old urgent/important/info set didn't
+  // match 3 of those 4 real values at all
+  const priorityColors = {
+    urgent: 'bg-red-600/20 border-red-600/40 text-red-400',
+    high:   'bg-orange-600/20 border-orange-600/40 text-orange-400',
+    medium: 'bg-blue-600/20 border-blue-600/40 text-blue-400',
+    low:    'bg-slate-600/20 border-slate-600/40 text-slate-400',
+  }
+  const priorityIcons = { urgent: '🔴', high: '🟠', medium: '🔵', low: '⚪' }
 
   // ── Spellforge portal ─────────────────────────────────────────────────────
   if (activeTab === 'spellforge' && selectedQuest) {
@@ -715,6 +770,7 @@ export default function StudentDashboard({ user, onLogout }) {
 
   const tabs = [
     { id: 'subjects',   label: '🎓 My Subjects' },
+    { id: 'bounty',     label: '🏴 Bounty Board' },
     { id: 'hall',       label: '👑 Hall of Champions' },
     { id: 'hero',       label: '🧙 Hero Sheet' },
     { id: 'sandbox',    label: '🧪 Sandbox' },
@@ -786,7 +842,27 @@ export default function StudentDashboard({ user, onLogout }) {
                 </div>
                 <div className="max-h-96 overflow-y-auto">
                   {notifications.map(note => (
-                    <div key={note.id} className={`p-4 border-b border-slate-800 hover:bg-slate-800/40 transition cursor-pointer ${!note.read ? 'bg-purple-900/10' : ''}`}>
+                    <div
+                      key={note.id}
+                      onClick={() => {
+                        setShowNotifications(false)
+                        // global announcements (no specific class) have
+                        // nowhere to navigate to — only jump when this
+                        // notification actually belongs to one subject
+                        if (note.class_id && note.subject_id) {
+                          handleEnterSubject({
+                            id: note.subject_id,
+                            name: note.subject_name,
+                            section_id: note.class_id,
+                            section_no: note.section_no,
+                            semester: null,
+                            instructor: note.instructor,
+                          })
+                          setCourseTab('announcements')
+                        }
+                      }}
+                      className={`p-4 border-b border-slate-800 hover:bg-slate-800/40 transition cursor-pointer ${!note.read ? 'bg-purple-900/10' : ''}`}
+                    >
                       <div className="flex items-start gap-3">
                         <span className="text-lg">{priorityIcons[note.priority]}</span>
                         <div className="flex-1 min-w-0">
@@ -806,7 +882,12 @@ export default function StudentDashboard({ user, onLogout }) {
                   ))}
                 </div>
                 <div className="p-3 border-t border-purple-600/30 text-center">
-                  <button className="text-xs text-purple-400 hover:text-purple-300 transition">View All Notifications →</button>
+                  <button
+                    onClick={() => { setShowNotifications(false); setActiveTab('subjects') }}
+                    className="text-xs text-purple-400 hover:text-purple-300 transition"
+                  >
+                    Browse My Subjects →
+                  </button>
                 </div>
               </div>
             )}
@@ -875,12 +956,13 @@ export default function StudentDashboard({ user, onLogout }) {
         {!selectedBlock ? (
           <div className="animate-fade-in">
             {activeTab === 'subjects' && <MySubjects onSelectSubject={handleEnterSubject} user={user} stats={heroStats} />}
+            {activeTab === 'bounty' && <BountyBoard onSelectQuest={handleBountyQuestSelect} />}
             {activeTab === 'hall' && (
               <div className="overflow-hidden">
                 <Leaderboard currentUsername={user.username} />
               </div>
             )}
-            {activeTab === 'hero' && heroStats && <ProgressStats stats={heroStats} username={user.username} />}
+            {activeTab === 'hero' && heroStats && <ProgressStats stats={heroStats} username={user.username} fullName={user.full_name} />}
             {activeTab === 'sandbox' && (
               <div>
                 <SandboxHealthBanner health={sandboxHealth} />
@@ -924,6 +1006,7 @@ export default function StudentDashboard({ user, onLogout }) {
             <div className="flex gap-2 border-b border-purple-600/40 pb-2">
               {[
                 { id: 'lessons', label: '📚 Lessons' },  
+                { id: 'announcements', label: '📢 Announcements' },
                 { id: 'board', label: '🗺️ Quest Board' },
                 { id: 'log', label: '📜 Quest Log' },
                 { id: 'sandbox', label: '🧪 Sandbox' },
@@ -950,6 +1033,9 @@ export default function StudentDashboard({ user, onLogout }) {
                 <StudentLessons subjectId={selectedBlock.subject_id} blockId={selectedBlock.id} blockName={selectedBlock.name} />
               )}
               
+              {courseTab === 'announcements' && (
+                <StudentAnnouncements classId={selectedBlock.id} blockName={selectedBlock.name} />
+              )}
               {courseTab === 'board' && (
                 <ProblemList 
                   onSelectQuest={handleQuestSelect} 
@@ -969,7 +1055,7 @@ export default function StudentDashboard({ user, onLogout }) {
                  </div>
               )}
               {courseTab === 'hero' && heroStats && (
-                <ProgressStats stats={heroStats} username={user.username} />
+                <ProgressStats stats={heroStats} username={user.username} fullName={user.full_name} />
               )}
             </div>
           </div>

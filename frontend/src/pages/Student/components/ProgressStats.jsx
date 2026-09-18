@@ -4,7 +4,7 @@ import AchievementModal from "../../../components/AchievementModal"
 import { triggerConfetti } from '../../../utils/confetti'
 import AchievementToast from '../../../components/AchievementToast'
 
-export default function ProgressStats({ stats, username }) {
+export default function ProgressStats({ stats, username, fullName }) {
   const [animated, setAnimated] = useState(false)
   const [hoveredDay, setHoveredDay] = useState(null)
   const [achievements, setAchievements] = useState([])
@@ -161,10 +161,11 @@ export default function ProgressStats({ stats, username }) {
       <div className={`bg-gradient-to-r from-purple-900/40 to-pink-900/40 border border-purple-600/40 rounded-2xl p-6 transition-all duration-700 ${animated ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4'}`}>
         <div className="flex items-center gap-4">
           <div className="w-16 h-16 bg-gradient-to-br from-purple-600 to-pink-600 rounded-2xl flex items-center justify-center text-3xl font-bold shadow-lg shadow-purple-600/40 animate-pulse">
-            {username?.[0]?.toUpperCase() || 'S'}
+            {(fullName || username)?.[0]?.toUpperCase() || 'S'}
           </div>
           <div>
-            <h2 className="text-2xl font-bold text-white">{username}'s Hero Sheet</h2>
+            <h2 className="text-2xl font-bold text-white">{fullName || username}'s Hero Sheet</h2>
+            <p className="text-slate-500 text-xs font-mono">{username}</p>
             <p className="text-slate-400">Track your legendary progress</p>
           </div>
         </div>

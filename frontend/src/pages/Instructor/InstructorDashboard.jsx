@@ -161,9 +161,9 @@ export default function InstructorDashboard({ user, onLogout }) {
                 {location.pathname === '/instructor' && 'Dashboard'}
                 {location.pathname.startsWith('/instructor/classes') && 'My Classes'}
                 {location.pathname.startsWith('/instructor/class/') && 'Class Detail'}
-                {location.pathname.startsWith('/instructor/problems') && 'Activities'}
-                {location.pathname.startsWith('/instructor/create-problem') && 'Create Activity'}
-                {location.pathname.startsWith('/instructor/problem/') && 'Activity Submissions'}
+                {location.pathname.startsWith('/instructor/problems') && 'Quests'}
+                {location.pathname.startsWith('/instructor/create-problem') && 'Create Quest'}
+                {location.pathname.startsWith('/instructor/problem/') && 'Quest Submissions'}
                 {location.pathname.startsWith('/instructor/announcements') && 'Announcements'}
                 {location.pathname.startsWith('/instructor/materials') && 'Course Materials'}
                 {location.pathname.startsWith('/instructor/achievements') && 'Achievements'}

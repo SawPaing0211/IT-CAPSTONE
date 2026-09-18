@@ -57,8 +57,8 @@ export default function ClassDetail() {
   }, [id])
 
   const tabs = [
-    { id: 'lessons',       label: '📚 Modules',      component: <CourseMaterials  classId={id} /> },
-    { id: 'problems',      label: '📝 Activities',    component: <ProblemManagement classId={id} /> },
+    { id: 'lessons',       label: '📚 Modules',      component: <CourseMaterials  classId={id} subjectId={classInfo?.subject_id} /> },
+    { id: 'problems',      label: '📝 Activities',    component: <ProblemManagement classId={id} subjectId={classInfo?.subject_id} /> },
     { id: 'announcements', label: '📢 Announcements', component: <Announcements    classId={id} /> },
     { id: 'plagiarism',    label: '🔍 Plagiarism',    component: <PlagiarismCheck  classId={id} /> },
     { id: 'analytics',     label: '📊 Analytics',     component: <Analytics        classId={id} /> },

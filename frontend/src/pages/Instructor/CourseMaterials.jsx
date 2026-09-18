@@ -150,7 +150,7 @@ function LessonModal({ lesson, onClose }) {
 }
 
 // ── Main Component ────────────────────────────────────────────────────────────
-export default function CourseMaterials({ classId }) {
+export default function CourseMaterials({ classId, subjectId }) {
   const [showCreateForm, setShowCreateForm] = useState(false)
   const [lessons, setLessons]               = useState([])
   const [loadingLessons, setLoadingLessons] = useState(true)
@@ -186,7 +186,13 @@ export default function CourseMaterials({ classId }) {
     setLoadingLessons(true)
     try {
       const res = await fetch(`${API}/api/lessons`, { headers: authHeaders() })
-      if (res.ok) setLessons(await res.json())
+      if (res.ok) {
+        const all = await res.json()
+        // the backend returns every lesson this instructor has ever made,
+        // across every class they teach — only keep the ones for the
+        // subject this specific class tab belongs to
+        setLessons(subjectId ? all.filter(l => l.subject_id === subjectId) : all)
+      }
     } catch (err) {
       console.error('Failed to fetch lessons:', err)
     } finally {
