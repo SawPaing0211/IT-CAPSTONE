@@ -1,4 +1,4 @@
-// activities list for a class — shows all problems the instructor created.
+// quests list for a class — shows all problems the instructor created.
 // if classId is passed in (from ClassDetail tab), fetches problems scoped to
 // that class. if no classId (accessed directly), fetches all instructor problems.
 //
@@ -9,7 +9,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 
-export default function ProblemManagement({ classId }) {
+export default function ProblemManagement({ classId, subjectId }) {
   const navigate = useNavigate()
   const [problems, setProblems] = useState([])
   const [loading, setLoading]   = useState(true)
@@ -33,7 +33,7 @@ export default function ProblemManagement({ classId }) {
   }
 
   const handleDelete = async (id) => {
-    if (!confirm('Delete this activity? This also removes all student submissions for it.')) return
+    if (!confirm('Delete this quest? This also removes all student submissions for it.')) return
     try {
       const token = localStorage.getItem('token')
       const res = await fetch(`http://localhost:5000/api/problems/${id}`, {
@@ -70,7 +70,7 @@ export default function ProblemManagement({ classId }) {
   if (loading) return (
     <div className="flex flex-col items-center justify-center py-20 gap-4">
       <div className="animate-spin rounded-full h-10 w-10 border-4 border-purple-500 border-t-transparent" />
-      <p className="text-slate-500 text-sm animate-pulse">Loading activities...</p>
+      <p className="text-slate-500 text-sm animate-pulse">Loading quests...</p>
     </div>
   )
 
@@ -80,14 +80,14 @@ export default function ProblemManagement({ classId }) {
       {/* Header */}
       <div className="flex justify-between items-start gap-4 flex-wrap">
         <div>
-          <h2 className="text-2xl font-black text-white tracking-tight">Activities</h2>
-          <p className="text-slate-400 mt-0.5 text-sm">Create and manage coding activities for your students</p>
+          <h2 className="text-2xl font-black text-white tracking-tight">Quests</h2>
+          <p className="text-slate-400 mt-0.5 text-sm">Create and manage coding quests for your students</p>
         </div>
         <button
-          onClick={() => navigate(`/instructor/create-problem?from=${encodeURIComponent(fromPath)}`)}
+          onClick={() => navigate(`/instructor/create-problem?from=${encodeURIComponent(fromPath)}${subjectId ? `&subject_id=${subjectId}` : ''}`)}
           className="px-4 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white rounded-xl font-bold transition shadow-lg shadow-purple-600/20 flex items-center gap-2 text-sm"
         >
-          ➕ Create Activity
+          ⚔️ Create Quest
         </button>
       </div>
 
@@ -111,7 +111,7 @@ export default function ProblemManagement({ classId }) {
         <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 text-sm pointer-events-none">🔍</span>
         <input
           type="text"
-          placeholder="Search activities..."
+          placeholder="Search quests..."
           value={search}
           onChange={e => setSearch(e.target.value)}
           className="w-full bg-slate-900 border border-slate-800 rounded-xl px-5 py-3 pl-11 text-white placeholder-slate-600 focus:border-purple-500/60 focus:outline-none transition text-sm"
@@ -123,7 +123,7 @@ export default function ProblemManagement({ classId }) {
         <table className="w-full text-left text-sm">
           <thead>
             <tr className="bg-slate-800/60 text-slate-500 text-xs uppercase tracking-wider border-b border-slate-800">
-              <th className="px-5 py-3.5 font-semibold">Activity</th>
+              <th className="px-5 py-3.5 font-semibold">Quest</th>
               <th className="px-5 py-3.5 font-semibold">Type</th>
               <th className="px-5 py-3.5 font-semibold hidden md:table-cell">Languages</th>
               <th className="px-5 py-3.5 font-semibold">Difficulty</th>
@@ -139,14 +139,14 @@ export default function ProblemManagement({ classId }) {
                   <div className="flex flex-col items-center gap-3 text-slate-500">
                     <span className="text-5xl">📝</span>
                     <p className="font-medium text-slate-300">
-                      {search ? 'No activities match your search' : 'No activities yet'}
+                      {search ? 'No quests match your search' : 'No quests yet'}
                     </p>
                     {!search && (
                       <button
-                        onClick={() => navigate(`/instructor/create-problem?from=${encodeURIComponent(fromPath)}`)}
+                        onClick={() => navigate(`/instructor/create-problem?from=${encodeURIComponent(fromPath)}${subjectId ? `&subject_id=${subjectId}` : ''}`)}
                         className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-sm font-bold transition mt-1"
                       >
-                        Create Your First Activity
+                        Create Your First Quest
                       </button>
                     )}
                   </div>
@@ -159,7 +159,7 @@ export default function ProblemManagement({ classId }) {
                   <tr
                     key={problem.id}
                     className="hover:bg-slate-800/30 transition cursor-pointer group"
-                    onClick={() => navigate(`/instructor/problem/${problem.id}/submissions`)}
+                    onClick={() => navigate(`/instructor/problem/${problem.id}/submissions?from=${encodeURIComponent(fromPath)}`)}
                   >
                     {/* Title */}
                     <td className="px-5 py-4">
@@ -256,7 +256,7 @@ export default function ProblemManagement({ classId }) {
 
       {filtered.length > 0 && (
         <p className="text-slate-600 text-xs text-right">
-          Showing {filtered.length} of {problems.length} activities
+          Showing {filtered.length} of {problems.length} quests
         </p>
       )}
     </div>

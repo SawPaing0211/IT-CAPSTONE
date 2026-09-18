@@ -161,7 +161,7 @@ export default function Announcements({ classId }) {
           onClick={openCreate}
           className="px-4 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white rounded-xl font-bold transition shadow-lg shadow-purple-600/20 flex items-center gap-2 text-sm"
         >
-          ➕ New Announcement
+          📢 New Announcement
         </button>
       </div>
 
@@ -180,7 +180,8 @@ export default function Announcements({ classId }) {
       {showCreateForm && (
         <div className="bg-slate-900 border border-purple-600/20 rounded-2xl p-6 space-y-5">
           <div className="flex items-center justify-between">
-            <h3 className="text-lg font-bold text-white">
+            <h3 className="text-lg font-bold text-white flex items-center gap-2">
+              <span>{editingId ? '✏️' : '📢'}</span>
               {editingId ? 'Edit Announcement' : 'New Announcement'}
             </h3>
             <button onClick={closeForm} className="w-9 h-9 flex items-center justify-center rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition">

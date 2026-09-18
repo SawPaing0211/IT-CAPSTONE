@@ -110,7 +110,7 @@ export default function DashboardOverview() {
       <div className="flex items-start justify-between">
         <div>
           <h1 className="text-2xl font-black text-white tracking-tight">Dashboard</h1>
-          <p className="text-slate-400 mt-0.5 text-sm">Manage your classes, activities, and student progress</p>
+          <p className="text-slate-400 mt-0.5 text-sm">Manage your classes, quests, and student progress</p>
         </div>
         <div className="text-xs text-slate-500 text-right">
           <p className="text-slate-400 font-medium">Updated {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
@@ -326,7 +326,7 @@ export default function DashboardOverview() {
             </div>
             <div className="p-4 space-y-2">
               {[
-                { icon: '➕', label: 'Create Activity',     sub: 'Add new challenge',         color: 'purple', path: '/instructor/create-problem' },
+                { icon: '⚔️', label: 'Create Quest',     sub: 'Add new challenge',         color: 'purple', path: '/instructor/create-problem' },
                 { icon: '🏫', label: 'View Classes',        sub: 'Manage class list',          color: 'blue',   path: '/instructor/classes' },
                 { icon: '📢', label: 'Post Announcement',   sub: 'Communicate with students',  color: 'pink',   path: '/instructor/announcements' },
               ].map(action => {

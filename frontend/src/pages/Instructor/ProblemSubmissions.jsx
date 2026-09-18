@@ -1,10 +1,14 @@
 import { useState, useEffect } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import StudentCodeModal from "./StudentCodeModal";
 
 export default function ProblemSubmissions() {
   const { problemId } = useParams()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  // where this page came from — falls back to the standalone quests list
+  // if it was reached some other way and no "from" was ever set
+  const goBack = () => navigate(searchParams.get('from') || '/instructor/problems')
   const [problem, setProblem] = useState(null)
   const [students, setStudents] = useState([])
   const [loading, setLoading] = useState(true)
@@ -66,7 +70,7 @@ export default function ProblemSubmissions() {
       <div className="text-center py-20">
         <p className="text-red-400 mb-4">⚠️ {error}</p>
         <button
-          onClick={() => navigate('/instructor/problems')}
+          onClick={goBack}
           className="px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300"
         >
           ← Back to Problems
@@ -96,7 +100,7 @@ export default function ProblemSubmissions() {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
           <button
-            onClick={() => navigate('/instructor/problems')}
+            onClick={goBack}
             className="text-slate-400 hover:text-white transition"
           >
             ← Back
