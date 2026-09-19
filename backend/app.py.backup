@@ -1750,15 +1750,19 @@ def get_student_submissions():
     subs = Submission.query.filter_by(user_id=user_id)\
         .order_by(Submission.submitted_at.desc())\
         .limit(limit).offset((page-1)*limit).all()
-    
+
+    # one query for every problem this page needs, instead of querying
+    # per row per field — this page used to run up to 4 database queries
+    # per submission just to get its title and difficulty
+    problem_ids = list(set(s.problem_id for s in subs))
+    problems_by_id = {p.id: p for p in Problem.query.filter(Problem.id.in_(problem_ids)).all()}
+
     return jsonify({
         "submissions": [{
             "id": s.id, 
             "problem_id": s.problem_id, 
-            "problem_title": Problem.query.get(s.problem_id).title if Problem.query.get(s.problem_id) else "Unknown", 
-            # ✅ added: frontend needs this to show real difficulty stats
-            # instead of guessing/hardcoding it (see ProgressStats.jsx)
-            "difficulty": Problem.query.get(s.problem_id).difficulty if Problem.query.get(s.problem_id) else None,
+            "problem_title": problems_by_id[s.problem_id].title if s.problem_id in problems_by_id else "Unknown",
+            "difficulty": problems_by_id[s.problem_id].difficulty if s.problem_id in problems_by_id else None,
             "status": s.status, 
             "score": s.score, 
             "language": s.language, 
@@ -2100,6 +2104,9 @@ def get_submissions_by_section():
         subject_id=section.subject_id, is_published=True
     ).all()
     problem_ids = [p.id for p in problems_for_subject]
+    # reuses the list already fetched above instead of querying again
+    # per row — this page used to run 2 extra queries per submission
+    problems_by_id = {p.id: p for p in problems_for_subject}
 
     if not problem_ids:
         return jsonify({"submissions": []}), 200
@@ -2113,7 +2120,7 @@ def get_submissions_by_section():
         "submissions": [{
             "id": s.id,
             "problem_id": s.problem_id,
-            "problem_title": Problem.query.get(s.problem_id).title if Problem.query.get(s.problem_id) else "Unknown",
+            "problem_title": problems_by_id[s.problem_id].title if s.problem_id in problems_by_id else "Unknown",
             "status": s.status,
             "score": s.score,
             "language": s.language,
@@ -2192,14 +2199,11 @@ def get_class_problems(class_id):
         if not assignment:
             return jsonify({"error": "Not assigned to any section"}), 403
 
+    section = SubjectSection.query.get(class_id)
+    if not section:
+        return jsonify({"error": "Class not found"}), 404
+
     problems = Problem.query.filter_by(created_by=user_id).all()
-
-    instructor_subject_ids_in_block = list(set(
-        a.subject_id for a in TeacherAssignment.query.filter_by(
-            instructor_id=user_id
-        ).all()
-    ))
-
 
     result = []
     for p in problems:
@@ -2208,7 +2212,10 @@ def get_class_problems(class_id):
             if class_id in p.visible_to_sections:
                 in_scope = True
         else:
-            if p.subject_id in instructor_subject_ids_in_block:
+            # no specific sections chosen = visible to every section under
+            # THIS SAME subject only — not every subject the instructor
+            # happens to teach something for
+            if p.subject_id == section.subject_id:
                 in_scope = True
 
         if not in_scope:
@@ -2772,8 +2779,15 @@ def get_problem_submissions(problem_id):
     submissions = Submission.query.filter_by(problem_id=problem_id)\
         .order_by(Submission.submitted_at.desc()).all()
 
-    assignments = TeacherAssignment.query.filter_by(instructor_id=user_id).all()
+    assignments = TeacherAssignment.query.filter_by(
+        instructor_id=user_id, subject_id=problem.subject_id
+    ).all()
     section_ids = list(set(a.section_id for a in assignments if a.section_id))
+
+    # if this quest is scoped to specific sections, only count those —
+    # not every section the instructor teaches for this subject
+    if problem.visible_to_sections:
+        section_ids = [sid for sid in section_ids if sid in problem.visible_to_sections]
 
     enrolled_student_ids = []
     if section_ids:
@@ -3013,32 +3027,58 @@ def update_announcement(announcement_id):
 @app.route('/api/student/announcements', methods=['GET'])
 @jwt_required()
 def get_student_announcements():
-    """Get announcements for logged-in student's blocks"""
+    # every announcement visible to this student — global ones (no class_id
+    # set) plus ones posted specifically to any section they're actually
+    # enrolled in. uses IrregularEnrollment like every other multi-subject
+    # student endpoint (Bounty Board, My Subjects) — a student can be in
+    # more than one section, so a single section_id field was never enough.
     user_id = int(get_jwt_identity())
     user = User.query.get(user_id)
     if user.role != 'student':
         return jsonify({"error": "Students only"}), 403
-    
-    # ✅ FIX: this used to only match class_id == None (global announcements),
-    # so anything an instructor posted to a specific class was invisible to
-    # students in that class. Now also matches the student's own section.
+
+    enrollments = IrregularEnrollment.query.filter_by(student_id=user_id).all()
+    section_ids = [e.section_id for e in enrollments]
+
     announcements = Announcement.query.filter(
         db.or_(
             Announcement.class_id == None,
-            Announcement.class_id == user.section_id
+            Announcement.class_id.in_(section_ids)
         )
     ).order_by(Announcement.is_pinned.desc(), Announcement.created_at.desc()).all()
 
-    return jsonify([{
-        "id": a.id,
-        "title": a.title,
-        "content": a.content,
-        "is_pinned": a.is_pinned,
-        "priority": a.priority,
-        "created_at": a.created_at.isoformat(),
-        "instructor": User.query.get(a.instructor_id).username if a.instructor_id else "System",
-        "block_name": "All Classes" if a.class_id is None else "My Class"
-    } for a in announcements]), 200
+    sections_by_id = {s.id: s for s in SubjectSection.query.filter(SubjectSection.id.in_(section_ids)).all()}
+    subjects_by_id = {}
+    if sections_by_id:
+        subj_ids = list(set(s.subject_id for s in sections_by_id.values()))
+        subjects_by_id = {s.id: s for s in Subject.query.filter(Subject.id.in_(subj_ids)).all()}
+
+    result = []
+    for a in announcements:
+        subject_name = "All Subjects"
+        section_no = None
+        if a.class_id and a.class_id in sections_by_id:
+            section = sections_by_id[a.class_id]
+            section_no = section.section_no
+            subject = subjects_by_id.get(section.subject_id)
+            subject_name = subject.name if subject else "Unknown Subject"
+
+        result.append({
+            "id": a.id,
+            "title": a.title,
+            "content": a.content,
+            "is_pinned": a.is_pinned,
+            "priority": a.priority,
+            "created_at": a.created_at.isoformat(),
+            "instructor": User.query.get(a.instructor_id).username if a.instructor_id else "System",
+            "class_id": a.class_id,
+            # numeric subject id — lets the frontend jump straight into the
+            # right subject's tabs when a notification is clicked
+            "subject_id": sections_by_id[a.class_id].subject_id if a.class_id in sections_by_id else None,
+            "subject_name": subject_name,
+            "section_no": section_no
+        })
+    return jsonify(result), 200
 
 @app.route('/api/admin/dashboard-stats', methods=['GET'])
 @admin_required
