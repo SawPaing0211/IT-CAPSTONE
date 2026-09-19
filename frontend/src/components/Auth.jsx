@@ -1,33 +1,41 @@
 import { useState, useEffect } from 'react'
 
-export default function Auth({ onLogin, initialMode = 'login' }) {
-  const [isLogin, setIsLogin] = useState(initialMode === 'login')
-  const [formData, setFormData] = useState({ username: '', email: '', password: '' })
+// minimalist line-art eye icons for the password show/hide toggle
+function EyeIcon({ size = 18 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  )
+}
+function EyeOffIcon({ size = 18 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+      <line x1="1" y1="1" x2="23" y2="23" />
+    </svg>
+  )
+}
+
+export default function Auth({ onLogin }) {
+  const [formData, setFormData] = useState({ username: '', password: '' })
   const [error, setError] = useState('')
   const [lockedInfo, setLockedInfo] = useState(null)
   const [countdown, setCountdown] = useState(0)
   const [loading, setLoading] = useState(false)
-  const [selectedClass, setSelectedClass] = useState('student')
-
-  useEffect(() => {
-    setIsLogin(initialMode === 'login')
-  }, [initialMode])
+  const [showPassword, setShowPassword] = useState(false)
 
   const handleSubmit = async (e) => {
   e.preventDefault()
   setError('')
   setLoading(true)
   
-  const endpoint = isLogin ? '/api/auth/login' : '/api/auth/register'
-  const payload = isLogin 
-    ? { username: formData.username, password: formData.password }
-    : { ...formData, role: selectedClass }
-  
   try {
-    const res = await fetch(`http://localhost:5000${endpoint}`, {
+    const res = await fetch(`http://localhost:5000/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+      body: JSON.stringify({ username: formData.username, password: formData.password })
     })
     const data = await res.json()
     
@@ -54,46 +62,33 @@ export default function Auth({ onLogin, initialMode = 'login' }) {
       return
     }
     
-    if (isLogin) {
-      // Save tokens
-      localStorage.setItem('token', data.access_token)
-      localStorage.setItem('user', JSON.stringify(data.user))
-      if (data.refresh_token) {
-        localStorage.setItem('refresh_token', data.refresh_token)
-      }
-      
-      
-      const role = data.user.role
-      console.log('Login successful, role:', role)
-      
-      setTimeout(() => {
-        if (role === 'administrator') {
-          window.location.href = '/admin'
-        } else if (role === 'instructor') {
-          window.location.href = '/instructor'
-        } else if (role === 'student') {
-          window.location.href = '/student'
-        } else {
-          onLogin(data.user)
-        }
-      }, 100)
-      
-    } else {
-      alert('⚔️ Account created! Your quest begins!')
-      setIsLogin(true)
-      setFormData({ username: '', email: '', password: '' })
+    // Save tokens
+    localStorage.setItem('token', data.access_token)
+    localStorage.setItem('user', JSON.stringify(data.user))
+    if (data.refresh_token) {
+      localStorage.setItem('refresh_token', data.refresh_token)
     }
+
+    const role = data.user.role
+    console.log('Login successful, role:', role)
+
+    setTimeout(() => {
+      if (role === 'administrator') {
+        window.location.href = '/admin'
+      } else if (role === 'instructor') {
+        window.location.href = '/instructor'
+      } else if (role === 'student') {
+        window.location.href = '/student'
+      } else {
+        onLogin(data.user)
+      }
+    }, 100)
   } catch (err) {
     setError(err.message)
   } finally {
     setLoading(false)
   }
 }
-
-  const classOptions = [
-  { id: 'student', icon: '🗡️', name: 'Student', desc: 'Learn & conquer', color: 'from-purple-600 to-pink-600' },
-  { id: 'instructor', icon: '📚', name: 'Instructor', desc: 'Teach & guide', color: 'from-blue-600 to-cyan-600' },
-]
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-950 via-purple-950/20 to-slate-950 flex items-center justify-center p-4 relative overflow-hidden">
@@ -125,10 +120,10 @@ export default function Auth({ onLogin, initialMode = 'login' }) {
               </div>
             </div>
             <h2 className="text-3xl font-black text-center bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent">
-              {isLogin ? 'WELCOME BACK' : 'BEGIN YOUR QUEST'}
+              WELCOME BACK
             </h2>
             <p className="text-center text-slate-400 text-sm mt-2">
-              {isLogin ? 'Enter your credentials to continue' : 'Create your character and start coding'}
+              Enter your credentials to continue
             </p>
           </div>
 
@@ -167,23 +162,6 @@ export default function Auth({ onLogin, initialMode = 'login' }) {
               </div>
             )}
 
-            {/* Email Field (Register only) */}
-            {!isLogin && (
-              <div className="space-y-2">
-                <label className="text-sm font-bold text-purple-300 uppercase tracking-wider flex items-center gap-2">
-                  <span>📧</span> Email Address
-                </label>
-                <input
-                  type="email"
-                  placeholder="hero@example.com"
-                  className="w-full p-4 rounded-lg bg-slate-800/80 text-white border-2 border-slate-700 focus:border-purple-500 outline-none transition placeholder:text-slate-600 font-mono"
-                  value={formData.email}
-                  onChange={(e) => setFormData({...formData, email: e.target.value})}
-                  required
-                />
-              </div>
-            )}
-
             {/* Username Field */}
             <div className="space-y-2">
               <label className="text-sm font-bold text-purple-300 uppercase tracking-wider flex items-center gap-2">
@@ -205,45 +183,26 @@ export default function Auth({ onLogin, initialMode = 'login' }) {
               <label className="text-sm font-bold text-purple-300 uppercase tracking-wider flex items-center gap-2">
                 <span>🔐</span> Password
               </label>
-              <input
-                type="password"
-                placeholder="••••••••"
-                className="w-full p-4 rounded-lg bg-slate-800/80 text-white border-2 border-slate-700 focus:border-purple-500 outline-none transition placeholder:text-slate-600 font-mono"
-                value={formData.password}
-                onChange={(e) => setFormData({...formData, password: e.target.value})}
-                required
-                autoComplete={isLogin ? 'current-password' : 'new-password'}
-              />
-            </div>
-
-            {/* Class Selection (Register only) */}
-            {!isLogin && (
-              <div className="space-y-3">
-                <label className="text-sm font-bold text-purple-300 uppercase tracking-wider flex items-center gap-2">
-                  <span>⚔️</span> Choose Your Class
-                </label>
-                <div className="grid grid-cols-2 gap-3">
-                  {classOptions.map((cls) => (
-                    <button
-                      key={cls.id}
-                      type="button"
-                      onClick={() => setSelectedClass(cls.id)}
-                      className={`p-4 rounded-lg border-2 transition transform hover:scale-105 ${
-                        selectedClass === cls.id
-                          ? `bg-gradient-to-br ${cls.color} border-white/50 shadow-lg`
-                          : 'bg-slate-800/50 border-slate-700 hover:border-purple-500/50'
-                      }`}
-                    >
-                      <div className="text-3xl mb-1">{cls.icon}</div>
-                      <div className={`font-bold text-sm ${selectedClass === cls.id ? 'text-white' : 'text-slate-400'}`}>
-                        {cls.name}
-                      </div>
-                      <div className="text-xs text-slate-500 mt-1">{cls.desc}</div>
-                    </button>
-                  ))}
-                </div>
+              <div className="relative">
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  placeholder="••••••••"
+                  className="w-full p-4 pr-12 rounded-lg bg-slate-800/80 text-white border-2 border-slate-700 focus:border-purple-500 outline-none transition placeholder:text-slate-600 font-mono"
+                  value={formData.password}
+                  onChange={(e) => setFormData({...formData, password: e.target.value})}
+                  required
+                  autoComplete="current-password"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(v => !v)}
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition"
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                >
+                  {showPassword ? <EyeOffIcon /> : <EyeIcon />}
+                </button>
               </div>
-            )}
+            </div>
 
             {/* Submit Button */}
             <button 
@@ -258,24 +217,11 @@ export default function Auth({ onLogin, initialMode = 'login' }) {
                 </span>
               ) : (
                 <span className="flex items-center justify-center gap-2">
-                  {isLogin ? '⚔️ Login' : ' Start Quest'}
+                  ⚔️ Login
                 </span>
               )}
             </button>
 
-            {/* Toggle Mode */}
-            <div className="text-center pt-4 border-t border-slate-800">
-              <p className="text-slate-400 text-sm">
-                {isLogin ? "Don't have an account? " : "Already have an account? "}
-                <button 
-                  type="button" 
-                  onClick={() => setIsLogin(!isLogin)}
-                  className="text-purple-400 hover:text-purple-300 font-bold hover:underline transition"
-                >
-                  {isLogin ? 'Register Now' : 'Login Here'}
-                </button>
-              </p>
-            </div>
           </form>
 
           {/* Footer */}

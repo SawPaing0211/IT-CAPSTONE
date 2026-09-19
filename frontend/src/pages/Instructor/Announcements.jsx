@@ -136,10 +136,10 @@ export default function Announcements({ classId }) {
   }
 
   const priorityConfig = {
-    low:    { label: 'Low',    color: 'text-slate-400',  bg: 'bg-slate-700/40',  border: 'border-slate-600' },
-    medium: { label: 'Medium', color: 'text-blue-400',   bg: 'bg-blue-500/10',   border: 'border-blue-500/20' },
-    high:   { label: 'High',   color: 'text-orange-400', bg: 'bg-orange-500/10', border: 'border-orange-500/20' },
-    urgent: { label: 'Urgent', color: 'text-red-400',    bg: 'bg-red-500/10',    border: 'border-red-500/20' },
+    low:    { label: 'Low',    color: 'text-slate-400',  bg: 'bg-slate-700/40',  border: 'border-slate-600',     selectedBorder: 'border-slate-400' },
+    medium: { label: 'Medium', color: 'text-blue-400',   bg: 'bg-blue-500/10',   border: 'border-blue-500/20',   selectedBorder: 'border-blue-500' },
+    high:   { label: 'High',   color: 'text-orange-400', bg: 'bg-orange-500/10', border: 'border-orange-500/20', selectedBorder: 'border-orange-500' },
+    urgent: { label: 'Urgent', color: 'text-red-400',    bg: 'bg-red-500/10',    border: 'border-red-500/20',    selectedBorder: 'border-red-500' },
   }
 
   const filtered = announcements.filter(a => {
@@ -202,31 +202,44 @@ export default function Announcements({ classId }) {
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-slate-400 text-xs font-medium uppercase tracking-wider mb-2">Priority</label>
-              <select
-                name="priority" value={form.priority} onChange={handleChange}
-                className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white outline-none cursor-pointer text-sm focus:border-purple-500/60 transition"
-              >
-                <option value="low">Low</option>
-                <option value="medium">Medium</option>
-                <option value="high">High</option>
-                <option value="urgent">Urgent</option>
-              </select>
+          <div>
+            <label className="block text-slate-400 text-xs font-medium uppercase tracking-wider mb-2">Priority</label>
+            <div className="grid grid-cols-4 gap-2">
+              {Object.entries(priorityConfig).map(([key, pc]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setForm(prev => ({ ...prev, priority: key }))}
+                  className={`py-2.5 rounded-xl text-sm font-bold border-2 transition ${
+                    form.priority === key
+                      ? `${pc.bg} ${pc.color} ${pc.selectedBorder}`
+                      : 'bg-slate-800 border-slate-700 text-slate-500 hover:text-slate-300 hover:border-slate-600'
+                  }`}
+                >
+                  {pc.label}
+                </button>
+              ))}
             </div>
-            <div className="flex items-end pb-1">
-              <label className="flex items-center gap-3 cursor-pointer select-none">
-                <input
-                  type="checkbox" name="is_pinned" checked={form.is_pinned} onChange={handleChange}
-                  className="w-5 h-5 rounded border-slate-600 text-purple-600 focus:ring-purple-500 cursor-pointer"
-                />
-                <div>
-                  <p className="text-white text-sm font-medium">Pin announcement</p>
-                  <p className="text-slate-500 text-xs">Shows at the top of the list</p>
+          </div>
+
+          <div className={`p-4 border rounded-xl transition ${
+            form.is_pinned
+              ? 'bg-gradient-to-r from-purple-900/20 to-pink-900/20 border-purple-600/30'
+              : 'bg-slate-800/40 border-slate-700'
+          }`}>
+            <label className="flex items-center justify-between cursor-pointer">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xl">📌</span>
+                  <span className="text-white font-bold text-sm">Pin announcement</span>
                 </div>
-              </label>
-            </div>
+                <p className="text-slate-400 text-xs mt-1">Shows at the top of the list</p>
+              </div>
+              <input
+                type="checkbox" name="is_pinned" checked={form.is_pinned} onChange={handleChange}
+                className="w-6 h-6 rounded border-slate-600 text-purple-600 focus:ring-purple-500 cursor-pointer"
+              />
+            </label>
           </div>
 
           <div>

@@ -52,17 +52,11 @@ export default function Landing({ onLogin }) {
             </div>
           </div>
           <div className="flex gap-3">
-            <button 
+            <button
               onClick={() => { setAuthMode('login'); setShowAuth(true) }}
               className="px-6 py-3 bg-slate-800/80 hover:bg-slate-700 border-2 border-slate-600 hover:border-purple-500 rounded-lg transition font-bold shadow-lg"
             >
               🎮 Login
-            </button>
-            <button 
-              onClick={() => { setAuthMode('register'); setShowAuth(true) }}
-              className="px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 rounded-lg transition font-bold shadow-xl shadow-purple-600/50 transform hover:scale-105"
-            >
-              Start Quest ➜
             </button>
           </div>
         </nav>
@@ -98,8 +92,8 @@ export default function Landing({ onLogin }) {
             
             {/* CTA Buttons - Game Menu Style */}
             <div className="flex flex-col sm:flex-row gap-5 justify-center mb-20">
-              <button 
-                onClick={() => { setAuthMode('register'); setShowAuth(true) }}
+              <button
+                onClick={() => { setAuthMode('login'); setShowAuth(true) }}
                 className="group relative px-12 py-6 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-xl font-black text-xl transition transform hover:scale-105 shadow-2xl shadow-purple-600/50 border-4 border-purple-400/30"
               >
                 <span className="flex items-center justify-center gap-3">
