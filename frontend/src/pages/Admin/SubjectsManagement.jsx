@@ -17,6 +17,7 @@ export default function SubjectsManagement() {
     subject_type: 'lab',
   })
   const [toast, setToast] = useState(null)
+  const [deleteTarget, setDeleteTarget] = useState(null) // { id, name } of the subject pending deletion
   const [newSubject, setNewSubject] = useState({
     internal_subject_no: '',
     name: '',
@@ -51,7 +52,7 @@ export default function SubjectsManagement() {
 
   const handleCreateSubject = async () => {
     if (!newSubject.name.trim()) {
-      alert('Subject name is required')
+      showToast('Subject name is required', 'error')
       return
     }
 
@@ -89,14 +90,14 @@ export default function SubjectsManagement() {
           subject_type: 'lab' 
         })
         await fetchSubjects()
-        alert('✅ Subject created successfully!')
+        showToast('Subject created successfully!')
       } else {
         const error = await res.json()
-        alert(`Failed to create subject: ${error.error}`)
+        showToast(`Failed to create subject: ${error.error}`, 'error')
       }
     } catch (err) {
       console.error('Failed to create subject:', err)
-      alert('Failed to create subject')
+      showToast('Failed to create subject', 'error')
     }
   }
 
@@ -155,26 +156,33 @@ export default function SubjectsManagement() {
     }
   }
 
-  const handleDeleteSubject = async (subjectId, subjectName) => {
-    if (!confirm(`Delete "${subjectName}"?\n\n⚠️ This will affect blocks using this subject!`)) return
+  // opens the confirm modal instead of blocking with a native dialog —
+  // the actual delete only happens once the admin confirms inside it
+  const handleDeleteSubject = (subjectId, subjectName) => {
+    setDeleteTarget({ id: subjectId, name: subjectName })
+  }
 
+  const confirmDeleteSubject = async () => {
+    if (!deleteTarget) return
     try {
       const token = localStorage.getItem('token')
-      const res = await fetch(`http://localhost:5000/api/admin/subjects/${subjectId}`, {
+      const res = await fetch(`http://localhost:5000/api/admin/subjects/${deleteTarget.id}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       })
 
       if (res.ok) {
         await fetchSubjects()
-        alert('✅ Subject deleted successfully!')
+        showToast('Subject deleted successfully!')
       } else {
         const error = await res.json()
-        alert(`Failed to delete subject: ${error.error}`)
+        showToast(`Failed to delete subject: ${error.error}`, 'error')
       }
     } catch (err) {
       console.error('Failed to delete subject:', err)
-      alert('Failed to delete subject')
+      showToast('Failed to delete subject', 'error')
+    } finally {
+      setDeleteTarget(null)
     }
   }
 
@@ -195,6 +203,41 @@ export default function SubjectsManagement() {
         </div>
       )}
 
+      {deleteTarget && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
+          <div className="bg-slate-900 border-2 border-red-600/40 rounded-2xl w-full max-w-md shadow-2xl shadow-red-900/30 overflow-hidden">
+            <div className="p-6 space-y-4">
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 bg-red-600/20 border border-red-600/40 rounded-xl flex items-center justify-center text-xl shrink-0">
+                  ⚠️
+                </div>
+                <div>
+                  <h3 className="text-white font-bold text-lg">Delete Subject?</h3>
+                  <p className="text-slate-400 text-sm">This can't be undone</p>
+                </div>
+              </div>
+              <p className="text-slate-300 text-sm">
+                Delete <span className="text-white font-semibold">"{deleteTarget.name}"</span>? This will affect any class codes using this subject.
+              </p>
+            </div>
+            <div className="flex gap-3 p-6 pt-0">
+              <button
+                onClick={() => setDeleteTarget(null)}
+                className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 rounded-xl text-slate-300 font-bold transition text-sm"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDeleteSubject}
+                className="flex-1 py-2.5 bg-red-600 hover:bg-red-500 rounded-xl text-white font-bold transition text-sm"
+              >
+                🗑️ Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Edit Subject Modal */}
       {showEditModal && editingSubject && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
@@ -208,7 +251,7 @@ export default function SubjectsManagement() {
                 </div>
               </div>
               <button onClick={() => { setShowEditModal(false); setEditingSubject(null) }}
-                className="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition text-lg">×</button>
+                className="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition text-lg">✕</button>
             </div>
             <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
               <div className="grid grid-cols-3 gap-3">
@@ -264,13 +307,10 @@ export default function SubjectsManagement() {
                 </div>
                 <div>
                   <label className="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">Type</label>
-                  <select value={editForm.subject_type} onChange={e => setEditForm({...editForm, subject_type: e.target.value})}
-                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-white outline-none focus:border-purple-500 transition text-sm">
-                    <option value="lab">Lab ✓</option>
-                    <option value="lecture_lab">Lec + Lab</option>
-                    <option value="elective">Elective</option>
-                  </select>
-                  <p className="text-yellow-500/80 text-[10px] mt-1">Only Lab subjects supported</p>
+                  <div className="w-full bg-slate-800/60 border border-slate-700 rounded-xl px-3 py-2.5 text-emerald-400 text-sm font-semibold flex items-center gap-2">
+                    🧪 Lab
+                  </div>
+                  <p className="text-slate-500 text-[10px] mt-1">This platform is lab-only</p>
                 </div>
               </div>
               <div>
@@ -312,7 +352,7 @@ export default function SubjectsManagement() {
           onClick={() => setShowCreateModal(true)}
           className="px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-xl text-white font-bold transition shadow-lg shadow-purple-600/30 flex items-center gap-2"
         >
-          <span className="text-xl">+</span> Create Subject
+          <span className="text-xl">📚</span> Create Subject
         </button>
       </div>
 
@@ -321,6 +361,20 @@ export default function SubjectsManagement() {
         <div className="bg-gradient-to-br from-purple-900/30 to-slate-900 border border-purple-600/30 rounded-xl p-4">
           <p className="text-slate-400 text-sm">Total Subjects</p>
           <p className="text-3xl font-bold text-purple-300 mt-1">{subjects.length}</p>
+        </div>
+        <div className="bg-gradient-to-br from-blue-900/30 to-slate-900 border border-blue-600/30 rounded-xl p-4">
+          <p className="text-slate-400 text-sm">Departments</p>
+          <p className="text-3xl font-bold text-blue-300 mt-1">
+            {new Set(subjects.map(s => s.department).filter(Boolean)).size}
+          </p>
+        </div>
+        <div className="bg-gradient-to-br from-emerald-900/30 to-slate-900 border border-emerald-600/30 rounded-xl p-4">
+          <p className="text-slate-400 text-sm">Avg. Units</p>
+          <p className="text-3xl font-bold text-emerald-300 mt-1">
+            {subjects.length && subjects.some(s => s.units)
+              ? (subjects.reduce((sum, s) => sum + (s.units || 0), 0) / subjects.filter(s => s.units).length).toFixed(1)
+              : '—'}
+          </p>
         </div>
       </div>
 
@@ -338,7 +392,7 @@ export default function SubjectsManagement() {
               <div className="flex items-start justify-between">
                 <div className="flex items-start gap-4 flex-1">
                   <div className="w-12 h-12 bg-gradient-to-br from-purple-600 to-pink-600 rounded-xl flex items-center justify-center text-2xl flex-shrink-0">
-                    📖
+                    💻
                   </div>
                   <div className="flex-1">
                     <div className="flex items-center gap-2 flex-wrap mb-1">
@@ -369,7 +423,7 @@ export default function SubjectsManagement() {
                     </div>
                   </div>
                 </div>
-                <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition">
+                <div className="flex gap-2">
                   <button
                     onClick={() => handleEditClick(subject)}
                     className="px-4 py-2 bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 rounded-lg text-sm font-bold transition flex items-center gap-2"
@@ -406,7 +460,7 @@ export default function SubjectsManagement() {
               <button
                 onClick={() => setShowCreateModal(false)}
                 className="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition text-lg"
-              >×</button>
+              >✕</button>
             </div>
 
             {/* Body */}
@@ -501,16 +555,12 @@ export default function SubjectsManagement() {
                 </div>
                 <div>
                   <label className="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">Type</label>
-                  <select
-                    value={newSubject.subject_type}
-                    onChange={(e) => setNewSubject({...newSubject, subject_type: e.target.value})}
-                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-white outline-none focus:border-purple-500 transition text-sm"
-                  >
-                    <option value="lab">Lab ✓</option>
-                    <option value="lecture_lab">Lec + Lab</option>
-                    <option value="elective">Elective</option>
-                  </select>
-                  <p className="text-yellow-500/80 text-[10px] mt-1">Only Lab subjects supported</p>
+                  {/* forge.dev is a coding platform — every subject here has
+                      to be hands-on lab work, so this is fixed, not a choice */}
+                  <div className="w-full bg-slate-800/60 border border-slate-700 rounded-xl px-3 py-2.5 text-emerald-400 text-sm font-semibold flex items-center gap-2">
+                    🧪 Lab
+                  </div>
+                  <p className="text-slate-500 text-[10px] mt-1">This platform is lab-only</p>
                 </div>
               </div>
 
@@ -538,7 +588,7 @@ export default function SubjectsManagement() {
                 <div className="bg-slate-800/60 border border-purple-600/20 rounded-xl p-4">
                   <p className="text-slate-500 text-xs uppercase tracking-wider font-semibold mb-3">Preview</p>
                   <div className="flex items-start gap-3">
-                    <div className="w-10 h-10 bg-gradient-to-br from-purple-600 to-pink-600 rounded-xl flex items-center justify-center text-lg flex-shrink-0">📖</div>
+                    <div className="w-10 h-10 bg-gradient-to-br from-purple-600 to-pink-600 rounded-xl flex items-center justify-center text-lg flex-shrink-0">💻</div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         {/* ✅ Preview shows both numbers */}
@@ -598,7 +648,7 @@ export default function SubjectsManagement() {
                   onClick={handleCreateSubject}
                   className="flex-1 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-xl text-white font-bold transition shadow-lg shadow-purple-600/30 flex items-center justify-center gap-2"
                 >
-                  ✅ Create Subject
+                  📚 Create Subject
                 </button>
               </div>
 

@@ -890,6 +890,38 @@ function CSVUploadModal({ onClose, onSuccess }) {
               ))}
             </div>
           )}
+
+          {/* per-row results — the backend already sends this for every
+              row (created/skipped/error + a reason), it just wasn't being
+              shown here before. without this, "3 errors" told you nothing
+              about which 3 rows or why. */}
+          {result.results?.length > 0 && (
+            <div style={{ borderRadius: 10, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)', maxHeight: 210, overflowY: 'auto' }}>
+              <table style={{ width: '100%', fontSize: '0.8rem', borderCollapse: 'collapse' }}>
+                <thead style={{ background: 'rgba(255,255,255,0.06)', position: 'sticky', top: 0 }}>
+                  <tr>
+                    <th style={{ textAlign: 'left', padding: '0.5rem 0.75rem', color: '#94a3b8', fontWeight: 600, fontSize: '0.7rem' }}>Row</th>
+                    <th style={{ textAlign: 'left', padding: '0.5rem 0.75rem', color: '#94a3b8', fontWeight: 600, fontSize: '0.7rem' }}>Section</th>
+                    <th style={{ textAlign: 'left', padding: '0.5rem 0.75rem', color: '#94a3b8', fontWeight: 600, fontSize: '0.7rem' }}>Status</th>
+                    <th style={{ textAlign: 'left', padding: '0.5rem 0.75rem', color: '#94a3b8', fontWeight: 600, fontSize: '0.7rem' }}>Details</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {result.results.map((r, i) => {
+                    const statusColor = r.status === 'created' ? '#4ade80' : r.status === 'skipped' ? '#facc15' : '#f87171'
+                    return (
+                      <tr key={i} style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                        <td style={{ padding: '0.5rem 0.75rem', color: '#64748b', fontFamily: 'monospace', fontSize: '0.75rem' }}>{r.row}</td>
+                        <td style={{ padding: '0.5rem 0.75rem', color: '#cbd5e1', fontFamily: 'monospace', fontSize: '0.75rem' }}>{r.section_no || '—'}</td>
+                        <td style={{ padding: '0.5rem 0.75rem', color: statusColor, fontWeight: 700, textTransform: 'capitalize' }}>{r.status}</td>
+                        <td style={{ padding: '0.5rem 0.75rem', color: '#94a3b8', fontSize: '0.75rem' }}>{r.subject || r.reason || ''}</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
           <div style={{ display: 'flex', gap: '0.75rem' }}>
             <button onClick={() => { setResult(null); setFile(null) }} style={{ flex: 1, padding: '0.625rem', borderRadius: 10, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: '#cbd5e1', cursor: 'pointer', fontWeight: 600 }}>
               Upload Another

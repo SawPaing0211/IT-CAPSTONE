@@ -1,5 +1,22 @@
 import { useState, useEffect } from 'react'
 import EditUserModal from './EditUserModal'
+// minimalist line-art eye icons for the password show/hide toggle
+function EyeIcon({ size = 18 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  )
+}
+function EyeOffIcon({ size = 18 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+      <line x1="1" y1="1" x2="23" y2="23" />
+    </svg>
+  )
+}
 import SubjectManagement from './SubjectsManagement'
 import RecoveryModal from './RecoveryModal'
 import UploadCSVModal from './UploadCSVModal'
@@ -46,10 +63,17 @@ export default function UserManagement() {
     username: '', email: '', password: '', role: 'student', section_id: ''
   })
   const [addUserLoading, setAddUserLoading] = useState(false)
+  const [showAddUserPassword, setShowAddUserPassword] = useState(false)
   const [addUserError, setAddUserError] = useState('')
   const [addUserSuccess, setAddUserSuccess] = useState('')
   const [csvModal, setCsvModal] = useState(false)
   const [activeTab, setActiveTab] = useState('users')
+
+  // shared type-to-confirm modal for single-user delete AND the
+  // "Delete All Students" bulk action below
+  const [confirmModal, setConfirmModal] = useState(null)
+  const [confirmInput, setConfirmInput] = useState('')
+  const [confirmLoading, setConfirmLoading] = useState(false)
 
   // toast — replaces every alert() in this file. alert() is that plain
   // browser popup that doesn't match anything else in the app (purple
@@ -200,9 +224,20 @@ export default function UserManagement() {
     }
   }
 
-  const handleDeleteUser = async (userId) => {
-    const confirmText = prompt(`Type "DELETE" to confirm deletion of user ID ${userId}:`)
-    if (confirmText !== 'DELETE') { showToast('Deletion cancelled.', 'error'); return }
+  // opens the styled type-to-confirm modal instead of the old prompt()
+  const handleDeleteUser = (userId) => {
+    const target = users.find(u => u.id === userId)
+    setConfirmInput('')
+    setConfirmModal({
+      title: 'Delete User',
+      message: `This permanently deletes ${target?.full_name || target?.username || `user ID ${userId}`} and cannot be undone.`,
+      requiredPhrase: 'DELETE',
+      onConfirm: () => performDeleteUser(userId),
+    })
+  }
+
+  const performDeleteUser = async (userId) => {
+    setConfirmLoading(true)
     try {
       const token = localStorage.getItem('token')
       const res = await fetch(`http://localhost:5000/api/admin/users/${userId}`, {
@@ -214,6 +249,50 @@ export default function UserManagement() {
     } catch (err) {
       console.error('Failed to delete user:', err)
       showToast('Failed to delete user', 'error')
+    } finally {
+      setConfirmLoading(false)
+      setConfirmModal(null)
+      setConfirmInput('')
+    }
+  }
+
+  // "Delete All Students" — same type-to-confirm modal, higher-friction
+  // phrase since this wipes every student account (and, via the backend's
+  // _cascade_delete_student_data, their submissions/progress/enrollments)
+  // in one action instead of just one user
+  const handleBulkDeleteStudents = () => {
+    setConfirmInput('')
+    setConfirmModal({
+      title: 'Delete All Students',
+      message: `This permanently deletes all ${groupedUsers.student.length} student account(s) — including their submissions, progress, and enrollment records. This cannot be undone.`,
+      requiredPhrase: 'DELETE ALL STUDENTS',
+      onConfirm: performBulkDeleteStudents,
+    })
+  }
+
+  const performBulkDeleteStudents = async () => {
+    setConfirmLoading(true)
+    try {
+      const token = localStorage.getItem('token')
+      const res = await fetch('http://localhost:5000/api/admin/students/bulk-delete', {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      if (res.ok) {
+        const data = await res.json()
+        await fetchUsers()
+        showToast(`Deleted ${data.count} student account(s) successfully.`)
+      } else {
+        const error = await res.json()
+        showToast(`Failed to delete students: ${error.error}`, 'error')
+      }
+    } catch (err) {
+      console.error('Failed to bulk delete students:', err)
+      showToast('Failed to delete students', 'error')
+    } finally {
+      setConfirmLoading(false)
+      setConfirmModal(null)
+      setConfirmInput('')
     }
   }
 
@@ -328,6 +407,13 @@ export default function UserManagement() {
                 className="px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2 transition hover:opacity-85 hover:brightness-110 bg-gradient-to-r from-purple-600 to-pink-600 text-white"
               >
                 <Icon.Users size={14} /> Add User
+              </button>
+              <button
+                onClick={handleBulkDeleteStudents}
+                disabled={groupedUsers.student.length === 0}
+                className="px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2 transition hover:opacity-85 hover:brightness-110 bg-red-600/15 border border-red-500/40 text-red-400 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:opacity-40"
+              >
+                🗑️ Delete All Students
               </button>
             </div>
           </div>
@@ -477,6 +563,60 @@ export default function UserManagement() {
             />
           )}
 
+          {/* Type-to-confirm modal — shared by single-user Delete and
+              "Delete All Students". Confirm button stays disabled until
+              the typed text exactly matches confirmModal.requiredPhrase. */}
+          {confirmModal && (
+            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[9998] p-4">
+              <div className="bg-slate-900 border border-red-600/50 rounded-2xl w-full max-w-md shadow-2xl shadow-red-900/50">
+                <div className="flex items-center gap-3 p-6 border-b border-red-600/30">
+                  <div className="w-10 h-10 bg-red-600/20 border border-red-600/40 rounded-xl flex items-center justify-center text-xl">⚠️</div>
+                  <div>
+                    <h2 className="text-xl font-black text-white">{confirmModal.title}</h2>
+                    <p className="text-slate-400 text-xs">This action cannot be undone</p>
+                  </div>
+                </div>
+
+                <div className="p-6 space-y-4">
+                  <p className="text-slate-300 text-sm leading-relaxed">{confirmModal.message}</p>
+                  <div>
+                    <label className="block text-sm text-slate-400 mb-1.5">
+                      Type <span className="font-mono text-red-400 font-bold">{confirmModal.requiredPhrase}</span> to confirm
+                    </label>
+                    <input
+                      type="text"
+                      value={confirmInput}
+                      onChange={e => setConfirmInput(e.target.value)}
+                      autoFocus
+                      autoComplete="off"
+                      placeholder={confirmModal.requiredPhrase}
+                      className="w-full bg-slate-800 border border-slate-700 focus:border-red-500 rounded-lg px-4 py-2.5 text-white outline-none transition placeholder-slate-600 font-mono"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex gap-3 p-6 border-t border-red-600/30">
+                  <button
+                    onClick={() => { setConfirmModal(null); setConfirmInput('') }}
+                    disabled={confirmLoading}
+                    className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 rounded-lg text-slate-300 font-medium transition"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={confirmModal.onConfirm}
+                    disabled={confirmInput !== confirmModal.requiredPhrase || confirmLoading}
+                    className="flex-1 py-2.5 bg-red-600 hover:bg-red-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg text-white font-black transition shadow-lg shadow-red-600/30 flex items-center justify-center gap-2"
+                  >
+                    {confirmLoading
+                      ? <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Deleting...</>
+                      : <><span>🗑️</span> Confirm Delete</>}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Add User Modal */}
           {addUserModal && (
             <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
@@ -529,13 +669,23 @@ export default function UserManagement() {
 
                   <div>
                     <label className="block text-sm text-slate-400 mb-1.5">Password <span className="text-red-400">*</span></label>
-                    <input
-                      type="password"
-                      value={addUserForm.password}
-                      onChange={e => setAddUserForm({ ...addUserForm, password: e.target.value })}
-                      placeholder="Min. 6 characters"
-                      className="w-full bg-slate-800 border border-slate-700 focus:border-purple-500 rounded-lg px-4 py-2.5 text-white outline-none transition placeholder-slate-500"
-                    />
+                    <div className="relative">
+                      <input
+                        type={showAddUserPassword ? 'text' : 'password'}
+                        value={addUserForm.password}
+                        onChange={e => setAddUserForm({ ...addUserForm, password: e.target.value })}
+                        placeholder="Min. 6 characters"
+                        className="w-full bg-slate-800 border border-slate-700 focus:border-purple-500 rounded-lg px-4 py-2.5 pr-11 text-white outline-none transition placeholder-slate-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowAddUserPassword(v => !v)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition"
+                        aria-label={showAddUserPassword ? 'Hide password' : 'Show password'}
+                      >
+                        {showAddUserPassword ? <EyeOffIcon /> : <EyeIcon />}
+                      </button>
+                    </div>
                   </div>
 
                   <div>

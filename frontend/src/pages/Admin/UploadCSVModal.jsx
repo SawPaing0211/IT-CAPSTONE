@@ -101,6 +101,7 @@ export default function UploadCSVModal({ blocks = [], onClose, onSuccess }) {
   const [isDragging, setIsDragging] = useState(false)
   const [result,     setResult]     = useState(null)
   const [toast,      setToast]      = useState(null)
+  const [showAllRows, setShowAllRows] = useState(false)
 
   // ── helpers ──────────────────────────────────────────────────────────
   const showToast = (msg, type = 'success') => {
@@ -187,7 +188,7 @@ export default function UploadCSVModal({ blocks = [], onClose, onSuccess }) {
 
   const reset = () => {
     setStep('select'); setFile(null); setParsed(null)
-    setClientErrs([]); setResult(null)
+    setClientErrs([]); setResult(null); setShowAllRows(false)
   }
 
   // ── counts for preview step ───────────────────────────────────────────
@@ -213,7 +214,7 @@ export default function UploadCSVModal({ blocks = [], onClose, onSuccess }) {
         <div className="bg-gradient-to-r from-purple-900/60 to-pink-900/40 px-6 py-5 border-b border-purple-600/30 flex items-center justify-between flex-shrink-0">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-gradient-to-br from-green-500 to-emerald-500 rounded-xl flex items-center justify-center text-xl">
-              📤
+              🎓
             </div>
             <div>
               <h2 className="text-xl font-black text-white">Bulk Enrollment Upload</h2>
@@ -357,12 +358,20 @@ export default function UploadCSVModal({ blocks = [], onClose, onSuccess }) {
 
               {/* Preview table */}
               <div className="rounded-xl overflow-hidden border border-slate-700">
-                <div className="bg-slate-800/80 px-4 py-2 text-xs text-slate-400 font-semibold uppercase tracking-wider">
-                  Preview — first 8 rows
+                <div className="bg-slate-800/80 px-4 py-2 text-xs text-slate-400 font-semibold uppercase tracking-wider flex items-center justify-between">
+                  <span>{showAllRows ? `All ${parsed.rows.length} rows` : 'Preview — first 8 rows'}</span>
+                  {parsed.rows.length > 8 && (
+                    <button
+                      onClick={() => setShowAllRows(v => !v)}
+                      className="normal-case font-semibold text-purple-300 hover:text-purple-200 transition"
+                    >
+                      {showAllRows ? '▲ Show fewer' : `▼ Show all ${parsed.rows.length} rows`}
+                    </button>
+                  )}
                 </div>
-                <div className="overflow-x-auto">
+                <div className={`overflow-x-auto ${showAllRows ? 'max-h-72 overflow-y-auto' : ''}`}>
                   <table className="w-full text-sm">
-                    <thead className="bg-slate-800/60">
+                    <thead className="bg-slate-800/60 sticky top-0">
                       <tr>
                         <th className="text-left px-3 py-2 text-slate-400 font-medium text-xs">#</th>
                         {parsed.headers.map(h => (
@@ -371,7 +380,7 @@ export default function UploadCSVModal({ blocks = [], onClose, onSuccess }) {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800">
-                      {parsed.rows.slice(0, 8).map((row, i) => {
+                      {(showAllRows ? parsed.rows : parsed.rows.slice(0, 8)).map((row, i) => {
                         const hasErr = clientErrs.some(e => e.row === i + 2)
                         const isIrr  = row.student_type?.toLowerCase() === 'irregular'
                         return (
@@ -387,10 +396,13 @@ export default function UploadCSVModal({ blocks = [], onClose, onSuccess }) {
                       })}
                     </tbody>
                   </table>
-                  {parsed.rows.length > 8 && (
-                    <p className="text-center text-slate-500 text-xs py-2">
-                      …and {parsed.rows.length - 8} more rows
-                    </p>
+                  {!showAllRows && parsed.rows.length > 8 && (
+                    <button
+                      onClick={() => setShowAllRows(true)}
+                      className="w-full text-center text-purple-400 hover:text-purple-300 text-xs py-2 transition"
+                    >
+                      …and {parsed.rows.length - 8} more rows — click to view all
+                    </button>
                   )}
                 </div>
               </div>
