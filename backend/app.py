@@ -678,26 +678,12 @@ def evaluate_code(code, test_cases, language):
 # ===== AUTH ROUTES =====
 @app.route('/api/auth/register', methods=['POST'])
 def register():
-    data = request.get_json()
-    if not all(k in data for k in ['username','email','password']): 
-        return jsonify({"error": "Missing fields"}), 400
-    if User.query.filter_by(username=data['username']).first() or User.query.filter_by(email=data['email']).first():
-        return jsonify({"error": "Username or email exists"}), 400
-    
-    new_user = User(
-        username=data['username'], 
-        email=data['email'], 
-        password_hash=generate_password_hash(data['password']), 
-        role=data.get('role','student')
-    )
-    db.session.add(new_user)
-    db.session.commit()
-    
-    return jsonify({
-        "message": "Created", 
-        "access_token": create_access_token(identity=str(new_user.id)), 
-        "user": {"id": new_user.id, "username": new_user.username, "role": new_user.role}
-    }), 201
+    # public self-registration removed — every account (student or
+    # instructor) is now provisioned centrally by an admin, via the Add
+    # User modal or the CSV bulk-enrollment upload. same 410 pattern
+    # already used for the removed blocks endpoints below, so a stray
+    # request here gets a clear reason instead of a confusing 404.
+    return jsonify({"error": "Public registration is disabled. Accounts are created by an administrator."}), 410
 
 @app.route('/api/auth/login', methods=['POST'])
 def login():
@@ -3477,20 +3463,51 @@ def admin_update_user(admin, user_id):
     log_admin_action(admin.id, "USER_UPDATED", f"Target: {target.username}. Changes: {', '.join(changes) if changes else 'None'}", target_id=user_id)
     return jsonify({"message": "User updated", "changes": changes}), 200
 
+def _cascade_delete_student_data(user_id):
+    # removes every row that references this student before the User row
+    # itself can be deleted — MySQL blocks deleting a row that's still
+    # referenced elsewhere (Submission/UserAchievement/HintReveal all
+    # point at users.id with no CASCADE set). shared by the single-user
+    # delete and the bulk-delete-all-students endpoints so both stay
+    # correct together instead of quietly drifting apart later.
+    HintReveal.query.filter_by(user_id=user_id).delete()
+    UserAchievement.query.filter_by(user_id=user_id).delete()
+    Submission.query.filter_by(user_id=user_id).delete()
+    IrregularEnrollment.query.filter_by(student_id=user_id).delete()
+    TeacherAssignment.query.filter_by(instructor_id=user_id).delete()
+
 @app.route('/api/admin/users/<int:user_id>', methods=['DELETE'])
 @admin_required
 def admin_delete_user(admin, user_id):
     if user_id == admin.id: 
         return jsonify({"error": "Cannot delete own account"}), 400
     target = User.query.get_or_404(user_id)
-    
-    IrregularEnrollment.query.filter_by(student_id=user_id).delete()
-    TeacherAssignment.query.filter_by(instructor_id=user_id).delete()
+
+    _cascade_delete_student_data(user_id)
     db.session.delete(target)
     db.session.commit()
     
     log_admin_action(admin.id, "USER_DELETED", f"Deleted user {target.username} (ID: {user_id})")
     return jsonify({"message": "User deleted"}), 200
+
+@app.route('/api/admin/students/bulk-delete', methods=['DELETE'])
+@admin_required
+def admin_bulk_delete_students(admin):
+    # deletes EVERY student account — used to clear out accumulated test
+    # data before a real demo/defense. only ever touches role='student',
+    # never instructors or admins, so the account running this stays safe
+    # and instructor/subject/class-code setup survives intact.
+    students = User.query.filter_by(role='student').all()
+    count = len(students)
+
+    for student in students:
+        _cascade_delete_student_data(student.id)
+        db.session.delete(student)
+
+    db.session.commit()
+
+    log_admin_action(admin.id, "BULK_STUDENTS_DELETED", f"Deleted all {count} student accounts.")
+    return jsonify({"message": f"Deleted {count} student accounts", "count": count}), 200
 
 @app.route('/api/admin/users/<int:user_id>/reset-password', methods=['POST'])
 @admin_required
@@ -4694,13 +4711,13 @@ def admin_bulk_enrollment_upload(admin):
 
     CSV columns (header row required, order does NOT matter):
         student_id, firstname, middlename, lastname, suffix,
-        year_level, student_type, block_code, section_no, subject_code
+        year_level, student_type, section_no
 
-    Regular row example:
-        2024-00001,Juan,Santos,Dela Cruz,,1,regular,IT101,,,
+    Regular row example (one section — their fixed cohort's class code):
+        2024-00001,Juan,Santos,Dela Cruz,,1,regular,29022
 
-    Irregular row example (one row per section):
-        2024-00100,Pedro,Jose,Reyes,,3,irregular,,29144,ITCED102L
+    Irregular row example (one row per section — same student_id repeats):
+        2024-00100,Pedro,Jose,Reyes,,3,irregular,29144
 
     Returns JSON:
     {
@@ -4739,9 +4756,14 @@ def admin_bulk_enrollment_upload(admin):
     # Normalise header names (strip whitespace, lowercase)
     rows = [{k.strip().lower(): (v or "").strip() for k, v in row.items() if k is not None} for row in rows]
 
+    # block_code and subject_code used to be required here, but neither
+    # is ever actually read anywhere in this function — a class code
+    # (section_no) already knows its own subject internally, so specifying
+    # it again here was always redundant. requiring 2 columns that do
+    # nothing just confused anyone building the CSV.
     required_cols = {
         "student_id", "firstname", "middlename", "lastname", "suffix",
-        "year_level", "student_type", "block_code", "section_no", "subject_code",
+        "year_level", "student_type", "section_no",
     }
     missing_cols = required_cols - set(rows[0].keys())
     if missing_cols:
