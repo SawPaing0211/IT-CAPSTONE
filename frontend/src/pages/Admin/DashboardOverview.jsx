@@ -2,8 +2,9 @@ import { useState, useEffect, useCallback } from 'react'
 import CreateUserModal from './CreateUserModal'
 import BackupDatabaseModal from './BackupDatabaseModal'
 import SystemSettingsModal from './SystemSettingsModal'
+import { API_BASE } from '../../api/client'
 
-const API = 'http://localhost:5000'
+const API = API_BASE
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 

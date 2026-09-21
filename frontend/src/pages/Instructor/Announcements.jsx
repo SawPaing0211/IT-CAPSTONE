@@ -1,6 +1,12 @@
 // announcements — instructor posts updates, students see them.
-// reused in two places: inside a class tab (classId passed in) and possibly
-// a global feed (no classId) — fetchAnnouncements branches on that.
+// reused in two places: inside a class tab (classId passed in), and the
+// standalone /instructor/announcements route (Dashboard Quick Actions →
+// "Post Announcement"), which has no class context of its own — that route
+// makes the instructor pick one of their classes first (via the shared
+// ClassPicker) before showing the composer, so every announcement always
+// ends up scoped to a real class. There used to be a "no class_id" global
+// path here that broadcast to every student on the platform; nothing
+// legitimately used it, so it's gone — pickedClass below is what replaces it.
 //
 // priority = low/medium/high/urgent, just a colored label, no real logic
 // tied to it. is_pinned just floats it to the top of the list.
@@ -10,9 +16,19 @@
 //
 // edit re-uses the same create form, just pre-filled, sends PUT instead of POST
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
+import ClassPicker from '../../components/ClassPicker'
+import MobileSheet from '../../components/MobileSheet'
+import { API_BASE } from '../../api/client'
 
 export default function Announcements({ classId }) {
+  const navigate = useNavigate()
+  // only used on the standalone route (no classId prop) — the class the
+  // instructor picked before the composer/list is shown
+  const [pickedClass, setPickedClass] = useState(null)
+  const effectiveClassId = classId ?? pickedClass?.id
+
   const [showCreateForm, setShowCreateForm] = useState(false)
   const [editingId, setEditingId]           = useState(null)
   const [announcements, setAnnouncements]   = useState([])
@@ -22,6 +38,8 @@ export default function Announcements({ classId }) {
   const [success, setSuccess]               = useState(null)
   const [searchTerm, setSearchTerm]         = useState('')
   const [typeFilter, setTypeFilter]         = useState('all')
+  const [showTypeFilter, setShowTypeFilter] = useState(false)
+  const typeFilterRef = useRef(null)
   const [deleteTarget, setDeleteTarget]     = useState(null)
 
   const [form, setForm] = useState({
@@ -31,14 +49,13 @@ export default function Announcements({ classId }) {
     is_pinned: false,
   })
 
-  // Fetch announcements, scoped to a class if one was passed in
+  // Fetch announcements for the effective class
   const fetchAnnouncements = async () => {
     try {
       const token = localStorage.getItem('token')
-      const url = classId
-        ? `http://localhost:5000/api/announcements?class_id=${classId}`
-        : 'http://localhost:5000/api/announcements'
-      const res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } })
+      const res = await fetch(`${API_BASE}/api/announcements?class_id=${effectiveClassId}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
       if (res.ok) setAnnouncements(await res.json())
     } catch (err) {
       console.error('Failed to fetch announcements:', err)
@@ -47,8 +64,12 @@ export default function Announcements({ classId }) {
     }
   }
 
-  // Re-fetch announcements whenever the class changes
-  useEffect(() => { fetchAnnouncements() }, [classId])
+  // Re-fetch announcements whenever the effective class changes. On the
+  // standalone route there's nothing to fetch yet until a class is picked.
+  useEffect(() => {
+    if (effectiveClassId != null) fetchAnnouncements()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [effectiveClassId])
 
   // Sync a form field's value or checked state into state
   const handleChange = (e) => {
@@ -91,8 +112,8 @@ export default function Announcements({ classId }) {
     try {
       const token = localStorage.getItem('token')
       const url = editingId
-        ? `http://localhost:5000/api/announcements/${editingId}`
-        : 'http://localhost:5000/api/announcements'
+        ? `${API_BASE}/api/announcements/${editingId}`
+        : `${API_BASE}/api/announcements`
       const method = editingId ? 'PUT' : 'POST'
 
       const res = await fetch(url, {
@@ -103,7 +124,7 @@ export default function Announcements({ classId }) {
           content:   form.content,
           priority:  form.priority,
           is_pinned: form.is_pinned,
-          class_id:  classId ?? null,
+          class_id:  effectiveClassId,
         }),
       })
       if (!res.ok) {
@@ -131,7 +152,7 @@ export default function Announcements({ classId }) {
     if (!deleteTarget) return
     try {
       const token = localStorage.getItem('token')
-      const res = await fetch(`http://localhost:5000/api/announcements/${deleteTarget.id}`, {
+      const res = await fetch(`${API_BASE}/api/announcements/${deleteTarget.id}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       })
@@ -162,13 +183,42 @@ export default function Announcements({ classId }) {
     return matchesSearch && matchesType
   })
 
+  // Standalone route (no classId prop) and no class picked yet — make the
+  // instructor choose one of their classes before anything else renders.
+  // This is what keeps class_id from ever being sent as null.
+  if (classId == null && !pickedClass) {
+    return (
+      <ClassPicker
+        onSelect={(cls) => setPickedClass(cls)}
+        onCancel={() => navigate(-1)}
+        actionLabel="Post Announcement — Choose a Class"
+        actionIcon="📢"
+        prompt="Which class is this announcement for?"
+      />
+    )
+  }
+
   return (
     <div className="space-y-6">
 
       <div className="flex justify-between items-start gap-4 flex-wrap">
         <div>
           <h2 className="text-2xl font-black text-white tracking-tight">Announcements</h2>
-          <p className="text-slate-400 mt-0.5 text-sm">Communicate important updates to your students</p>
+          <p className="text-slate-400 mt-0.5 text-sm flex items-center gap-1.5 flex-wrap">
+            <span>Communicate important updates to your students</span>
+            {/* only shown on the standalone route — classId prop already pins the tab to one class */}
+            {classId == null && pickedClass && (
+              <>
+                <span className="text-slate-700">·</span>
+                <button
+                  onClick={() => { setPickedClass(null); setAnnouncements([]); setLoading(true) }}
+                  className="text-purple-400 hover:text-purple-300 font-semibold transition"
+                >
+                  {pickedClass.name} (change)
+                </button>
+              </>
+            )}
+          </p>
         </div>
         <button
           onClick={openCreate}
@@ -191,7 +241,7 @@ export default function Announcements({ classId }) {
 
       {/* create + edit reuse the same form — editingId tells us which mode */}
       {showCreateForm && (
-        <div className="bg-slate-900 border border-purple-600/20 rounded-2xl p-6 space-y-5">
+        <div className="bg-slate-900 border border-purple-600/20 rounded-2xl p-4 sm:p-6 space-y-5">
           <div className="flex items-center justify-between">
             <h3 className="text-lg font-bold text-white flex items-center gap-2">
               <span>{editingId ? '✏️' : '📢'}</span>
@@ -291,16 +341,30 @@ export default function Announcements({ classId }) {
             className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-9 pr-4 py-2.5 text-white placeholder-slate-600 outline-none focus:border-purple-500/60 transition text-sm"
           />
         </div>
-        <select
-          value={typeFilter} onChange={e => setTypeFilter(e.target.value)}
-          className="bg-slate-900 border border-slate-800 rounded-xl px-4 py-2.5 text-slate-300 outline-none text-sm focus:border-purple-500/60 transition cursor-pointer"
-        >
-          <option value="all">All Priorities</option>
-          <option value="low">Low</option>
-          <option value="medium">Medium</option>
-          <option value="high">High</option>
-          <option value="urgent">Urgent</option>
-        </select>
+        <div ref={typeFilterRef} className="relative shrink-0">
+          <button
+            onClick={() => setShowTypeFilter(v => !v)}
+            className="flex items-center gap-2 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-xl px-4 py-2.5 text-slate-300 text-sm transition"
+          >
+            <span>{typeFilter === 'all' ? 'All Priorities' : priorityConfig[typeFilter]?.label}</span>
+            <span className="text-slate-500 text-[10px]">▼</span>
+          </button>
+          <MobileSheet show={showTypeFilter} onClose={() => setShowTypeFilter(false)} widthClass="sm:w-48" anchorRef={typeFilterRef}>
+            <div className="py-2">
+              {[{ key: 'all', label: 'All Priorities' }, ...Object.entries(priorityConfig).map(([key, pc]) => ({ key, label: pc.label }))].map(opt => (
+                <button
+                  key={opt.key}
+                  onClick={() => { setTypeFilter(opt.key); setShowTypeFilter(false) }}
+                  className={`w-full px-4 py-2.5 text-left text-sm transition ${
+                    typeFilter === opt.key ? 'text-purple-300 bg-purple-600/10 font-semibold' : 'text-slate-300 hover:text-white hover:bg-slate-800/80'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </MobileSheet>
+        </div>
       </div>
 
       {/* List */}

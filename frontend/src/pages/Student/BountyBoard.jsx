@@ -47,9 +47,9 @@ export default function BountyBoard({ onSelectQuest }) {
           <div className="h-8 bg-slate-800 rounded w-56 mb-2 animate-pulse" />
           <div className="h-4 bg-slate-800 rounded w-72 animate-pulse" />
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
           {[...Array(6)].map((_, i) => (
-            <div key={i} className="bg-slate-800/40 border border-slate-700 rounded-xl p-5 animate-pulse">
+            <div key={i} className="bg-slate-800/40 border border-slate-700 rounded-xl p-3 sm:p-5 animate-pulse">
               <div className="h-4 bg-slate-700 rounded w-3/4 mb-3" />
               <div className="h-3 bg-slate-700 rounded w-full mb-2" />
               <div className="h-3 bg-slate-700 rounded w-2/3" />
@@ -97,25 +97,25 @@ export default function BountyBoard({ onSelectQuest }) {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
             {group.quests.map(quest => (
               <div
                 key={quest.id}
                 onClick={() => onSelectQuest(quest, group)}
-                className="bg-slate-900 border border-slate-800 rounded-xl p-5 hover:border-purple-500/50 transition cursor-pointer"
+                className="bg-slate-900 border border-slate-800 rounded-xl p-3 sm:p-5 hover:border-purple-500/50 transition cursor-pointer"
               >
-                <div className="flex items-start justify-between mb-3">
-                  <span className={`px-2.5 py-1 rounded-full text-xs font-bold border ${difficultyStyles[quest.difficulty]}`}>
+                <div className="flex items-start justify-between mb-2 sm:mb-3 flex-wrap gap-1">
+                  <span className={`px-2 sm:px-2.5 py-0.5 sm:py-1 rounded-full text-[10px] sm:text-xs font-bold border ${difficultyStyles[quest.difficulty]}`}>
                     {quest.difficulty}
                   </span>
                   {quest.is_event_quest && (
-                    <span className="px-2 py-0.5 bg-yellow-500/10 text-yellow-400 border border-yellow-500/20 rounded text-xs font-bold">
+                    <span className="px-1.5 sm:px-2 py-0.5 bg-yellow-500/10 text-yellow-400 border border-yellow-500/20 rounded text-[10px] sm:text-xs font-bold">
                       🎉 EVENT
                     </span>
                   )}
                 </div>
-                <h3 className="font-bold text-white mb-2">{quest.title}</h3>
-                <div className="flex items-center justify-between mt-4 pt-3 border-t border-slate-800">
+                <h3 className="font-bold text-white text-sm sm:text-base mb-1 sm:mb-2 line-clamp-2">{quest.title}</h3>
+                <div className="flex items-center justify-between mt-2 sm:mt-4 pt-2 sm:pt-3 border-t border-slate-800">
                   <div className="flex gap-1">
                     {quest.languages?.map(lang => (
                       <span key={lang} className="text-sm" title={lang}>

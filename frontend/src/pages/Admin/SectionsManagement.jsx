@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { API_BASE } from '../../api/client'
 
-const API = 'http://localhost:5000'
+const API = API_BASE
 
 /** Helper: retrieve the JWT from storage. */
 const token = () => localStorage.getItem('token')
@@ -118,18 +119,25 @@ const Icon = {
 /** Toast notification — self-dismisses via parent timeout. */
 function Toast({ toast }) {
   if (!toast) return null
-  const isError = toast.type === 'error'
+  const isError   = toast.type === 'error'
+  const isWarning = toast.type === 'warning'
+  const bg   = isError ? '#b91c1c' : isWarning ? '#b45309' : '#15803d'
+  const icon = isError
+    ? <Icon.X size={14} color="#fff" />
+    : isWarning
+      ? <Icon.AlertCircle size={14} color="#fff" />
+      : <Icon.Check size={14} color="#fff" />
   return (
     <div style={{
       position: 'fixed', top: '1.5rem', right: '1.5rem', zIndex: 9999,
       display: 'flex', alignItems: 'center', gap: '0.5rem',
       padding: '0.75rem 1.25rem', borderRadius: '0.75rem',
       fontWeight: 600, fontSize: '0.875rem', color: '#fff',
-      background: isError ? '#b91c1c' : '#15803d',
+      background: bg,
       boxShadow: '0 4px 24px rgba(0,0,0,0.35)',
       animation: 'toastIn 0.2s ease',
     }}>
-      {isError ? <Icon.X size={14} color="#fff" /> : <Icon.Check size={14} color="#fff" />}
+      {icon}
       {toast.msg}
     </div>
   )
@@ -987,6 +995,9 @@ export default function ClassCodesManagement() {
   const [enrollModal, setEnrollModal]     = useState(null)
   const [csvModal, setCSVModal]           = useState(false)
   const [deleteTarget, setDeleteTarget]   = useState(null)
+  const [bulkDeleteModal, setBulkDeleteModal] = useState(false)
+  const [bulkDeleteInput, setBulkDeleteInput] = useState('')
+  const [bulkDeleting, setBulkDeleting]       = useState(false)
   const [toast, setToast]                 = useState(null)
 
   // Show a temporary toast notification
@@ -1032,6 +1043,31 @@ export default function ClassCodesManagement() {
       else showToast(data.error || 'Delete failed', 'error')
     } catch { showToast('Network error', 'error') }
     finally { setDeleteTarget(null) }
+  }
+
+  // ── Bulk delete — clears every EMPTY class code in one go (dev/test-data
+  // reset before a demo). Sections with real enrollments or an instructor
+  // assignment are left alone by the backend and reported back as skipped.
+  const performBulkDelete = async () => {
+    setBulkDeleting(true)
+    try {
+      const res  = await fetch(`${API}/api/admin/sections/bulk-delete`, {
+        method: 'DELETE', headers: { 'Authorization': `Bearer ${token()}` },
+      })
+      const data = await res.json()
+      if (res.ok) {
+        const skippedMsg = data.skipped?.length ? ` (${data.skipped.length} skipped — still enrolled)` : ''
+        if (data.deleted === 0 && data.skipped?.length) {
+          showToast(`Nothing deleted — all ${data.skipped.length} class code(s) still have enrolled students`, 'warning')
+        } else {
+          showToast(`Deleted ${data.deleted} class code(s)${skippedMsg}`)
+        }
+        fetchSections()
+      } else {
+        showToast(data.error || 'Bulk delete failed', 'error')
+      }
+    } catch { showToast('Network error', 'error') }
+    finally { setBulkDeleting(false); setBulkDeleteModal(false); setBulkDeleteInput('') }
   }
 
   // ── Filtering ────────────────────────────────────────────────────────────
@@ -1107,6 +1143,7 @@ export default function ClassCodesManagement() {
           <HeaderBtn icon={Icon.Refresh}  label="Refresh"        onClick={fetchSections}           bg="rgba(255,255,255,0.05)" />
           <HeaderBtn icon={Icon.Upload}   label="Upload CSV"     onClick={() => setCSVModal(true)} bg="rgba(22,163,74,0.15)"  color="#4ade80" border="1px solid rgba(74,222,128,0.3)" />
           <HeaderBtn icon={Icon.Plus}     label="Create Section" onClick={() => setCreateModal(true)} bg="linear-gradient(135deg,#7c3aed,#db2777)" border="none" color="#fff" />
+          <HeaderBtn icon={Icon.Trash}    label="Delete All"     onClick={() => setBulkDeleteModal(true)} bg="rgba(185,28,28,0.15)" color="#f87171" border="1px solid rgba(248,113,113,0.3)" />
         </div>
       </div>
 
@@ -1221,6 +1258,56 @@ export default function ClassCodesManagement() {
         <CSVUploadModal
           onClose={() => setCSVModal(false)}
           onSuccess={() => { fetchSections(); showToast('Sections uploaded!') }} />
+      )}
+      {bulkDeleteModal && (
+        <Modal
+          onClose={() => { setBulkDeleteModal(false); setBulkDeleteInput('') }}
+          title="Delete All Empty Class Codes"
+          subtitle="This action cannot be undone"
+          icon={<Icon.Trash size={18} color="#fff" />}
+          iconBg="#b91c1c"
+          maxWidth={440}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <p style={{ margin: 0, fontSize: '0.875rem', color: '#cbd5e1', lineHeight: 1.6 }}>
+              This permanently deletes every class code that has <strong style={{ color: '#f1f5f9' }}>zero enrolled students</strong> —
+              useful for clearing out duplicate or leftover test class codes before a demo.
+              Any class code with real enrollments or an instructor assignment is left untouched.
+            </p>
+            <div>
+              <label style={{ display: 'block', fontSize: '0.8rem', color: '#94a3b8', marginBottom: 6 }}>
+                Type <span style={{ fontFamily: 'monospace', color: '#f87171', fontWeight: 700 }}>DELETE ALL CLASS CODES</span> to confirm
+              </label>
+              <input
+                type="text"
+                value={bulkDeleteInput}
+                onChange={(e) => setBulkDeleteInput(e.target.value)}
+                autoFocus
+                autoComplete="off"
+                placeholder="DELETE ALL CLASS CODES"
+                style={{ width: '100%', background: '#1e293b', border: '1px solid rgba(248,113,113,0.4)', borderRadius: 8, padding: '0.625rem 0.75rem', color: '#f1f5f9', fontSize: '0.875rem', outline: 'none', fontFamily: 'monospace' }}
+              />
+            </div>
+            <div style={{ display: 'flex', gap: '0.75rem' }}>
+              <button
+                onClick={() => { setBulkDeleteModal(false); setBulkDeleteInput('') }}
+                disabled={bulkDeleting}
+                style={{ flex: 1, padding: '0.625rem', borderRadius: 10, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: '#cbd5e1', cursor: 'pointer', fontWeight: 600, opacity: bulkDeleting ? 0.5 : 1 }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={performBulkDelete}
+                disabled={bulkDeleteInput !== 'DELETE ALL CLASS CODES' || bulkDeleting}
+                style={{ flex: 1, padding: '0.625rem', borderRadius: 10, background: 'linear-gradient(135deg, #b91c1c, #7f1d1d)', border: 'none', color: '#fff', cursor: (bulkDeleteInput !== 'DELETE ALL CLASS CODES' || bulkDeleting) ? 'not-allowed' : 'pointer', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, opacity: (bulkDeleteInput !== 'DELETE ALL CLASS CODES' || bulkDeleting) ? 0.4 : 1 }}
+              >
+                {bulkDeleting
+                  ? <><Spinner size={14} /> Deleting…</>
+                  : <><Icon.Trash size={14} color="#fff" /> Confirm Delete</>}
+              </button>
+            </div>
+          </div>
+        </Modal>
       )}
       {deleteTarget && (
         <Modal

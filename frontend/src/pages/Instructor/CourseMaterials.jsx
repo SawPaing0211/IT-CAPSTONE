@@ -1,8 +1,10 @@
 // this is for uploading lessons/modules and files for students. draft = only i can see it, published = students can see it
 
 import { useState, useEffect } from 'react'
+import DownloadIcon from '../../components/DownloadIcon'
+import { API_BASE } from '../../api/client'
 
-const API = 'http://localhost:5000'
+const API = API_BASE
 
 // file type → icon
 const fileIcon = (name = '') => {
@@ -79,7 +81,7 @@ function LessonModal({ lesson, onClose, onFileDeleted }) {
     <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-2xl max-h-[80vh] flex flex-col shadow-2xl">
 
-        <div className="flex items-start justify-between p-6 border-b border-slate-800">
+        <div className="flex items-start justify-between gap-3 p-4 sm:p-6 border-b border-slate-800">
           <div>
             <div className="flex items-center gap-2 mb-1 flex-wrap">
               <span className="px-2 py-0.5 bg-slate-800 text-slate-400 rounded text-xs font-mono">
@@ -101,7 +103,7 @@ function LessonModal({ lesson, onClose, onFileDeleted }) {
           >✕</button>
         </div>
 
-        <div className="overflow-y-auto flex-1 p-6 space-y-5">
+        <div className="overflow-y-auto flex-1 p-4 sm:p-6 space-y-5">
           <div>
             <p className="text-slate-500 text-xs font-medium uppercase tracking-wider mb-2">Description</p>
             <p className="text-slate-300 text-sm leading-relaxed">{lesson.description}</p>
@@ -154,9 +156,9 @@ function LessonModal({ lesson, onClose, onFileDeleted }) {
                       <button
                         onClick={() => handleDownload(file)}
                         disabled={downloading === file.id}
-                        className="px-3 py-1.5 bg-purple-600/10 hover:bg-purple-600/20 text-purple-400 border border-purple-600/20 rounded-lg text-xs font-bold transition disabled:opacity-50 shrink-0"
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-600/10 hover:bg-purple-600/20 text-purple-400 border border-purple-600/20 rounded-lg text-xs font-bold transition disabled:opacity-50 shrink-0"
                       >
-                        {downloading === file.id ? '⏳' : '⬇️ Download'}
+                        {downloading === file.id ? '⏳' : <><DownloadIcon size={13} /> Download</>}
                       </button>
                       <button
                         onClick={() => setFileToDelete(file)}
@@ -218,13 +220,14 @@ export default function CourseMaterials({ classId, subjectId }) {
   const fetchLessons = async () => {
     setLoadingLessons(true)
     try {
-      const res = await fetch(`${API}/api/lessons`, { headers: authHeaders() })
+      const res = await fetch(`${API}/api/lessons?class_id=${classId}`, { headers: authHeaders() })
       if (res.ok) {
         const all = await res.json()
-        // the backend returns every lesson this instructor has ever made,
-        // across every class they teach — only keep the ones for the
-        // subject this specific class tab belongs to
-        setLessons(subjectId ? all.filter(l => l.subject_id === subjectId) : all)
+        // A module belongs to one specific class code now, not the whole
+        // subject -- the backend already filters by class_id above, this
+        // is just a defensive client-side filter in case classId is ever
+        // missing from the query.
+        setLessons(classId ? all.filter(l => l.section_id === Number(classId)) : all)
       }
     } catch (err) {
       console.error('Failed to fetch lessons:', err)
@@ -455,7 +458,7 @@ export default function CourseMaterials({ classId, subjectId }) {
 
       {/* Create Form */}
       {showCreateForm && (
-        <form onSubmit={handleSubmit} className="bg-slate-900 border border-purple-600/20 rounded-2xl p-6 space-y-5">
+        <form onSubmit={handleSubmit} className="bg-slate-900 border border-purple-600/20 rounded-2xl p-4 sm:p-6 space-y-5">
           <div className="flex items-center justify-between">
             <h3 className="text-lg font-bold text-white">New Module</h3>
             <button type="button" onClick={() => { setShowCreateForm(false); setError(null) }}
@@ -535,7 +538,7 @@ export default function CourseMaterials({ classId, subjectId }) {
               own label flips between the two states hides that comparison. */}
           <div>
             <label className="block text-slate-400 text-xs font-medium uppercase tracking-wider mb-2">Visibility</label>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <button
                 type="button"
                 onClick={() => setFormData(prev => ({ ...prev, is_published: false }))}
@@ -654,37 +657,39 @@ export default function CourseMaterials({ classId, subjectId }) {
                       : 'border-yellow-600/20'
                   }`}
                 >
-                  <div className="flex items-center gap-4 p-5">
-                    {/* Week badge */}
-                    <div className="shrink-0 w-12 h-12 bg-slate-800 border border-slate-700 rounded-xl flex flex-col items-center justify-center">
-                      <span className="text-slate-500 text-[9px] uppercase tracking-wider">Wk</span>
-                      <span className="text-white font-black text-lg leading-none">{lesson.week_number}</span>
-                    </div>
-
-                    {/* Info */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap mb-0.5">
-                        <h3 className="text-white font-bold text-base truncate">{lesson.title}</h3>
-                        {lesson.is_published ? (
-                          <span className="px-2 py-0.5 bg-green-600/10 text-green-400 rounded text-xs font-bold border border-green-600/20 shrink-0">
-                            ✅ Published
-                          </span>
-                        ) : (
-                          <span className="px-2 py-0.5 bg-yellow-600/20 text-yellow-400 rounded text-xs font-bold border border-yellow-600/30 shrink-0">
-                            📝 Draft
-                          </span>
-                        )}
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 p-4 sm:p-5">
+                    <div className="flex items-center gap-4 flex-1 min-w-0">
+                      {/* Week badge */}
+                      <div className="shrink-0 w-12 h-12 bg-slate-800 border border-slate-700 rounded-xl flex flex-col items-center justify-center">
+                        <span className="text-slate-500 text-[9px] uppercase tracking-wider">Wk</span>
+                        <span className="text-white font-black text-lg leading-none">{lesson.week_number}</span>
                       </div>
-                      <p className="text-slate-500 text-xs">
-                        📎 {lesson.files?.length || 0} {lesson.files?.length === 1 ? 'file' : 'files'} attached
-                        {!lesson.is_published && (
-                          <span className="ml-2 text-yellow-600">· hidden from students</span>
-                        )}
-                      </p>
+
+                      {/* Info */}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap mb-0.5">
+                          <h3 className="text-white font-bold text-base truncate">{lesson.title}</h3>
+                          {lesson.is_published ? (
+                            <span className="px-2 py-0.5 bg-green-600/10 text-green-400 rounded text-xs font-bold border border-green-600/20 shrink-0">
+                              ✅ Published
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 bg-yellow-600/20 text-yellow-400 rounded text-xs font-bold border border-yellow-600/30 shrink-0">
+                              📝 Draft
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-slate-500 text-xs">
+                          📎 {lesson.files?.length || 0} {lesson.files?.length === 1 ? 'file' : 'files'} attached
+                          {!lesson.is_published && (
+                            <span className="ml-2 text-yellow-600">· hidden from students</span>
+                          )}
+                        </p>
+                      </div>
                     </div>
 
                     {/* Actions */}
-                    <div className="flex items-center gap-2 shrink-0">
+                    <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap sm:shrink-0 pl-16 sm:pl-0">
                       {/* View */}
                       <button
                         onClick={() => setViewingLesson(lesson)}

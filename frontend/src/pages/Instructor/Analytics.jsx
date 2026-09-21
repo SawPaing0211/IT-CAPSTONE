@@ -9,8 +9,9 @@
 // heatmap uses real submission timestamps grouped by hour, not Math.random().
 
 import { useState, useEffect } from 'react'
+import { API_BASE } from '../../api/client'
 
-const API = 'http://localhost:5000'
+const API = API_BASE
 
 export default function Analytics({ classId }) {
   const [stats, setStats]     = useState(null)
@@ -91,7 +92,7 @@ export default function Analytics({ classId }) {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
 
       {/* Header */}
       <div className="flex items-start justify-between flex-wrap gap-3">
@@ -103,16 +104,16 @@ export default function Analytics({ classId }) {
       </div>
 
       {/* Stat Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-4">
         {[
           { label: 'Students',     value: stats.total_students,    icon: '👥', border: 'border-l-purple-500', text: 'text-purple-400' },
           { label: 'Submissions',  value: stats.total_submissions,  icon: '📝', border: 'border-l-blue-500',   text: 'text-blue-400' },
           { label: 'Success Rate', value: `${successRate}%`,       icon: '✅', border: successRate >= 70 ? 'border-l-green-500' : 'border-l-red-500', text: successRate >= 70 ? 'text-green-400' : 'text-red-400' },
           { label: 'Avg XP',       value: stats.avg_xp,            icon: '⭐', border: 'border-l-yellow-500', text: 'text-yellow-400' },
         ].map(c => (
-          <div key={c.label} className={`bg-slate-900 border border-slate-800 border-l-4 ${c.border} rounded-xl p-4`}>
-            <p className={`text-3xl font-black ${c.text} tabular-nums`}>{c.value}</p>
-            <p className="text-slate-500 text-xs mt-1 flex items-center gap-1">
+          <div key={c.label} className={`bg-slate-900 border border-slate-800 border-l-4 ${c.border} rounded-xl p-2.5 sm:p-4`}>
+            <p className={`text-lg sm:text-3xl font-black ${c.text} tabular-nums leading-none`}>{c.value}</p>
+            <p className="text-slate-500 text-[10px] sm:text-xs mt-1 flex items-center gap-1 truncate">
               <span>{c.icon}</span> {c.label}
             </p>
           </div>
@@ -120,7 +121,7 @@ export default function Analytics({ classId }) {
       </div>
 
       {/* AI Insights — computed from real data */}
-      <div className="bg-gradient-to-r from-purple-900/20 to-blue-900/20 border border-purple-600/30 rounded-2xl p-5">
+      <div className="bg-gradient-to-r from-purple-900/20 to-blue-900/20 border border-purple-600/30 rounded-2xl p-3.5 sm:p-5">
         <h3 className="text-white font-bold text-sm mb-3 flex items-center gap-2">
           <span>🤖</span> Insights & Recommendations
           <span className="text-xs text-slate-500 font-normal ml-1">— based on real class data</span>
@@ -143,7 +144,7 @@ export default function Analytics({ classId }) {
       </div>
 
       {/* Main Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-5">
 
         {/* Top Performers */}
         <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
@@ -222,7 +223,7 @@ export default function Analytics({ classId }) {
       </div>
 
       {/* Bottom Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-5">
 
         {/* Activity Heatmap */}
         <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">

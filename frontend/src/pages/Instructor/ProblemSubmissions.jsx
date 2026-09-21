@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import StudentCodeModal from "./StudentCodeModal";
+import { API_BASE } from '../../api/client'
 
 export default function ProblemSubmissions() {
   const { problemId } = useParams()
@@ -28,7 +29,7 @@ export default function ProblemSubmissions() {
     try {
       const token = localStorage.getItem('token')
       const res = await fetch(
-        `http://localhost:5000/api/instructor/problems/${problemId}/submissions`,
+        `${API_BASE}/api/instructor/problems/${problemId}/submissions`,
         { headers: { 'Authorization': `Bearer ${token}` } }
       )
       if (!res.ok) {
@@ -101,22 +102,24 @@ export default function ProblemSubmissions() {
       )}
 
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-3 sm:gap-4 min-w-0">
           <button
             onClick={goBack}
-            className="text-slate-400 hover:text-white transition"
+            className="shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center text-slate-400 hover:text-white transition rounded-lg hover:bg-slate-800"
+            aria-label="Back"
           >
-            ← Back
+            <span className="sm:hidden text-xl">←</span>
+            <span className="hidden sm:inline">← Back</span>
           </button>
-          <div>
-            <h1 className="text-2xl font-bold text-white">{problem.title}</h1>
-            <p className="text-slate-400">Submission Overview</p>
+          <div className="min-w-0">
+            <h1 className="text-lg sm:text-2xl font-bold text-white truncate">{problem.title}</h1>
+            <p className="text-slate-400 text-xs sm:text-base">Submission Overview</p>
           </div>
         </div>
         <button
           onClick={fetchData}
-          className="px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 font-medium transition"
+          className="px-4 py-2 min-h-[44px] bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 font-medium transition shrink-0"
         >
           🔄 Refresh
         </button>
@@ -143,7 +146,7 @@ export default function ProblemSubmissions() {
       </div>
 
       {/* Filters */}
-      <div className="flex gap-2">
+      <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
         {[
           { key: 'all', label: `All (${students.length})`, active: 'bg-blue-600' },
           { key: 'submitted', label: `Submitted (${submittedCount})`, active: 'bg-green-600' },
@@ -152,7 +155,7 @@ export default function ProblemSubmissions() {
           <button
             key={tab.key}
             onClick={() => setFilter(tab.key)}
-            className={`px-4 py-2 rounded-lg font-medium transition ${
+            className={`px-4 py-2 min-h-[44px] rounded-lg font-medium transition shrink-0 whitespace-nowrap ${
               filter === tab.key
                 ? `${tab.active} text-white`
                 : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
@@ -164,16 +167,16 @@ export default function ProblemSubmissions() {
       </div>
 
       {/* Table */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
-        <table className="w-full text-left">
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-x-auto">
+        <table className="w-full text-left min-w-[640px]">
           <thead className="bg-slate-800/50 text-slate-400 text-sm">
             <tr>
-              <th className="p-4 font-medium">Student</th>
-              <th className="p-4 font-medium">Status</th>
-              <th className="p-4 font-medium">Score</th>
-              <th className="p-4 font-medium">Language</th>
-              <th className="p-4 font-medium">Submitted At</th>
-              <th className="p-4 font-medium">Code</th>
+              <th className="p-3 sm:p-4 font-medium">Student</th>
+              <th className="p-3 sm:p-4 font-medium">Status</th>
+              <th className="p-3 sm:p-4 font-medium">Score</th>
+              <th className="p-3 sm:p-4 font-medium hidden md:table-cell">Language</th>
+              <th className="p-3 sm:p-4 font-medium hidden lg:table-cell">Submitted At</th>
+              <th className="p-3 sm:p-4 font-medium">Code</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-800">
@@ -190,7 +193,7 @@ export default function ProblemSubmissions() {
                 <tr key={student.id} className="hover:bg-slate-800/30 transition">
 
                   {/* Student */}
-                  <td className="p-4">
+                  <td className="p-3 sm:p-4">
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 bg-purple-600 rounded-full flex items-center justify-center font-bold text-sm">
                         {(student.full_name || student.username)[0].toUpperCase()}
@@ -203,7 +206,7 @@ export default function ProblemSubmissions() {
                   </td>
 
                   {/* Status */}
-                  <td className="p-4">
+                  <td className="p-3 sm:p-4">
                     <span className={`px-3 py-1 rounded-full text-xs font-bold ${
                       !student.submitted
                         ? 'bg-slate-700/50 text-slate-400'
@@ -227,14 +230,14 @@ export default function ProblemSubmissions() {
                   </td>
 
                   {/* Score */}
-                  <td className="p-4">
+                  <td className="p-3 sm:p-4">
                     {student.submitted
                       ? <span className="text-yellow-400 font-mono font-bold">{student.score} XP</span>
                       : <span className="text-slate-500">—</span>}
                   </td>
 
                   {/* Language */}
-                  <td className="p-4">
+                  <td className="p-4 hidden md:table-cell">
                     {student.language
                       ? <span className="text-slate-300 text-sm">
                           {student.language === 'python' ? '🐍'
@@ -244,14 +247,14 @@ export default function ProblemSubmissions() {
                   </td>
 
                   {/* Submitted At */}
-                  <td className="p-4 text-slate-400 text-sm">
+                  <td className="p-4 text-slate-400 text-sm hidden lg:table-cell">
                     {student.submitted_at
                       ? new Date(student.submitted_at).toLocaleString()
                       : '—'}
                   </td>
 
                   {/* View Code */}
-                  <td className="p-4">
+                  <td className="p-3 sm:p-4">
                     {student.submission_id ? (
                       <button
                         onClick={() => setViewingSubmissionId(student.submission_id)}

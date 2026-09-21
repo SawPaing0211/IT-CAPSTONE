@@ -5,9 +5,10 @@ import InstructorAssignments from './InstructorAssignments'
 import ActivityLogs from './ActivityLogs'
 import SubjectsManagement from './SubjectsManagement'
 import SectionsManagement from './SectionsManagement'
+import { API_BASE } from '../../api/client'
 
 // Backend lives here. Change this if we are about to deploy to a real server.  
-const API = 'http://localhost:5000/api'
+const API = `${API_BASE}/api`
 
 // Reads the login token from localStorage and adds it to every API request.
 // Also Without this the backend rejects requests with 401 Unauthorized.

@@ -1,7 +1,8 @@
 import { useState, useRef } from 'react'
+import { API_BASE } from '../../api/client'
 
 // our backend base url — change this if we ever move to prod
-const API = 'http://localhost:5000'
+const API = API_BASE
 
 // these match the exact tables our backend /api/admin/backup exports
 // added subject_sections, announcements, system_config because they're in our schema too

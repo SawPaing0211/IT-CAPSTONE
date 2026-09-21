@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback } from 'react'
+import { API_BASE } from '../../api/client'
 
 // minimalist line-art eye icons for the password show/hide toggle
 function EyeIcon({ size = 18 }) {
@@ -18,7 +19,7 @@ function EyeOffIcon({ size = 18 }) {
   )
 }
 
-const API = 'http://localhost:5000'
+const API = API_BASE
 
 // ── check if the logged-in user is the head admin ─────────────────────────────
 // only admin@adamson.edu.ph can create other admin accounts

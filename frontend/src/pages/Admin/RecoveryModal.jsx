@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { API_BASE } from '../../api/client'
 
 // minimalist line-art eye icons for the password show/hide toggle
 function EyeIcon({ size = 18 }) {
@@ -39,7 +40,7 @@ export default function RecoveryModal({ user, onClose, onSuccess }) {
     setLoading(true)
     try {
       const token = localStorage.getItem('token')
-      const res = await fetch(`http://localhost:5000/api/admin/users/${user.id}/reset-password`, {
+      const res = await fetch(`${API_BASE}/api/admin/users/${user.id}/reset-password`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,

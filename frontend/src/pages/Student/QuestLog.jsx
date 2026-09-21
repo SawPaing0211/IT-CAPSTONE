@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { API_BASE } from '../../api/client'
 
 export default function QuestLog({ sectionId }) {
   const [submissions, setSubmissions] = useState([])
@@ -12,7 +13,7 @@ export default function QuestLog({ sectionId }) {
     const fetchSectionInfo = async () => {
       try {
         const token = localStorage.getItem('token')
-        const subjectsRes = await fetch('http://localhost:5000/api/student/subjects', {
+        const subjectsRes = await fetch(`${API_BASE}/api/student/subjects`, {
           headers: { 'Authorization': `Bearer ${token}` }
         })
         const subjects = await subjectsRes.json()
@@ -47,13 +48,13 @@ export default function QuestLog({ sectionId }) {
         const token = localStorage.getItem('token')
 
         const questsRes = await fetch(
-          `http://localhost:5000/api/problems${selectedSection.subject_id ? `?subject_id=${selectedSection.subject_id}` : ''}`,
+          `${API_BASE}/api/problems${selectedSection.subject_id ? `?subject_id=${selectedSection.subject_id}` : ''}`,
           { headers: { 'Authorization': `Bearer ${token}` } }
         )
         const allQuests = await questsRes.json()
 
         const subsRes = await fetch(
-          `http://localhost:5000/api/student/submissions/by-section?section_id=${selectedSection.id}`,
+          `${API_BASE}/api/student/submissions/by-section?section_id=${selectedSection.id}`,
           { headers: { 'Authorization': `Bearer ${token}` } }
         )
         const subsData = await subsRes.json()

@@ -1,13 +1,62 @@
 import { useState, useEffect } from 'react'
+import { API_BASE } from '../../api/client'
 
-const API = 'http://localhost:5000'
+const API = API_BASE
+
+// ─── inline icons (no icon library — keeps this self-contained) ──────
+function Icon({ children, className = 'w-4 h-4', fill = 'none' }) {
+  return (
+    <svg viewBox="0 0 24 24" fill={fill} stroke="currentColor" strokeWidth="2"
+      strokeLinecap="round" strokeLinejoin="round" className={className}>
+      {children}
+    </svg>
+  )
+}
+const IconSettings = (p) => (
+  <Icon {...p}><circle cx="12" cy="12" r="3" />
+    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></Icon>
+)
+const IconSchool = (p) => (
+  <Icon {...p}><path d="M22 10 12 5 2 10l10 5 10-5Z" /><path d="M6 12v5c0 1.5 2.5 3 6 3s6-1.5 6-3v-5" /></Icon>
+)
+const IconLock = (p) => (
+  <Icon {...p}><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></Icon>
+)
+const IconZap = (p) => (
+  <Icon {...p} fill="currentColor"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" /></Icon>
+)
+const IconGamepad = (p) => (
+  <Icon {...p}><line x1="6" y1="12" x2="10" y2="12" /><line x1="8" y1="10" x2="8" y2="14" />
+    <circle cx="15" cy="13" r="1" /><circle cx="18" cy="11" r="1" />
+    <rect x="2" y="6" width="20" height="12" rx="6" /></Icon>
+)
+const IconSearch = (p) => (
+  <Icon {...p}><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></Icon>
+)
+const IconCheckCircle = (p) => (
+  <Icon {...p}><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></Icon>
+)
+const IconXCircle = (p) => (
+  <Icon {...p}><circle cx="12" cy="12" r="10" /><line x1="15" y1="9" x2="9" y2="15" /><line x1="9" y1="9" x2="15" y2="15" /></Icon>
+)
+const IconAlertTriangle = (p) => (
+  <Icon {...p}><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+    <line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></Icon>
+)
+const IconSave = (p) => (
+  <Icon {...p}><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z" />
+    <polyline points="17 21 17 13 7 13 7 21" /><polyline points="7 3 7 8 15 8" /></Icon>
+)
+const IconRotateCcw = (p) => (
+  <Icon {...p}><polyline points="1 4 1 10 7 10" /><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" /></Icon>
+)
 
 const TABS = [
-  { id: 'general',       label: 'General',       icon: '🏫' },
-  { id: 'security',      label: 'Security',       icon: '🔐' },
-  { id: 'execution',     label: 'Execution',      icon: '⚡' },
-  { id: 'gamification',  label: 'Gamification',   icon: '🎮' },
-  { id: 'plagiarism',    label: 'Plagiarism',     icon: '🔍' },
+  { id: 'general',       label: 'General',       icon: IconSchool },
+  { id: 'security',      label: 'Security',       icon: IconLock },
+  { id: 'execution',     label: 'Execution',      icon: IconZap },
+  { id: 'gamification',  label: 'Gamification',   icon: IconGamepad },
+  { id: 'plagiarism',    label: 'Plagiarism',     icon: IconSearch },
 ]
 
 export default function SystemSettingsModal({ onClose }) {
@@ -137,8 +186,9 @@ export default function SystemSettingsModal({ onClose }) {
   return (
     <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
       {toast && (
-        <div className={`fixed top-6 right-6 z-[9999] px-5 py-3 rounded-xl font-semibold text-white shadow-xl ${toast.type === 'error' ? 'bg-red-600' : 'bg-green-600'}`}>
-          {toast.type === 'error' ? '❌' : '✅'} {toast.message}
+        <div className={`fixed top-6 right-6 z-[9999] px-5 py-3 rounded-xl font-semibold text-white shadow-xl flex items-center gap-2 ${toast.type === 'error' ? 'bg-red-600' : 'bg-green-600'}`}>
+          {toast.type === 'error' ? <IconXCircle className="w-4 h-4 flex-shrink-0" /> : <IconCheckCircle className="w-4 h-4 flex-shrink-0" />}
+          {toast.message}
         </div>
       )}
 
@@ -147,7 +197,7 @@ export default function SystemSettingsModal({ onClose }) {
         {/* Header */}
         <div className="bg-gradient-to-r from-purple-900/60 to-pink-900/40 px-6 py-5 border-b border-purple-600/30 flex items-center justify-between flex-shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-gradient-to-br from-orange-500 to-red-500 rounded-xl flex items-center justify-center text-xl">⚙️</div>
+            <div className="w-10 h-10 bg-gradient-to-br from-orange-500 to-red-500 rounded-xl flex items-center justify-center"><IconSettings className="w-5 h-5 text-white" /></div>
             <div>
               <h2 className="text-xl font-black text-white">System Settings</h2>
               <p className="text-purple-300/70 text-xs">Configure platform-wide behaviour</p>
@@ -163,12 +213,15 @@ export default function SystemSettingsModal({ onClose }) {
 
           {/* Sidebar tabs */}
           <div className="w-40 bg-slate-900/80 border-r border-slate-800 p-2 flex-shrink-0">
-            {TABS.map(t => (
-              <button key={t.id} onClick={() => setActiveTab(t.id)}
-                className={`w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-semibold transition mb-1 ${activeTab === t.id ? 'bg-purple-600/30 text-white border border-purple-600/50' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}>
-                <span>{t.icon}</span>{t.label}
-              </button>
-            ))}
+            {TABS.map(t => {
+              const TabIcon = t.icon
+              return (
+                <button key={t.id} onClick={() => setActiveTab(t.id)}
+                  className={`w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-semibold transition mb-1 ${activeTab === t.id ? 'bg-purple-600/30 text-white border border-purple-600/50' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}>
+                  <TabIcon className="w-4 h-4 flex-shrink-0" />{t.label}
+                </button>
+              )
+            })}
           </div>
 
           {/* Content */}
@@ -181,7 +234,7 @@ export default function SystemSettingsModal({ onClose }) {
               <>
                 {/* GENERAL */}
                 {activeTab === 'general' && (
-                  <SettingsSection title="General Configuration" icon="🏫">
+                  <SettingsSection title="General Configuration" icon={IconSchool}>
                     <Field label="System Name" hint="Displayed in the header and emails">
                       <input type="text" value={config.system_name} onChange={e => update('system_name', e.target.value)}
                         className="settings-input" placeholder="Forge.dev" />
@@ -206,7 +259,7 @@ export default function SystemSettingsModal({ onClose }) {
 
                 {/* SECURITY */}
                 {activeTab === 'security' && (
-                  <SettingsSection title="Security Settings" icon="🔐">
+                  <SettingsSection title="Security Settings" icon={IconLock}>
                     <Field label="Min. Password Length" hint="Enforce stronger passwords (minimum 6)">
                       <NumberInput value={config.min_password_length} onChange={v => update('min_password_length', v)} min={6} max={32} />
                     </Field>
@@ -221,7 +274,7 @@ export default function SystemSettingsModal({ onClose }) {
 
                 {/* EXECUTION */}
                 {activeTab === 'execution' && (
-                  <SettingsSection title="Code Execution Engine" icon="⚡">
+                  <SettingsSection title="Code Execution Engine" icon={IconZap}>
                     <Field label="Execution Timeout (seconds)" hint="Max time a student's code is allowed to run">
                       <NumberInput value={config.execution_timeout} onChange={v => update('execution_timeout', v)} min={1} max={30} />
                     </Field>
@@ -232,8 +285,8 @@ export default function SystemSettingsModal({ onClose }) {
                       <div className="flex gap-2 flex-wrap">
                         {['python', 'java', 'csharp'].map(lang => (
                           <button key={lang} onClick={() => toggleLanguage(lang)}
-                            className={`px-3 py-1.5 rounded-lg text-sm font-semibold border-2 transition ${languageList.includes(lang) ? 'bg-purple-600/30 border-purple-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-600'}`}>
-                            {lang === 'python' && '🐍 '}{lang === 'java' && '☕ '}{lang === 'csharp' && '🔷 '}
+                            className={`px-3 py-1.5 rounded-lg text-sm font-semibold border-2 transition flex items-center gap-1.5 ${languageList.includes(lang) ? 'bg-purple-600/30 border-purple-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-600'}`}>
+                            <span className={`w-2 h-2 rounded-full flex-shrink-0 ${lang === 'python' ? 'bg-blue-400' : lang === 'java' ? 'bg-orange-400' : 'bg-purple-400'}`} />
                             {lang}
                           </button>
                         ))}
@@ -244,7 +297,7 @@ export default function SystemSettingsModal({ onClose }) {
 
                 {/* GAMIFICATION */}
                 {activeTab === 'gamification' && (
-                  <SettingsSection title="Gamification & XP" icon="🎮">
+                  <SettingsSection title="Gamification & XP" icon={IconGamepad}>
                     <Field label="XP Multiplier" hint="Global multiplier applied to all XP rewards (1.0 = normal)">
                       <input type="number" step="0.1" min="0.1" max="5" value={config.xp_multiplier} onChange={e => update('xp_multiplier', e.target.value)}
                         className="settings-input w-28" />
@@ -263,7 +316,7 @@ export default function SystemSettingsModal({ onClose }) {
 
                 {/* PLAGIARISM */}
                 {activeTab === 'plagiarism' && (
-                  <SettingsSection title="Plagiarism Detection" icon="🔍">
+                  <SettingsSection title="Plagiarism Detection" icon={IconSearch}>
                     <Field label="Similarity Threshold" hint="Submissions above this score are flagged (0.0–1.0)">
                       <div className="space-y-2">
                         <div className="flex items-center gap-3">
@@ -274,10 +327,10 @@ export default function SystemSettingsModal({ onClose }) {
                           <span className="text-white font-mono font-bold w-12 text-right">{parseFloat(config.plagiarism_threshold).toFixed(2)}</span>
                         </div>
                         {/* Describe how strict the current threshold is */}
-                        <p className="text-xs text-slate-500">
-                          {parseFloat(config.plagiarism_threshold) >= 0.90 && '🟢 Conservative — only near-identical code flagged'}
-                          {parseFloat(config.plagiarism_threshold) >= 0.80 && parseFloat(config.plagiarism_threshold) < 0.90 && '🟡 Balanced — recommended setting'}
-                          {parseFloat(config.plagiarism_threshold) < 0.80 && '🔴 Aggressive — many false positives possible'}
+                        <p className="text-xs text-slate-500 flex items-center gap-1.5">
+                          {parseFloat(config.plagiarism_threshold) >= 0.90 && <><span className="w-2 h-2 rounded-full bg-green-500 flex-shrink-0" /> Conservative — only near-identical code flagged</>}
+                          {parseFloat(config.plagiarism_threshold) >= 0.80 && parseFloat(config.plagiarism_threshold) < 0.90 && <><span className="w-2 h-2 rounded-full bg-yellow-500 flex-shrink-0" /> Balanced — recommended setting</>}
+                          {parseFloat(config.plagiarism_threshold) < 0.80 && <><span className="w-2 h-2 rounded-full bg-red-500 flex-shrink-0" /> Aggressive — many false positives possible</>}
                         </p>
                       </div>
                     </Field>
@@ -294,12 +347,12 @@ export default function SystemSettingsModal({ onClose }) {
         {/* Footer */}
         <div className="px-6 py-4 border-t border-slate-800 flex items-center justify-between bg-slate-900 flex-shrink-0">
           <button onClick={() => setShowResetConfirm(true)}
-            className="text-slate-500 hover:text-slate-300 text-sm transition">↺ Reset to defaults</button>
+            className="text-slate-500 hover:text-slate-300 text-sm transition flex items-center gap-1.5"><IconRotateCcw className="w-3.5 h-3.5" /> Reset to defaults</button>
           <div className="flex gap-3">
             <button onClick={onClose} className="px-5 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-white font-bold transition text-sm">Cancel</button>
             <button onClick={handleSave} disabled={saving || !dirty}
               className="px-6 py-2 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 disabled:opacity-40 rounded-lg text-white font-bold transition shadow-lg shadow-purple-600/30 text-sm flex items-center gap-2">
-              {saving ? <><span className="animate-spin">⟳</span> Saving…</> : '💾 Save Changes'}
+              {saving ? <><IconRotateCcw className="w-4 h-4 animate-spin" /> Saving…</> : <><IconSave className="w-4 h-4" /> Save Changes</>}
             </button>
           </div>
         </div>
@@ -310,8 +363,8 @@ export default function SystemSettingsModal({ onClose }) {
           <div className="bg-slate-900 border-2 border-red-600/40 rounded-2xl w-full max-w-sm shadow-2xl shadow-red-900/30 overflow-hidden">
             <div className="p-6 space-y-4">
               <div className="flex items-center gap-3">
-                <div className="w-11 h-11 bg-red-600/20 border border-red-600/40 rounded-xl flex items-center justify-center text-xl shrink-0">
-                  ⚠️
+                <div className="w-11 h-11 bg-red-600/20 border border-red-600/40 rounded-xl flex items-center justify-center shrink-0">
+                  <IconAlertTriangle className="w-5 h-5 text-red-400" />
                 </div>
                 <div>
                   <h3 className="text-white font-bold text-lg">Reset to Defaults?</h3>
@@ -331,9 +384,9 @@ export default function SystemSettingsModal({ onClose }) {
               </button>
               <button
                 onClick={() => { fetchConfig(); setShowResetConfirm(false) }}
-                className="flex-1 py-2.5 bg-red-600 hover:bg-red-500 rounded-xl text-white font-bold transition text-sm"
+                className="flex-1 py-2.5 bg-red-600 hover:bg-red-500 rounded-xl text-white font-bold transition text-sm flex items-center justify-center gap-1.5"
               >
-                ↺ Reset
+                <IconRotateCcw className="w-4 h-4" /> Reset
               </button>
             </div>
           </div>
@@ -345,11 +398,11 @@ export default function SystemSettingsModal({ onClose }) {
   )
 }
 
-function SettingsSection({ title, icon, children }) {
+function SettingsSection({ title, icon: SectionIcon, children }) {
   return (
     <div className="space-y-4">
       <h3 className="text-white font-bold text-base flex items-center gap-2 pb-2 border-b border-slate-800">
-        <span>{icon}</span>{title}
+        {SectionIcon && <SectionIcon className="w-4 h-4 text-purple-300 flex-shrink-0" />}{title}
       </h3>
       <div className="space-y-4">{children}</div>
     </div>

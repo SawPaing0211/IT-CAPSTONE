@@ -12,8 +12,9 @@
 // StudentsModal hits /api/admin/sections/:id/students — yes it's the admin
 // endpoint, but instructors have access to it (backend checks instructor_or_admin)
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { API_BASE } from '../../api/client'
 
 function StudentsModal({ cls, onClose }) {
   const [students, setStudents] = useState([])
@@ -25,7 +26,7 @@ function StudentsModal({ cls, onClose }) {
     const fetchStudents = async () => {
       try {
         const token = localStorage.getItem('token')
-        const res = await fetch(`http://localhost:5000/api/admin/sections/${cls.id}/students`, {
+        const res = await fetch(`${API_BASE}/api/admin/sections/${cls.id}/students`, {
           headers: { 'Authorization': `Bearer ${token}` }
         })
         if (res.ok) setStudents(await res.json())
@@ -49,7 +50,7 @@ function StudentsModal({ cls, onClose }) {
     <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-2xl max-h-[80vh] flex flex-col shadow-2xl">
 
-        <div className="flex items-center justify-between p-6 border-b border-slate-800">
+        <div className="flex items-center justify-between gap-3 p-4 sm:p-6 border-b border-slate-800">
           <div>
             <h2 className="text-xl font-bold text-white">Class {cls.name} — Students</h2>
             <p className="text-slate-400 text-sm mt-0.5">{cls.title} · {students.length} enrolled</p>
@@ -62,7 +63,7 @@ function StudentsModal({ cls, onClose }) {
           </button>
         </div>
 
-        <div className="px-6 py-4 border-b border-slate-800">
+        <div className="px-4 sm:px-6 py-4 border-b border-slate-800">
           <div className="relative">
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm">🔍</span>
             <input
@@ -88,7 +89,7 @@ function StudentsModal({ cls, onClose }) {
           ) : (
             <div className="divide-y divide-slate-800/60">
               {filtered.map((student, idx) => (
-                <div key={student.id} className="flex items-center gap-4 px-6 py-3.5 hover:bg-slate-800/40 transition">
+                <div key={student.id} className="flex items-center gap-3 sm:gap-4 px-4 sm:px-6 py-3.5 hover:bg-slate-800/40 transition">
                   <span className="text-slate-600 text-xs w-5 text-right shrink-0">{idx + 1}</span>
                   <div className="w-9 h-9 bg-gradient-to-br from-purple-600 to-pink-600 rounded-full flex items-center justify-center text-xs font-bold text-white shrink-0">
                     {(student.full_name || student.username)[0].toUpperCase()}
@@ -116,14 +117,8 @@ function StudentsModal({ cls, onClose }) {
           )}
         </div>
 
-        <div className="px-6 py-4 border-t border-slate-800 flex justify-between items-center">
+        <div className="px-4 sm:px-6 py-4 border-t border-slate-800">
           <p className="text-slate-500 text-xs">Showing {filtered.length} of {students.length} students</p>
-          <button
-            onClick={onClose}
-            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 text-sm font-medium transition"
-          >
-            Close
-          </button>
         </div>
       </div>
     </div>
@@ -136,18 +131,22 @@ export default function MyClasses() {
   const [classes, setClasses] = useState([])
   const [loading, setLoading] = useState(true)
   const [studentsModal, setStudentsModal] = useState(null)
+  // Which subject we've drilled into — null means we're still at the
+  // subject-picking step (unless there's only one subject, see below).
+  const [selectedSubjectId, setSelectedSubjectId] = useState(null)
 
   // Fetch the instructor's assigned classes on mount
   useEffect(() => {
     const fetchClasses = async () => {
       try {
         const token = localStorage.getItem('token')
-        const res = await fetch('http://localhost:5000/api/instructor/classes', {
+        const res = await fetch(`${API_BASE}/api/instructor/classes`, {
           headers: { 'Authorization': `Bearer ${token}` }
         })
         const data = await res.json()
         setClasses(data.map(c => ({
           id:           c.id,
+          subjectId:    c.subject_id,
           name:         c.section_no,
           section_no:   c.section_no,
           title:        c.subjects?.length > 0 ? c.subjects.join(' · ') : c.name,
@@ -166,8 +165,37 @@ export default function MyClasses() {
     fetchClasses()
   }, [])
 
-  // Filter classes by search term across code, subject, and semester
-  const filteredClasses = classes.filter(c =>
+  // Group classes by subject — an instructor can teach the same subject
+  // across several class codes/sections (or teach a handful of unrelated
+  // subjects), so one flat list gets repetitive and confusing fast. This
+  // mirrors the same "pick a subject, then pick a class code" pattern
+  // already used when creating a quest (components/ClassPicker.jsx) — if
+  // there's only one subject, there's nothing to pick between, so that step
+  // is skipped entirely.
+  const subjectGroups = useMemo(() => {
+    const bySubject = new Map()
+    for (const cls of classes) {
+      const key = cls.subjectId ?? `unassigned-${cls.id}`
+      if (!bySubject.has(key)) {
+        bySubject.set(key, { subjectId: cls.subjectId, name: cls.title, classes: [] })
+      }
+      bySubject.get(key).classes.push(cls)
+    }
+    return Array.from(bySubject.values())
+  }, [classes])
+
+  const onlyOneSubject = subjectGroups.length <= 1
+  const step = selectedSubjectId != null || onlyOneSubject ? 'classes' : 'subjects'
+  const activeGroup = subjectGroups.find(g => g.subjectId === selectedSubjectId) || subjectGroups[0]
+
+  const handleBackToSubjects = () => { setSelectedSubjectId(null); setSearchTerm('') }
+
+  // Filter whichever step is currently showing by the search term
+  const filteredSubjects = subjectGroups.filter(g =>
+    g.name.toLowerCase().includes(searchTerm.toLowerCase())
+  )
+  const classesInScope = step === 'classes' ? (activeGroup?.classes || []) : []
+  const filteredClasses = classesInScope.filter(c =>
     c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     c.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
     c.description.toLowerCase().includes(searchTerm.toLowerCase())
@@ -196,15 +224,37 @@ export default function MyClasses() {
       )}
 
       {/* Header */}
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-black text-white tracking-tight">My Classes</h1>
-          <p className="text-slate-400 mt-0.5 text-sm">View and manage your assigned class codes</p>
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div className="min-w-0">
+          {step === 'classes' && !onlyOneSubject && (
+            <p className="text-sm mb-1 flex items-center gap-1.5 flex-wrap">
+              <button
+                onClick={handleBackToSubjects}
+                className="text-purple-400 hover:text-purple-300 font-semibold transition flex items-center gap-1"
+              >
+                ← My Classes
+              </button>
+              <span className="text-slate-600">/</span>
+              <span className="text-slate-400">{activeGroup?.name}</span>
+            </p>
+          )}
+          <h1 className="text-2xl font-black text-white tracking-tight truncate">
+            {step === 'subjects' || onlyOneSubject ? 'My Classes' : activeGroup?.name}
+          </h1>
+          <p className="text-slate-400 mt-0.5 text-sm">
+            {step === 'subjects'
+              ? 'Choose a subject to see its class codes'
+              : 'View and manage your assigned class codes'}
+          </p>
         </div>
         {!loading && (
-          <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-lg">
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-lg shrink-0">
             <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
-            <span className="text-slate-300 text-xs font-medium">{classes.length} {classes.length === 1 ? 'Class' : 'Classes'}</span>
+            <span className="text-slate-300 text-xs font-medium">
+              {step === 'subjects'
+                ? `${subjectGroups.length} ${subjectGroups.length === 1 ? 'Subject' : 'Subjects'}`
+                : `${classesInScope.length} ${classesInScope.length === 1 ? 'Class' : 'Classes'}`}
+            </span>
           </div>
         )}
       </div>
@@ -214,7 +264,7 @@ export default function MyClasses() {
         <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 text-sm pointer-events-none">🔍</span>
         <input
           type="text"
-          placeholder="Search by class code, subject name, or semester..."
+          placeholder={step === 'subjects' ? 'Search subjects...' : 'Search by class code or semester...'}
           value={searchTerm}
           onChange={e => setSearchTerm(e.target.value)}
           className="w-full bg-slate-900 border border-slate-800 rounded-xl px-5 py-3 pl-12 text-white placeholder-slate-600 focus:border-purple-500/60 focus:outline-none transition text-sm"
@@ -239,74 +289,118 @@ export default function MyClasses() {
         </div>
       )}
 
-      {/* Classes List */}
-      <div className="space-y-4">
-        {filteredClasses.map((cls, idx) => (
-          <div
-            key={cls.id}
-            onClick={() => navigate(`/instructor/class/${cls.id}`)}
-            className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden hover:border-purple-600/30 hover:shadow-xl hover:shadow-purple-900/10 transition-all duration-300 cursor-pointer group"
-          >
-            <div className="flex items-stretch">
-              {/* colored left accent strip — same pattern as admin cards */}
-              <div className={`w-1.5 bg-gradient-to-b ${gradients[idx % gradients.length]} shrink-0`} />
-
-              <div className="flex-1 p-6">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex items-start gap-4">
-                    <div className={`w-12 h-12 bg-gradient-to-br ${gradients[idx % gradients.length]} rounded-xl flex items-center justify-center text-xl shadow-lg group-hover:scale-105 transition-transform shrink-0`}>
-                      🏫
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2 mb-1 flex-wrap">
-                        <h3 className="text-lg font-bold text-white group-hover:text-purple-300 transition">
-                          {cls.name}
-                        </h3>
-                        <span className="px-2 py-0.5 bg-green-500/10 text-green-400 border border-green-500/20 rounded-full text-xs font-bold">
-                          Active
-                        </span>
+      {/* ── Step 1: Subjects ── (only shown when there's more than one) */}
+      {!loading && step === 'subjects' && (
+        filteredSubjects.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16 bg-slate-900 border border-slate-800 rounded-2xl">
+            <span className="text-5xl mb-4">🔍</span>
+            <p className="text-slate-300 text-lg font-semibold mb-1">No subjects found</p>
+            <p className="text-slate-500 text-sm">Try adjusting your search</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {filteredSubjects.map((group, idx) => {
+              const totalStudents = group.classes.reduce((sum, c) => sum + c.students, 0)
+              return (
+                <button
+                  key={group.subjectId ?? `unassigned-${idx}`}
+                  onClick={() => { setSelectedSubjectId(group.subjectId); setSearchTerm('') }}
+                  className="text-left bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden hover:border-purple-600/40 hover:shadow-xl hover:shadow-purple-900/10 transition-all duration-300 group"
+                >
+                  <div className={`h-1.5 bg-gradient-to-r ${gradients[idx % gradients.length]}`} />
+                  <div className="p-5">
+                    <div className="flex items-start justify-between mb-3">
+                      <div className={`w-12 h-12 bg-gradient-to-br ${gradients[idx % gradients.length]} rounded-xl flex items-center justify-center text-xl shadow-lg group-hover:scale-105 transition-transform`}>
+                        🏫
                       </div>
-                      <p className="text-purple-400 text-sm font-medium mb-0.5">{cls.title}</p>
-                      <p className="text-slate-500 text-xs">{cls.description}</p>
+                      <span className="px-2.5 py-1 bg-purple-600/20 border border-purple-600/40 rounded-full text-xs font-bold text-purple-300 whitespace-nowrap">
+                        {group.classes.length} {group.classes.length === 1 ? 'code' : 'codes'}
+                      </span>
                     </div>
+                    <h3 className="text-lg font-bold text-white group-hover:text-purple-300 transition truncate">
+                      {group.name}
+                    </h3>
+                    <p className="text-slate-500 text-xs mt-3 pt-3 border-t border-slate-800">
+                      👥 {totalStudents} students total
+                    </p>
                   </div>
-                  <span className="text-slate-600 group-hover:text-purple-400 group-hover:translate-x-1 transition-all text-xl shrink-0 mt-1">›</span>
-                </div>
+                </button>
+              )
+            })}
+          </div>
+        )
+      )}
 
-                {/* Stat pills */}
-                <div className="flex flex-wrap gap-2 mt-4 pt-4 border-t border-slate-800/60">
-                  {statItems.map(({ icon, key, label, clickable }) => (
-                    <button
-                      key={key}
-                      onClick={clickable ? e => { e.stopPropagation(); setStudentsModal(cls) } : e => e.stopPropagation()}
-                      className={`flex items-center gap-2 px-3 py-1.5 bg-slate-800/60 rounded-lg text-sm transition border ${
-                        clickable
-                          ? 'hover:bg-purple-600/20 hover:border-purple-500/40 border-transparent cursor-pointer'
-                          : 'border-transparent cursor-default'
-                      }`}
-                    >
-                      <span>{icon}</span>
-                      <span className="text-white font-bold">{cls[key]}</span>
-                      <span className="text-slate-500 text-xs">{label}</span>
-                      {clickable && <span className="text-purple-400 text-xs">↗</span>}
-                    </button>
-                  ))}
+      {/* ── Step 2: Class codes for the chosen subject ── */}
+      {!loading && step === 'classes' && (
+        <div className="space-y-4">
+          {filteredClasses.map((cls, idx) => (
+            <div
+              key={cls.id}
+              onClick={() => navigate(`/instructor/class/${cls.id}`)}
+              className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden hover:border-purple-600/30 hover:shadow-xl hover:shadow-purple-900/10 transition-all duration-300 cursor-pointer group"
+            >
+              <div className="flex items-stretch">
+                {/* colored left accent strip — same pattern as admin cards */}
+                <div className={`w-1.5 bg-gradient-to-b ${gradients[idx % gradients.length]} shrink-0`} />
+
+                <div className="flex-1 p-4 sm:p-6">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex items-start gap-4">
+                      <div className={`w-12 h-12 bg-gradient-to-br ${gradients[idx % gradients.length]} rounded-xl flex items-center justify-center text-xl shadow-lg group-hover:scale-105 transition-transform shrink-0`}>
+                        🏫
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2 mb-1 flex-wrap">
+                          <h3 className="text-lg font-bold text-white group-hover:text-purple-300 transition">
+                            {cls.title}
+                          </h3>
+                          <span className="px-2 py-0.5 bg-green-500/10 text-green-400 border border-green-500/20 rounded-full text-xs font-bold">
+                            Active
+                          </span>
+                        </div>
+                        <p className="text-slate-400 text-sm font-medium mb-0.5">{cls.name}</p>
+                        <p className="text-slate-500 text-xs">{cls.description}</p>
+                      </div>
+                    </div>
+                    <span className="text-slate-600 group-hover:text-purple-400 group-hover:translate-x-1 transition-all text-xl shrink-0 mt-1">›</span>
+                  </div>
+
+                  {/* Stat pills */}
+                  <div className="flex flex-wrap gap-2 mt-4 pt-4 border-t border-slate-800/60">
+                    {statItems.map(({ icon, key, label, clickable }) => (
+                      <button
+                        key={key}
+                        onClick={clickable ? e => { e.stopPropagation(); setStudentsModal(cls) } : e => e.stopPropagation()}
+                        className={`flex items-center gap-2 px-3 py-1.5 bg-slate-800/60 rounded-lg text-sm transition border ${
+                          clickable
+                            ? 'hover:bg-purple-600/20 hover:border-purple-500/40 border-transparent cursor-pointer'
+                            : 'border-transparent cursor-default'
+                        }`}
+                      >
+                        <span>{icon}</span>
+                        <span className="text-white font-bold">{cls[key]}</span>
+                        <span className="text-slate-500 text-xs">{label}</span>
+                        {clickable && <span className="text-purple-400 text-xs">↗</span>}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-        ))}
+          ))}
 
-        {!loading && filteredClasses.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-16 bg-slate-900 border border-slate-800 rounded-2xl">
-            <span className="text-5xl mb-4">🏫</span>
-            <p className="text-slate-300 text-lg font-semibold mb-1">No classes found</p>
-            <p className="text-slate-500 text-sm">
-              {searchTerm ? 'Try adjusting your search' : 'No class codes assigned yet — ask your admin'}
-            </p>
-          </div>
-        )}
-      </div>
+          {filteredClasses.length === 0 && (
+            <div className="flex flex-col items-center justify-center py-16 bg-slate-900 border border-slate-800 rounded-2xl">
+              <span className="text-5xl mb-4">🏫</span>
+              <p className="text-slate-300 text-lg font-semibold mb-1">No classes found</p>
+              <p className="text-slate-500 text-sm">
+                {searchTerm ? 'Try adjusting your search' : 'No class codes assigned yet — ask your admin'}
+              </p>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

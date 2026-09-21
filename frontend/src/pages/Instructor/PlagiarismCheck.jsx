@@ -10,9 +10,17 @@
 //      plain-english verdict explaining what looks suspicious
 //   6. results show similarity %, both code previews, and the AI verdict
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import MobileSheet from '../../components/MobileSheet'
+import { API_BASE } from '../../api/client'
 
-const API = 'http://localhost:5000'
+const API = API_BASE
+
+const THRESHOLD_OPTIONS = [
+  { value: '75', label: '75% — High Sensitivity', desc: 'More results, some false positives' },
+  { value: '85', label: '85% — Balanced', desc: 'Recommended' },
+  { value: '90', label: '90% — Low Sensitivity', desc: 'Only obvious cases' },
+]
 
 export default function PlagiarismCheck({ classId }) {
   const [problems, setProblems]               = useState([])
@@ -23,6 +31,10 @@ export default function PlagiarismCheck({ classId }) {
   const [error, setError]                     = useState(null)
   const [expandedPair, setExpandedPair]       = useState(null)
   const [loadingProblems, setLoadingProblems] = useState(true)
+  const [showProblemMenu, setShowProblemMenu]   = useState(false)
+  const [showThresholdMenu, setShowThresholdMenu] = useState(false)
+  const problemMenuRef   = useRef(null)
+  const thresholdMenuRef = useRef(null)
 
   // Fetch problems available for scanning, scoped to the class if one is given
   useEffect(() => {
@@ -98,25 +110,25 @@ export default function PlagiarismCheck({ classId }) {
       </div>
 
       {/* Stat strip */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-3 gap-2 sm:gap-4">
         {[
           { label: 'Cases Found', value: results ? results.flagged : '—', icon: '⚠️', border: results?.flagged > 0 ? 'border-l-red-500' : 'border-l-slate-600', text: results?.flagged > 0 ? 'text-red-400' : 'text-slate-400' },
           { label: 'Compared',    value: results ? `${results.total_compared} students` : '—', icon: '👥', border: 'border-l-blue-500', text: 'text-blue-400' },
           { label: 'Threshold',   value: `${threshold}%`, icon: '🎯', border: 'border-l-purple-500', text: 'text-purple-400' },
         ].map(c => (
-          <div key={c.label} className={`bg-slate-900 border border-slate-800 border-l-4 ${c.border} rounded-xl p-4`}>
-            <p className={`text-2xl font-black ${c.text} tabular-nums`}>{c.value}</p>
-            <p className="text-slate-500 text-xs mt-1 flex items-center gap-1"><span>{c.icon}</span> {c.label}</p>
+          <div key={c.label} className={`bg-slate-900 border border-slate-800 border-l-4 ${c.border} rounded-xl p-2.5 sm:p-4`}>
+            <p className={`text-lg sm:text-2xl font-black ${c.text} tabular-nums truncate`}>{c.value}</p>
+            <p className="text-slate-500 text-[10px] sm:text-xs mt-0.5 sm:mt-1 flex items-center gap-1 truncate"><span>{c.icon}</span> {c.label}</p>
           </div>
         ))}
       </div>
 
       {/* Scan Panel */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
-        <div className="px-6 py-4 border-b border-slate-800">
+        <div className="px-4 sm:px-6 py-4 border-b border-slate-800">
           <h3 className="text-white font-bold text-sm flex items-center gap-2">🔍 Scan Setup</h3>
         </div>
-        <div className="p-6 space-y-5">
+        <div className="p-4 sm:p-6 space-y-5">
 
           {/* Problem selector */}
           <div>
@@ -129,31 +141,69 @@ export default function PlagiarismCheck({ classId }) {
             ) : problems.length === 0 ? (
               <p className="text-slate-500 text-sm py-2">No problems created for this class yet</p>
             ) : (
-              <select
-                value={selectedProblem}
-                onChange={e => { setSelectedProblem(e.target.value); setResults(null); setError(null) }}
-                className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white outline-none focus:border-purple-500/60 transition text-sm cursor-pointer"
-              >
-                <option value="">Choose a problem...</option>
-                {problems.map(p => (
-                  <option key={p.id} value={p.id}>{p.title} ({p.difficulty}) — {p.problem_type}</option>
-                ))}
-              </select>
+              <div ref={problemMenuRef} className="relative">
+                <button
+                  type="button"
+                  onClick={() => setShowProblemMenu(v => !v)}
+                  className="w-full flex items-center justify-between gap-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl px-4 py-3 text-white text-sm transition text-left"
+                >
+                  <span className="truncate">
+                    {selectedProblem
+                      ? (() => { const p = problems.find(p => String(p.id) === String(selectedProblem)); return p ? `${p.title} (${p.difficulty}) — ${p.problem_type}` : 'Choose a problem...' })()
+                      : 'Choose a problem...'}
+                  </span>
+                  <span className="text-slate-500 text-[10px] shrink-0">▼</span>
+                </button>
+                <MobileSheet show={showProblemMenu} onClose={() => setShowProblemMenu(false)} widthClass="sm:w-96" anchorRef={problemMenuRef}>
+                  <div className="py-2">
+                    {problems.map(p => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => { setSelectedProblem(String(p.id)); setResults(null); setError(null); setShowProblemMenu(false) }}
+                        className={`w-full px-4 py-2.5 text-left text-sm transition truncate ${
+                          String(selectedProblem) === String(p.id) ? 'text-purple-300 bg-purple-600/10 font-semibold' : 'text-slate-300 hover:text-white hover:bg-slate-800/80'
+                        }`}
+                      >
+                        {p.title} ({p.difficulty}) — {p.problem_type}
+                      </button>
+                    ))}
+                  </div>
+                </MobileSheet>
+              </div>
             )}
           </div>
 
           {/* Threshold */}
           <div>
             <label className="block text-slate-400 text-xs font-medium uppercase tracking-wider mb-2">Similarity Threshold</label>
-            <select
-              value={threshold}
-              onChange={e => setThreshold(e.target.value)}
-              className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white outline-none focus:border-purple-500/60 transition text-sm cursor-pointer"
-            >
-              <option value="75">75% — High Sensitivity (more results, some false positives)</option>
-              <option value="85">85% — Balanced (recommended)</option>
-              <option value="90">90% — Low Sensitivity (only obvious cases)</option>
-            </select>
+            <div ref={thresholdMenuRef} className="relative">
+              <button
+                type="button"
+                onClick={() => setShowThresholdMenu(v => !v)}
+                className="w-full flex items-center justify-between gap-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl px-4 py-3 text-white text-sm transition text-left"
+              >
+                <span className="truncate">{THRESHOLD_OPTIONS.find(o => o.value === threshold)?.label}</span>
+                <span className="text-slate-500 text-[10px] shrink-0">▼</span>
+              </button>
+              <MobileSheet show={showThresholdMenu} onClose={() => setShowThresholdMenu(false)} widthClass="sm:w-72" anchorRef={thresholdMenuRef}>
+                <div className="py-2">
+                  {THRESHOLD_OPTIONS.map(opt => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => { setThreshold(opt.value); setShowThresholdMenu(false) }}
+                      className={`w-full px-4 py-2.5 text-left text-sm transition ${
+                        threshold === opt.value ? 'text-purple-300 bg-purple-600/10 font-semibold' : 'text-slate-300 hover:text-white hover:bg-slate-800/80'
+                      }`}
+                    >
+                      <div>{opt.label}</div>
+                      <div className="text-xs text-slate-500">{opt.desc}</div>
+                    </button>
+                  ))}
+                </div>
+              </MobileSheet>
+            </div>
             <div className="mt-3 h-2 bg-slate-800 rounded-full overflow-hidden">
               <div className="h-full bg-gradient-to-r from-green-500 via-yellow-500 to-red-500 rounded-full transition-all duration-500" style={{ width: `${threshold}%` }} />
             </div>

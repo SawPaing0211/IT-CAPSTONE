@@ -20,6 +20,7 @@ function EyeOffIcon({ size = 18 }) {
 import SubjectManagement from './SubjectsManagement'
 import RecoveryModal from './RecoveryModal'
 import UploadCSVModal from './UploadCSVModal'
+import { API_BASE } from '../../api/client'
 
 // same hand-drawn line icons as the Class Codes page (SectionsManagement.jsx)
 // — copied exactly, not redrawn, so both admin pages use the literal same
@@ -122,7 +123,7 @@ export default function UserManagement() {
         role: addUserForm.role,
         section_ids: addUserForm.section_id ? [parseInt(addUserForm.section_id)] : []
       }
-      const res = await fetch('http://localhost:5000/api/admin/users', {
+      const res = await fetch(`${API_BASE}/api/admin/users`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -153,7 +154,7 @@ export default function UserManagement() {
   const fetchUsers = async () => {
     try {
       const token = localStorage.getItem('token')
-      let url = 'http://localhost:5000/api/admin/users?'
+      let url = `${API_BASE}/api/admin/users?`
       if (roleFilter !== 'all') url += `role=${roleFilter}&`
       if (statusFilter !== 'all') url += `status=${statusFilter}&`
       if (search) url += `search=${encodeURIComponent(search)}&`
@@ -181,7 +182,7 @@ export default function UserManagement() {
   const fetchSections = async () => {
     try {
       const token = localStorage.getItem('token')
-      const res = await fetch('http://localhost:5000/api/admin/sections', {
+      const res = await fetch(`${API_BASE}/api/admin/sections`, {
         headers: { 'Authorization': `Bearer ${token}` }
       })
       if (res.ok) {
@@ -197,7 +198,7 @@ export default function UserManagement() {
   const handleUpdateUser = async (userId, updates) => {
     try {
       const token = localStorage.getItem('token')
-      const res = await fetch(`http://localhost:5000/api/admin/users/${userId}`, {
+      const res = await fetch(`${API_BASE}/api/admin/users/${userId}`, {
         method: 'PUT',
         headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(updates)
@@ -248,7 +249,7 @@ export default function UserManagement() {
     setConfirmLoading(true)
     try {
       const token = localStorage.getItem('token')
-      const res = await fetch(`http://localhost:5000/api/admin/users/${userId}`, {
+      const res = await fetch(`${API_BASE}/api/admin/users/${userId}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       })
@@ -283,7 +284,7 @@ export default function UserManagement() {
     setConfirmLoading(true)
     try {
       const token = localStorage.getItem('token')
-      const res = await fetch('http://localhost:5000/api/admin/students/bulk-delete', {
+      const res = await fetch(`${API_BASE}/api/admin/students/bulk-delete`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       })
@@ -309,7 +310,7 @@ export default function UserManagement() {
   const handleUnlockUser = async (userId, username) => {
     try {
       const token = localStorage.getItem('token')
-      const res = await fetch(`http://localhost:5000/api/admin/users/${userId}/unlock`, {
+      const res = await fetch(`${API_BASE}/api/admin/users/${userId}/unlock`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` }
       })
@@ -391,7 +392,7 @@ export default function UserManagement() {
               <button
                 onClick={async () => {
                   const token = localStorage.getItem('token')
-                  const res = await fetch('http://localhost:5000/api/admin/reports?format=csv', {
+                  const res = await fetch(`${API_BASE}/api/admin/reports?format=csv`, {
                     headers: { 'Authorization': `Bearer ${token}` }
                   })
                   if (res.ok) {

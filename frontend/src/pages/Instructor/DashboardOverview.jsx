@@ -9,8 +9,10 @@
 // the early-return condition (activityFilter === 'all' && sections.length === 0)
 // prevents it from firing a pointless fetch on initial mount before sections load.
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
+import MobileSheet from '../../components/MobileSheet'
+import { API_BASE } from '../../api/client'
 
 export default function DashboardOverview() {
   const navigate = useNavigate()
@@ -26,6 +28,8 @@ export default function DashboardOverview() {
   const [assignedSections, setAssignedSections] = useState([])
   const [activityFilter, setActivityFilter]     = useState('all')
   const [activityLoading, setActivityLoading]   = useState(false)
+  const [showActivityFilter, setShowActivityFilter] = useState(false)
+  const activityFilterAnchorRef = useRef(null)
 
   // Fetch dashboard stats and class list on mount
   useEffect(() => {
@@ -35,10 +39,10 @@ export default function DashboardOverview() {
         if (!token) throw new Error('Not authenticated')
 
         const [classesRes, statsRes] = await Promise.all([
-          fetch('http://localhost:5000/api/instructor/classes', {
+          fetch(`${API_BASE}/api/instructor/classes`, {
             headers: { 'Authorization': `Bearer ${token}` }
           }),
-          fetch('http://localhost:5000/api/instructor/dashboard-stats', {
+          fetch(`${API_BASE}/api/instructor/dashboard-stats`, {
             headers: { 'Authorization': `Bearer ${token}` }
           })
         ])
@@ -77,8 +81,8 @@ export default function DashboardOverview() {
       try {
         const token = localStorage.getItem('token')
         const url = activityFilter === 'all'
-          ? 'http://localhost:5000/api/instructor/dashboard-stats'
-          : `http://localhost:5000/api/instructor/dashboard-stats?class_code=${activityFilter}`
+          ? `${API_BASE}/api/instructor/dashboard-stats`
+          : `${API_BASE}/api/instructor/dashboard-stats?class_code=${activityFilter}`
         const res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } })
         if (res.ok) {
           const data = await res.json()
@@ -105,10 +109,10 @@ export default function DashboardOverview() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
 
       {/* ── Page Header — same pattern as admin ────────────────────── */}
-      <div className="flex items-start justify-between">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-black text-white tracking-tight">Dashboard</h1>
           <p className="text-slate-400 mt-0.5 text-sm">Manage your classes, quests, and student progress</p>
@@ -119,7 +123,7 @@ export default function DashboardOverview() {
       </div>
 
       {/* ── Stat Cards ─────────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         {[
           {
             label: 'Total Students',
@@ -162,29 +166,29 @@ export default function DashboardOverview() {
         ].map(card => (
           <div
             key={card.label}
-            className={`bg-slate-900 border border-slate-800 border-l-4 ${card.border} ${card.bg} rounded-xl p-5 hover:border-slate-700 transition-all`}
+            className={`bg-slate-900 border border-slate-800 border-l-4 ${card.border} ${card.bg} rounded-xl p-3 sm:p-5 hover:border-slate-700 transition-all`}
           >
-            <div className="flex items-start justify-between mb-3">
-              <p className="text-slate-400 text-xs font-medium uppercase tracking-widest">{card.label}</p>
-              <span className="text-xl opacity-70">{card.icon}</span>
+            <div className="flex items-start justify-between mb-1.5 sm:mb-3">
+              <p className="text-slate-400 text-[10px] sm:text-xs font-medium uppercase tracking-widest truncate">{card.label}</p>
+              <span className="text-base sm:text-xl opacity-70 shrink-0 ml-1">{card.icon}</span>
             </div>
-            <p className={`text-3xl font-black ${card.text} tabular-nums`}>{card.value}</p>
+            <p className={`text-xl sm:text-3xl font-black ${card.text} tabular-nums`}>{card.value}</p>
             {card.sub && (
-              <p className={`text-xs mt-1 font-medium ${card.subColor}`}>{card.sub}</p>
+              <p className={`text-[10px] sm:text-xs mt-0.5 sm:mt-1 font-medium ${card.subColor} truncate`}>{card.sub}</p>
             )}
           </div>
         ))}
       </div>
 
       {/* ── Main Grid ──────────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5">
 
         {/* Left col — classes + activity */}
-        <div className="lg:col-span-2 space-y-5">
+        <div className="lg:col-span-2 space-y-4 sm:space-y-5">
 
           {/* My Classes */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
-            <div className="flex justify-between items-center px-6 py-4 border-b border-slate-800">
+            <div className="flex justify-between items-center px-4 sm:px-6 py-4 border-b border-slate-800">
               <h2 className="text-sm font-bold text-white uppercase tracking-widest flex items-center gap-2">
                 <span>🏫</span> My Classes
               </h2>
@@ -216,21 +220,21 @@ export default function DashboardOverview() {
                     <div
                       key={cls.id}
                       onClick={() => navigate(`/instructor/class/${cls.id}`)}
-                      className="flex items-center gap-4 px-6 py-4 hover:bg-slate-800/40 transition cursor-pointer group"
+                      className="flex items-center gap-3 sm:gap-4 px-4 sm:px-6 py-4 hover:bg-slate-800/40 transition cursor-pointer group"
                     >
                       <div className={`w-10 h-10 bg-gradient-to-br ${gradients[idx % gradients.length]} rounded-xl flex items-center justify-center text-base shadow-lg group-hover:scale-110 transition-transform shrink-0`}>
                         🏫
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="font-bold text-white text-sm group-hover:text-purple-300 transition">{cls.section_no}</p>
-                        <p className="text-slate-500 text-xs truncate">{cls.name}</p>
+                        <p className="font-bold text-white text-sm group-hover:text-purple-300 transition truncate">{cls.name}</p>
+                        <p className="text-slate-500 text-xs">{cls.section_no}</p>
                       </div>
-                      <div className="flex items-center gap-5 text-right shrink-0">
+                      <div className="flex items-center gap-3 sm:gap-5 text-right shrink-0">
                         <div>
                           <p className="text-white font-bold text-sm">{cls.student_count || 0}</p>
                           <p className="text-slate-600 text-xs">Students</p>
                         </div>
-                        <div>
+                        <div className="hidden sm:block">
                           <p className="text-white font-bold text-sm">{cls.problem_count || 0}</p>
                           <p className="text-slate-600 text-xs">Problems</p>
                         </div>
@@ -245,22 +249,51 @@ export default function DashboardOverview() {
 
           {/* Recent Activity */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
-            <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between gap-4">
+            <div className="px-4 sm:px-6 py-4 border-b border-slate-800 flex items-center justify-between gap-4">
               <h2 className="text-sm font-bold text-white uppercase tracking-widest flex items-center gap-2 shrink-0">
                 <span>⚡</span> Recent Activity
               </h2>
-              <select
-                value={activityFilter}
-                onChange={e => setActivityFilter(e.target.value)}
-                className="bg-slate-800 border border-slate-700 text-slate-300 text-xs rounded-lg px-3 py-1.5 focus:outline-none focus:border-purple-500/60 transition cursor-pointer"
-              >
-                <option value="all">All Sections</option>
-                {assignedSections.map(sec => (
-                  <option key={sec.id} value={sec.section_no}>
-                    Class {sec.section_no}
-                  </option>
-                ))}
-              </select>
+              <div ref={activityFilterAnchorRef} className="relative shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setShowActivityFilter(v => !v)}
+                  className="flex items-center gap-1.5 bg-slate-800 border border-slate-700 text-slate-300 text-xs rounded-lg px-3 py-1.5 min-h-[32px] focus:outline-none focus:border-purple-500/60 transition"
+                >
+                  <span className="truncate max-w-[10rem]">
+                    {activityFilter === 'all' ? 'All Sections' : `Class ${activityFilter}`}
+                  </span>
+                  <span className="text-slate-500 text-[10px]">▼</span>
+                </button>
+                <MobileSheet
+                  show={showActivityFilter}
+                  onClose={() => setShowActivityFilter(false)}
+                  widthClass="sm:w-56"
+                  anchorRef={activityFilterAnchorRef}
+                >
+                  <div className="p-2">
+                    <p className="px-3 pt-2 pb-1 text-slate-500 text-xs font-bold uppercase tracking-widest">Filter Activity</p>
+                    <button
+                      onClick={() => { setActivityFilter('all'); setShowActivityFilter(false) }}
+                      className={`w-full text-left px-3 py-2.5 rounded-lg text-sm transition ${
+                        activityFilter === 'all' ? 'bg-purple-600/20 text-purple-300' : 'text-slate-300 hover:bg-slate-800'
+                      }`}
+                    >
+                      All Sections
+                    </button>
+                    {assignedSections.map(sec => (
+                      <button
+                        key={sec.id}
+                        onClick={() => { setActivityFilter(sec.section_no); setShowActivityFilter(false) }}
+                        className={`w-full text-left px-3 py-2.5 rounded-lg text-sm transition ${
+                          activityFilter === sec.section_no ? 'bg-purple-600/20 text-purple-300' : 'text-slate-300 hover:bg-slate-800'
+                        }`}
+                      >
+                        Class {sec.section_no}
+                      </button>
+                    ))}
+                  </div>
+                </MobileSheet>
+              </div>
             </div>
 
             <div className="divide-y divide-slate-800/60">
@@ -284,7 +317,7 @@ export default function DashboardOverview() {
                   }
                   const s = statusStyles[activity.status] || statusStyles.error
                   return (
-                    <div key={activity.id} className="flex items-center gap-4 px-6 py-3.5 hover:bg-slate-800/30 transition">
+                    <div key={activity.id} className="flex items-center gap-3 sm:gap-4 px-4 sm:px-6 py-3.5 hover:bg-slate-800/30 transition">
                       <div className={`w-2 h-2 rounded-full ${s.dot} shrink-0`} />
                       <div className="flex-1 min-w-0">
                         <p className="text-sm text-white truncate">
@@ -318,22 +351,20 @@ export default function DashboardOverview() {
         </div>
 
         {/* Right col — quick actions + top performers */}
-        <div className="space-y-5">
+        <div className="space-y-4 sm:space-y-5">
 
           {/* Quick Actions */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
-            <div className="px-6 py-4 border-b border-slate-800">
+            <div className="px-4 sm:px-6 py-4 border-b border-slate-800">
               <h2 className="text-sm font-bold text-white uppercase tracking-widest">Quick Actions</h2>
             </div>
             <div className="p-4 space-y-2">
               {[
                 { icon: '⚔️', label: 'Create Quest',     sub: 'Add new challenge',         color: 'purple', path: '/instructor/create-problem/pick-class' },
-                { icon: '🏫', label: 'View Classes',        sub: 'Manage class list',          color: 'blue',   path: '/instructor/classes' },
                 { icon: '📢', label: 'Post Announcement',   sub: 'Communicate with students',  color: 'pink',   path: '/instructor/announcements' },
               ].map(action => {
                 const colors = {
                   purple: { bg: 'bg-purple-600/10 hover:bg-purple-600/20 border-purple-600/20', text: 'text-purple-400' },
-                  blue:   { bg: 'bg-blue-600/10 hover:bg-blue-600/20 border-blue-600/20',       text: 'text-blue-400' },
                   pink:   { bg: 'bg-pink-600/10 hover:bg-pink-600/20 border-pink-600/20',       text: 'text-pink-400' },
                 }
                 const c = colors[action.color]
@@ -356,7 +387,7 @@ export default function DashboardOverview() {
 
           {/* Top Performers */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
-            <div className="px-6 py-4 border-b border-slate-800">
+            <div className="px-4 sm:px-6 py-4 border-b border-slate-800">
               <h2 className="text-sm font-bold text-white uppercase tracking-widest flex items-center gap-2">
                 <span>🏆</span> Top Performers
               </h2>

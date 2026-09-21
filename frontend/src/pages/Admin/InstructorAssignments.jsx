@@ -7,9 +7,10 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
+import { API_BASE } from '../../api/client'
 
 // The backend base URL — change this when deploying to a real server
-const API = 'http://localhost:5000'
+const API = API_BASE
 
 // Attaches the JWT token from localStorage to every fetch call.
 // Without this, the backend returns 401 Unauthorized on every request.

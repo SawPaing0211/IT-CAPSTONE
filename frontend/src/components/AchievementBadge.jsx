@@ -45,10 +45,16 @@ export default function AchievementBadge({ badge, showTooltip = true, size = 'md
   const textColor = is_earned ? 'text-white' : 'text-slate-400'
   const progressColor = is_earned ? 'bg-gradient-to-r from-purple-500 to-pink-500' : 'bg-slate-600'
 
-  // Calculate tooltip position (slightly offset from mouse so it doesn't block it)
+  // Calculate tooltip position (slightly offset from mouse/tap so it doesn't
+  // block it), clamped to the viewport — on a phone the tap is often close
+  // enough to an edge that "10px right, 10px down" alone pushes the 256px-
+  // wide tooltip half off-screen, cutting off the description/progress/reward.
+  const TOOLTIP_WIDTH = 256   // matches w-64 below
+  const TOOLTIP_HEIGHT_ESTIMATE = 200
+  const EDGE_MARGIN = 12
   const tooltipStyle = {
-    left: position.x + 10, // 10px to the right of mouse
-    top: position.y + 10,  // 10px below mouse
+    left: Math.min(position.x + 10, window.innerWidth - TOOLTIP_WIDTH - EDGE_MARGIN),
+    top: Math.min(position.y + 10, window.innerHeight - TOOLTIP_HEIGHT_ESTIMATE - EDGE_MARGIN),
   }
 
   return (
@@ -65,12 +71,22 @@ export default function AchievementBadge({ badge, showTooltip = true, size = 'md
           hover:scale-110 hover:shadow-xl hover:border-purple-300
           focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 focus:ring-offset-slate-900
           ${sizes[size]}
-          flex items-center justify-center
           ${!is_earned && 'grayscale hover:grayscale-0'}
         `}
         title={name}
       >
-        <span className="drop-shadow-lg">{icon || '🔒'}</span>
+        {/* Icon sits in its own clipped, centered layer. Some devices'
+            emoji fonts swap in a glyph with different metrics than the
+            real one, and without a clip it can spill past the badge's
+            rounded corners instead of sitting in the middle of the box. */}
+        <span className="absolute inset-0 rounded-xl overflow-hidden flex items-center justify-center leading-none">
+          {/* No drop-shadow filter here — on some devices' emoji renderers a
+              filter effect on a glyph isn't clipped by the overflow-hidden
+              above, so it can still show past the corners even though the
+              glyph itself is contained. The button already has its own
+              box-shadow for depth. */}
+          <span>{icon || '🔒'}</span>
+        </span>
         
         {is_earned && (
           <span className="absolute -top-1 -right-1 w-4 h-4 bg-green-500 rounded-full border-2 border-slate-900 flex items-center justify-center text-[8px]">✓</span>

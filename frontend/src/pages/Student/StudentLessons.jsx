@@ -1,4 +1,6 @@
 import { useState, useEffect } from "react";
+import DownloadIcon from "../../components/DownloadIcon";
+import { API_BASE } from '../../api/client'
 
 export default function StudentLessons({ subjectId, sectionId, sectionName }) {
   const [lessons, setLessons] = useState([]);
@@ -9,19 +11,20 @@ export default function StudentLessons({ subjectId, sectionId, sectionName }) {
     const fetchLessons = async () => {
       try {
         const token = localStorage.getItem("token");
-        if (!subjectId) {
+        if (!sectionId) {
           setLessons([]);
           setLoading(false);
           return;
         }
         const res = await fetch(
-          `http://localhost:5000/api/student/lessons?subject_id=${subjectId}`,
+          `${API_BASE}/api/student/lessons?section_id=${sectionId}`,
           { headers: { Authorization: `Bearer ${token}` } },
         );
         if (res.ok) {
           const data = await res.json();
-          // Lessons are already scoped to the subject by the backend (subject_id filter).
-          // No client-side block filtering needed.
+          // Lessons are scoped to this exact class code by the backend
+          // (section_id filter) -- a module uploaded for another section
+          // of the same subject never shows up here.
           setLessons(data);
         }
       } catch (err) {
@@ -38,7 +41,7 @@ export default function StudentLessons({ subjectId, sectionId, sectionName }) {
     try {
       const token = localStorage.getItem("token");
       const res = await fetch(
-        `http://localhost:5000/api/lessons/${lessonId}/files/${fileId}/download`,
+        `${API_BASE}/api/lessons/${lessonId}/files/${fileId}/download`,
         { headers: { Authorization: `Bearer ${token}` } },
       );
       if (!res.ok) {
@@ -173,9 +176,11 @@ export default function StudentLessons({ subjectId, sectionId, sectionName }) {
                                   file.filename,
                                 )
                               }
-                              className="flex-shrink-0 px-2 py-1 bg-purple-600/30 hover:bg-purple-600/50 border border-purple-600/40 rounded text-xs text-purple-300 hover:text-white transition"
+                              title={`Download ${file.filename}`}
+                              aria-label={`Download ${file.filename}`}
+                              className="flex-shrink-0 w-8 h-8 flex items-center justify-center bg-purple-600/30 hover:bg-purple-600 border border-purple-600/40 rounded-full text-purple-300 hover:text-white transition"
                             >
-                              ⬇ Download
+                              <DownloadIcon size={15} />
                             </button>
                           </div>
                         ))}

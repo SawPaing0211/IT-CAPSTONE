@@ -1,114 +1,22 @@
 // instructor achievements — badge gallery showing all 15 instructor badges,
 // earned and locked. all data is real from /api/instructor/achievements.
 //
+// badges use the same shared AchievementBadge component the student side
+// uses (components/AchievementBadge.jsx) — icon + name, tap/hover for the
+// full description/progress/reward in a tooltip — so a badge looks and
+// behaves like the same "thing" on both sides of the app, and the grid
+// stays compact instead of a tall stack of description cards.
+//
 // filter tabs: All/Earned/In Progress/Locked. sort by default/xp/progress.
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import MobileSheet from '../../components/MobileSheet'
+import AchievementBadge from '../../components/AchievementBadge'
+import { API_BASE } from '../../api/client'
 
-const API = 'http://localhost:5000'
+const API = API_BASE
 
-function AchievementBadge({ badge, size = 'md' }) {
-  const sizes = {
-    sm: { outer: 'w-14 h-14', icon: 'text-2xl', ring: 'ring-2' },
-    md: { outer: 'w-20 h-20', icon: 'text-3xl', ring: 'ring-2' },
-    lg: { outer: 'w-28 h-28', icon: 'text-5xl', ring: 'ring-4' },
-  }
-  const s = sizes[size] || sizes.md
-  const earned = badge.is_earned
-
-  return (
-    <div className="relative group flex flex-col items-center">
-      {earned && (
-        <div className="absolute inset-0 rounded-full bg-purple-500/20 blur-xl scale-125 opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
-      )}
-      <div className={`
-        relative ${s.outer} rounded-2xl flex items-center justify-center ${s.ring}
-        ${earned
-          ? 'bg-gradient-to-br from-purple-800/60 to-blue-900/60 ring-purple-500/50 shadow-lg shadow-purple-900/40'
-          : 'bg-slate-800/60 ring-slate-700/40 grayscale opacity-50'}
-        transition-all duration-300 group-hover:scale-105
-      `}>
-        <span className={s.icon}>{badge.icon}</span>
-        {earned && (
-          <span className="absolute -top-1 -right-1 w-5 h-5 bg-green-500 rounded-full flex items-center justify-center text-xs text-white font-bold shadow">
-            ✓
-          </span>
-        )}
-      </div>
-    </div>
-  )
-}
-
-function ProgressBar({ value, max, color = 'purple' }) {
-  const pct = max > 0 ? Math.min(100, Math.round((value / max) * 100)) : 0
-  const colorMap = {
-    purple: 'from-purple-600 to-blue-500',
-    green:  'from-green-500 to-emerald-400',
-    yellow: 'from-yellow-500 to-amber-400',
-  }
-  return (
-    <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
-      <div
-        className={`h-full bg-gradient-to-r ${colorMap[color]} rounded-full transition-all duration-700`}
-        style={{ width: `${pct}%` }}
-      />
-    </div>
-  )
-}
-
-function AchievementCard({ badge }) {
-  const pct = badge.max_progress > 0
-    ? Math.min(100, Math.round((badge.progress / badge.max_progress) * 100))
-    : 0
-
-  return (
-    <div className={`
-      relative flex flex-col gap-4 p-5 rounded-2xl border transition-all duration-300 group
-      ${badge.is_earned
-        ? 'bg-gradient-to-br from-slate-900 to-purple-950/30 border-purple-600/30 hover:border-purple-500/60 hover:shadow-lg hover:shadow-purple-900/30'
-        : 'bg-slate-900 border-slate-800 hover:border-slate-700 opacity-75 hover:opacity-90'}
-    `}>
-      {badge.is_earned && (
-        <div className="absolute top-0 left-6 right-6 h-px bg-gradient-to-r from-transparent via-purple-500/60 to-transparent" />
-      )}
-      <div className="flex items-start gap-4">
-        <AchievementBadge badge={badge} size="md" />
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-0.5">
-            <h3 className={`font-bold text-sm leading-tight ${badge.is_earned ? 'text-white' : 'text-slate-400'}`}>
-              {badge.name}
-            </h3>
-            {badge.is_earned && (
-              <span className="px-1.5 py-0.5 bg-purple-500/20 text-purple-300 border border-purple-500/30 rounded text-xs font-bold flex-shrink-0">
-                EARNED
-              </span>
-            )}
-          </div>
-          <p className="text-slate-500 text-xs leading-relaxed">{badge.description}</p>
-          <div className="mt-2 flex items-center gap-1.5">
-            <span className="text-yellow-400 text-xs font-black">+{badge.xp_reward}</span>
-            <span className="text-yellow-600 text-xs">XP</span>
-          </div>
-        </div>
-      </div>
-
-      {!badge.is_earned ? (
-        <div className="space-y-1.5">
-          <div className="flex justify-between text-xs">
-            <span className="text-slate-500">Progress</span>
-            <span className="text-slate-400 font-mono tabular-nums">{badge.progress} / {badge.max_progress}</span>
-          </div>
-          <ProgressBar value={badge.progress} max={badge.max_progress} />
-          <p className="text-slate-600 text-xs text-right">{pct}%</p>
-        </div>
-      ) : badge.earned_at ? (
-        <p className="text-slate-600 text-xs">
-          🗓 Earned {new Date(badge.earned_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-        </p>
-      ) : null}
-    </div>
-  )
-}
+const SORT_LABELS = { default: 'Default', xp: 'XP Reward', progress: 'Progress' }
 
 export default function InstructorAchievements() {
   const [achievements, setAchievements] = useState([])
@@ -116,6 +24,8 @@ export default function InstructorAchievements() {
   const [error, setError]               = useState(null)
   const [filter, setFilter]             = useState('all')
   const [sortBy, setSortBy]             = useState('default')
+  const [showSortMenu, setShowSortMenu] = useState(false)
+  const sortMenuRef = useRef(null)
 
   // Fetch instructor achievements on mount
   useEffect(() => {
@@ -184,8 +94,8 @@ export default function InstructorAchievements() {
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         {[...Array(4)].map((_, i) => <div key={i} className="h-24 bg-slate-800 rounded-2xl animate-pulse" />)}
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {[...Array(6)].map((_, i) => <div key={i} className="h-40 bg-slate-800 rounded-2xl animate-pulse" />)}
+      <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-4">
+        {[...Array(12)].map((_, i) => <div key={i} className="aspect-square bg-slate-800 rounded-xl animate-pulse" />)}
       </div>
     </div>
   )
@@ -201,7 +111,7 @@ export default function InstructorAchievements() {
   )
 
   return (
-    <div className="space-y-7">
+    <div className="space-y-4 sm:space-y-7">
 
       {/* Header — same pattern as other redesigned pages */}
       <div className="flex items-start justify-between">
@@ -217,23 +127,23 @@ export default function InstructorAchievements() {
       </div>
 
       {/* Stat strip */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
         {[
           { label: 'Earned',        value: earned.length,     icon: '🥇', color: 'text-yellow-400', border: 'border-l-yellow-500' },
           { label: 'In Progress',   value: inProgress.length, icon: '⚡', color: 'text-blue-400',   border: 'border-l-blue-500' },
           { label: 'Locked',        value: locked.length,     icon: '🔒', color: 'text-slate-400',  border: 'border-l-slate-600' },
           { label: 'XP from Badges',value: `${totalXP} XP`,  icon: '✨', color: 'text-purple-400', border: 'border-l-purple-500' },
         ].map(stat => (
-          <div key={stat.label} className={`bg-slate-900 border border-slate-800 border-l-4 ${stat.border} rounded-xl p-4`}>
-            <p className={`text-2xl font-black ${stat.color} tabular-nums leading-none`}>{stat.value}</p>
-            <p className="text-slate-500 text-xs mt-1 flex items-center gap-1"><span>{stat.icon}</span> {stat.label}</p>
+          <div key={stat.label} className={`bg-slate-900 border border-slate-800 border-l-4 ${stat.border} rounded-xl p-2.5 sm:p-4`}>
+            <p className={`text-lg sm:text-2xl font-black ${stat.color} tabular-nums leading-none`}>{stat.value}</p>
+            <p className="text-slate-500 text-[10px] sm:text-xs mt-0.5 sm:mt-1 flex items-center gap-1 truncate"><span>{stat.icon}</span> {stat.label}</p>
           </div>
         ))}
       </div>
 
       {/* Overall progress bar */}
       {achievements.length > 0 && (
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3 sm:p-5">
           <div className="flex items-center justify-between mb-3">
             <p className="text-white font-semibold text-sm">Overall Completion</p>
             <p className="text-slate-400 text-sm tabular-nums">
@@ -255,7 +165,7 @@ export default function InstructorAchievements() {
 
       {/* Filters + Sort */}
       <div className="flex flex-wrap gap-3 items-center justify-between">
-        <div className="flex gap-2 flex-wrap">
+        <div className="flex gap-1.5 sm:gap-2 flex-wrap">
           {[
             { key: 'all',      label: `All (${achievements.length})` },
             { key: 'earned',   label: `Earned (${earned.length})` },
@@ -265,7 +175,7 @@ export default function InstructorAchievements() {
             <button
               key={tab.key}
               onClick={() => setFilter(tab.key)}
-              className={`px-4 py-2 rounded-xl text-sm font-medium transition ${
+              className={`px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl text-xs sm:text-sm font-medium transition ${
                 filter === tab.key
                   ? 'bg-purple-600 text-white shadow-lg shadow-purple-900/30'
                   : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'
@@ -275,17 +185,35 @@ export default function InstructorAchievements() {
             </button>
           ))}
         </div>
-        <select
-          value={sortBy} onChange={e => setSortBy(e.target.value)}
-          className="bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-slate-300 text-sm outline-none focus:border-purple-500/60 transition cursor-pointer"
-        >
-          <option value="default">Sort: Default</option>
-          <option value="xp">Sort: XP Reward</option>
-          <option value="progress">Sort: Progress</option>
-        </select>
+        <div ref={sortMenuRef} className="relative shrink-0">
+          <button
+            onClick={() => setShowSortMenu(v => !v)}
+            className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl px-3 sm:px-4 py-1.5 sm:py-2 text-slate-300 text-xs sm:text-sm transition"
+          >
+            <span>Sort: {SORT_LABELS[sortBy]}</span>
+            <span className="text-slate-500 text-[10px]">▼</span>
+          </button>
+          <MobileSheet show={showSortMenu} onClose={() => setShowSortMenu(false)} widthClass="sm:w-48" anchorRef={sortMenuRef}>
+            <div className="py-2">
+              {Object.entries(SORT_LABELS).map(([key, label]) => (
+                <button
+                  key={key}
+                  onClick={() => { setSortBy(key); setShowSortMenu(false) }}
+                  className={`w-full px-4 py-2.5 text-left text-sm transition ${
+                    sortBy === key ? 'text-purple-300 bg-purple-600/10 font-semibold' : 'text-slate-300 hover:text-white hover:bg-slate-800/80'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </MobileSheet>
+        </div>
       </div>
 
-      {/* Grid */}
+      {/* Grid — icon + name, same as the student side's badge gallery. Tap
+          (or hover on desktop) a badge for its full description, progress
+          and reward in a tooltip. */}
       {filtered.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 bg-slate-900 border border-slate-800 rounded-2xl">
           <span className="text-5xl mb-4">🎯</span>
@@ -293,8 +221,20 @@ export default function InstructorAchievements() {
           <p className="text-slate-500 text-sm">Try a different filter</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filtered.map(badge => <AchievementCard key={badge.id} badge={badge} />)}
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6">
+          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-4 sm:gap-5">
+            {filtered.map(badge => (
+              <div key={badge.id} className="flex flex-col items-center gap-2">
+                <AchievementBadge badge={badge} size="md" />
+                <p className={`text-xs text-center font-medium truncate w-full ${badge.is_earned ? 'text-white' : 'text-slate-500'}`}>
+                  {badge.name}
+                </p>
+              </div>
+            ))}
+          </div>
+          <p className="text-slate-600 text-xs text-center mt-5 pt-4 border-t border-slate-800">
+            Tap a badge for details · Keep teaching to earn more! ✨
+          </p>
         </div>
       )}
 
@@ -306,4 +246,3 @@ export default function InstructorAchievements() {
     </div>
   )
 }
-  

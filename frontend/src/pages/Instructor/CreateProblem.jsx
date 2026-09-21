@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
+import { API_BASE } from '../../api/client'
 
 export default function CreateProblem() {
   const navigate = useNavigate()
@@ -54,7 +55,7 @@ export default function CreateProblem() {
         if (problemId) {
           setIsEditing(true)
           const problemRes = await fetch(
-            `http://localhost:5000/api/instructor/problems/${problemId}`,
+            `${API_BASE}/api/instructor/problems/${problemId}`,
             { headers: { 'Authorization': `Bearer ${token}` } }
           )
           if (problemRes.ok) {
@@ -88,7 +89,7 @@ export default function CreateProblem() {
         }
 
         const subjectsRes = await fetch(
-          'http://localhost:5000/api/instructor/assigned-subjects',
+          `${API_BASE}/api/instructor/assigned-subjects`,
           { headers: { 'Authorization': `Bearer ${token}` } }
         )
         if (subjectsRes.ok) setAssignedSubjects(await subjectsRes.json())
@@ -119,19 +120,30 @@ export default function CreateProblem() {
       try {
         const token = localStorage.getItem('token')
         const res = await fetch(
-          `http://localhost:5000/api/instructor/sections-by-subject?subject_id=${selectedSubjectId}`,
+          `${API_BASE}/api/instructor/sections-by-subject?subject_id=${selectedSubjectId}`,
           { headers: { Authorization: `Bearer ${token}` } }
         )
         if (res.ok) {
           const data = await res.json()
           setSectionsBySubject(data)
-          // Remove any selected sections that are no longer valid for this subject
-          setFormData(prev => ({
-            ...prev,
-            visible_to_sections: prev.visible_to_sections.filter(sid =>
+          setFormData(prev => {
+            // Remove any selected sections that are no longer valid for this subject
+            const cleaned = prev.visible_to_sections.filter(sid =>
               data.some(s => s.id === sid)
             )
-          }))
+            // A quest belongs to one specific class code -- when we arrived
+            // from inside a class (?class_id=) and nothing is picked yet,
+            // default it to that class instead of leaving it empty (empty
+            // used to silently mean "every section of this subject", which
+            // is exactly how a quest ends up leaking into class codes it
+            // was never meant for).
+            const classIdParam = searchParams.get('class_id')
+            if (!isEditing && cleaned.length === 0 && classIdParam &&
+                data.some(s => s.id === Number(classIdParam))) {
+              return { ...prev, visible_to_sections: [Number(classIdParam)] }
+            }
+            return { ...prev, visible_to_sections: cleaned }
+          })
         }
       } catch (err) {
         console.error('Failed to fetch sections for subject:', err)
@@ -224,6 +236,10 @@ export default function CreateProblem() {
       showToast('Please select at least one programming language.', 'error')
       return
     }
+    if (formData.visible_to_sections.length === 0) {
+      showToast('Please select at least one class code this quest should be visible to.', 'error')
+      return
+    }
 
     setIsSubmitting(true)
     try {
@@ -236,8 +252,8 @@ export default function CreateProblem() {
       }
 
       const url = isEditing
-        ? `http://localhost:5000/api/problems/${problemId}`
-        : 'http://localhost:5000/api/problems'
+        ? `${API_BASE}/api/problems/${problemId}`
+        : `${API_BASE}/api/problems`
       const method = isEditing ? 'PUT' : 'POST'
 
       const res = await fetch(url, {
@@ -277,7 +293,7 @@ export default function CreateProblem() {
   return (
     <div className="space-y-6">
       {toast && (
-        <div className={`fixed top-6 right-6 z-[200] max-w-sm rounded-xl border p-4 shadow-2xl ${
+        <div className={`fixed top-4 left-4 right-4 sm:left-auto sm:top-6 sm:right-6 sm:max-w-sm z-[200] rounded-xl border p-4 shadow-2xl ${
           toast.type === 'success'
             ? 'bg-green-900/90 border-green-500/50 shadow-green-900/30'
             : 'bg-red-900/90 border-red-500/50 shadow-red-900/30'
@@ -289,21 +305,32 @@ export default function CreateProblem() {
         </div>
       )}
       {/* Header */}
-      <div className="flex items-center gap-4">
-        <button onClick={() => navigate(resolveBackTarget())} className="text-slate-400 hover:text-white transition">
-          ← Back
+      <div className="flex items-center gap-3 sm:gap-4">
+        <button
+          onClick={() => navigate(resolveBackTarget())}
+          className="shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center text-slate-400 hover:text-white transition rounded-lg hover:bg-slate-800"
+          aria-label="Back"
+        >
+          <span className="sm:hidden text-xl">←</span>
+          <span className="hidden sm:inline">← Back</span>
         </button>
-        <div>
-          <h1 className="text-3xl font-bold text-white">
+        <div className="min-w-0">
+          <h1 className="text-xl sm:text-3xl font-bold text-white truncate">
             {isEditing ? '✏️ Edit Quest' : '⚔️ Create New Quest'}
           </h1>
-          <p className="text-slate-400">Design a coding quest for your students</p>
+          <p className="text-slate-400 text-xs sm:text-base">Design a coding quest for your students</p>
         </div>
       </div>
 
       {/* Progress Steps */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
-        <div className="flex items-center justify-between">
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6">
+        {/* Mobile: current step name only — the full icon row is too wide
+            for a phone screen even without labels (7 icons + connectors) */}
+        <p className="sm:hidden text-center text-sm font-bold text-purple-300 mb-1">
+          Step {activeSection} of {sections_nav.length} — {sections_nav.find(s => s.id === activeSection)?.title}
+        </p>
+
+        <div className="hidden sm:flex items-center justify-between">
           {sections_nav.map((sec, idx) => (
             <div key={sec.id} className="flex items-center">
               <button
@@ -326,7 +353,31 @@ export default function CreateProblem() {
             </div>
           ))}
         </div>
-        <div className="mt-5 w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+
+        {/* Mobile: tappable dots so you can still jump to any step directly */}
+        <div className="sm:hidden flex items-center justify-center gap-2 mt-1">
+          {sections_nav.map(sec => (
+            <button
+              key={sec.id}
+              type="button"
+              onClick={() => setActiveSection(sec.id)}
+              aria-label={sec.title}
+              className="p-2 -m-2"
+            >
+              <span
+                className={`block w-2 h-2 rounded-full transition-all ${
+                  activeSection === sec.id
+                    ? 'bg-purple-500 w-5'
+                    : activeSection > sec.id
+                    ? 'bg-green-600'
+                    : 'bg-slate-700'
+                }`}
+              />
+            </button>
+          ))}
+        </div>
+
+        <div className="mt-4 sm:mt-5 w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
           <div
             className="h-full bg-gradient-to-r from-purple-600 to-pink-600 rounded-full transition-all duration-500"
             style={{ width: `${(activeSection / sections_nav.length) * 100}%` }}
@@ -338,13 +389,15 @@ export default function CreateProblem() {
 
         {/* ── Section 1: Basic Information ── */}
         {activeSection === 1 && (
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6 animate-fade-in">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6 space-y-6 animate-fade-in">
             <div>
               <label className="block text-slate-400 text-sm mb-2">Course Subject *</label>
-              {searchParams.get('subject_id') ? (
+              {(searchParams.get('subject_id') || isEditing) ? (
                 <div className="w-full bg-slate-800/50 border border-slate-700 rounded-xl px-4 py-3 text-white flex items-center justify-between">
                   <span>{assignedSubjects.find(s => s.id === selectedSubjectId)?.name || 'Loading...'}</span>
-                  <span className="text-xs text-slate-500">🔒 Set by this class</span>
+                  <span className="text-xs text-slate-500">
+                    {isEditing && !searchParams.get('subject_id') ? "🔒 Can't change an existing quest's subject" : '🔒 Set by this class'}
+                  </span>
                 </div>
               ) : (
                 <select
@@ -366,7 +419,7 @@ export default function CreateProblem() {
                   the locked "🔒 Set by this class" state above, so choosing from
                   this dropdown feels just as deliberate/confirmed as arriving
                   with the subject already set. */}
-              {!searchParams.get('subject_id') && selectedSubjectId && (
+              {!searchParams.get('subject_id') && !isEditing && selectedSubjectId && (
                 <p className="text-xs text-purple-300 mt-2 flex items-center gap-1.5">
                   📚 Creating this quest for
                   <span className="font-semibold text-purple-200">
@@ -394,7 +447,7 @@ export default function CreateProblem() {
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
               <div>
                 <label className="block text-slate-400 text-sm mb-2">Difficulty *</label>
                 <select
@@ -434,14 +487,14 @@ export default function CreateProblem() {
 
         {/* ── Section 2: Problem Type & Languages ── */}
         {activeSection === 2 && (
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6 animate-fade-in">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6 space-y-6 animate-fade-in">
             <h2 className="text-2xl font-bold text-white flex items-center gap-2">
               <span>💻</span> Problem Type & Languages
             </h2>
 
             <div>
               <label className="block text-slate-400 text-sm mb-3">Problem Type *</label>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {[
                   { value: 'coding',    icon: '📝', label: 'Coding',    desc: 'Student writes complete solution' },
                   { value: 'debugging', icon: '🐛', label: 'Debugging', desc: 'Student fixes bugs in code' },
@@ -489,7 +542,7 @@ export default function CreateProblem() {
 
         {/* ── Section 3: Visibility & Settings ── */}
         {activeSection === 3 && (
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6 animate-fade-in">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6 space-y-6 animate-fade-in">
             <h2 className="text-2xl font-bold text-white flex items-center gap-2">
               <span>🔧</span> Visibility & Settings
             </h2>
@@ -520,7 +573,7 @@ export default function CreateProblem() {
               <label className="block text-slate-400 text-sm mb-3">
                 Visible To Sections
                 <span className="ml-2 text-slate-500 font-normal text-xs">
-                  (leave empty = all your sections for this subject)
+                  (required -- a quest only shows up in the class code(s) you pick here)
                 </span>
               </label>
               <div className="bg-slate-800 rounded-xl p-4 space-y-2 max-h-60 overflow-y-auto border border-slate-700">
@@ -558,12 +611,13 @@ export default function CreateProblem() {
                 )}
               </div>
               <p className="text-slate-500 text-xs mt-2">
-                Select which sections can see this problem. Leave empty to share with all your sections.
+                Select which class code(s) can see this quest. At least one is required -- a quest
+                deleted along with its class code never lingers in another section by accident.
               </p>
             </div>
 
             {/* Advanced settings */}
-            <div className="grid grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
               <div>
                 <label className="block text-slate-400 text-sm mb-2">Estimated Time</label>
                 <select
@@ -594,7 +648,7 @@ export default function CreateProblem() {
 
         {/* ── Section 4: Starter Code ── */}
         {activeSection === 4 && (
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6 animate-fade-in">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6 space-y-6 animate-fade-in">
             <h2 className="text-2xl font-bold text-white flex items-center gap-2">
               <span>📝</span> Starter Code
             </h2>
@@ -624,7 +678,7 @@ export default function CreateProblem() {
 
         {/* ── Section 5: Test Cases ── */}
         {activeSection === 5 && (
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6 animate-fade-in">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6 space-y-6 animate-fade-in">
             <div className="flex justify-between items-center">
               <h2 className="text-2xl font-bold text-white flex items-center gap-2">
                 <span>🧪</span> Test Cases
@@ -656,7 +710,7 @@ export default function CreateProblem() {
                     />
                     🔒 Hide from students (used for grading only)
                   </label>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       {/* was a single-line <input>, so there was no way to press
                           Enter for a real 2nd line of input (needed when a quest
@@ -692,7 +746,7 @@ export default function CreateProblem() {
 
         {/* ── Section 6: Hints ── */}
         {activeSection === 6 && (
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6 animate-fade-in">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6 space-y-6 animate-fade-in">
             <div className="flex justify-between items-center">
               <h2 className="text-2xl font-bold text-white flex items-center gap-2">
                 <span>💡</span> Hints (Optional)
@@ -740,7 +794,7 @@ export default function CreateProblem() {
 
         {/* ── Section 7: Review ── */}
         {activeSection === 7 && (
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6 animate-fade-in">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6 space-y-6 animate-fade-in">
             <h2 className="text-2xl font-bold text-white flex items-center gap-2">
               <span>📋</span> Review Quest
             </h2>
@@ -754,7 +808,7 @@ export default function CreateProblem() {
                 {
                   label: 'Visible To Sections',
                   value: formData.visible_to_sections.length === 0
-                    ? 'All my sections'
+                    ? <span className="text-red-400">None selected -- required</span>
                     : `${formData.visible_to_sections.length} section(s) selected`
                 },
               ].map(row => (

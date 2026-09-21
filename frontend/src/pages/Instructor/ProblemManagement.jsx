@@ -8,6 +8,7 @@
 
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { API_BASE } from '../../api/client'
 
 export default function ProblemManagement({ classId, subjectId }) {
   const navigate = useNavigate()
@@ -27,7 +28,7 @@ export default function ProblemManagement({ classId, subjectId }) {
   // subject dropdown.
   const goToCreateQuest = () => {
     if (subjectId) {
-      navigate(`/instructor/create-problem?from=${encodeURIComponent(fromPath)}&subject_id=${subjectId}`)
+      navigate(`/instructor/create-problem?from=${encodeURIComponent(fromPath)}&subject_id=${subjectId}&class_id=${classId}`)
     } else {
       navigate('/instructor/create-problem/pick-class')
     }
@@ -38,8 +39,8 @@ export default function ProblemManagement({ classId, subjectId }) {
     try {
       const token = localStorage.getItem('token')
       const url = classId
-        ? `http://localhost:5000/api/instructor/classes/${classId}/problems`
-        : 'http://localhost:5000/api/instructor/problems'
+        ? `${API_BASE}/api/instructor/classes/${classId}/problems`
+        : `${API_BASE}/api/instructor/problems`
       const res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } })
       if (res.ok) setProblems(await res.json())
     } catch (err) {
@@ -63,7 +64,7 @@ export default function ProblemManagement({ classId, subjectId }) {
     setDeleteTarget(null)
     try {
       const token = localStorage.getItem('token')
-      const res = await fetch(`http://localhost:5000/api/problems/${target.id}`, {
+      const res = await fetch(`${API_BASE}/api/problems/${target.id}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       })
@@ -113,10 +114,10 @@ export default function ProblemManagement({ classId, subjectId }) {
   )
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
 
       {/* Header */}
-      <div className="flex justify-between items-start gap-4 flex-wrap">
+      <div className="flex justify-between items-start gap-4 flex-wrap sm:flex-nowrap">
         <div>
           <h2 className="text-2xl font-black text-white tracking-tight">Quests</h2>
           <p className="text-slate-400 mt-0.5 text-sm">Create and manage coding quests for your students</p>
@@ -142,16 +143,16 @@ export default function ProblemManagement({ classId, subjectId }) {
       )}
 
       {/* Stat Strip */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-3">
         {[
           { label: 'Total',     value: problems.length,                                             border: 'border-l-slate-500',   text: 'text-white' },
           { label: 'Coding',    value: problems.filter(p => p.problem_type === 'coding').length,    border: 'border-l-purple-500',  text: 'text-purple-400' },
           { label: 'Debugging', value: problems.filter(p => p.problem_type === 'debugging').length, border: 'border-l-blue-500',    text: 'text-blue-400' },
           { label: 'Events',    value: problems.filter(p => p.is_event_quest).length,               border: 'border-l-yellow-500',  text: 'text-yellow-400' },
         ].map(stat => (
-          <div key={stat.label} className={`bg-slate-900 border border-slate-800 border-l-4 ${stat.border} rounded-xl p-4`}>
-            <p className={`text-2xl font-black ${stat.text} tabular-nums`}>{stat.value}</p>
-            <p className="text-slate-500 text-xs mt-0.5">{stat.label}</p>
+          <div key={stat.label} className={`bg-slate-900 border border-slate-800 border-l-4 ${stat.border} rounded-xl p-2.5 sm:p-4`}>
+            <p className={`text-lg sm:text-2xl font-black ${stat.text} tabular-nums leading-none`}>{stat.value}</p>
+            <p className="text-slate-500 text-[10px] sm:text-xs mt-1 truncate">{stat.label}</p>
           </div>
         ))}
       </div>
@@ -164,22 +165,22 @@ export default function ProblemManagement({ classId, subjectId }) {
           placeholder="Search quests..."
           value={search}
           onChange={e => setSearch(e.target.value)}
-          className="w-full bg-slate-900 border border-slate-800 rounded-xl px-5 py-3 pl-11 text-white placeholder-slate-600 focus:border-purple-500/60 focus:outline-none transition text-sm"
+          className="w-full bg-slate-900 border border-slate-800 rounded-xl px-5 py-2.5 pl-11 text-white placeholder-slate-600 focus:border-purple-500/60 focus:outline-none transition text-sm"
         />
       </div>
 
       {/* Table */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
-        <table className="w-full text-left text-sm">
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-x-auto">
+        <table className="w-full text-left text-sm min-w-[640px]">
           <thead>
             <tr className="bg-slate-800/60 text-slate-500 text-xs uppercase tracking-wider border-b border-slate-800">
-              <th className="px-5 py-3.5 font-semibold">Quest</th>
-              <th className="px-5 py-3.5 font-semibold">Type</th>
-              <th className="px-5 py-3.5 font-semibold hidden md:table-cell">Languages</th>
-              <th className="px-5 py-3.5 font-semibold">Difficulty</th>
-              <th className="px-5 py-3.5 font-semibold hidden sm:table-cell">XP</th>
-              <th className="px-5 py-3.5 font-semibold">Status</th>
-              <th className="px-5 py-3.5 font-semibold text-right">Actions</th>
+              <th className="px-3 sm:px-5 py-3.5 font-semibold">Quest</th>
+              <th className="px-3 sm:px-5 py-3.5 font-semibold">Type</th>
+              <th className="px-3 sm:px-5 py-3.5 font-semibold hidden md:table-cell">Languages</th>
+              <th className="px-3 sm:px-5 py-3.5 font-semibold">Difficulty</th>
+              <th className="px-3 sm:px-5 py-3.5 font-semibold hidden sm:table-cell">XP</th>
+              <th className="px-3 sm:px-5 py-3.5 font-semibold">Status</th>
+              <th className="px-3 sm:px-5 py-3.5 font-semibold text-right">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-800/60">
@@ -212,7 +213,7 @@ export default function ProblemManagement({ classId, subjectId }) {
                     onClick={() => navigate(`/instructor/problem/${problem.id}/submissions?from=${encodeURIComponent(fromPath)}`)}
                   >
                     {/* Title */}
-                    <td className="px-5 py-4">
+                    <td className="px-3 sm:px-5 py-4">
                       <div className="flex flex-col gap-1">
                         <span className="font-semibold text-purple-400 group-hover:text-purple-300 transition group-hover:underline underline-offset-2">
                           {problem.title}
@@ -226,7 +227,7 @@ export default function ProblemManagement({ classId, subjectId }) {
                     </td>
 
                     {/* Type */}
-                    <td className="px-5 py-4">
+                    <td className="px-3 sm:px-5 py-4">
                       <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold ${
                         problem.problem_type === 'coding'
                           ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20'
@@ -237,7 +238,7 @@ export default function ProblemManagement({ classId, subjectId }) {
                     </td>
 
                     {/* Languages */}
-                    <td className="px-5 py-4 hidden md:table-cell">
+                    <td className="px-3 sm:px-5 py-4 hidden md:table-cell">
                       <div className="flex gap-1 flex-wrap">
                         {(problem.languages || []).map(lang => {
                           const l = langConfig[lang] || { icon: '📄', label: lang }
@@ -251,7 +252,7 @@ export default function ProblemManagement({ classId, subjectId }) {
                     </td>
 
                     {/* Difficulty */}
-                    <td className="px-5 py-4">
+                    <td className="px-3 sm:px-5 py-4">
                       <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold ${diff.bg} ${diff.color} border ${diff.border}`}>
                         <span className={`w-1.5 h-1.5 rounded-full ${diff.dot}`} />
                         {problem.difficulty}
@@ -259,13 +260,13 @@ export default function ProblemManagement({ classId, subjectId }) {
                     </td>
 
                     {/* XP */}
-                    <td className="px-5 py-4 hidden sm:table-cell">
+                    <td className="px-3 sm:px-5 py-4 hidden sm:table-cell">
                       <span className="text-yellow-400 font-black tabular-nums text-sm">{problem.xp_reward}</span>
                       <span className="text-yellow-600 text-xs ml-1">XP</span>
                     </td>
 
                     {/* Status */}
-                    <td className="px-5 py-4">
+                    <td className="px-3 sm:px-5 py-4">
                       <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border ${
                         problem.is_published
                           ? 'bg-green-500/10 text-green-400 border-green-500/20'
@@ -278,7 +279,7 @@ export default function ProblemManagement({ classId, subjectId }) {
 
                     {/* Actions — always visible, not hover-only. hover-only means
                         on mobile/touch the buttons are completely unreachable */}
-                    <td className="px-5 py-4 text-right" onClick={e => e.stopPropagation()}>
+                    <td className="px-3 sm:px-5 py-4 text-right" onClick={e => e.stopPropagation()}>
                       <div className="flex justify-end gap-1.5">
                         <button
                           onClick={() => navigate(`/instructor/create-problem?edit=${problem.id}&from=${encodeURIComponent(fromPath)}`)}

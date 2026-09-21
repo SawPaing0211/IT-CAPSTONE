@@ -1,18 +1,83 @@
 import { useState, useRef, useCallback } from 'react'
+import { API_BASE } from '../../api/client'
 
-const API = 'http://localhost:5000'
+const API = API_BASE
 
 // ─── Required columns for the enrollment endpoint ────────────────────
-const REQUIRED_COLS = ['student_id', 'firstname', 'lastname', 'year_level', 'student_type']
-const OPTIONAL_COLS = ['middlename', 'suffix', 'class_code', 'section_no', 'subject_code']
+// section_no is the actual class code (created under Class Codes) and is
+// what the backend enrolls a student into — for BOTH regular and irregular
+// students. class_code/subject_code used to be separate fields but the
+// server never reads them, so they've been dropped here to match.
+const REQUIRED_COLS = ['student_id', 'firstname', 'lastname', 'year_level', 'student_type', 'section_no']
+const OPTIONAL_COLS = ['middlename', 'suffix']
 const SAMPLE_CSV = [
-  'student_id,firstname,middlename,lastname,suffix,year_level,student_type,class_code,section_no,subject_code',
-  '2024-00001,Juan,Santos,Dela Cruz,,1,regular,IT101,,,',
-  '2024-00002,Maria,Reyes,Garcia,,1,regular,IT101,,,',
-  '2024-00003,Jose,Bautista,Mendoza,,1,regular,IT102,,,',
-  '2024-30001,Pedro,Jose,Reyes,,3,irregular,,29017,IT115',
-  '2024-30001,Pedro,Jose,Reyes,,3,irregular,,29018,IT115L',
+  'student_id,firstname,middlename,lastname,suffix,year_level,student_type,section_no',
+  '2024-00001,Juan,Santos,Dela Cruz,,1,regular,IT101',
+  '2024-00002,Maria,Reyes,Garcia,,1,regular,IT101',
+  '2024-00003,Jose,Bautista,Mendoza,,1,regular,IT102',
+  '2024-30001,Pedro,Jose,Reyes,,3,irregular,29017',
+  '2024-30001,Pedro,Jose,Reyes,,3,irregular,29018',
 ].join('\n')
+
+// ─── inline icons (no icon library — keeps this self-contained) ──────
+function Icon({ children, className = 'w-4 h-4', fill = 'none' }) {
+  return (
+    <svg viewBox="0 0 24 24" fill={fill} stroke="currentColor" strokeWidth="2"
+      strokeLinecap="round" strokeLinejoin="round" className={className}>
+      {children}
+    </svg>
+  )
+}
+const IconUpload = (p) => (
+  <Icon {...p}><polyline points="7 10 12 5 17 10" /><line x1="12" y1="5" x2="12" y2="16" />
+    <path d="M20 16v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-2" /></Icon>
+)
+const IconDownload = (p) => (
+  <Icon {...p}><polyline points="7 11 12 16 17 11" /><line x1="12" y1="4" x2="12" y2="16" />
+    <path d="M20 16v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-2" /></Icon>
+)
+const IconSend = (p) => (
+  <Icon {...p}><line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" /></Icon>
+)
+const IconCheckCircle = (p) => (
+  <Icon {...p}><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></Icon>
+)
+const IconXCircle = (p) => (
+  <Icon {...p}><circle cx="12" cy="12" r="10" /><line x1="15" y1="9" x2="9" y2="15" /><line x1="9" y1="9" x2="15" y2="15" /></Icon>
+)
+const IconLink = (p) => (
+  <Icon {...p}><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></Icon>
+)
+const IconSkip = (p) => (
+  <Icon {...p} fill="currentColor"><polygon points="5 4 15 12 5 20 5 4" /><line x1="19" y1="5" x2="19" y2="19" /></Icon>
+)
+const IconInfo = (p) => (
+  <Icon {...p}><circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" /></Icon>
+)
+const IconAlertTriangle = (p) => (
+  <Icon {...p}><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+    <line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></Icon>
+)
+const IconLock = (p) => (
+  <Icon {...p}><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></Icon>
+)
+const IconGraduationCap = (p) => (
+  <Icon {...p} fill="currentColor" className={p.className}><path d="M22 10 12 5 2 10l10 5 10-5Z" />
+    <path fill="none" strokeWidth="2" d="M6 12v5c0 1.5 2.5 3 6 3s6-1.5 6-3v-5" /></Icon>
+)
+const IconArrowLeft = (p) => (
+  <Icon {...p}><line x1="19" y1="12" x2="5" y2="12" /><polyline points="12 19 5 12 12 5" /></Icon>
+)
+const IconUsers = (p) => (
+  <Icon {...p}><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" />
+    <path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></Icon>
+)
+const IconClipboard = (p) => (
+  <Icon {...p}><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+    <rect x="8" y="2" width="8" height="4" rx="1" ry="1" /></Icon>
+)
+
 
 // ─── tiny CSV parser ──────────────────────────────────────────────────
 function parseCSV(text) {
@@ -62,14 +127,21 @@ function StatusBadge({ status }) {
     skipped:  'bg-yellow-600/20 text-yellow-300 border-yellow-600/40',
     error:    'bg-red-600/20    text-red-300    border-red-600/40',
   }
+  const icons = {
+    created:  <IconCheckCircle className="w-3.5 h-3.5" />,
+    enrolled: <IconLink className="w-3.5 h-3.5" />,
+    skipped:  <IconSkip className="w-3.5 h-3.5" />,
+    error:    <IconXCircle className="w-3.5 h-3.5" />,
+  }
   const label = {
-    created:  '✅ Created',
-    enrolled: '🔗 Enrolled',
-    skipped:  '⏭ Skipped',
-    error:    '❌ Error',
+    created:  'Created',
+    enrolled: 'Enrolled',
+    skipped:  'Skipped',
+    error:    'Error',
   }
   return (
-    <span className={`px-2 py-0.5 rounded text-xs font-bold border ${map[status] ?? map.error}`}>
+    <span className={`px-2 py-0.5 rounded text-xs font-bold border inline-flex items-center gap-1 ${map[status] ?? map.error}`}>
+      {icons[status] ?? icons.error}
       {label[status] ?? status}
     </span>
   )
@@ -204,9 +276,10 @@ export default function UploadCSVModal({ onClose, onSuccess }) {
 
       {/* Toast */}
       {toast && (
-        <div className={`fixed top-6 right-6 z-[9999] px-5 py-3 rounded-xl font-semibold text-white shadow-xl
+        <div className={`fixed top-6 right-6 z-[9999] px-5 py-3 rounded-xl font-semibold text-white shadow-xl flex items-center gap-2
           ${toast.type === 'error' ? 'bg-red-600' : 'bg-green-600'}`}>
-          {toast.type === 'error' ? '❌' : '✅'} {toast.msg}
+          {toast.type === 'error' ? <IconXCircle className="w-4 h-4 flex-shrink-0" /> : <IconCheckCircle className="w-4 h-4 flex-shrink-0" />}
+          {toast.msg}
         </div>
       )}
 
@@ -215,8 +288,8 @@ export default function UploadCSVModal({ onClose, onSuccess }) {
         {/* ── Header ───────────────────────────────────────────────────── */}
         <div className="bg-gradient-to-r from-purple-900/60 to-pink-900/40 px-6 py-5 border-b border-purple-600/30 flex items-center justify-between flex-shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-gradient-to-br from-green-500 to-emerald-500 rounded-xl flex items-center justify-center text-xl">
-              🎓
+            <div className="w-10 h-10 bg-gradient-to-br from-green-500 to-emerald-500 rounded-xl flex items-center justify-center">
+              <IconGraduationCap className="w-5 h-5 text-white" />
             </div>
             <div>
               <h2 className="text-xl font-black text-white">Bulk Enrollment Upload</h2>
@@ -256,7 +329,9 @@ export default function UploadCSVModal({ onClose, onSuccess }) {
                 className="hidden"
                 onChange={(e) => readAndParse(e.target.files[0])}
               />
-              <div className="text-5xl mb-3">📂</div>
+              <div className="w-14 h-14 mx-auto mb-3 rounded-2xl bg-purple-600/10 flex items-center justify-center">
+                <IconUpload className="w-7 h-7 text-purple-400" />
+              </div>
               <p className="text-white font-bold text-lg">
                 {isDragging ? 'Drop it!' : 'Drag & drop your registrar CSV here'}
               </p>
@@ -266,14 +341,15 @@ export default function UploadCSVModal({ onClose, onSuccess }) {
             {/* How it works */}
             <div className="grid grid-cols-2 gap-3">
               <div className="bg-slate-800/60 rounded-xl p-4 border border-green-600/20">
-                <p className="text-green-400 font-bold text-sm mb-1">🏫 Regular Students</p>
+                <p className="text-green-400 font-bold text-sm mb-1 flex items-center gap-1.5"><IconUsers className="w-4 h-4" /> Regular Students</p>
                 <p className="text-slate-400 text-xs leading-relaxed">
-                  Set <code className="text-purple-300">student_type=regular</code> and fill <code className="text-purple-300">class_code</code>.                  Account is created and student is enrolled in that class code.
-                  Class code auto-closes when full.
+                  Set <code className="text-purple-300">student_type=regular</code> and fill <code className="text-purple-300">section_no</code> with their class code.
+                  Account is created and student is enrolled in that class.
+                  Class auto-closes when full.
                 </p>
               </div>
               <div className="bg-slate-800/60 rounded-xl p-4 border border-blue-600/20">
-                <p className="text-blue-400 font-bold text-sm mb-1">📋 Irregular Students</p>
+                <p className="text-blue-400 font-bold text-sm mb-1 flex items-center gap-1.5"><IconClipboard className="w-4 h-4" /> Irregular Students</p>
                 <p className="text-slate-400 text-xs leading-relaxed">
                   Set <code className="text-purple-300">student_type=irregular</code> and fill <code className="text-purple-300">section_no</code>.
                   Add multiple rows with the same <code className="text-purple-300">student_id</code> to enroll in several sections.
@@ -306,7 +382,7 @@ export default function UploadCSVModal({ onClose, onSuccess }) {
               onClick={downloadSample}
               className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 rounded-xl text-slate-300 text-sm font-semibold border border-slate-700 hover:border-slate-600 transition flex items-center justify-center gap-2"
             >
-              <span>⬇️</span> Download Sample CSV Template
+              <IconDownload className="w-4 h-4" /> Download Sample CSV Template
             </button>
           </div>
         )}
@@ -334,7 +410,7 @@ export default function UploadCSVModal({ onClose, onSuccess }) {
               {/* Irregular multi-section notice */}
               {irregularCount > 0 && (
                 <div className="bg-blue-900/20 border border-blue-600/30 rounded-xl p-3 flex gap-3 items-start">
-                  <span className="text-lg flex-shrink-0">ℹ️</span>
+                  <IconInfo className="w-4 h-4 flex-shrink-0 text-blue-400 mt-0.5" />
                   <p className="text-blue-300 text-xs leading-relaxed">
                     Irregular students with the same <code>student_id</code> on multiple rows will have one account created
                     and will be enrolled in each listed section separately.
@@ -345,7 +421,9 @@ export default function UploadCSVModal({ onClose, onSuccess }) {
               {/* Client-side errors */}
               {clientErrs.length > 0 && (
                 <div className="bg-red-900/20 border border-red-600/30 rounded-xl p-4 space-y-1.5">
-                  <p className="text-red-300 text-sm font-bold">⚠️ Validation issues (these rows will be skipped):</p>
+                  <p className="text-red-300 text-sm font-bold flex items-center gap-1.5">
+                    <IconAlertTriangle className="w-4 h-4" /> Validation issues (these rows will be skipped):
+                  </p>
                   {clientErrs.slice(0, 6).map((e, i) => (
                     <p key={i} className="text-red-400 text-xs font-mono">
                       Row {e.row} · {e.student_id || '(empty)'} — {e.errors.join(', ')}
@@ -372,7 +450,7 @@ export default function UploadCSVModal({ onClose, onSuccess }) {
                 </div>
                 <div className={`overflow-x-auto ${showAllRows ? 'max-h-72 overflow-y-auto' : ''}`}>
                   <table className="w-full text-sm">
-                    <thead className="bg-slate-800/60 sticky top-0">
+                    <thead className="bg-slate-800 sticky top-0 z-10">
                       <tr>
                         <th className="text-left px-3 py-2 text-slate-400 font-medium text-xs">#</th>
                         {parsed.headers.map(h => (
@@ -413,16 +491,17 @@ export default function UploadCSVModal({ onClose, onSuccess }) {
             <div className="flex gap-3 p-6 border-t border-purple-600/30 flex-shrink-0">
               <button
                 onClick={reset}
-                className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-white font-bold transition"
+                className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-white font-bold transition flex items-center justify-center gap-1.5"
               >
-                ← Back
+                <IconArrowLeft className="w-4 h-4" /> Back
               </button>
               <button
                 onClick={handleUpload}
                 disabled={validCount === 0}
                 className="flex-1 py-2.5 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-white font-black transition shadow-lg shadow-green-600/30 flex items-center justify-center gap-2"
               >
-                📤 Enroll {validCount} Student{validCount !== 1 ? 's' : ''}
+                <IconSend className="w-4 h-4" />
+                Enroll {validCount} Student{validCount !== 1 ? 's' : ''}
               </button>
             </div>
           </div>
@@ -433,7 +512,9 @@ export default function UploadCSVModal({ onClose, onSuccess }) {
           <div className="flex flex-col items-center justify-center py-16 px-6 gap-5">
             <div className="relative">
               <div className="w-20 h-20 rounded-full border-4 border-purple-600/30 border-t-purple-500 animate-spin" />
-              <span className="absolute inset-0 flex items-center justify-center text-2xl">📤</span>
+              <span className="absolute inset-0 flex items-center justify-center">
+                <IconSend className="w-7 h-7 text-purple-300" />
+              </span>
             </div>
             <div className="text-center">
               <p className="text-white font-bold text-lg">Processing enrollment…</p>
@@ -468,7 +549,9 @@ export default function UploadCSVModal({ onClose, onSuccess }) {
             {/* Server-side errors list */}
             {result.errors?.length > 0 && (
               <div className="bg-red-900/20 border border-red-600/30 rounded-xl p-4 space-y-1 max-h-32 overflow-y-auto">
-                <p className="text-red-300 text-xs font-bold mb-1">⚠️ Rows that were skipped:</p>
+                <p className="text-red-300 text-xs font-bold mb-1 flex items-center gap-1.5">
+                  <IconAlertTriangle className="w-3.5 h-3.5" /> Rows that were skipped:
+                </p>
                 {result.errors.map((e, i) => (
                   <p key={i} className="text-red-400 text-xs font-mono">{e}</p>
                 ))}
@@ -479,7 +562,7 @@ export default function UploadCSVModal({ onClose, onSuccess }) {
             {result.results?.length > 0 && (
               <div className="rounded-xl overflow-hidden border border-slate-700 max-h-52 overflow-y-auto">
                 <table className="w-full text-sm">
-                  <thead className="bg-slate-800/80 sticky top-0">
+                  <thead className="bg-slate-800 sticky top-0 z-10">
                     <tr>
                       <th className="text-left px-4 py-2 text-slate-400 font-medium text-xs">Row</th>
                       <th className="text-left px-4 py-2 text-slate-400 font-medium text-xs">Student ID</th>
@@ -504,7 +587,9 @@ export default function UploadCSVModal({ onClose, onSuccess }) {
             {/* Credential CSV download */}
             {result.credential_csv && (
               <div className="bg-blue-900/20 border border-blue-600/30 rounded-xl p-4 flex items-center gap-4">
-                <span className="text-3xl flex-shrink-0">🔐</span>
+                <div className="w-10 h-10 rounded-xl bg-blue-600/20 flex items-center justify-center flex-shrink-0">
+                  <IconLock className="w-5 h-5 text-blue-300" />
+                </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-blue-300 font-bold text-sm">Auto-generated credentials ready</p>
                   <p className="text-slate-400 text-xs mt-0.5">
@@ -513,9 +598,9 @@ export default function UploadCSVModal({ onClose, onSuccess }) {
                 </div>
                 <button
                   onClick={downloadCredentials}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-white text-sm font-bold transition flex-shrink-0"
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-white text-sm font-bold transition flex-shrink-0 flex items-center gap-1.5"
                 >
-                  ⬇️ Download
+                  <IconDownload className="w-4 h-4" /> Download
                 </button>
               </div>
             )}

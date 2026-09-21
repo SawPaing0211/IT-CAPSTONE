@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { API_BASE } from '../../api/client'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -283,7 +284,7 @@ export default function ActivityLogs() {
         params.set('date_from', d.toISOString().split('T')[0])
       }
 
-      const res = await fetch(`http://localhost:5000/api/admin/audit-logs?${params}`, {
+      const res = await fetch(`${API_BASE}/api/admin/audit-logs?${params}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       })
       if (res.ok) {
@@ -354,7 +355,7 @@ export default function ActivityLogs() {
         params.set('date_from', d.toISOString().split('T')[0])
       }
 
-      const res = await fetch(`http://localhost:5000/api/admin/audit-logs/export?${params}`, {
+      const res = await fetch(`${API_BASE}/api/admin/audit-logs/export?${params}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       })
       if (res.ok) {

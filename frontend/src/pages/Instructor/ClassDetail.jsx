@@ -17,6 +17,7 @@ import ProblemManagement from './ProblemManagement'
 import Announcements    from './Announcements'
 import PlagiarismCheck  from './PlagiarismCheck'
 import Analytics        from './Analytics'
+import { API_BASE } from '../../api/client'
 
 export default function ClassDetail() {
   const navigate = useNavigate()
@@ -33,12 +34,12 @@ export default function ClassDetail() {
         const token = localStorage.getItem('token')
         const headers = { 'Authorization': `Bearer ${token}` }
 
-        const classRes = await fetch(`http://localhost:5000/api/instructor/classes/${id}`, { headers })
+        const classRes = await fetch(`${API_BASE}/api/instructor/classes/${id}`, { headers })
         if (classRes.ok) {
           const data = await classRes.json()
           setClassInfo(data)
 
-          const studentsRes = await fetch(`http://localhost:5000/api/admin/sections/${id}/students`, { headers })
+          const studentsRes = await fetch(`${API_BASE}/api/admin/sections/${id}/students`, { headers })
           if (studentsRes.ok) {
             const sData = await studentsRes.json()
             setStats({
@@ -83,7 +84,7 @@ export default function ClassDetail() {
   )
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
 
       {/* ── Header ────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between gap-4 flex-wrap">
@@ -118,16 +119,16 @@ export default function ClassDetail() {
       </div>
 
       {/* ── Stats Strip ───────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-3">
         {[
           { label: 'Students',  value: stats.total,             icon: '👥', border: 'border-l-purple-500', text: 'text-purple-400' },
           { label: 'Problems',  value: stats.problems,          icon: '📝', border: 'border-l-blue-500',   text: 'text-blue-400'   },
           { label: 'At Risk',   value: stats.atRisk,            icon: '⚠️', border: stats.atRisk > 0 ? 'border-l-red-500' : 'border-l-green-500', text: stats.atRisk > 0 ? 'text-red-400' : 'text-green-400' },
           { label: 'Semester',  value: classInfo.semester || '—', icon: '📅', border: 'border-l-slate-600', text: 'text-slate-300'  },
         ].map(s => (
-          <div key={s.label} className={`bg-slate-900 border border-slate-800 border-l-4 ${s.border} rounded-xl p-4`}>
-            <p className={`text-2xl font-black ${s.text} tabular-nums`}>{s.value}</p>
-            <p className="text-slate-500 text-xs mt-0.5 flex items-center gap-1">
+          <div key={s.label} className={`bg-slate-900 border border-slate-800 border-l-4 ${s.border} rounded-xl p-2.5 sm:p-4`}>
+            <p className={`text-lg sm:text-2xl font-black ${s.text} tabular-nums leading-none`}>{s.value}</p>
+            <p className="text-slate-500 text-[10px] sm:text-xs mt-1 flex items-center gap-1 truncate">
               <span>{s.icon}</span> {s.label}
             </p>
           </div>

@@ -7,7 +7,7 @@ import ProgressStats from './components/ProgressStats'
 import QuestLog from './QuestLog'
 import MySubjects from './MySubjects'
 import BountyBoard from './BountyBoard'
-import { api } from '../../api/client'
+import { api, API_BASE} from '../../api/client'
 import MobileSheet from '../../components/MobileSheet'
 import BottomNav from '../../components/BottomNav'
 import StudentLessons from './StudentLessons'
@@ -129,12 +129,32 @@ function ArcaneSandbox({ seedCode = null, seedLanguage = 'python', sandboxHealth
     if (!seedCode && code) localStorage.setItem(`arcane_code_${lang}`, code)
   }, [code, lang])
 
-  // ResizeObserver
+  // ResizeObserver — catches the editor's own box changing size (Monaco's
+  // automaticLayout option already does this too, but doubling up here is
+  // harmless and layout() is cheap to call again)
   useEffect(() => {
     if (!editorContainerRef.current) return
     const obs = new ResizeObserver(() => editorRef.current?.layout())
     obs.observe(editorContainerRef.current)
     return () => obs.disconnect()
+  }, [])
+
+  // Mobile browsers resize the *visible* viewport (not the CSS one) when the
+  // on-screen keyboard opens/closes or the address bar collapses on scroll —
+  // that doesn't fire a ResizeObserver on our container, so Monaco can be
+  // left with stale layout metrics: the blinking cursor and text look right,
+  // but the hidden textarea Monaco uses to capture typing/backspace ends up
+  // positioned against the old metrics, so keys stop registering until
+  // something else forces a relayout (e.g. switching tabs). Re-running
+  // layout() on every viewport resize keeps it in sync.
+  useEffect(() => {
+    const relayout = () => editorRef.current?.layout()
+    window.visualViewport?.addEventListener('resize', relayout)
+    window.addEventListener('orientationchange', relayout)
+    return () => {
+      window.visualViewport?.removeEventListener('resize', relayout)
+      window.removeEventListener('orientationchange', relayout)
+    }
   }, [])
 
   // Ctrl+Enter shortcut
@@ -222,7 +242,7 @@ function ArcaneSandbox({ seedCode = null, seedLanguage = 'python', sandboxHealth
     lineHeight: 1.7,
     fontFamily: "'Fira Code', 'JetBrains Mono', monospace",
     fontLigatures: true,
-    automaticLayout: false,
+    automaticLayout: true,
     scrollBeyondLastLine: false,
     wordWrap: 'on',
     tabSize: 4,
@@ -615,7 +635,7 @@ export default function StudentDashboard({ user, onLogout }) {
     const fetch_ = async () => {
       try {
         const token = localStorage.getItem('token')
-        const res = await fetch('http://localhost:5000/api/student/stats', {
+        const res = await fetch(`${API_BASE}/api/student/stats`, {
           headers: { 'Authorization': `Bearer ${token}` }
         })
         if (res.ok) {
@@ -735,6 +755,24 @@ export default function StudentDashboard({ user, onLogout }) {
 
   const [notifications, setNotifications] = useState([])
 
+  // Read state still isn't tracked on the backend, so it's kept client-side
+  // in localStorage, per student (by username) — an id in this set stays
+  // "read" across refreshes and future logins, instead of resetting to
+  // "everything unread" every time the dropdown is opened.
+  const readStorageKey = `readAnnouncements_${user?.username || 'anon'}`
+  const loadReadIds = () => {
+    try {
+      return new Set(JSON.parse(localStorage.getItem(readStorageKey)) || [])
+    } catch {
+      return new Set()
+    }
+  }
+  const saveReadIds = (ids) => {
+    try {
+      localStorage.setItem(readStorageKey, JSON.stringify([...ids]))
+    } catch { /* best effort — a full/blocked localStorage just skips persistence */ }
+  }
+
   // real announcements from every subject this student is enrolled in —
   // reshaped to the same field names the dropdown below already expects
   // (class_label/date/time/read), so the render JSX didn't need to change
@@ -742,6 +780,7 @@ export default function StudentDashboard({ user, onLogout }) {
     const fetchNotifications = async () => {
       try {
         const data = await api.get('/api/student/announcements')
+        const readIds = loadReadIds()
         setNotifications(data.map(a => {
           const created = new Date(a.created_at)
           return {
@@ -753,10 +792,7 @@ export default function StudentDashboard({ user, onLogout }) {
             class_label: a.section_no ? `${a.subject_name} · ${a.section_no}` : a.subject_name,
             date: created.toLocaleDateString(),
             time: created.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            // no read/unread tracking exists on the backend yet — everything
-            // fetched is treated as unread for this session rather than
-            // inventing a fake "already read" state
-            read: false,
+            read: readIds.has(a.id),
             // carried through so clicking a notification can navigate to
             // the right subject's Announcements tab
             class_id: a.class_id,
@@ -770,7 +806,24 @@ export default function StudentDashboard({ user, onLogout }) {
       }
     }
     fetchNotifications()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Mark one notification read (bell badge count drops immediately) and
+  // persist it so it stays read next time the dropdown or page reloads.
+  const markNotificationRead = (id) => {
+    setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n))
+    const ids = loadReadIds()
+    ids.add(id)
+    saveReadIds(ids)
+  }
+
+  const markAllNotificationsRead = () => {
+    setNotifications(prev => prev.map(n => ({ ...n, read: true })))
+    const ids = loadReadIds()
+    notifications.forEach(n => ids.add(n.id))
+    saveReadIds(ids)
+  }
 
   const unreadCount = notifications.filter(n => !n.read).length
   // matches the real priority values instructors actually pick from
@@ -877,13 +930,21 @@ export default function StudentDashboard({ user, onLogout }) {
             <MobileSheet show={showNotifications} onClose={() => setShowNotifications(false)} widthClass="sm:w-80" anchorRef={notificationRef}>
                 <div className="p-4 border-b border-purple-600/30 flex justify-between items-center">
                   <p className="font-bold text-white">Notifications</p>
-                  <span className="text-xs text-slate-400">{unreadCount} unread</span>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs text-slate-400">{unreadCount} unread</span>
+                    {unreadCount > 0 && (
+                      <button onClick={markAllNotificationsRead} className="text-xs text-purple-400 hover:text-purple-300 transition font-medium">
+                        Mark all read
+                      </button>
+                    )}
+                  </div>
                 </div>
                 <div className="max-h-96 overflow-y-auto">
                   {notifications.map(note => (
                     <div
                       key={note.id}
                       onClick={() => {
+                        markNotificationRead(note.id)
                         setShowNotifications(false)
                         // global announcements (no specific class) have
                         // nowhere to navigate to — only jump when this
@@ -1030,8 +1091,8 @@ export default function StudentDashboard({ user, onLogout }) {
                   ← <span className="hidden sm:inline">Back to Subjects</span>
                 </button>
                 <div className="min-w-0">
-                  <h2 className="text-xl font-bold text-white truncate">{selectedSection.section_code}</h2>
-                  <p className="text-sm text-slate-400 truncate">{selectedSection.name}</p>
+                  <h2 className="text-xl font-bold text-white truncate">{selectedSection.name}</h2>
+                  <p className="text-sm text-slate-400 truncate">{selectedSection.section_code}</p>
                 </div>
               </div>
               <div className="sm:text-right">

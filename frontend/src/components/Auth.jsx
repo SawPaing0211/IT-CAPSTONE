@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { API_BASE } from '../api/client'
 
 // minimalist line-art eye icons for the password show/hide toggle
 function EyeIcon({ size = 18 }) {
@@ -32,7 +33,7 @@ export default function Auth({ onLogin }) {
   setLoading(true)
   
   try {
-    const res = await fetch(`http://localhost:5000/api/auth/login`, {
+    const res = await fetch(`${API_BASE}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username: formData.username, password: formData.password })
@@ -108,26 +109,26 @@ export default function Auth({ onLogin }) {
         ))}
       </div>
 
-      <div className="relative z-10 w-full max-w-lg">
+      <div className="relative z-10 w-full max-w-md">
         {/* Form Container */}
         <div className="bg-slate-900/90 backdrop-blur-xl rounded-2xl border-2 border-purple-600/30 shadow-2xl shadow-purple-600/20 overflow-hidden">
           
           {/* Header */}
-          <div className="bg-gradient-to-r from-purple-600/20 to-pink-600/20 p-6 border-b border-purple-600/30">
-            <div className="flex items-center justify-center gap-3 mb-2">
-              <div className="w-12 h-12 bg-gradient-to-br from-purple-600 to-pink-600 rounded-lg flex items-center justify-center text-2xl shadow-lg">
+          <div className="bg-gradient-to-r from-purple-600/20 to-pink-600/20 p-4 sm:p-6 border-b border-purple-600/30">
+            <div className="flex items-center justify-center gap-3 mb-1.5 sm:mb-2">
+              <div className="w-9 h-9 sm:w-12 sm:h-12 bg-gradient-to-br from-purple-600 to-pink-600 rounded-lg flex items-center justify-center text-lg sm:text-2xl shadow-lg">
                 ⚡
               </div>
             </div>
-            <h2 className="text-3xl font-black text-center bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent">
+            <h2 className="text-xl sm:text-3xl font-black text-center bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent">
               WELCOME BACK
             </h2>
-            <p className="text-center text-slate-400 text-sm mt-2">
+            <p className="text-center text-slate-400 text-xs sm:text-sm mt-1 sm:mt-2">
               Enter your credentials to continue
             </p>
           </div>
 
-          <form onSubmit={handleSubmit} className="p-6 space-y-5">
+          <form onSubmit={handleSubmit} className="p-4 sm:p-6 space-y-3 sm:space-y-5">
             {/* Locked Account Message */}
             {lockedInfo && (
               <div className="bg-red-900/30 border-2 border-red-500/60 rounded-xl p-4 space-y-2">
@@ -164,13 +165,13 @@ export default function Auth({ onLogin }) {
 
             {/* Username Field */}
             <div className="space-y-2">
-              <label className="text-sm font-bold text-purple-300 uppercase tracking-wider flex items-center gap-2">
+              <label className="text-xs sm:text-sm font-bold text-purple-300 uppercase tracking-wider flex items-center gap-2">
                 <span>👤</span> Username
               </label>
               <input
                 type="text"
                 placeholder="Enter your hero name"
-                className="w-full p-4 rounded-lg bg-slate-800/80 text-white border-2 border-slate-700 focus:border-purple-500 outline-none transition placeholder:text-slate-600 font-mono"
+                className="w-full p-3 sm:p-4 text-sm sm:text-base rounded-lg bg-slate-800/80 text-white border-2 border-slate-700 focus:border-purple-500 outline-none transition placeholder:text-slate-600 font-mono"
                 value={formData.username}
                 onChange={(e) => setFormData({...formData, username: e.target.value})}
                 required
@@ -180,14 +181,14 @@ export default function Auth({ onLogin }) {
 
             {/* Password Field */}
             <div className="space-y-2">
-              <label className="text-sm font-bold text-purple-300 uppercase tracking-wider flex items-center gap-2">
+              <label className="text-xs sm:text-sm font-bold text-purple-300 uppercase tracking-wider flex items-center gap-2">
                 <span>🔐</span> Password
               </label>
               <div className="relative">
                 <input
                   type={showPassword ? 'text' : 'password'}
                   placeholder="••••••••"
-                  className="w-full p-4 pr-12 rounded-lg bg-slate-800/80 text-white border-2 border-slate-700 focus:border-purple-500 outline-none transition placeholder:text-slate-600 font-mono"
+                  className="w-full p-3 sm:p-4 pr-12 text-sm sm:text-base rounded-lg bg-slate-800/80 text-white border-2 border-slate-700 focus:border-purple-500 outline-none transition placeholder:text-slate-600 font-mono"
                   value={formData.password}
                   onChange={(e) => setFormData({...formData, password: e.target.value})}
                   required
@@ -208,7 +209,7 @@ export default function Auth({ onLogin }) {
             <button 
               type="submit" 
               disabled={loading}
-              className="w-full py-4 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-lg font-black text-lg transition transform hover:scale-[1.02] shadow-xl shadow-purple-600/30 disabled:opacity-50 disabled:cursor-not-allowed border-2 border-purple-400/30 uppercase tracking-wider"
+              className="w-full py-3 sm:py-4 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-lg font-black text-sm sm:text-lg transition transform hover:scale-[1.02] shadow-xl shadow-purple-600/30 disabled:opacity-50 disabled:cursor-not-allowed border-2 border-purple-400/30 uppercase tracking-wider"
             >
               {loading ? (
                 <span className="flex items-center justify-center gap-3">
@@ -225,7 +226,7 @@ export default function Auth({ onLogin }) {
           </form>
 
           {/* Footer */}
-          <div className="bg-slate-950/50 p-4 border-t border-purple-600/20">
+          <div className="bg-slate-950/50 p-3 sm:p-4 border-t border-purple-600/20">
             <div className="flex items-center justify-center gap-4 text-xs text-slate-500">
               <span className="flex items-center gap-1">
                 <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></span>

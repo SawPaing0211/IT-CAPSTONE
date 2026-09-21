@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { API_BASE } from '../../api/client'
 
 export default function SubjectsManagement() {
   const [subjects, setSubjects] = useState([])
@@ -38,7 +39,7 @@ export default function SubjectsManagement() {
   const fetchSubjects = async () => {
     try {
       const token = localStorage.getItem('token')
-      const res = await fetch('http://localhost:5000/api/admin/subjects', {
+      const res = await fetch(`${API_BASE}/api/admin/subjects`, {
         headers: { 'Authorization': `Bearer ${token}` }
       })
       if (res.ok) {
@@ -61,7 +62,7 @@ export default function SubjectsManagement() {
 
     try {
       const token = localStorage.getItem('token')
-      const res = await fetch('http://localhost:5000/api/admin/subjects', {
+      const res = await fetch(`${API_BASE}/api/admin/subjects`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -134,7 +135,7 @@ export default function SubjectsManagement() {
     }
     try {
       const token = localStorage.getItem('token')
-      const res = await fetch(`http://localhost:5000/api/admin/subjects/${editingSubject.id}`, {
+      const res = await fetch(`${API_BASE}/api/admin/subjects/${editingSubject.id}`, {
         method: 'PUT',
         headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -173,7 +174,7 @@ export default function SubjectsManagement() {
     if (!deleteTarget) return
     try {
       const token = localStorage.getItem('token')
-      const res = await fetch(`http://localhost:5000/api/admin/subjects/${deleteTarget.id}`, {
+      const res = await fetch(`${API_BASE}/api/admin/subjects/${deleteTarget.id}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       })

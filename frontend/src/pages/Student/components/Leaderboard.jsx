@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import MobileSheet from '../../../components/MobileSheet'
+import { API_BASE } from '../../../api/client'
 
 const AVATAR_GRADIENTS = [
   'from-purple-600 to-blue-600',
@@ -51,7 +52,7 @@ export default function Leaderboard({ currentUsername }) {
     const loadSubjects = async () => {
       try {
         const token = localStorage.getItem('token')
-        const res = await fetch('http://localhost:5000/api/student/subjects', {
+        const res = await fetch(`${API_BASE}/api/student/subjects`, {
           headers: { 'Authorization': `Bearer ${token}` }
         })
         if (res.ok) {
@@ -90,7 +91,7 @@ export default function Leaderboard({ currentUsername }) {
     try {
       const token = localStorage.getItem('token')
 
-      let url = 'http://localhost:5000/api/leaderboard'
+      let url = `${API_BASE}/api/leaderboard`
       if (filter === 'section' && selectedSectionId) {
         url += `?section_id=${selectedSectionId}`
       }
@@ -226,23 +227,28 @@ export default function Leaderboard({ currentUsername }) {
       {/* Content — only render when we have data */}
       {!loading && !error && leaders.length > 0 && (
         <>
-          {/* Top 3 Podium */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+          {/* Top 3 Podium — always a 3-across row, even on mobile. Used to
+              stack to one full-width celebratory card per medalist, which
+              on a phone meant scrolling past most of a screen just to reach
+              Full Rankings below. */}
+          <div className="grid grid-cols-3 gap-2 sm:gap-6 mb-5 sm:mb-8">
             {/* 2nd Place */}
             {topThree[1] && (
-              <div className={`order-2 md:order-1 bg-gradient-to-br from-slate-700/40 to-slate-800/40 border-2 border-slate-500/40 rounded-2xl p-6 text-center relative overflow-hidden transition-all duration-700 delay-200 hover:scale-105 ${animated ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-10'}`}>
+              <div className={`order-1 bg-gradient-to-br from-slate-700/40 to-slate-800/40 border-2 border-slate-500/40 rounded-xl sm:rounded-2xl p-2 sm:p-6 text-center relative overflow-hidden transition-all duration-700 delay-200 hover:scale-105 ${animated ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-10'}`}>
                 <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-slate-500/10 to-transparent pointer-events-none" />
                 <div className="relative z-10">
-                  <div className="text-slate-300 text-sm font-semibold mb-2 flex items-center justify-center gap-1 animate-bounce">
-                    <span>⚔️</span> Vice Champion
+                  <div className="text-slate-300 text-[9px] sm:text-sm font-semibold mb-1 sm:mb-2 flex items-center justify-center gap-1">
+                    <span>⚔️</span> <span className="hidden sm:inline">Vice Champion</span><span className="sm:hidden">2nd</span>
                   </div>
-                  <div className={`w-20 h-20 mx-auto mb-3 rounded-2xl bg-gradient-to-br ${topThree[1].color} flex items-center justify-center text-3xl font-bold text-white shadow-lg shadow-slate-500/30 animate-pulse`}>
+                  <div className={`w-10 h-10 sm:w-20 sm:h-20 mx-auto mb-1 sm:mb-3 rounded-lg sm:rounded-2xl bg-gradient-to-br ${topThree[1].color} flex items-center justify-center text-base sm:text-3xl font-bold text-white shadow-lg shadow-slate-500/30`}>
                     {topThree[1].avatar}
                   </div>
-                  <p className="text-white font-bold text-lg mb-1 truncate px-2" title={getDisplayName(topThree[1])}>
+                  <p className="text-white font-bold text-[10px] sm:text-lg mb-0.5 sm:mb-1 truncate px-0.5 sm:px-2" title={getDisplayName(topThree[1])}>
                     {getDisplayName(topThree[1])}
                   </p>
-                  <div className="flex justify-center gap-4 mt-4">
+                  <p className="text-slate-400 text-[9px] sm:hidden">Lv.{topThree[1].level}</p>
+                  <p className="text-yellow-400 font-bold text-[10px] sm:hidden">{topThree[1].xp} XP</p>
+                  <div className="hidden sm:flex justify-center gap-4 mt-4">
                     <div className="bg-slate-800/60 rounded-lg px-4 py-2 transform hover:scale-110 transition-transform">
                       <p className="text-slate-400 text-xs">Level</p>
                       <p className="text-slate-200 font-bold">{topThree[1].level}</p>
@@ -258,19 +264,21 @@ export default function Leaderboard({ currentUsername }) {
 
             {/* 1st Place */}
             {topThree[0] && (
-              <div className={`order-1 md:order-2 bg-gradient-to-br from-yellow-600/30 to-amber-700/30 border-2 border-yellow-500/60 rounded-2xl p-8 text-center relative overflow-hidden transition-all duration-700 delay-300 hover:scale-105 ${animated ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-10'}`}>
+              <div className={`order-2 bg-gradient-to-br from-yellow-600/30 to-amber-700/30 border-2 border-yellow-500/60 rounded-xl sm:rounded-2xl p-2.5 sm:p-8 text-center relative overflow-hidden transition-all duration-700 delay-300 hover:scale-105 ${animated ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-10'}`}>
                 <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-yellow-500/20 to-transparent pointer-events-none animate-pulse" />
                 <div className="relative z-10">
-                  <div className="text-yellow-300 text-sm font-semibold mb-2 flex items-center justify-center gap-1 animate-bounce">
-                    <span>👑</span> Grand Champion
+                  <div className="text-yellow-300 text-[9px] sm:text-sm font-semibold mb-1 sm:mb-2 flex items-center justify-center gap-1">
+                    <span>👑</span> <span className="hidden sm:inline">Grand Champion</span><span className="sm:hidden">1st</span>
                   </div>
-                  <div className={`w-24 h-24 mx-auto mb-4 rounded-2xl bg-gradient-to-br ${topThree[0].color} flex items-center justify-center text-4xl font-bold text-white shadow-lg shadow-yellow-500/50`}>
+                  <div className={`w-12 h-12 sm:w-24 sm:h-24 mx-auto mb-1 sm:mb-4 rounded-lg sm:rounded-2xl bg-gradient-to-br ${topThree[0].color} flex items-center justify-center text-lg sm:text-4xl font-bold text-white shadow-lg shadow-yellow-500/50`}>
                     {topThree[0].avatar}
                   </div>
-                  <p className="text-white font-bold text-xl mb-1 truncate px-2" title={getDisplayName(topThree[0])}>
+                  <p className="text-white font-bold text-xs sm:text-xl mb-0.5 sm:mb-1 truncate px-0.5 sm:px-2" title={getDisplayName(topThree[0])}>
                     {getDisplayName(topThree[0])}
                   </p>
-                  <div className="flex justify-center gap-4 mt-6">
+                  <p className="text-slate-400 text-[9px] sm:hidden">Lv.{topThree[0].level}</p>
+                  <p className="text-yellow-400 font-bold text-[10px] sm:hidden">{topThree[0].xp} XP</p>
+                  <div className="hidden sm:flex justify-center gap-4 mt-6">
                     <div className="bg-slate-900/60 rounded-lg px-6 py-3 border border-yellow-600/30 transform hover:scale-110 transition-transform duration-300">
                       <p className="text-slate-400 text-xs">Level</p>
                       <p className="text-yellow-300 font-bold text-lg">{topThree[0].level}</p>
@@ -286,19 +294,21 @@ export default function Leaderboard({ currentUsername }) {
 
             {/* 3rd Place */}
             {topThree[2] && (
-              <div className={`order-3 md:order-3 bg-gradient-to-br from-amber-800/30 to-orange-900/30 border-2 border-orange-600/40 rounded-2xl p-6 text-center relative overflow-hidden transition-all duration-700 delay-200 hover:scale-105 ${animated ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-10'}`}>
+              <div className={`order-3 bg-gradient-to-br from-amber-800/30 to-orange-900/30 border-2 border-orange-600/40 rounded-xl sm:rounded-2xl p-2 sm:p-6 text-center relative overflow-hidden transition-all duration-700 delay-200 hover:scale-105 ${animated ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-10'}`}>
                 <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-orange-500/10 to-transparent pointer-events-none" />
                 <div className="relative z-10">
-                  <div className="text-orange-300 text-sm font-semibold mb-2 flex items-center justify-center gap-1 animate-bounce">
-                    <span>🥉</span> Third Place
+                  <div className="text-orange-300 text-[9px] sm:text-sm font-semibold mb-1 sm:mb-2 flex items-center justify-center gap-1">
+                    <span>🥉</span> <span className="hidden sm:inline">Third Place</span><span className="sm:hidden">3rd</span>
                   </div>
-                  <div className={`w-20 h-20 mx-auto mb-3 rounded-2xl bg-gradient-to-br ${topThree[2].color} flex items-center justify-center text-3xl font-bold text-white shadow-lg shadow-orange-500/30 animate-pulse`}>
+                  <div className={`w-10 h-10 sm:w-20 sm:h-20 mx-auto mb-1 sm:mb-3 rounded-lg sm:rounded-2xl bg-gradient-to-br ${topThree[2].color} flex items-center justify-center text-base sm:text-3xl font-bold text-white shadow-lg shadow-orange-500/30`}>
                     {topThree[2].avatar}
                   </div>
-                  <p className="text-white font-bold text-lg mb-1 truncate px-2" title={getDisplayName(topThree[2])}>
+                  <p className="text-white font-bold text-[10px] sm:text-lg mb-0.5 sm:mb-1 truncate px-0.5 sm:px-2" title={getDisplayName(topThree[2])}>
                     {getDisplayName(topThree[2])}
                   </p>
-                  <div className="flex justify-center gap-4 mt-4">
+                  <p className="text-slate-400 text-[9px] sm:hidden">Lv.{topThree[2].level}</p>
+                  <p className="text-yellow-400 font-bold text-[10px] sm:hidden">{topThree[2].xp} XP</p>
+                  <div className="hidden sm:flex justify-center gap-4 mt-4">
                     <div className="bg-slate-800/60 rounded-lg px-4 py-2 transform hover:scale-110 transition-transform">
                       <p className="text-slate-400 text-xs">Level</p>
                       <p className="text-orange-300 font-bold">{topThree[2].level}</p>

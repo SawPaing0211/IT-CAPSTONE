@@ -3,6 +3,7 @@ import AchievementBadge from "../../../components/AchievementBadge"
 import AchievementModal from "../../../components/AchievementModal"
 import { triggerConfetti } from '../../../utils/confetti'
 import AchievementToast from '../../../components/AchievementToast'
+import { API_BASE } from '../../../api/client'
 
 export default function ProgressStats({ stats, username, fullName }) {
   const [animated, setAnimated] = useState(false)
@@ -23,8 +24,8 @@ export default function ProgressStats({ stats, username, fullName }) {
       try {
         const token = localStorage.getItem('token')
         const [statsRes, subsRes] = await Promise.all([
-          fetch('http://localhost:5000/api/student/stats', { headers: { 'Authorization': `Bearer ${token}` } }),
-          fetch('http://localhost:5000/api/student/submissions?limit=50', { headers: { 'Authorization': `Bearer ${token}` } })
+          fetch(`${API_BASE}/api/student/stats`, { headers: { 'Authorization': `Bearer ${token}` } }),
+          fetch(`${API_BASE}/api/student/submissions?limit=50`, { headers: { 'Authorization': `Bearer ${token}` } })
         ])
         if (statsRes.ok) setRealStats(await statsRes.json())
         if (subsRes.ok) {
@@ -43,7 +44,7 @@ export default function ProgressStats({ stats, username, fullName }) {
     const fetchAchievements = async () => {
       try {
         const token = localStorage.getItem('token')
-        const res = await fetch('http://localhost:5000/api/student/achievements', {
+        const res = await fetch(`${API_BASE}/api/student/achievements`, {
           headers: { 'Authorization': `Bearer ${token}` }
         })
         if (res.ok) {

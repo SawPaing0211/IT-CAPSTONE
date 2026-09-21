@@ -25,6 +25,7 @@ import Analytics from './pages/Instructor/Analytics'
 import CourseMaterials from './pages/Instructor/CourseMaterials'
 import ProblemSubmissions from './pages/Instructor/ProblemSubmissions'
 import InstructorAchievements from './pages/Instructor/InstructorAchievements'
+import { API_BASE } from './api/client'
 
 // student/admin sub-pages are handled inside those dashboards themselves, not routed here
 
@@ -36,7 +37,7 @@ function AppContent() {
   useEffect(() => {
     const token = localStorage.getItem('token')
     if (token) {
-      fetch('http://localhost:5000/api/auth/me', {
+      fetch(`${API_BASE}/api/auth/me`, {
         headers: { 'Authorization': `Bearer ${token}` }
       })
         .then(res => res.json())

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { API_BASE } from '../../api/client'
 
 export default function ProblemList({ onSelectQuest, currentLevel, sectionId, subjectId }) {
   const [quests, setQuests] = useState([])
@@ -16,7 +17,7 @@ export default function ProblemList({ onSelectQuest, currentLevel, sectionId, su
   const fetchQuests = async () => {
     try {      
       const token = localStorage.getItem('token')
-      let url = 'http://localhost:5000/api/problems'
+      let url = `${API_BASE}/api/problems`
       
       // Build query params
       // (section filtering happens server-side from the student's own

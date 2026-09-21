@@ -11,6 +11,7 @@
 
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { API_BASE } from '../../api/client'
 
 export default function MySubjects({ onSelectSubject, user, stats }) {
   const navigate = useNavigate()
@@ -22,7 +23,7 @@ export default function MySubjects({ onSelectSubject, user, stats }) {
     const fetchSubjects = async () => {
       try {
         const token = localStorage.getItem('token')
-        const subjectsRes = await fetch('http://localhost:5000/api/student/subjects', {
+        const subjectsRes = await fetch(`${API_BASE}/api/student/subjects`, {
           headers: { 'Authorization': `Bearer ${token}` }
         })
         const subjectsData = await subjectsRes.json()
@@ -47,17 +48,16 @@ export default function MySubjects({ onSelectSubject, user, stats }) {
           </div>
           <div className="h-10 w-40 bg-slate-800 rounded-xl" />
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
           {[...Array(3)].map((_, i) => (
-            <div key={i} className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
-              <div className="flex items-start justify-between mb-4">
-                <div className="w-14 h-14 bg-slate-800 rounded-xl" />
+            <div key={i} className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5">
+              <div className="flex items-start justify-between mb-3">
+                <div className="w-11 h-11 sm:w-12 sm:h-12 bg-slate-800 rounded-xl" />
                 <div className="h-5 w-16 bg-slate-800 rounded-full" />
               </div>
-              <div className="h-5 w-3/4 bg-slate-800 rounded mb-3" />
-              <div className="h-4 w-24 bg-slate-800 rounded mb-4" />
-              <div className="h-3 w-32 bg-slate-800 rounded" />
-              <div className="h-9 w-full bg-slate-800 rounded-lg mt-6" />
+              <div className="h-5 w-3/4 bg-slate-800 rounded mb-2" />
+              <div className="h-4 w-32 bg-slate-800 rounded mb-4" />
+              <div className="h-8 w-full bg-slate-800 rounded-lg" />
             </div>
           ))}
         </div>
@@ -99,7 +99,7 @@ export default function MySubjects({ onSelectSubject, user, stats }) {
       </div>
 
             {/* Subjects Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
         {subjects.map((subject) => (
           <div
             key={subject.id}
@@ -120,62 +120,53 @@ export default function MySubjects({ onSelectSubject, user, stats }) {
                 navigate(`/student/subject/${subject.section_id}`) 
               }
             }}
-            className="group bg-gradient-to-br from-slate-900 to-slate-800 border border-slate-700 rounded-2xl p-6 hover:border-purple-500 hover:shadow-lg hover:shadow-purple-600/20 transition-all duration-300 cursor-pointer transform hover:scale-105"
+            className="group bg-gradient-to-br from-slate-900 to-slate-800 border border-slate-700 rounded-2xl p-4 sm:p-5 hover:border-purple-500 hover:shadow-lg hover:shadow-purple-600/20 transition-all duration-300 cursor-pointer transform hover:scale-[1.02]"
           >
             {/* Subject Icon & Badge */}
-            <div className="flex items-start justify-between mb-4">
-              <div className="w-14 h-14 bg-gradient-to-br from-purple-600 to-pink-600 rounded-xl flex items-center justify-center text-2xl shadow-lg group-hover:scale-110 transition-transform">
+            <div className="flex items-start justify-between mb-3">
+              <div className="w-11 h-11 sm:w-12 sm:h-12 bg-gradient-to-br from-purple-600 to-pink-600 rounded-xl flex items-center justify-center text-xl shadow-lg group-hover:scale-110 transition-transform shrink-0">
                 📖
               </div>
-              <span className="px-3 py-1 bg-purple-600/20 border border-purple-600/40 rounded-full text-xs font-bold text-purple-300">
+              <span className="px-2.5 py-1 bg-purple-600/20 border border-purple-600/40 rounded-full text-xs font-bold text-purple-300 shrink-0">
                 {subject.semester || 'Current'}
               </span>
             </div>
 
             {/* Subject Name (Big Text - this is now the main heading) */}
-            <h3 className="text-xl font-bold text-white mb-2 group-hover:text-purple-300 transition">
+            <h3 className="text-lg font-bold text-white mb-2 group-hover:text-purple-300 transition truncate">
               {subject.name}
             </h3>
-            
-            {/* Class Code Badge */}
-            <div className="mb-3">
-              <span className="px-2.5 py-0.5 bg-slate-700 rounded text-xs font-bold text-slate-300">
-                🏷️ {subject.section_no || 'No Class Code'}
+
+            {/* Class code + instructor — one compact line instead of two
+                separate bordered sections */}
+            <div className="flex items-center gap-2 text-xs text-slate-400 mb-4 flex-wrap">
+              <span className="px-2 py-0.5 bg-slate-700 rounded font-bold text-slate-300 shrink-0">
+                🏷️ {subject.section_no || 'No Code'}
               </span>
-            </div>
-            
-            {/* Instructor */}
-            <div className="flex items-center gap-2 pt-2 border-t border-slate-700">
-              <span className="text-xs text-slate-500">👨‍🏫 Instructor</span>
-              <span className="text-xs text-slate-400">•</span>
-              <span className="text-xs text-slate-300 font-medium">
-                {subject.instructor || 'TBA'}
-              </span>
+              <span className="truncate">👨‍🏫 {subject.instructor || 'TBA'}</span>
             </div>
 
             {/* Action Button */}
-            <div className="mt-6 pt-4 border-t border-slate-700">
-              <button className="w-full py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-lg text-white font-bold text-sm transition shadow-lg shadow-purple-600/20 group-hover:shadow-purple-600/40">
-                Open Course →
-              </button>
-            </div>
+            <button className="w-full py-2 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-lg text-white font-bold text-sm transition shadow-lg shadow-purple-600/20 group-hover:shadow-purple-600/40">
+              Open Course →
+            </button>
           </div>
         ))}
       </div>
 
       {/* Quick Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-8">
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 text-center">
-          <div className="text-3xl font-bold text-purple-400">{subjects.length}</div>
-          <div className="text-xs text-slate-500 uppercase tracking-wider mt-1">Total Subjects</div>
+      <div className="grid grid-cols-3 gap-2 sm:gap-4 mt-6 sm:mt-8">
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-2.5 sm:p-4 text-center">
+          <div className="text-lg sm:text-3xl font-bold text-purple-400">{subjects.length}</div>
+          <div className="text-[9px] sm:text-xs text-slate-500 uppercase tracking-wider mt-0.5 sm:mt-1 truncate">Total Subjects</div>
         </div>
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 text-center">
-          <div className="text-3xl font-bold text-green-400">{stats?.accepted_submissions ?? 0}</div>
-          <div className="text-xs text-slate-500 uppercase tracking-wider mt-1">Quests Completed</div>
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-2.5 sm:p-4 text-center">
+          <div className="text-lg sm:text-3xl font-bold text-green-400">{stats?.accepted_submissions ?? 0}</div>
+          <div className="text-[9px] sm:text-xs text-slate-500 uppercase tracking-wider mt-0.5 sm:mt-1 truncate">Quests Done</div>
         </div>
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 text-center">
-          <div className="text-3xl font-bold text-yellow-400">{stats?.total_xp ?? 0}</div>
-          <div className="text-xs text-slate-500 uppercase tracking-wider mt-1">Total XP Earned</div>
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-2.5 sm:p-4 text-center">
+          <div className="text-lg sm:text-3xl font-bold text-yellow-400">{stats?.total_xp ?? 0}</div>
+          <div className="text-[9px] sm:text-xs text-slate-500 uppercase tracking-wider mt-0.5 sm:mt-1 truncate">Total XP</div>
         </div>
       </div>
     </div>

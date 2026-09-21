@@ -1,0 +1,62 @@
+# Forge.dev — production stack (backend + MySQL) for the Oracle Cloud VM.
+#
+# Run from the repo root:
+#   docker compose up -d --build
+#
+# Requires a backend/.env file first (copy backend/.env.example -> backend/.env
+# and fill in real values — see that file's comments). The sandbox images
+# (forge-sandbox-python/java/csharp) must be built separately first with
+# backend/forge-sandbox/build_images.sh, since the backend container does not
+# build them itself — it only *runs* them, against the host's Docker daemon.
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: forge-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-changeme}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-forge_dev}
+    volumes:
+      - forge-mysql-data:/var/lib/mysql
+    ports:
+      # Exposed on localhost only, mainly so you can psql/mysql in for
+      # debugging from the VM itself. Comment this out for a slightly
+      # smaller attack surface once everything's confirmed working.
+      - "127.0.0.1:3306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${MYSQL_ROOT_PASSWORD:-changeme}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: forge-backend
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      # Overrides DATABASE_URL from .env so the backend always talks to the
+      # "mysql" service by its Compose network name, not localhost — this is
+      # the one value you do NOT set yourself in backend/.env for this setup.
+      DATABASE_URL: mysql+pymysql://root:${MYSQL_ROOT_PASSWORD:-changeme}@mysql:3306/${MYSQL_DATABASE:-forge_dev}
+    depends_on:
+      mysql:
+        condition: service_healthy
+    volumes:
+      # Docker-outside-of-Docker: lets the backend's `docker` Python package
+      # launch sandbox containers on the HOST's Docker daemon. See the
+      # comment at the top of backend/Dockerfile for the security tradeoff.
+      - /var/run/docker.sock:/var/run/docker.sock
+      - forge-uploads:/app/uploads
+    ports:
+      # Only reachable from the VM itself (127.0.0.1) — Nginx is what the
+      # internet actually talks to; see nginx/forge.conf.
+      - "127.0.0.1:5000:5000"
+
+volumes:
+  forge-mysql-data:
+  forge-uploads:

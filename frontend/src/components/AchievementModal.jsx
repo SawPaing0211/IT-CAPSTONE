@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import AchievementBadge from './AchievementBadge'
 
 export default function AchievementModal({ achievements, onClose }) {
@@ -17,8 +17,11 @@ export default function AchievementModal({ achievements, onClose }) {
     return () => { document.body.style.overflow = 'unset' }
   }, [])
 
+  const [filter, setFilter] = useState('all')
+
   const earned = achievements.filter(b => b.is_earned)
   const locked = achievements.filter(b => !b.is_earned)
+  const visible = filter === 'earned' ? earned : filter === 'locked' ? locked : achievements
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
@@ -51,21 +54,35 @@ export default function AchievementModal({ achievements, onClose }) {
 
         {/* Tabs */}
         <div className="flex gap-2 p-4 border-b border-purple-600/30">
-          <button className="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium">
-            All ({achievements.length})
-          </button>
-          <button className="px-4 py-2 bg-slate-800 text-slate-400 rounded-lg text-sm font-medium hover:bg-slate-700 transition">
-            Earned ({earned.length})
-          </button>
-          <button className="px-4 py-2 bg-slate-800 text-slate-400 rounded-lg text-sm font-medium hover:bg-slate-700 transition">
-            Locked ({locked.length})
-          </button>
+          {[
+            { key: 'all',    label: `All (${achievements.length})` },
+            { key: 'earned', label: `Earned (${earned.length})` },
+            { key: 'locked', label: `Locked (${locked.length})` },
+          ].map(tab => (
+            <button
+              key={tab.key}
+              onClick={() => setFilter(tab.key)}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+                filter === tab.key
+                  ? 'bg-purple-600 text-white'
+                  : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
         </div>
 
         {/* Badge Grid */}
         <div className="flex-1 overflow-y-auto p-6">
+          {visible.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-12 text-slate-500">
+              <span className="text-4xl mb-3">🎯</span>
+              <p className="text-sm">No badges here</p>
+            </div>
+          ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-            {achievements.map(badge => (
+            {visible.map(badge => (
               <div key={badge.id} className="flex flex-col items-center gap-2">
                 <AchievementBadge badge={badge} size="md" showTooltip={true} />
                 <p className={`text-xs text-center font-medium ${badge.is_earned ? 'text-white' : 'text-slate-400'}`}>
@@ -74,6 +91,7 @@ export default function AchievementModal({ achievements, onClose }) {
               </div>
             ))}
           </div>
+          )}
         </div>
 
         {/* Footer */}

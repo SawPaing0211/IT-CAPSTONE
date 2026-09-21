@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import Editor from '@monaco-editor/react'
-import { api } from '../../api/client'
+import { api, API_BASE} from '../../api/client'
+import DownloadIcon from '../../components/DownloadIcon'
 
 export default function StudentCodeEditor({ 
   quest, 
@@ -243,7 +244,7 @@ useEffect(() => {
     const checkSubmission = async () => {
       try {
         const token = localStorage.getItem('token')
-        const subRes = await fetch(`http://localhost:5000/api/problems/${quest.id}/my-submission`, {
+        const subRes = await fetch(`${API_BASE}/api/problems/${quest.id}/my-submission`, {
           headers: { 'Authorization': `Bearer ${token}` }
         })
         if (subRes.ok) {
@@ -350,8 +351,8 @@ useEffect(() => {
     try {
       const token = localStorage.getItem('token')
       const endpoint = (userRole === 'instructor' || userRole === 'administrator')
-        ? `http://localhost:5000/api/problems/${quest.id}/test`
-        : `http://localhost:5000/api/problems/${quest.id}/run`
+        ? `${API_BASE}/api/problems/${quest.id}/test`
+        : `${API_BASE}/api/problems/${quest.id}/run`
 
       const res = await fetch(endpoint, {
         method: 'POST',
@@ -395,7 +396,7 @@ useEffect(() => {
     
     try {
       const token = localStorage.getItem('token')
-      const res = await fetch(`http://localhost:5000/api/problems/${quest.id}/test`, {
+      const res = await fetch(`${API_BASE}/api/problems/${quest.id}/test`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -885,7 +886,7 @@ useEffect(() => {
                 onClick={handleDownload}
                 className="px-2 sm:px-3 py-1.5 text-xs text-slate-400 hover:text-white transition flex items-center gap-1"
               >
-                📥 <span className="hidden sm:inline">Download</span>
+                <DownloadIcon size={13} /> <span className="hidden sm:inline">Download</span>
               </button>
               <span className="hidden sm:inline text-[10px] text-slate-500">
                 Main.{language === 'python' ? 'py' : language === 'java' ? 'java' : 'cs'}
