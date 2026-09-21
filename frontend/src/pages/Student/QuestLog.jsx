@@ -1,13 +1,15 @@
 import { useState, useEffect } from 'react'
 
-export default function QuestLog({ blockId }) {
+export default function QuestLog({ sectionId }) {
   const [submissions, setSubmissions] = useState([])
-  const [enrolledBlocks, setEnrolledBlocks] = useState([])
-  const [selectedBlock, setSelectedBlock] = useState(null)
+  const [selectedSection, setSelectedSection] = useState(null)
   const [loading, setLoading] = useState(true)
 
+  // QuestLog only ever gets opened from inside one subject's course tabs, so
+  // sectionId is always given — just resolve that one subject's details,
+  // no need to offer a "pick a subject" dropdown here at all
   useEffect(() => {
-    const fetchBlockInfo = async () => {
+    const fetchSectionInfo = async () => {
       try {
         const token = localStorage.getItem('token')
         const subjectsRes = await fetch('http://localhost:5000/api/student/subjects', {
@@ -15,47 +17,29 @@ export default function QuestLog({ blockId }) {
         })
         const subjects = await subjectsRes.json()
 
-        if (blockId) {
-          // Course context — blockId is actually a section_id
-          const subject = subjects.find(s => s.section_id === blockId)
-          if (subject) {
-            setSelectedBlock({
-              id: subject.section_id,
-              section_code: subject.section_no,
-              name: subject.name,
-              subject_id: subject.id,
-              semester: subject.semester
-            })
-          } else {
-            setSelectedBlock({
-              id: blockId,
-              section_code: 'Section',
-              name: 'Current Subject',
-              subject_id: null
-            })
-          }
+        const subject = subjects.find(s => s.section_id === sectionId)
+        if (subject) {
+          setSelectedSection({
+            id: subject.section_id,
+            section_code: subject.section_no,
+            name: subject.name,
+            subject_id: subject.id,
+            semester: subject.semester
+          })
         } else {
-          // Dashboard context — show all enrolled subjects as options
-          const blocks = subjects.map(s => ({
-            id: s.section_id,
-            section_code: s.section_no,
-            name: s.name,
-            subject_id: s.id,
-            semester: s.semester
-          }))
-          setEnrolledBlocks(blocks)
-          if (blocks.length > 0) setSelectedBlock(blocks[0])
+          setSelectedSection({ id: sectionId, section_code: 'Section', name: 'Current Subject', subject_id: null })
         }
       } catch (err) {
-        console.error('Failed to fetch block info:', err)
-        if (blockId) setSelectedBlock({ id: blockId, section_code: 'Section', name: 'Current Subject', subject_id: null })
+        console.error('Failed to fetch section info:', err)
+        setSelectedSection({ id: sectionId, section_code: 'Section', name: 'Current Subject', subject_id: null })
       }
     }
-    fetchBlockInfo()
-  }, [blockId])
+    fetchSectionInfo()
+  }, [sectionId])
 
+  // Fetch quests and submissions for the selected section, then merge them by quest
   useEffect(() => {
-    if (!selectedBlock) return
+    if (!selectedSection) return
 
     const fetchSubmissions = async () => {
       setLoading(true)
@@ -63,13 +47,13 @@ export default function QuestLog({ blockId }) {
         const token = localStorage.getItem('token')
 
         const questsRes = await fetch(
-          `http://localhost:5000/api/problems${selectedBlock.subject_id ? `?subject_id=${selectedBlock.subject_id}` : ''}`,
+          `http://localhost:5000/api/problems${selectedSection.subject_id ? `?subject_id=${selectedSection.subject_id}` : ''}`,
           { headers: { 'Authorization': `Bearer ${token}` } }
         )
         const allQuests = await questsRes.json()
 
         const subsRes = await fetch(
-          `http://localhost:5000/api/student/submissions/by-section?section_id=${selectedBlock.id}`,
+          `http://localhost:5000/api/student/submissions/by-section?section_id=${selectedSection.id}`,
           { headers: { 'Authorization': `Bearer ${token}` } }
         )
         const subsData = await subsRes.json()
@@ -109,8 +93,9 @@ return {
 }
     
     fetchSubmissions()
-  }, [selectedBlock])
+  }, [selectedSection])
 
+  // Show a loading message while section info resolves
   if (loading) {
   return (
     <div className="text-center py-20 text-purple-300 animate-pulse">
@@ -119,47 +104,17 @@ return {
   )
 }
 
-// Only show "No Subjects Enrolled" in dashboard context (not course context)
-if (!blockId && enrolledBlocks.length === 0) {
   return (
-    <div className="p-6 max-w-4xl mx-auto">
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-12 text-center">
-        <div className="text-5xl mb-4">📚</div>
-        <h2 className="text-xl font-bold text-white mb-2">No Subjects Enrolled</h2>
-        <p className="text-slate-400">You're not enrolled in any subjects yet. Contact your administrator.</p>
-      </div>
-    </div>
-  )
-}
-
-  return (
-    <div className="p-6 max-w-4xl mx-auto space-y-6">
-      {/* Header with Block Selector */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-white">📜 Quest Log</h1>
-          <p className="text-slate-400 text-sm mt-1">Track your progress across subjects</p>
-        </div>
-        
-        {/* Subject/Block Dropdown */}
-        <select
-          value={selectedBlock?.id || ''}
-          onChange={(e) => {
-            const block = enrolledBlocks.find(b => String(b.id) === e.target.value)
-            if (block) setSelectedBlock({ ...block, subject_id: block.subject_id })
-          }}
-          className="px-4 py-2 bg-slate-900 border border-purple-600/40 rounded-lg text-white text-sm outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 transition cursor-pointer"
-        >
-          {enrolledBlocks.map(block => (
-            <option key={block.id} value={block.id}>
-              {block.section_code} - {block.name}
-            </option>
-          ))}
-        </select>
+    <div className="p-4 sm:p-6 max-w-4xl mx-auto space-y-6">
+      {/* Header — no subject picker here, this page is already scoped to
+          whichever subject's course tabs it was opened from */}
+      <div>
+        <h1 className="text-2xl font-bold text-white">📜 Quest Log</h1>
+        <p className="text-slate-400 text-sm mt-1">Track your progress in this subject</p>
       </div>
 
       {/* Current Subject Badge */}
-      {selectedBlock && (
+      {selectedSection && (
         <div className="bg-gradient-to-r from-purple-900/30 to-pink-900/30 border border-purple-600/30 rounded-xl p-4">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-gradient-to-br from-purple-600 to-pink-600 rounded-lg flex items-center justify-center text-xl">
@@ -167,7 +122,7 @@ if (!blockId && enrolledBlocks.length === 0) {
             </div>
             <div>
               <p className="text-xs text-purple-300 font-bold uppercase tracking-wider">Current Subject</p>
-              <p className="text-white font-bold">{selectedBlock.section_code} - {selectedBlock.name}</p>
+              <p className="text-white font-bold">{selectedSection.section_code} - {selectedSection.name}</p>
             </div>
           </div>
         </div>
@@ -176,15 +131,26 @@ if (!blockId && enrolledBlocks.length === 0) {
       {/* Submissions List */}
       <div className="space-y-3">
         {loading ? (
-          <div className="text-center py-12 text-purple-300 animate-pulse">
-            Loading submissions...
+          <div className="space-y-3">
+            {[...Array(4)].map((_, i) => (
+              <div key={i} className="border border-slate-800 rounded-xl p-4 flex items-center justify-between animate-pulse">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 rounded-lg bg-slate-800" />
+                  <div>
+                    <div className="h-4 bg-slate-800 rounded w-32 mb-2" />
+                    <div className="h-3 bg-slate-800 rounded w-20" />
+                  </div>
+                </div>
+                <div className="h-6 bg-slate-800 rounded-full w-24" />
+              </div>
+            ))}
           </div>
         ) : submissions.length === 0 ? (
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-12 text-center">
             <div className="text-5xl mb-4">⚔️</div>
             <h3 className="text-lg font-bold text-white mb-2">No Quests Attempted</h3>
             <p className="text-slate-400 text-sm">
-              You haven't attempted any quests in <span className="text-purple-400 font-semibold">{selectedBlock?.name}</span> yet.
+              You haven't attempted any quests in <span className="text-purple-400 font-semibold">{selectedSection?.name}</span> yet.
             </p>
             <p className="text-slate-500 text-xs mt-2">Go to the Quest Board to start your adventure!</p>
           </div>
@@ -204,14 +170,13 @@ if (!blockId && enrolledBlocks.length === 0) {
             return (
               <div 
                 key={quest.id} 
-                className={`group border rounded-xl p-4 transition-all duration-300 flex items-center justify-between ${
+                className={`group border rounded-xl p-4 transition-all duration-300 flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-0 sm:justify-between ${
                   isConquered 
                     ? 'bg-green-900/10 border-green-600/30 hover:border-green-500/50' 
                     : 'bg-slate-900 border-slate-800 hover:border-purple-500/50'
                 }`}
               >
                 <div className="flex items-center gap-4">
-                  {/* Icon with animation for conquered */}
                   <div className={`w-12 h-12 rounded-lg flex items-center justify-center text-xl transition-transform group-hover:scale-110 ${
                     isConquered ? 'bg-green-900/30 text-green-400' : 'bg-slate-800 text-slate-400'
                   }`}>
@@ -239,8 +204,7 @@ if (!blockId && enrolledBlocks.length === 0) {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-6 text-sm">
-                  {/* Status Badge */}
+                <div className="flex items-center justify-between sm:justify-end gap-4 sm:gap-6 text-sm">
                   <span className={`px-3 py-1 rounded-full text-xs font-bold border ${
                     quest.status === 'conquered'  ? 'bg-green-500/20 text-green-400 border-green-500/30'
                     : quest.status === 'partial'  ? 'bg-blue-500/20 text-blue-400 border-blue-500/30'
@@ -259,7 +223,6 @@ if (!blockId && enrolledBlocks.length === 0) {
                     : '📜 ONGOING'}
                   </span>
 
-                  {/* XP Reward */}
                   <div className="text-right">
                     {quest.submission ? (
                       <div>

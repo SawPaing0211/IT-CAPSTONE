@@ -7,6 +7,7 @@ export default function StudentCodeModal({ submissionId, onClose }) {
   const [error, setError] = useState(null);
   const [copied, setCopied] = useState(false);
 
+  // Fetch the submission's code and test results when the modal opens
   useEffect(() => {
     if (!submissionId) return;
     setLoading(true);
@@ -18,6 +19,7 @@ export default function StudentCodeModal({ submissionId, onClose }) {
       .finally(() => setLoading(false));
   }, [submissionId]);
 
+  // Copy the submitted code to the clipboard
   const handleCopy = () => {
     if (!data?.code) return;
     navigator.clipboard.writeText(data.code);
@@ -25,6 +27,7 @@ export default function StudentCodeModal({ submissionId, onClose }) {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  // Pick a color for the submission status badge
   const statusColor = (status) => {
     if (status === "accepted") return "#4ade80";
     if (status === "wrong_answer") return "#f87171";
@@ -32,6 +35,7 @@ export default function StudentCodeModal({ submissionId, onClose }) {
     return "#94a3b8";
   };
 
+  // Format the language name with its icon
   const langLabel = (lang) => {
     if (lang === "python") return "🐍 Python";
     if (lang === "java") return "☕ Java";

@@ -1,9 +1,10 @@
 import { useState, useEffect } from "react";
 
-export default function StudentLessons({ subjectId, blockId, blockName }) {
+export default function StudentLessons({ subjectId, sectionId, sectionName }) {
   const [lessons, setLessons] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  // Fetch lessons for the current subject
   useEffect(() => {
     const fetchLessons = async () => {
       try {
@@ -30,8 +31,9 @@ export default function StudentLessons({ subjectId, blockId, blockName }) {
       }
     };
     fetchLessons();
-  }, [subjectId, blockId]);
+  }, [subjectId, sectionId]);
 
+  // Download a lesson file
   const handleDownload = async (lessonId, fileId, filename) => {
     try {
       const token = localStorage.getItem("token");
@@ -56,6 +58,7 @@ export default function StudentLessons({ subjectId, blockId, blockName }) {
     }
   };
 
+  // Pick a display icon for the file's type
   const getFileIcon = (fileType) => {
     if (fileType === "pdf") return "📄";
     if (fileType === "ppt" || fileType === "pptx") return "📊";
@@ -64,22 +67,38 @@ export default function StudentLessons({ subjectId, blockId, blockName }) {
     return "📎";
   };
 
+  // Show skeleton week-cards while lessons are being fetched
   if (loading) {
     return (
-      <div className="text-center py-20 text-purple-300 animate-pulse">
-        Loading lessons...
+      <div className="p-4 sm:p-6 max-w-6xl mx-auto space-y-6">
+        <div>
+          <div className="h-7 bg-slate-800 rounded w-56 mb-2 animate-pulse" />
+          <div className="h-4 bg-slate-800 rounded w-40 animate-pulse" />
+        </div>
+        {[...Array(2)].map((_, w) => (
+          <div key={w} className="bg-slate-900/50 border border-slate-800 rounded-xl p-6 space-y-3 animate-pulse">
+            <div className="h-5 bg-slate-800 rounded w-28 mb-2" />
+            {[...Array(2)].map((_, r) => (
+              <div key={r} className="bg-slate-800/50 border border-slate-700 rounded-lg p-4">
+                <div className="h-4 bg-slate-700 rounded w-1/2 mb-2" />
+                <div className="h-3 bg-slate-700 rounded w-full" />
+              </div>
+            ))}
+          </div>
+        ))}
       </div>
     );
   }
 
+  // Show an empty state when no lessons have been uploaded yet
   if (lessons.length === 0) {
     return (
-      <div className="p-6 max-w-6xl mx-auto">
+      <div className="p-4 sm:p-6 max-w-6xl mx-auto">
         <div className="text-center py-20">
           <div className="text-6xl mb-4">📚</div>
           <h2 className="text-2xl font-bold text-white mb-2">No Lessons Yet</h2>
           <p className="text-slate-400">
-            Your instructor hasn't uploaded any lessons for {blockName} yet.
+            Your instructor hasn't uploaded any lessons for {sectionName} yet.
           </p>
         </div>
       </div>
@@ -95,11 +114,11 @@ export default function StudentLessons({ subjectId, blockId, blockName }) {
   }, {});
 
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-6">
+    <div className="p-4 sm:p-6 max-w-6xl mx-auto space-y-6">
       {/* Header */}
       <div>
         <h2 className="text-2xl font-bold text-white">📚 Course Lessons</h2>
-        <p className="text-slate-400">Learning materials for {blockName}</p>
+        <p className="text-slate-400">Learning materials for {sectionName}</p>
       </div>
 
       {/* Lessons by Week */}

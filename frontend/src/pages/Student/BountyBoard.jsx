@@ -18,6 +18,7 @@ export default function BountyBoard({ onSelectQuest }) {
   const [groups, setGroups] = useState([])
   const [loading, setLoading] = useState(true)
 
+  // Fetch every open quest across the student's enrolled subjects
   useEffect(() => {
     const fetchOpenQuests = async () => {
       try {
@@ -38,17 +39,31 @@ export default function BountyBoard({ onSelectQuest }) {
     Hard: 'bg-red-600/20 text-red-400 border-red-600/40'
   }
 
+  // Show skeleton quest cards while everything is still loading
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-20">
-        <div className="animate-spin rounded-full h-12 w-12 border-4 border-purple-600 border-t-transparent"></div>
+      <div className="p-4 sm:p-6 max-w-6xl mx-auto space-y-8">
+        <div>
+          <div className="h-8 bg-slate-800 rounded w-56 mb-2 animate-pulse" />
+          <div className="h-4 bg-slate-800 rounded w-72 animate-pulse" />
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {[...Array(6)].map((_, i) => (
+            <div key={i} className="bg-slate-800/40 border border-slate-700 rounded-xl p-5 animate-pulse">
+              <div className="h-4 bg-slate-700 rounded w-3/4 mb-3" />
+              <div className="h-3 bg-slate-700 rounded w-full mb-2" />
+              <div className="h-3 bg-slate-700 rounded w-2/3" />
+            </div>
+          ))}
+        </div>
       </div>
     )
   }
 
+  // Show an empty state when there are no open quests anywhere
   if (groups.length === 0) {
     return (
-      <div className="p-6 max-w-4xl mx-auto">
+      <div className="p-4 sm:p-6 max-w-4xl mx-auto">
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-12 text-center">
           <div className="text-6xl mb-4">🏴</div>
           <h2 className="text-2xl font-bold text-white mb-2">Bounty Board Clear!</h2>
@@ -59,7 +74,7 @@ export default function BountyBoard({ onSelectQuest }) {
   }
 
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-8">
+    <div className="p-4 sm:p-6 max-w-6xl mx-auto space-y-8">
       <div>
         <h1 className="text-3xl font-bold text-white flex items-center gap-3">
           <span className="text-4xl">🏴</span> Bounty Board

@@ -1,10 +1,7 @@
 // instructor achievements — badge gallery showing all 15 instructor badges,
 // earned and locked. all data is real from /api/instructor/achievements.
 //
-// filter tabs (All/Earned/In Progress/Locked) all work correctly.
-// sort works too (default/xp/progress).
-// this file was already in good shape — just adjusted the header style
-// to match the rest of the redesigned instructor pages.
+// filter tabs: All/Earned/In Progress/Locked. sort by default/xp/progress.
 
 import { useState, useEffect } from 'react'
 
@@ -120,6 +117,7 @@ export default function InstructorAchievements() {
   const [filter, setFilter]             = useState('all')
   const [sortBy, setSortBy]             = useState('default')
 
+  // Fetch instructor achievements on mount
   useEffect(() => {
     const fetchAchievements = async () => {
       setLoading(true)
@@ -146,11 +144,13 @@ export default function InstructorAchievements() {
     fetchAchievements()
   }, [])
 
+  // Split achievements into earned, in-progress, and locked groups
   const earned     = achievements.filter(a => a.is_earned)
   const inProgress = achievements.filter(a => !a.is_earned && a.progress > 0)
   const locked     = achievements.filter(a => !a.is_earned && a.progress === 0)
   const totalXP    = earned.reduce((sum, a) => sum + a.xp_reward, 0)
 
+  // Filter achievements by the selected tab, then sort by the chosen order
   const filtered = (() => {
     let list =
       filter === 'earned'   ? earned :

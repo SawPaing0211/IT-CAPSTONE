@@ -15,16 +15,17 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 
-function StudentsModal({ block, onClose }) {
+function StudentsModal({ cls, onClose }) {
   const [students, setStudents] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
 
+  // Fetch enrolled students for this class when the modal opens
   useEffect(() => {
     const fetchStudents = async () => {
       try {
         const token = localStorage.getItem('token')
-        const res = await fetch(`http://localhost:5000/api/admin/sections/${block.id}/students`, {
+        const res = await fetch(`http://localhost:5000/api/admin/sections/${cls.id}/students`, {
           headers: { 'Authorization': `Bearer ${token}` }
         })
         if (res.ok) setStudents(await res.json())
@@ -35,8 +36,9 @@ function StudentsModal({ block, onClose }) {
       }
     }
     fetchStudents()
-  }, [block.id])
+  }, [cls.id])
 
+  // Filter the student list by the search text
   const filtered = students.filter(s =>
     (s.full_name || s.username).toLowerCase().includes(search.toLowerCase()) ||
     s.username.toLowerCase().includes(search.toLowerCase()) ||
@@ -49,8 +51,8 @@ function StudentsModal({ block, onClose }) {
 
         <div className="flex items-center justify-between p-6 border-b border-slate-800">
           <div>
-            <h2 className="text-xl font-bold text-white">Class {block.name} — Students</h2>
-            <p className="text-slate-400 text-sm mt-0.5">{block.title} · {students.length} enrolled</p>
+            <h2 className="text-xl font-bold text-white">Class {cls.name} — Students</h2>
+            <p className="text-slate-400 text-sm mt-0.5">{cls.title} · {students.length} enrolled</p>
           </div>
           <button
             onClick={onClose}
@@ -135,6 +137,7 @@ export default function MyClasses() {
   const [loading, setLoading] = useState(true)
   const [studentsModal, setStudentsModal] = useState(null)
 
+  // Fetch the instructor's assigned classes on mount
   useEffect(() => {
     const fetchClasses = async () => {
       try {
@@ -163,6 +166,7 @@ export default function MyClasses() {
     fetchClasses()
   }, [])
 
+  // Filter classes by search term across code, subject, and semester
   const filteredClasses = classes.filter(c =>
     c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     c.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -188,7 +192,7 @@ export default function MyClasses() {
     <div className="space-y-6">
 
       {studentsModal && (
-        <StudentsModal block={studentsModal} onClose={() => setStudentsModal(null)} />
+        <StudentsModal cls={studentsModal} onClose={() => setStudentsModal(null)} />
       )}
 
       {/* Header */}

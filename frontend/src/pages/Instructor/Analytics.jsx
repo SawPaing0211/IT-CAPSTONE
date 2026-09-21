@@ -17,6 +17,7 @@ export default function Analytics({ classId }) {
   const [loading, setLoading] = useState(true)
   const [error, setError]     = useState(null)
 
+  // Fetch analytics for the selected class whenever it changes
   useEffect(() => {
     if (!classId) return
     const fetch_ = async () => {

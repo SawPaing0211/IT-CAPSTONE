@@ -339,6 +339,7 @@ function SectionFormModal({ section, subjects, onClose, onSuccess }) {
     textTransform: 'uppercase', marginBottom: 6, display: 'block',
   }
 
+  // Create or update the section on the backend
   const handleSubmit = async () => {
     if (!form.section_no.trim()) { setError('Class Code is required'); return }
     if (!form.subject_id)        { setError('Subject is required');    return }
@@ -503,6 +504,7 @@ function EnrolledStudentsModal({ section, onClose }) {
   const [data, setData]       = useState(null)
   const [loading, setLoading] = useState(true)
 
+  // Fetch the students enrolled in this section
   useEffect(() => {
     fetch(`${API}/api/admin/sections/${section.id}/enrollments`, {
       headers: { 'Authorization': `Bearer ${token()}` },
@@ -785,21 +787,25 @@ function CSVUploadModal({ onClose, onSuccess }) {
   const [result, setResult]       = useState(null)
   const [isDrag, setIsDrag]       = useState(false)
 
+  // Accept a csv file from the file picker or drop zone
   const handleFile = (f) => {
     if (!f || !f.name.toLowerCase().endsWith('.csv')) return
     setFile(f)
   }
+  // Read the file dropped onto the drop zone
   const onDrop = useCallback((e) => {
     e.preventDefault(); setIsDrag(false)
     handleFile(e.dataTransfer.files[0])
   }, [])
 
+  // Download a sample csv so admins know the expected column format
   const downloadTemplate = () => {
     const csv = ['section_no,subject_code,schedule,room,capacity,semester,academic_year', '29144,IT115L,Mon 18:00-21:00,CL5,40,1st Semester,2024-2025'].join('\n')
     const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([csv], { type: 'text/csv' })), download: 'sections_template.csv' })
     a.click()
   }
 
+  // Upload the csv and show the per-row results
   const handleUpload = async () => {
     if (!file) return
     setUploading(true)
@@ -980,13 +986,16 @@ export default function ClassCodesManagement() {
   const [editModal, setEditModal]         = useState(null)
   const [enrollModal, setEnrollModal]     = useState(null)
   const [csvModal, setCSVModal]           = useState(false)
+  const [deleteTarget, setDeleteTarget]   = useState(null)
   const [toast, setToast]                 = useState(null)
 
+  // Show a temporary toast notification
   const showToast = useCallback((msg, type = 'success') => {
     setToast({ msg, type })
     setTimeout(() => setToast(null), 4000)
   }, [])
 
+  // Fetch all class code sections
   const fetchSections = useCallback(async () => {
     setLoading(true)
     try {
@@ -996,6 +1005,7 @@ export default function ClassCodesManagement() {
     finally { setLoading(false) }
   }, [])
 
+  // Fetch all subjects for the filter dropdown and form
   const fetchSubjects = useCallback(async () => {
     try {
       const res = await fetch(`${API}/api/admin/subjects`, { headers: { 'Authorization': `Bearer ${token()}` } })
@@ -1006,16 +1016,22 @@ export default function ClassCodesManagement() {
   useEffect(() => { fetchSections(); fetchSubjects() }, [fetchSections, fetchSubjects])
 
   // ── Single delete (only delete path — no bulk) ───────────────────────────
-  const handleDelete = async (section) => {
-    if (!confirm(`Delete class code ${section.section_no}?\n\nThis cannot be undone.`)) return
+  const handleDelete = (section) => {
+    setDeleteTarget(section)
+  }
+
+  // Delete the section once the admin confirms in the dialog
+  const confirmDelete = async () => {
+    if (!deleteTarget) return
     try {
-      const res  = await fetch(`${API}/api/admin/sections/${section.id}`, {
+      const res  = await fetch(`${API}/api/admin/sections/${deleteTarget.id}`, {
         method: 'DELETE', headers: { 'Authorization': `Bearer ${token()}` },
       })
       const data = await res.json()
-      if (res.ok) { showToast(`Section ${section.section_no} deleted`); fetchSections() }
+      if (res.ok) { showToast(`Section ${deleteTarget.section_no} deleted`); fetchSections() }
       else showToast(data.error || 'Delete failed', 'error')
     } catch { showToast('Network error', 'error') }
+    finally { setDeleteTarget(null) }
   }
 
   // ── Filtering ────────────────────────────────────────────────────────────
@@ -1205,6 +1221,37 @@ export default function ClassCodesManagement() {
         <CSVUploadModal
           onClose={() => setCSVModal(false)}
           onSuccess={() => { fetchSections(); showToast('Sections uploaded!') }} />
+      )}
+      {deleteTarget && (
+        <Modal
+          onClose={() => setDeleteTarget(null)}
+          title="Delete Class Code"
+          subtitle={`Section ${deleteTarget.section_no}`}
+          icon={<Icon.Trash size={18} color="#fff" />}
+          iconBg="#b91c1c"
+          maxWidth={420}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <p style={{ margin: 0, fontSize: '0.875rem', color: '#cbd5e1', lineHeight: 1.6 }}>
+              Delete class code <strong style={{ color: '#f1f5f9' }}>{deleteTarget.section_no}</strong>?
+              This cannot be undone.
+            </p>
+            <div style={{ display: 'flex', gap: '0.75rem' }}>
+              <button
+                onClick={() => setDeleteTarget(null)}
+                style={{ flex: 1, padding: '0.625rem', borderRadius: 10, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: '#cbd5e1', cursor: 'pointer', fontWeight: 600 }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDelete}
+                style={{ flex: 1, padding: '0.625rem', borderRadius: 10, background: 'linear-gradient(135deg, #b91c1c, #7f1d1d)', border: 'none', color: '#fff', cursor: 'pointer', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+              >
+                <Icon.Trash size={14} color="#fff" /> Delete
+              </button>
+            </div>
+          </div>
+        </Modal>
       )}
     </div>
   )

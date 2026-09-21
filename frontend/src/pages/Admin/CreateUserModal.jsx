@@ -54,8 +54,7 @@ const delay = (ms) => new Promise(r => setTimeout(r, ms))
 
 // ── sample csv so admins can download a template and not guess the format ─────
 const SAMPLE_CSV = [
-  'student_id,firstname,middlename,lastname,suffix,year_level,student_type,block_code,section_no,subject_code',
-  '2024-00001,Juan,Santos,Dela Cruz,,1,regular,IT101,,,',
+  'student_id,firstname,middlename,lastname,suffix,year_level,student_type,class_code,section_no,subject_code',  '2024-00001,Juan,Santos,Dela Cruz,,1,regular,IT101,,,',
   '2024-00002,Maria,Reyes,Garcia,,1,regular,IT101,,,',
   '2024-30001,Pedro,Jose,Reyes,,3,irregular,,29017,IT115',
   '2024-30001,Pedro,Jose,Reyes,,3,irregular,,29018,IT115L',
@@ -141,16 +140,19 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
   const headAdmin = isHeadAdmin()
 
   // ── helpers ───────────────────────────────────────────────────────────────
+  // Show a temporary toast for the single-user form
   const showToast = (message, type = 'success') => {
     setToast({ message, type })
     setTimeout(() => setToast(null), 4000)
   }
 
+  // Show a temporary toast for the csv upload flow
   const showCsvToast = (msg, type = 'success') => {
     setCsvToast({ msg, type })
     setTimeout(() => setCsvToast(null), 4000)
   }
 
+  // Clear the single-user form back to its defaults
   const resetForm = () => {
     setForm({ username: '', email: '', password: '', role: 'student', section_id: '' })
     setPwStrength(0)
@@ -159,6 +161,7 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
     setErrors({})
   }
 
+  // Clear the csv upload state back to the select step
   const resetCsv = () => {
     if (blobUrlRef.current) { URL.revokeObjectURL(blobUrlRef.current); blobUrlRef.current = null }
     setCsvFile(null)
@@ -244,6 +247,7 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
     reader.readAsText(f)
   }
 
+  // Read the file dropped onto the drop zone
   const onDrop = useCallback((e) => {
     e.preventDefault(); setIsDragging(false)
     readCsvFile(e.dataTransfer.files[0])
@@ -305,6 +309,7 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
     return acc
   }, {})
 
+  // Count regular vs irregular rows for the preview summary
   const regularCount   = csvParsed?.rows.filter(r => r.student_type?.toLowerCase() === 'regular').length   ?? 0
   const irregularCount = csvParsed?.rows.filter(r => r.student_type?.toLowerCase() === 'irregular').length ?? 0
 
@@ -675,8 +680,7 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
                     <div className="bg-slate-800/60 rounded-xl p-3 border border-emerald-600/20">
                       <p className="text-emerald-400 font-bold text-xs mb-1">🏫 Regular</p>
                       <p className="text-slate-400 text-[11px] leading-relaxed">
-                        Set <code className="text-purple-300">student_type=regular</code> and fill <code className="text-purple-300">block_code</code>.
-                      </p>
+                        Set <code className="text-purple-300">student_type=regular</code> and fill <code className="text-purple-300">class_code</code>.                      </p>
                     </div>
                     <div className="bg-slate-800/60 rounded-xl p-3 border border-blue-600/20">
                       <p className="text-blue-400 font-bold text-xs mb-1">📋 Irregular</p>
@@ -695,8 +699,7 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
                           {c} <span className="text-red-400">*</span>
                         </span>
                       ))}
-                      {['middlename','suffix','block_code','section_no','subject_code'].map(c => (
-                        <span key={c} className="px-2 py-0.5 bg-slate-700 border border-slate-600 rounded-lg text-slate-400 text-[11px] font-mono">
+                      {['middlename','suffix','class_code','section_no','subject_code'].map(c => (                        <span key={c} className="px-2 py-0.5 bg-slate-700 border border-slate-600 rounded-lg text-slate-400 text-[11px] font-mono">
                           {c}
                         </span>
                       ))}

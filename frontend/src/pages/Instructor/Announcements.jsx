@@ -5,14 +5,10 @@
 // priority = low/medium/high/urgent, just a colored label, no real logic
 // tied to it. is_pinned just floats it to the top of the list.
 //
-// bug fixed: the Type filter dropdown had value={priorityConfig} which was
-// passing the whole config object as the select value — nothing would filter.
-// should be value={typeFilter} (the actual state variable). also removed the
-// statusFilter state that was declared but never connected to anything.
+// the Type filter dropdown used to bind to the wrong variable so filtering
+// never worked, uses typeFilter now. also removed an unused statusFilter state.
 //
-// new: delete and edit per announcement. backend now has DELETE and PUT
-// /api/announcements/:id routes. edit re-uses the same create form,
-// just pre-fills it and sends PUT instead of POST.
+// edit re-uses the same create form, just pre-filled, sends PUT instead of POST
 
 import { useState, useEffect } from 'react'
 
@@ -26,6 +22,7 @@ export default function Announcements({ classId }) {
   const [success, setSuccess]               = useState(null)
   const [searchTerm, setSearchTerm]         = useState('')
   const [typeFilter, setTypeFilter]         = useState('all')
+  const [deleteTarget, setDeleteTarget]     = useState(null)
 
   const [form, setForm] = useState({
     title: '',
@@ -34,6 +31,7 @@ export default function Announcements({ classId }) {
     is_pinned: false,
   })
 
+  // Fetch announcements, scoped to a class if one was passed in
   const fetchAnnouncements = async () => {
     try {
       const token = localStorage.getItem('token')
@@ -49,13 +47,16 @@ export default function Announcements({ classId }) {
     }
   }
 
+  // Re-fetch announcements whenever the class changes
   useEffect(() => { fetchAnnouncements() }, [classId])
 
+  // Sync a form field's value or checked state into state
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target
     setForm(prev => ({ ...prev, [name]: type === 'checkbox' ? checked : value }))
   }
 
+  // Open the form in create mode with a blank announcement
   const openCreate = () => {
     setEditingId(null)
     setForm({ title: '', content: '', priority: 'medium', is_pinned: false })
@@ -63,6 +64,7 @@ export default function Announcements({ classId }) {
     setShowCreateForm(true)
   }
 
+  // Open the form pre-filled with an existing announcement's data
   const openEdit = (ann) => {
     setEditingId(ann.id)
     setForm({ title: ann.title, content: ann.content, priority: ann.priority, is_pinned: ann.is_pinned })
@@ -70,6 +72,7 @@ export default function Announcements({ classId }) {
     setShowCreateForm(true)
   }
 
+  // Close the create/edit form and reset it
   const closeForm = () => {
     setShowCreateForm(false)
     setEditingId(null)
@@ -77,6 +80,7 @@ export default function Announcements({ classId }) {
     setForm({ title: '', content: '', priority: 'medium', is_pinned: false })
   }
 
+  // Create or update the announcement depending on which mode the form is in
   const handleSubmit = async () => {
     if (!form.title.trim() || !form.content.trim()) {
       setError('Title and content are required.')
@@ -117,21 +121,29 @@ export default function Announcements({ classId }) {
     }
   }
 
-  const handleDelete = async (id) => {
-    if (!confirm('Delete this announcement? Students will no longer see it.')) return
+  // Open the delete confirmation modal for an announcement
+  const handleDelete = (ann) => {
+    setDeleteTarget(ann)
+  }
+
+  // Delete the announcement pending confirmation
+  const confirmDelete = async () => {
+    if (!deleteTarget) return
     try {
       const token = localStorage.getItem('token')
-      const res = await fetch(`http://localhost:5000/api/announcements/${id}`, {
+      const res = await fetch(`http://localhost:5000/api/announcements/${deleteTarget.id}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       })
       if (res.ok) {
-        setAnnouncements(prev => prev.filter(a => a.id !== id))
+        setAnnouncements(prev => prev.filter(a => a.id !== deleteTarget.id))
         setSuccess('Announcement deleted.')
         setTimeout(() => setSuccess(null), 3000)
       }
     } catch (err) {
       console.error('Failed to delete:', err)
+    } finally {
+      setDeleteTarget(null)
     }
   }
 
@@ -142,6 +154,7 @@ export default function Announcements({ classId }) {
     urgent: { label: 'Urgent', color: 'text-red-400',    bg: 'bg-red-500/10',    border: 'border-red-500/20',    selectedBorder: 'border-red-500' },
   }
 
+  // Filter announcements by search term and priority
   const filtered = announcements.filter(a => {
     const matchesSearch = a.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
                           a.content.toLowerCase().includes(searchTerm.toLowerCase())
@@ -326,7 +339,7 @@ export default function Announcements({ classId }) {
                     {/* always visible — not hover-only so it works on mobile too */}
                     <div className="flex gap-1">
                       <button onClick={() => openEdit(ann)} title="Edit" className="p-1.5 rounded-lg hover:bg-purple-500/10 text-slate-500 hover:text-purple-400 transition">✏️</button>
-                      <button onClick={() => handleDelete(ann.id)} title="Delete" className="p-1.5 rounded-lg hover:bg-red-500/10 text-slate-500 hover:text-red-400 transition">🗑️</button>
+                      <button onClick={() => handleDelete(ann)} title="Delete" className="p-1.5 rounded-lg hover:bg-red-500/10 text-slate-500 hover:text-red-400 transition">🗑️</button>
                     </div>
                   </div>
                 </div>
@@ -351,6 +364,37 @@ export default function Announcements({ classId }) {
               )}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Delete confirmation modal */}
+      {deleteTarget && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-slate-900 border-2 border-red-600/40 rounded-2xl w-full max-w-sm shadow-2xl shadow-red-900/30 overflow-hidden">
+            <div className="p-6 text-center">
+              <div className="w-14 h-14 mx-auto mb-4 rounded-full bg-red-500/10 border border-red-500/20 flex items-center justify-center text-2xl">
+                📢
+              </div>
+              <h3 className="text-lg font-bold text-white mb-2">Delete Announcement?</h3>
+              <p className="text-slate-400 text-sm">
+                Delete <span className="text-white font-semibold">"{deleteTarget.title}"</span>? Students will no longer see it.
+              </p>
+            </div>
+            <div className="flex gap-3 p-4 pt-0">
+              <button
+                onClick={() => setDeleteTarget(null)}
+                className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 rounded-xl text-slate-300 font-bold transition text-sm"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDelete}
+                className="flex-1 py-2.5 bg-red-600 hover:bg-red-500 rounded-xl text-white font-bold transition text-sm"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

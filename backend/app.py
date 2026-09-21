@@ -101,7 +101,7 @@ class Problem(db.Model):
     created_by = db.Column(db.Integer, db.ForeignKey('users.id'))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
-    # ===== PRO FEATURES (Phase 1) =====
+    # extra quest fields below
     problem_type = db.Column(db.Enum('coding', 'debugging'), default='coding')
     languages = db.Column(db.JSON, default=['python'])  # ['python', 'java', 'csharp']
     is_event_quest = db.Column(db.Boolean, default=False)
@@ -113,8 +113,8 @@ class Problem(db.Model):
     partial_credit = db.Column(db.Integer, default=100)
     auto_grade = db.Column(db.Boolean, default=True)
     plagiarism_threshold = db.Column(db.Float, default=0.85)
-    due_date = db.Column(db.DateTime, nullable=True)  # NEW: For quest deadlines
-    # ✅ NEW: Subject ownership (Phase 2)
+    due_date = db.Column(db.DateTime, nullable=True)  # for quest deadlines
+    # this is for which subject a quest belongs to
     subject_id = db.Column(db.Integer, db.ForeignKey('subjects.id'), nullable=True)
 
 class Submission(db.Model):
@@ -487,7 +487,7 @@ def _run_in_docker_with_stdin(code: str, language: str, stdin_input: str) -> dic
         filename = os.path.basename(src_path)
 
         # ── Write input to file so container can read it ──────────────────
-        # ✅ cap stdin to prevent sandbox abuse
+        # cap stdin so nobody can abuse the sandbox with a huge input
         max_input_size = 64 * 1024  # 64kb
         if stdin_input and len(stdin_input.encode('utf-8')) > max_input_size:
             return {
@@ -789,7 +789,7 @@ def get_current_user():
         "level": user.level
     }), 200
 
-# 🔒 NEW: Token Refresh Endpoint
+# this is for refreshing the login token so people don't get logged out mid-session
 @app.route('/api/auth/refresh', methods=['POST'])
 def refresh():
     data = request.get_json()
@@ -829,14 +829,14 @@ def create_problem():
         if 'input' not in tc or 'expected' not in tc: 
             return jsonify({"error": f"Test case {i+1} invalid"}), 400
 
-    # ✅ XP Validation based on difficulty
+    # xp has to match the difficulty picked
     max_xp = {
         'Easy': 100,
         'Medium': 250,
         'Hard': 500
     }
     
-    # ✅ NEW: Validate subject assignment (Phase 2)
+    # make sure the subject picked is actually valid
     subject_id = data.get('subject_id')
     if not subject_id:
         return jsonify({"error": "Course subject is required"}), 400
@@ -867,7 +867,7 @@ def create_problem():
             due_date = None
 
     p = Problem(
-        subject_id=subject_id,  # ✅ NEW: Link problem to subject
+        subject_id=subject_id,  # links this quest to a subject
         title=data['title'], 
         description=data['description'], 
         category=data.get('category','General'), 
@@ -898,10 +898,10 @@ def create_problem():
     return jsonify({"message": "Problem created", "problem_id": p.id}), 201
 
 @app.route('/api/problems', methods=['GET'])
-@jwt_required()  # ✅ Ensure auth is required for student filtering
+@jwt_required()  # needs auth so we can filter by student
 def get_problems():
     """Get published problems with filtering for block visibility & problem type"""
-    user_id = int(get_jwt_identity())  # ✅ Get user_id once at top
+    user_id = int(get_jwt_identity())
     user = User.query.get(user_id)
     
     # block_id param ignored — blocks removed
@@ -963,10 +963,10 @@ def get_problems():
             if instructor:
                 instructor_name = instructor.username
         
-        block_names = []
+        section_names = []
         if p.visible_to_sections:
             sections = SubjectSection.query.filter(SubjectSection.id.in_(p.visible_to_sections)).all()
-            block_names = [s.section_no for s in sections]
+            section_names = [s.section_no for s in sections]
 
         result.append({
             "id": p.id,
@@ -986,7 +986,7 @@ def get_problems():
             "auto_grade": p.auto_grade,
             "due_date": p.due_date.isoformat() if p.due_date else None,
             "instructor_name": instructor_name,
-            "block_names": block_names,
+            "section_names": section_names,
             "created_at": p.created_at.isoformat()
         })
     
@@ -1014,10 +1014,10 @@ def get_problem_detail(problem_id):
         if instructor:
             instructor_name = instructor.username
     
-    block_names = []
+    section_names = []
     if problem.visible_to_sections:
         sections = SubjectSection.query.filter(SubjectSection.id.in_(problem.visible_to_sections)).all()
-        block_names = [s.section_no for s in sections]
+        section_names = [s.section_no for s in sections]
 
     return jsonify({
         "id": problem.id,
@@ -1033,8 +1033,8 @@ def get_problem_detail(problem_id):
         "test_cases": sanitize_test_cases_for_student(problem.test_cases),
         "estimated_time": problem.estimated_time,
         "due_date": problem.due_date.isoformat() if problem.due_date else None,
-        "instructor_name": instructor_name,  # ✅ NEW
-        "block_names": block_names  # ✅ NEW
+        "instructor_name": instructor_name,  
+        "section_names": section_names 
     }), 200
 
 @app.route('/api/problems/<int:problem_id>', methods=['PUT'])
@@ -1137,7 +1137,7 @@ def delete_problem(problem_id):
     if not is_instructor_or_admin(user):
         return jsonify({"error": "Unauthorized"}), 403
     
-    problem = Problem.query.get_or_404(problem_id)  # ✅ THIS WAS MISSING
+    problem = Problem.query.get_or_404(problem_id)
     
     if problem.created_by != user_id and user.role != 'administrator':
         return jsonify({"error": "Not your problem"}), 403
@@ -1303,6 +1303,35 @@ def delete_lesson(lesson_id):
     db.session.delete(lesson)
     db.session.commit()
     return jsonify({"message": "Lesson deleted"}), 200
+
+
+@app.route('/api/lessons/<int:lesson_id>/files/<int:file_id>', methods=['DELETE'])
+@jwt_required()
+def delete_lesson_file(lesson_id, file_id):
+    # this is for deleting one file from a module without wiping the whole thing
+    import os
+    user_id = int(get_jwt_identity())
+    user = User.query.get(user_id)
+    if not is_instructor_or_admin(user):
+        return jsonify({"error": "Unauthorized"}), 403
+
+    lesson = Lesson.query.get_or_404(lesson_id)
+    if lesson.created_by != user_id and user.role != 'administrator':
+        return jsonify({"error": "Not your lesson"}), 403
+
+    f = LessonFile.query.get_or_404(file_id)
+    if f.lesson_id != lesson_id:
+        return jsonify({"error": "File not found"}), 404
+
+    if f.storage_path and os.path.exists(f.storage_path):
+        try:
+            os.remove(f.storage_path)
+        except OSError:
+            pass  # file already gone, no big deal
+
+    db.session.delete(f)
+    db.session.commit()
+    return jsonify({"message": "File deleted"}), 200
 
 
 @app.route('/api/lessons/<int:lesson_id>/files/<int:file_id>/download', methods=['GET'])
@@ -1511,7 +1540,7 @@ def create_submission():
             "due_date": prob.due_date.isoformat()
         }), 403
 
-    # ✅ Block resubmission — any prior submission locks this problem
+    # once submitted once, can't resubmit this quest
     prior = Submission.query.filter_by(
         user_id=user_id,
         problem_id=prob.id
@@ -2107,6 +2136,7 @@ def get_submissions_by_section():
             "id": s.id,
             "problem_id": s.problem_id,
             "problem_title": problems_by_id[s.problem_id].title if s.problem_id in problems_by_id else "Unknown",
+            "difficulty": problems_by_id[s.problem_id].difficulty if s.problem_id in problems_by_id else None,
             "status": s.status,
             "score": s.score,
             "language": s.language,
@@ -2308,6 +2338,7 @@ def get_instructor_classes():
             "section_code": s.section_no,
             "name": ', '.join(subjects) if subjects else s.section_no,
             "subjects": subjects,
+            "subject_id": s.subject_id,  # needed by the quest-creation class picker
             "semester": s.semester,
             "student_count": student_count,
             "problem_count": problem_count,
@@ -2900,9 +2931,9 @@ def get_instructor_assigned_subjects():
         "description": s.description
     } for s in subjects]), 200
 
-@app.route('/api/instructor/blocks-by-subject', methods=['GET'])
+@app.route('/api/instructor/sections-by-subject', methods=['GET'])
 @jwt_required()
-def get_blocks_by_subject():
+def get_sections_by_subject():
     """Get blocks where instructor teaches a specific subject"""
     user_id = int(get_jwt_identity())
     subject_id = request.args.get('subject_id', type=int)
@@ -3009,7 +3040,7 @@ def update_announcement(announcement_id):
 
     return jsonify({"message": "Announcement updated"}), 200
 
-# ✅ NEW: Student-specific announcements endpoint
+# this is for the announcements a student actually sees
 @app.route('/api/student/announcements', methods=['GET'])
 @jwt_required()
 def get_student_announcements():
@@ -3322,8 +3353,8 @@ def admin_get_users(admin):
     
     result = []
     for u in users:
-        blocks_list = []
-        block_id, block_name = None, None
+        sections_list = []
+        section_id, section_name = None, None
         
         if u.role == 'student':
             enrollments = IrregularEnrollment.query.filter_by(student_id=u.id).all()
@@ -3331,16 +3362,16 @@ def admin_get_users(admin):
                 section = SubjectSection.query.get(e.section_id)
                 if section:
                     subject = Subject.query.get(section.subject_id)
-                    blocks_list.append({
+                    sections_list.append({
                         "id": section.id,
                         "section_code": section.section_no,
                         "name": section.section_no,
                         "semester": section.semester,
                         "subjects": [subject.name] if subject else []
                     })
-            if blocks_list:
-                block_id = blocks_list[0]["id"]
-                block_name = blocks_list[0]["section_code"]
+            if sections_list:
+                section_id = sections_list[0]["id"]
+                section_name = sections_list[0]["section_code"]
         
         elif u.role == 'instructor':
             assignments = TeacherAssignment.query.filter_by(instructor_id=u.id).all()
@@ -3351,20 +3382,20 @@ def admin_get_users(admin):
                     section = SubjectSection.query.get(a.section_id)
                     subject = Subject.query.get(a.subject_id)
                     if section:
-                        blocks_list.append({
+                        sections_list.append({
                             "id": section.id,
                             "section_code": section.section_no,
                             "name": section.section_no,
                             "semester": section.semester,
                             "subjects": [subject.name] if subject else []
                         })
-            if blocks_list:
-                block_id = blocks_list[0]["id"]
-                block_name = blocks_list[0]["section_code"]
+            if sections_list:
+                section_id = sections_list[0]["id"]
+                section_name = sections_list[0]["section_code"]
         
         # Check if student has irregular enrollments
         is_irregular = False
-        if u.role == 'student' and not blocks_list:
+        if u.role == 'student' and not sections_list:
             irr_count = IrregularEnrollment.query.filter_by(student_id=u.id).count()
             is_irregular = irr_count > 0
 
@@ -3373,8 +3404,8 @@ def admin_get_users(admin):
             "full_name": getattr(u, 'full_name', None) or None,
             "xp": u.xp, "level": u.level, "is_active": u.is_active,
             "created_at": u.created_at.isoformat(),
-            "block_id": block_id, "block_name": block_name,
-            "blocks": blocks_list,
+            "section_id": section_id, "section_name": section_name,
+            "sections": sections_list,
             "is_irregular": is_irregular,
             "login_attempts": u.login_attempts or 0,
             "locked_until": u.locked_until.isoformat() if u.locked_until else None,
@@ -3395,14 +3426,14 @@ def admin_update_user(admin, user_id):
     if 'role' in data and data['role'] in ['student','instructor','administrator']:
         if target.role != data['role']: changes.append(f"Role: {target.role} -> {data['role']}")
         target.role = data['role']
-    if 'is_active' in data:  # ✅ FIXED: was missing 'data:'
+    if 'is_active' in data:
         if target.is_active != data['is_active']: 
             changes.append(f"Status: {'Active' if target.is_active else 'Inactive'} -> {'Active' if data['is_active'] else 'Inactive'}")
         target.is_active = data['is_active']
-    if 'xp' in data: target.xp = int(data['xp'])  # ✅ FIXED
-    if 'level' in data: target.level = int(data['level'])  # ✅ FIXED
-    
-    # ✅ updated: accept 'block_ids' as a list for multi-class enrollment
+    if 'xp' in data: target.xp = int(data['xp'])
+    if 'level' in data: target.level = int(data['level'])
+
+    # this is for enrolling into multiple sections/classes at once
     if 'section_ids' in data:
         section_ids = data['section_ids']
         if target.role == 'student':
@@ -3433,8 +3464,7 @@ def admin_update_user(admin, user_id):
                     # frontend to send subject_id separately — just look it
                     # up here.
                     if section and section.subject_id:
-                        # ✅ one instructor per class code — added [this
-                        # pass]. we already deleted THIS instructor's own
+                        # one instructor per class code. we already deleted this instructor's own
                         # rows above, so if a row still exists for this
                         # subject+section, it belongs to a different
                         # instructor. skip it instead of double-booking,
@@ -4299,16 +4329,6 @@ def admin_get_sections_list(admin):
         })
     return jsonify(result), 200
 
-@app.route('/api/admin/blocks', methods=['POST'])
-@admin_required
-def admin_create_block(admin):
-    return jsonify({"error": "Blocks are removed. Use /api/admin/sections instead."}), 410
-
-@app.route('/api/admin/blocks/<int:block_id>', methods=['PUT'])
-@admin_required
-def admin_update_block(admin, block_id):
-    return jsonify({"error": "Blocks are removed. Use /api/admin/sections instead."}), 410
-
 @app.route('/api/admin/sections/<int:section_id>/students', methods=['GET'])
 @jwt_required()
 def get_section_students(section_id):
@@ -4334,11 +4354,6 @@ def get_section_students(section_id):
         "level": s.level,
         "is_active": s.is_active
     } for s in students]), 200
-
-@app.route('/api/admin/blocks/<int:block_id>', methods=['DELETE'])
-@admin_required
-def admin_delete_block(admin, block_id):
-    return jsonify({"error": "Blocks are removed. Use /api/admin/sections instead."}), 410
 
 @app.route('/api/admin/instructor-assignments', methods=['POST'])
 @admin_required
@@ -4374,7 +4389,7 @@ def admin_create_instructor_assignment(admin):
     if existing:
         return jsonify({"error": "Assignment already exists"}), 409
 
-    # ✅ one instructor per class code — added [this pass]. the check above
+    # one instructor per class code. the check above
     # only caught the exact same instructor being assigned twice; this is
     # the actual rule: this subject+section combo can only ever have ONE
     # instructor. if someone else is already on it, the admin has to
@@ -4436,7 +4451,7 @@ def admin_update_instructor_assignment(admin, assignment_id):
     if duplicate:
         return jsonify({"error": "This assignment already exists"}), 409
 
-    # ✅ same one-instructor-per-class-code rule as the create route.
+    # same one-instructor-per-class-code rule as the create route.
     # excluding this assignment's own id — editing an assignment shouldn't
     # conflict with itself.
     taken_by = TeacherAssignment.query.filter(
@@ -4907,7 +4922,7 @@ def admin_bulk_enrollment_upload(admin):
             "email":            email,
             "temp_password":    plain_pwd,
             "student_type":     row.get("student_type", "").strip().lower(),
-            "block_or_section": "",   # filled in by caller
+            "class_codes": "",   # filled in by caller
         })
 
         return new_user, plain_pwd, True
@@ -4915,17 +4930,12 @@ def admin_bulk_enrollment_upload(admin):
     # ── 5. Process REGULAR students ───────────────────────────────────────
     for idx, row in regular_rows:
         sid        = row["student_id"].strip()
-        # was reading row.get("block_code", ...) here — leftover from before
-        # blocks got removed from this system. block_code doesn't mean
-        # anything anymore (see the "blocks removed" comment above), everyone
-        # uses section_no now, same as irregular students below. this one
-        # line just never got updated when the rest of the system moved on.
         section_no = row.get("section_no", "").strip()
 
         if not section_no:
             skipped_count += 1
             results.append({"row": idx, "student_id": sid, "status": "error",
-                             "reason": "block_code/section_no missing"})
+                             "reason": "section_no missing"})
             row_errors.append(f"Row {idx} (student_id={sid}): section_no is empty — skipped")
             continue
 
@@ -4960,7 +4970,7 @@ def admin_bulk_enrollment_upload(admin):
         enrolled_count += 1
 
         if is_new:
-            credential_list[-1]["block_or_section"] = section_no
+            credential_list[-1]["class_codes"] = section_no
 
         results.append({"row": idx, "student_id": sid,
                          "status": "created" if is_new else "enrolled",
@@ -5036,7 +5046,7 @@ def admin_bulk_enrollment_upload(admin):
 
         # Patch credential list entry with section list
         if is_new and sections_enrolled:
-            credential_list[-1]["block_or_section"] = ";".join(sections_enrolled)
+            credential_list[-1]["class_codes"] = ";".join(sections_enrolled)
 
     # ── 7. Commit everything ───────────────────────────────────────────────
     try:
@@ -5054,7 +5064,7 @@ def admin_bulk_enrollment_upload(admin):
     cred_writer.writerow([
         "student_id", "full_name", "email",
         "temporary_password", "student_type",
-        "block_or_sections", "must_change_password",
+        "class_codes", "must_change_password",
     ])
     for c in credential_list:
         cred_writer.writerow([
@@ -5063,7 +5073,7 @@ def admin_bulk_enrollment_upload(admin):
             c["email"],
             c["temp_password"],
             c["student_type"],
-            c["block_or_section"],
+            c["class_codes"],
             "YES",
         ])
     cred_b64 = base64.b64encode(
@@ -5450,6 +5460,12 @@ def admin_delete_section(admin, section_id):
             "error": f"Cannot delete — {enrolled} student(s) are enrolled in this section. Unenroll them first."
         }), 400
 
+    assigned_instructors = TeacherAssignment.query.filter_by(section_id=section_id).count()
+    if assigned_instructors > 0:
+        return jsonify({
+            "error": f"Cannot delete — {assigned_instructors} instructor assignment(s) reference this section. Remove those assignments first."
+        }), 400
+
     section_no = section.section_no
     db.session.delete(section)
     db.session.commit()
@@ -5500,7 +5516,7 @@ def admin_bulk_upload_sections(admin):
     Bulk create sections from CSV.
 
     CSV columns:
-        section_no, subject_code, block_code, schedule, room,
+        section_no, subject_code, schedule, room,
         capacity, semester, academic_year
     """
     if 'file' not in request.files:
@@ -5559,7 +5575,7 @@ def admin_bulk_upload_sections(admin):
         semester      = row.get('semester', '').strip() or None
         academic_year = row.get('academic_year', '').strip() or None
 
-        # ✅ Check global uniqueness (matches DB constraint)
+        # section number has to be unique across everything
         existing = SubjectSection.query.filter_by(section_no=section_no).first()
         if existing:
             existing_subject = Subject.query.get(existing.subject_id)

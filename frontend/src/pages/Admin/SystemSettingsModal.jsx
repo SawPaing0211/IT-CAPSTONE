@@ -39,9 +39,12 @@ export default function SystemSettingsModal({ onClose }) {
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState(null)
   const [dirty, setDirty] = useState(false)
+  const [showResetConfirm, setShowResetConfirm] = useState(false)
 
+  // Load the current system config when the modal opens
   useEffect(() => { fetchConfig() }, [])
 
+  // Fetch the saved system configuration from the server
   const fetchConfig = async () => {
     try {
       const token = localStorage.getItem('token')
@@ -49,8 +52,16 @@ export default function SystemSettingsModal({ onClose }) {
       if (res.ok) {
         const data = await res.json()
         setConfig(prev => ({ ...prev, ...data }))
+        setDirty(false)
+      } else if (res.status === 401) {
+        showToast('Your session has expired. Please log in again.', 'error')
+      } else {
+        showToast('Failed to load settings', 'error')
       }
-    } catch (err) { console.error(err) }
+    } catch (err) {
+      console.error(err)
+      showToast('Network error while loading settings', 'error')
+    }
     finally { setLoading(false) }
   }
 
@@ -59,6 +70,7 @@ export default function SystemSettingsModal({ onClose }) {
     setDirty(true)
   }
 
+  // Save the updated configuration to the server
   const handleSave = async () => {
     setSaving(true)
     try {
@@ -109,12 +121,14 @@ export default function SystemSettingsModal({ onClose }) {
     }
   }
 
+  // Display a temporary toast message
   const showToast = (message, type = 'success') => {
     setToast({ message, type })
     setTimeout(() => setToast(null), 4000)
   }
 
   const languageList = config.enabled_languages.split(',').map(l => l.trim()).filter(Boolean)
+  // Add or remove a language from the enabled languages list
   const toggleLanguage = (lang) => {
     const list = languageList.includes(lang) ? languageList.filter(l => l !== lang) : [...languageList, lang]
     update('enabled_languages', list.join(','))
@@ -259,6 +273,7 @@ export default function SystemSettingsModal({ onClose }) {
                             className="flex-1 accent-purple-500" />
                           <span className="text-white font-mono font-bold w-12 text-right">{parseFloat(config.plagiarism_threshold).toFixed(2)}</span>
                         </div>
+                        {/* Describe how strict the current threshold is */}
                         <p className="text-xs text-slate-500">
                           {parseFloat(config.plagiarism_threshold) >= 0.90 && '🟢 Conservative — only near-identical code flagged'}
                           {parseFloat(config.plagiarism_threshold) >= 0.80 && parseFloat(config.plagiarism_threshold) < 0.90 && '🟡 Balanced — recommended setting'}
@@ -278,7 +293,7 @@ export default function SystemSettingsModal({ onClose }) {
 
         {/* Footer */}
         <div className="px-6 py-4 border-t border-slate-800 flex items-center justify-between bg-slate-900 flex-shrink-0">
-          <button onClick={() => { if (window.confirm('Reset all settings to defaults?')) fetchConfig() }}
+          <button onClick={() => setShowResetConfirm(true)}
             className="text-slate-500 hover:text-slate-300 text-sm transition">↺ Reset to defaults</button>
           <div className="flex gap-3">
             <button onClick={onClose} className="px-5 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-white font-bold transition text-sm">Cancel</button>
@@ -289,6 +304,41 @@ export default function SystemSettingsModal({ onClose }) {
           </div>
         </div>
       </div>
+
+      {showResetConfirm && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+          <div className="bg-slate-900 border-2 border-red-600/40 rounded-2xl w-full max-w-sm shadow-2xl shadow-red-900/30 overflow-hidden">
+            <div className="p-6 space-y-4">
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 bg-red-600/20 border border-red-600/40 rounded-xl flex items-center justify-center text-xl shrink-0">
+                  ⚠️
+                </div>
+                <div>
+                  <h3 className="text-white font-bold text-lg">Reset to Defaults?</h3>
+                  <p className="text-slate-400 text-sm">Unsaved changes will be discarded</p>
+                </div>
+              </div>
+              <p className="text-slate-300 text-sm">
+                This reloads all settings from the last saved configuration, discarding anything you've changed here.
+              </p>
+            </div>
+            <div className="flex gap-3 p-6 pt-0">
+              <button
+                onClick={() => setShowResetConfirm(false)}
+                className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 rounded-xl text-slate-300 font-bold transition text-sm"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => { fetchConfig(); setShowResetConfirm(false) }}
+                className="flex-1 py-2.5 bg-red-600 hover:bg-red-500 rounded-xl text-white font-bold transition text-sm"
+              >
+                ↺ Reset
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <style>{`.settings-input { width: 100%; background: #1e293b; border: 1px solid #334155; border-radius: 0.5rem; padding: 0.5rem 1rem; color: white; outline: none; transition: border-color 0.15s; } .settings-input:focus { border-color: #9333ea; }`}</style>
     </div>

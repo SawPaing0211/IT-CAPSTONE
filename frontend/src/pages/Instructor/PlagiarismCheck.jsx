@@ -24,6 +24,7 @@ export default function PlagiarismCheck({ classId }) {
   const [expandedPair, setExpandedPair]       = useState(null)
   const [loadingProblems, setLoadingProblems] = useState(true)
 
+  // Fetch problems available for scanning, scoped to the class if one is given
   useEffect(() => {
     const fetchProblems = async () => {
       try {
@@ -42,6 +43,7 @@ export default function PlagiarismCheck({ classId }) {
     fetchProblems()
   }, [classId])
 
+  // Run the plagiarism scan for the selected problem and threshold
   const handleScan = async () => {
     if (!selectedProblem) { setError('Please select a problem first.'); return }
     setIsScanning(true)
@@ -208,6 +210,7 @@ export default function PlagiarismCheck({ classId }) {
 
           {results.pairs.map((pair, i) => {
             const isExpanded = expandedPair === i
+            // Color-code the similarity badge by how severe the overlap is
             const simColor =
               pair.similarity >= 95 ? 'text-red-400 bg-red-500/10 border-red-500/20' :
               pair.similarity >= 85 ? 'text-orange-400 bg-orange-500/10 border-orange-500/20' :

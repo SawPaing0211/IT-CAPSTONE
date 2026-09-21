@@ -8,6 +8,8 @@ import QuestLog from './QuestLog'
 import MySubjects from './MySubjects'
 import BountyBoard from './BountyBoard'
 import { api } from '../../api/client'
+import MobileSheet from '../../components/MobileSheet'
+import BottomNav from '../../components/BottomNav'
 import StudentLessons from './StudentLessons'
 import StudentAnnouncements from './StudentAnnouncements'
 
@@ -93,11 +95,15 @@ function ArcaneSandbox({ seedCode = null, seedLanguage = 'python', sandboxHealth
   const [showTemplates, setShowTemplates] = useState(false)
   const [showSaved, setShowSaved]       = useState(false)
   const [showSettings, setShowSettings] = useState(false)
+  const templatesAnchorRef = useRef(null)
+  const savedAnchorRef     = useRef(null)
+  const settingsAnchorRef  = useRef(null)
   const [savedScrolls, setSavedScrolls] = useState(() => {
     try { return JSON.parse(localStorage.getItem('arcane_saved') || '[]') } catch { return [] }
   })
   const [saveDialog, setSaveDialog]     = useState(false)
   const [saveName, setSaveName]         = useState('')
+  const [mobileTab, setMobileTab]       = useState('code')  // Code/Output tabs, mobile only
   const [runHistory, setRunHistory]     = useState([])
   const [particles, setParticles]       = useState([])
 
@@ -118,6 +124,7 @@ function ArcaneSandbox({ seedCode = null, seedLanguage = 'python', sandboxHealth
     }
   }, [lang])
 
+  // Save code to localStorage whenever it changes
   useEffect(() => {
     if (!seedCode && code) localStorage.setItem(`arcane_code_${lang}`, code)
   }, [code, lang])
@@ -141,6 +148,7 @@ function ArcaneSandbox({ seedCode = null, seedLanguage = 'python', sandboxHealth
     return () => window.removeEventListener('keydown', handler)
   }, [code, lang])
 
+  // Trigger a particle burst animation after running code
   const burstParticles = (success) => {
     const emojis = success
       ? ['✨', '⚡', '🔮', '💫', '🌟', '🎯', '']
@@ -156,10 +164,12 @@ function ArcaneSandbox({ seedCode = null, seedLanguage = 'python', sandboxHealth
     setTimeout(() => setParticles([]), 1800)
   }
 
+  // Run the code in the sandbox and record the result
   const handleRun = async () => {
     if (isRunning) return
     setIsRunning(true)
     setOutput(null)
+    setMobileTab('output')
     const start = Date.now()
     try {
       const data = await api.post('/api/sandbox/run', { code, language: lang })
@@ -179,11 +189,13 @@ function ArcaneSandbox({ seedCode = null, seedLanguage = 'python', sandboxHealth
     }
   }
 
+  // Load a starter template into the editor
   const applyTemplate = (key) => {
     const tpl = SPELL_TEMPLATES[lang]?.[key]
     if (tpl) { setCode(tpl.code); setOutput(null); setShowTemplates(false) }
   }
 
+  // Save the current code as a named scroll
   const handleSave = () => {
     if (!saveName.trim()) return
     const scroll = { id: Date.now(), name: saveName.trim(), code, language: lang, ts: new Date().toLocaleDateString() }
@@ -193,6 +205,7 @@ function ArcaneSandbox({ seedCode = null, seedLanguage = 'python', sandboxHealth
     setSaveName(''); setSaveDialog(false)
   }
 
+  // Download the current code as a file
   const handleDownload = () => {
     const blob = new Blob([code], { type: 'text/plain' })
     const url = URL.createObjectURL(blob)
@@ -256,7 +269,7 @@ function ArcaneSandbox({ seedCode = null, seedLanguage = 'python', sandboxHealth
       )}
 
       {/* ── Sandbox Header ── */}
-      <div className="shrink-0 flex items-center justify-between px-4 py-2.5 bg-slate-900/80 border-b border-emerald-600/30 gap-2 flex-wrap">
+      <div className="relative shrink-0 flex items-center justify-between px-4 py-2.5 bg-slate-900/80 border-b border-emerald-600/30 gap-2 flex-wrap">
 
         {/* Left */}
         <div className="flex items-center gap-3">
@@ -309,26 +322,24 @@ function ArcaneSandbox({ seedCode = null, seedLanguage = 'python', sandboxHealth
         <div className="flex items-center gap-1">
 
           {/* Templates */}
-          <div className="relative">
+          <div ref={templatesAnchorRef}>
             <button onClick={() => { setShowTemplates(!showTemplates); setShowSaved(false); setShowSettings(false) }}
               className="px-2 py-1.5 text-xs text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition flex items-center gap-1 border border-transparent hover:border-slate-700">
               📜 <span className="hidden md:inline">Scrolls</span>
             </button>
-            {showTemplates && (
-              <div className="absolute right-0 top-full mt-1 w-52 bg-slate-900 border border-emerald-600/30 rounded-xl shadow-2xl z-50 overflow-hidden">
-                <p className="text-[9px] text-slate-500 uppercase tracking-wider px-3 pt-3 pb-1 font-bold">Spell Templates</p>
-                {Object.entries(SPELL_TEMPLATES[lang] || {}).map(([key, tpl]) => (
-                  <button key={key} onClick={() => applyTemplate(key)}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-300 hover:text-white hover:bg-slate-800 transition text-left">
-                    <span>{tpl.icon}</span> {tpl.label}
-                  </button>
-                ))}
-              </div>
-            )}
+            <MobileSheet show={showTemplates} onClose={() => setShowTemplates(false)} widthClass="sm:w-52" anchorRef={templatesAnchorRef}>
+              <p className="text-[9px] text-slate-500 uppercase tracking-wider px-3 pt-1 sm:pt-3 pb-1 font-bold">Spell Templates</p>
+              {Object.entries(SPELL_TEMPLATES[lang] || {}).map(([key, tpl]) => (
+                <button key={key} onClick={() => { applyTemplate(key); setShowTemplates(false) }}
+                  className="w-full flex items-center gap-2 px-3 py-3 sm:py-2 text-sm sm:text-xs text-slate-300 hover:text-white hover:bg-slate-800 transition text-left">
+                  <span>{tpl.icon}</span> {tpl.label}
+                </button>
+              ))}
+            </MobileSheet>
           </div>
 
           {/* Saved */}
-          <div className="relative">
+          <div ref={savedAnchorRef}>
             <button onClick={() => { setShowSaved(!showSaved); setShowTemplates(false); setShowSettings(false) }}
               className="px-2 py-1.5 text-xs text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition flex items-center gap-1 border border-transparent hover:border-slate-700">
               🗂️
@@ -338,47 +349,45 @@ function ArcaneSandbox({ seedCode = null, seedLanguage = 'python', sandboxHealth
                 </span>
               )}
             </button>
-            {showSaved && (
-              <div className="absolute right-0 top-full mt-1 w-60 bg-slate-900 border border-emerald-600/30 rounded-xl shadow-2xl z-50 overflow-hidden">
-                <p className="text-[9px] text-slate-500 uppercase tracking-wider px-3 pt-3 pb-1 font-bold">Saved Scrolls</p>
-                {savedScrolls.length === 0
-                  ? <p className="px-3 pb-3 text-xs text-slate-500">No saved scrolls yet.</p>
-                  : savedScrolls.map(s => (
-                    <div key={s.id} className="flex items-center gap-2 px-3 py-2 hover:bg-slate-800 group">
-                      <button onClick={() => { setLang(s.language); setCode(s.code); setOutput(null); setShowSaved(false) }} className="flex-1 text-left">
-                        <p className="text-xs text-slate-300 group-hover:text-white truncate">{s.name}</p>
-                        <p className="text-[9px] text-slate-500">{LANG_META[s.language]?.icon} {s.ts}</p>
-                      </button>
-                      <button onClick={() => {
-                        const u = savedScrolls.filter(x => x.id !== s.id)
-                        setSavedScrolls(u); localStorage.setItem('arcane_saved', JSON.stringify(u))
-                      }} className="text-slate-600 hover:text-red-400 text-xs transition">✕</button>
-                    </div>
-                  ))
-                }
-              </div>
-            )}
+            <MobileSheet show={showSaved} onClose={() => setShowSaved(false)} widthClass="sm:w-60" anchorRef={savedAnchorRef}>
+              <p className="text-[9px] text-slate-500 uppercase tracking-wider px-3 pt-1 sm:pt-3 pb-1 font-bold">Saved Scrolls</p>
+              {savedScrolls.length === 0
+                ? <p className="px-3 pb-3 text-xs text-slate-500">No saved scrolls yet.</p>
+                : savedScrolls.map(s => (
+                  <div key={s.id} className="flex items-center gap-2 px-3 py-2 hover:bg-slate-800 group">
+                    <button onClick={() => { setLang(s.language); setCode(s.code); setOutput(null); setShowSaved(false) }} className="flex-1 text-left">
+                      <p className="text-sm sm:text-xs text-slate-300 group-hover:text-white truncate">{s.name}</p>
+                      <p className="text-[9px] text-slate-500">{LANG_META[s.language]?.icon} {s.ts}</p>
+                    </button>
+                    <button onClick={() => {
+                      const u = savedScrolls.filter(x => x.id !== s.id)
+                      setSavedScrolls(u); localStorage.setItem('arcane_saved', JSON.stringify(u))
+                    }} className="text-slate-600 hover:text-red-400 text-xs transition">✕</button>
+                  </div>
+                ))
+              }
+            </MobileSheet>
           </div>
 
           {/* Settings */}
-          <div className="relative">
+          <div ref={settingsAnchorRef}>
             <button onClick={() => { setShowSettings(!showSettings); setShowTemplates(false); setShowSaved(false) }}
-              className="px-2 py-1.5 text-xs text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition border border-transparent hover:border-slate-700">⚙️</button>
-            {showSettings && (
-              <div className="absolute right-0 top-full mt-1 w-44 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-50 p-3">
+              className="px-2 py-1.5 text-xs text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition border border-transparent hover:border-slate-700 min-w-[44px] min-h-[44px] flex items-center justify-center">⚙️</button>
+            <MobileSheet show={showSettings} onClose={() => setShowSettings(false)} widthClass="sm:w-44" anchorRef={settingsAnchorRef}>
+              <div className="px-3 pb-3 sm:p-3">
                 <p className="text-[9px] text-slate-500 uppercase tracking-wider mb-2 font-bold">Font Size</p>
                 <div className="flex gap-1">
                   {[12, 14, 16, 18].map(s => (
                     <button key={s} onClick={() => setFontSize(s)}
-                      className={`flex-1 py-1 rounded text-xs font-bold transition ${fontSize === s ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'}`}>{s}</button>
+                      className={`flex-1 py-2 sm:py-1 rounded text-xs font-bold transition ${fontSize === s ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'}`}>{s}</button>
                   ))}
                 </div>
               </div>
-            )}
+            </MobileSheet>
           </div>
 
-          <button onClick={handleDownload} title="Download" className="px-2 py-1.5 text-xs text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition border border-transparent hover:border-slate-700">📥</button>
-          <button onClick={() => setSaveDialog(true)} title="Save scroll" className="px-2 py-1.5 text-xs text-slate-400 hover:text-emerald-400 hover:bg-slate-800 rounded-lg transition border border-transparent hover:border-emerald-600/40">💾</button>
+          <button onClick={handleDownload} title="Download" className="px-2 py-1.5 text-xs text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition border border-transparent hover:border-slate-700 min-w-[44px] min-h-[44px] flex items-center justify-center">📥</button>
+          <button onClick={() => setSaveDialog(true)} title="Save scroll" className="px-2 py-1.5 text-xs text-slate-400 hover:text-emerald-400 hover:bg-slate-800 rounded-lg transition border border-transparent hover:border-emerald-600/40 min-w-[44px] min-h-[44px] flex items-center justify-center">💾</button>
 
           {/* Run */}
           <button onClick={handleRun} disabled={isRunning}
@@ -396,10 +405,30 @@ function ArcaneSandbox({ seedCode = null, seedLanguage = 'python', sandboxHealth
       </div>
 
       {/* ── Editor + Output ── */}
-      <div className="flex-1 flex overflow-hidden" style={{ minHeight: 0 }}>
+      <div className="flex-1 flex flex-col overflow-hidden" style={{ minHeight: 0 }}>
+
+        {/* Mobile-only Code/Output tabs, shown once there's something to switch to */}
+        {(output || isRunning) && (
+          <div className="md:hidden shrink-0 flex border-b border-emerald-600/20 bg-slate-900/60">
+            <button
+              onClick={() => setMobileTab('code')}
+              className={`flex-1 py-2 text-xs font-bold transition ${mobileTab === 'code' ? 'text-emerald-400 border-b-2 border-emerald-400' : 'text-slate-500'}`}
+            >
+              💻 Code
+            </button>
+            <button
+              onClick={() => setMobileTab('output')}
+              className={`flex-1 py-2 text-xs font-bold transition ${mobileTab === 'output' ? 'text-emerald-400 border-b-2 border-emerald-400' : 'text-slate-500'}`}
+            >
+              🔮 Output
+            </button>
+          </div>
+        )}
+
+        <div className="flex-1 flex overflow-hidden" style={{ minHeight: 0 }}>
 
         {/* Editor */}
-        <div ref={editorContainerRef} className="overflow-hidden flex flex-col"
+        <div ref={editorContainerRef} className={`overflow-hidden flex-col ${(output || isRunning) && mobileTab === 'output' ? 'hidden' : 'flex'} md:flex`}
           style={{ flex: output ? '1 1 55%' : '1 1 100%', minWidth: 0, transition: 'flex 0.3s ease', position: 'relative' }}>
           <div className="h-0.5 w-full bg-gradient-to-r from-emerald-600 via-teal-500 to-emerald-600 opacity-70 shrink-0" />
           <Editor
@@ -446,7 +475,7 @@ function ArcaneSandbox({ seedCode = null, seedLanguage = 'python', sandboxHealth
 
         {/* Output pane */}
         {(output || isRunning) && (
-          <div ref={outputRef} className="flex flex-col border-l border-emerald-600/20 bg-slate-950"
+          <div ref={outputRef} className={`flex-col border-l-0 md:border-l border-emerald-600/20 bg-slate-950 ${mobileTab === 'code' ? 'hidden' : 'flex'} md:flex`}
             style={{ flex: '1 1 45%', minWidth: 0, minHeight: 0 }}>
             <div className="shrink-0 flex items-center justify-between px-4 py-2 bg-slate-900/80 border-b border-emerald-600/20">
               <span className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
@@ -525,6 +554,7 @@ function ArcaneSandbox({ seedCode = null, seedLanguage = 'python', sandboxHealth
             )}
           </div>
         )}
+        </div>
       </div>
 
       <style>{`
@@ -537,30 +567,19 @@ function ArcaneSandbox({ seedCode = null, seedLanguage = 'python', sandboxHealth
   )
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-//  Main StudentDashboard
-//
-//  bug fixed here: handleReturnFromQuest used to do setActiveTab('quests'),
-//  but the dashboard tab list got renamed at some point — 'quests' became
-//  'subjects' (see the comment a few lines down on the activeTab useState,
-//  somebody already noted the rename but never updated this function to
-//  match it). so the flow was: open a quest -> come back -> exit the
-//  course -> blank dashboard, because activeTab was sitting on a tab id
-//  that doesn't exist in the tabs array below. none of the 4 tab
-//  conditions matched so nothing rendered. fixed by pointing it at
-//  'subjects' instead — see handleReturnFromQuest further down.
-// ═══════════════════════════════════════════════════════════════════════════
+// heads up to myself: the tabs got renamed a while back ('quests' -> 'subjects')
+// so anything setting activeTab needs to use 'subjects', not the old name
 export default function StudentDashboard({ user, onLogout }) {
-  const [activeTab, setActiveTab]             = useState('subjects')  // ✅ Changed from 'quests'
+  const [activeTab, setActiveTab]             = useState('subjects')  
   const [selectedQuest, setSelectedQuest]     = useState(null)
   const [heroStats, setHeroStats]             = useState(null)
   const [loading, setLoading]                 = useState(true)
   const [showProfileMenu, setShowProfileMenu] = useState(false)
   const [showNotifications, setShowNotifications] = useState(false)
-  const [sandboxSeed, setSandboxSeed]         = useState(null)   // { code, language }
-  const [sandboxHealth, setSandboxHealth]     = useState(null)   // Docker health data
-  const [selectedBlock, setSelectedBlock]   = useState(null)   // Tracks which subject is open
-  const [courseTab, setCourseTab] = useState('lessons') // ✅ Changed default to lessons
+  const [sandboxSeed, setSandboxSeed]         = useState(null)  
+  const [sandboxHealth, setSandboxHealth]     = useState(null)  
+  const [selectedSection, setSelectedSection]   = useState(null)  
+  const [courseTab, setCourseTab] = useState('lessons') 
 
   const profileRef      = useRef(null)
   const notificationRef = useRef(null)
@@ -569,6 +588,8 @@ export default function StudentDashboard({ user, onLogout }) {
   // Close menus on outside click
   useEffect(() => {
     const handler = (e) => {
+      const insidePortaledSheet = e.target.closest?.('[data-mobile-sheet-portal]')
+      if (insidePortaledSheet) return
       if (profileRef.current && !profileRef.current.contains(e.target)) setShowProfileMenu(false)
       if (notificationRef.current && !notificationRef.current.contains(e.target)) setShowNotifications(false)
     }
@@ -639,6 +660,7 @@ export default function StudentDashboard({ user, onLogout }) {
     return () => document.body.classList.remove('editor-active')
   }, [activeTab, selectedQuest])
 
+  // Open a quest in the code editor
   const handleQuestSelect = (quest) => {
   console.log(`📚 Selected quest: ${quest.id} - ${quest.title}`)
   // Check if this quest is already completed
@@ -649,6 +671,7 @@ export default function StudentDashboard({ user, onLogout }) {
   setSelectedQuest(quest)
   setActiveTab('spellforge')
 }
+  // Award XP and level up after completing a quest
   const handleVictory = (xpEarned, newLevel) => {
   // Mark quest as completed in localStorage
   if (selectedQuest?.id) {
@@ -659,11 +682,9 @@ export default function StudentDashboard({ user, onLogout }) {
   setHeroStats(prev => ({ ...prev, total_xp: (prev?.total_xp || 0) + xpEarned, level: newLevel }))
 }
 
-  // fixed: was setActiveTab('quests') — that tab id doesn't exist anymore,
-  // got renamed to 'subjects' at some point. left the dashboard blank
-  // after returning from a quest then exiting the course. see the big
-  // comment above the component for the full story.
+  // uses 'subjects' not the old 'quests' tab id, see the note up top
   const handleReturnFromQuest = () => { setSelectedQuest(null); setActiveTab('subjects') }
+  // Carry the current code over into the sandbox
   const handleCarryToSandbox = (code, language) => {
     setSandboxSeed({ code, language })
     setActiveTab('sandbox')
@@ -674,7 +695,7 @@ export default function StudentDashboard({ user, onLogout }) {
   const handleEnterSubject = (subject) => {
     console.log('📚 Entering subject:', subject)
   // subject contains: { id, name, section_id, section_no, semester, instructor }
-    setSelectedBlock({
+    setSelectedSection({
       id: subject.section_id,        
       section_code: subject.section_no, 
       name: subject.name,
@@ -686,9 +707,19 @@ export default function StudentDashboard({ user, onLogout }) {
 }
 
   const handleExitSubject = () => {
-    setSelectedBlock(null)
+    setSelectedSection(null)
   }
 
+  // "My Progress" in the account dropdown jumps to the one real Hero Sheet —
+  // the dashboard-level one, since it's account-wide anyway. Exits out of
+  // any open course first so the tab actually renders.
+  const handleGoToProgress = () => {
+    setShowProfileMenu(false)
+    setSelectedSection(null)
+    setActiveTab('hero')
+  }
+
+  // Jump into a quest picked from the bounty board
   const handleBountyQuestSelect = (quest, group) => {
     handleEnterSubject({
       id: group.subject_id,
@@ -706,7 +737,7 @@ export default function StudentDashboard({ user, onLogout }) {
 
   // real announcements from every subject this student is enrolled in —
   // reshaped to the same field names the dropdown below already expects
-  // (block/date/time/read), so the render JSX didn't need to change
+  // (class_label/date/time/read), so the render JSX didn't need to change
   useEffect(() => {
     const fetchNotifications = async () => {
       try {
@@ -719,7 +750,7 @@ export default function StudentDashboard({ user, onLogout }) {
             content: a.content,
             priority: a.priority,
             instructor: a.instructor,
-            block: a.section_no ? `${a.subject_name} · ${a.section_no}` : a.subject_name,
+            class_label: a.section_no ? `${a.subject_name} · ${a.section_no}` : a.subject_name,
             date: created.toLocaleDateString(),
             time: created.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
             // no read/unread tracking exists on the backend yet — everything
@@ -769,11 +800,19 @@ export default function StudentDashboard({ user, onLogout }) {
   }
 
   const tabs = [
-    { id: 'subjects',   label: '🎓 My Subjects' },
-    { id: 'bounty',     label: '🏴 Bounty Board' },
-    { id: 'hall',       label: '👑 Hall of Champions' },
-    { id: 'hero',       label: '🧙 Hero Sheet' },
-    { id: 'sandbox',    label: '🧪 Sandbox' },
+    { id: 'subjects',   label: '🎓 My Subjects',       icon: '🎓', shortLabel: 'Subjects' },
+    { id: 'bounty',     label: '🏴 Bounty Board',       icon: '🏴', shortLabel: 'Bounty' },
+    { id: 'hall',       label: '👑 Hall of Champions',  icon: '👑', shortLabel: 'Champions' },
+    { id: 'hero',       label: '🧙 Hero Sheet',         icon: '🧙', shortLabel: 'Hero' },
+    { id: 'sandbox',    label: '🧪 Sandbox',            icon: '🧪', shortLabel: 'Sandbox' },
+  ]
+
+  const courseTabs = [
+    { id: 'lessons',       label: '📚 Lessons',        icon: '📚', shortLabel: 'Lessons' },
+    { id: 'announcements', label: '📢 Announcements',  icon: '📢', shortLabel: 'News' },
+    { id: 'board',         label: '🗺️ Quest Board',    icon: '🗺️', shortLabel: 'Quests' },
+    { id: 'log',           label: '📜 Quest Log',      icon: '📜', shortLabel: 'Log' },
+    { id: 'sandbox',       label: '🧪 Sandbox',        icon: '🧪', shortLabel: 'Sandbox' },
   ]
 
   return (
@@ -825,17 +864,17 @@ export default function StudentDashboard({ user, onLogout }) {
           </div>
         )}
 
-        {/* Notifications + Profile */}
-        <div className="flex items-center gap-3">
-          <div className="relative" ref={notificationRef}>
-            <button onClick={() => setShowNotifications(!showNotifications)} className="relative p-2 hover:bg-slate-800/80 rounded-lg transition group">
+        {/* Notifications + Profile — pinned to the top-right corner on mobile so it sits
+            next to the logo instead of stacking under the stats badge full-width */}
+        <div className="absolute top-3 right-4 sm:static sm:top-auto sm:right-auto flex items-center gap-3">
+          <div ref={notificationRef}>
+            <button onClick={() => setShowNotifications(!showNotifications)} className="relative p-2 hover:bg-slate-800/80 rounded-lg transition group min-w-[44px] min-h-[44px] flex items-center justify-center">
               <span className="text-xl group-hover:scale-110 transition-transform">🔔</span>
               {unreadCount > 0 && (
                 <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-600 text-white text-[10px] font-bold rounded-full flex items-center justify-center animate-pulse border-2 border-slate-900">{unreadCount}</span>
               )}
             </button>
-            {showNotifications && (
-              <div className="absolute right-0 mt-2 w-80 bg-slate-900 border border-purple-600/40 rounded-xl shadow-2xl shadow-purple-900/50 z-50 overflow-hidden">
+            <MobileSheet show={showNotifications} onClose={() => setShowNotifications(false)} widthClass="sm:w-80" anchorRef={notificationRef}>
                 <div className="p-4 border-b border-purple-600/30 flex justify-between items-center">
                   <p className="font-bold text-white">Notifications</p>
                   <span className="text-xs text-slate-400">{unreadCount} unread</span>
@@ -868,7 +907,7 @@ export default function StudentDashboard({ user, onLogout }) {
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 mb-1">
                             <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold border ${priorityColors[note.priority]}`}>{note.priority.toUpperCase()}</span>
-                            <span className="text-xs text-slate-400">{note.block}</span>
+                            <span className="text-xs text-slate-400">{note.class_label}</span>
                           </div>
                           <p className="text-sm font-semibold text-white truncate">{note.title}</p>
                           <p className="text-xs text-slate-400 mt-1 line-clamp-2">{note.content}</p>
@@ -889,11 +928,10 @@ export default function StudentDashboard({ user, onLogout }) {
                     Browse My Subjects →
                   </button>
                 </div>
-              </div>
-            )}
+            </MobileSheet>
           </div>
 
-          <div className="relative" ref={profileRef}>
+          <div ref={profileRef}>
             <button onClick={() => setShowProfileMenu(!showProfileMenu)} className="flex items-center gap-3 px-3 py-2 bg-slate-800/80 hover:bg-slate-700/80 border border-purple-600/40 rounded-xl transition group">
               <div className="w-9 h-9 bg-gradient-to-br from-purple-600 to-pink-600 rounded-lg flex items-center justify-center font-bold text-sm shadow-lg">{(user.full_name || user.username)?.[0]?.toUpperCase() || 'U'}</div>
               <div className="hidden sm:block text-left">
@@ -902,8 +940,7 @@ export default function StudentDashboard({ user, onLogout }) {
               </div>
               <span className="text-slate-400 group-hover:text-white transition">▼</span>
             </button>
-            {showProfileMenu && (
-              <div className="absolute right-0 mt-2 w-56 bg-slate-900 border border-purple-600/40 rounded-xl shadow-2xl shadow-purple-900/50 z-50 overflow-hidden">
+            <MobileSheet show={showProfileMenu} onClose={() => setShowProfileMenu(false)} widthClass="sm:w-56" anchorRef={profileRef}>
                 <div className="p-4 border-b border-purple-600/30">
                   <p className="font-bold text-white">{user.full_name || user.username}</p>
                   <p className="text-xs text-purple-300 font-mono mt-0.5">🎓 {user.username}</p>
@@ -914,24 +951,22 @@ export default function StudentDashboard({ user, onLogout }) {
                   </div>
                 </div>
                 <div className="py-2">
-                  <button className="w-full px-4 py-2.5 text-left text-sm text-slate-300 hover:text-white hover:bg-slate-800/80 transition flex items-center gap-3"><span>👤</span> View Profile</button>
-                  <button className="w-full px-4 py-2.5 text-left text-sm text-slate-300 hover:text-white hover:bg-slate-800/80 transition flex items-center gap-3"><span>⚙️</span> Settings</button>
-                  <button className="w-full px-4 py-2.5 text-left text-sm text-slate-300 hover:text-white hover:bg-slate-800/80 transition flex items-center gap-3"><span>📊</span> My Progress</button>
+                  <button onClick={handleGoToProgress} className="w-full px-4 py-2.5 text-left text-sm text-slate-300 hover:text-white hover:bg-slate-800/80 transition flex items-center gap-3"><span>📊</span> My Progress</button>
                   <div className="border-t border-purple-600/30 my-2" />
                   <button onClick={handleLogoutClick} className="w-full px-4 py-2.5 text-left text-sm text-red-400 hover:text-red-300 hover:bg-red-600/10 transition flex items-center gap-3"><span>🚪</span> Logout</button>
                 </div>
-              </div>
-            )}
+            </MobileSheet>
           </div>
         </div>
       </header>
 
       {/* ── Main Content ── */}
-      <main className="relative z-10 container mx-auto px-4 py-6 overflow-x-hidden">
+      <main className="relative z-10 container mx-auto px-4 py-6 pb-24 sm:pb-6 overflow-x-hidden">
 
-        {/* Tabs - Only show when NOT in a subject (Dashboard mode) */}
-        {!selectedBlock && (
-          <div className="flex gap-2 mb-6 border-b border-purple-600/40 pb-2 overflow-x-auto">
+        {/* Tabs - Only show when NOT in a subject (Dashboard mode). Desktop only —
+            mobile gets the fixed BottomNav below instead. */}
+        {!selectedSection && (
+          <div className="hidden sm:flex gap-2 mb-6 border-b border-purple-600/40 pb-2 overflow-x-auto">
             {tabs.map(tab => (
               <button key={tab.id} onClick={() => !tab.disabled && setActiveTab(tab.id)} disabled={tab.disabled}
                 className={`px-4 sm:px-5 py-2.5 rounded-lg font-semibold transition-all duration-300 whitespace-nowrap border-2 ${
@@ -951,9 +986,13 @@ export default function StudentDashboard({ user, onLogout }) {
           </div>
         )}
 
+        {/* Mobile bottom tab bar — only in dashboard mode, same tabs as above */}
+        {!selectedSection && (
+          <BottomNav tabs={tabs} activeId={activeTab} onSelect={setActiveTab} accentId="sandbox" />
+        )}
 
         {/* ================= MODE 1: DASHBOARD (No Subject Selected) ================= */}
-        {!selectedBlock ? (
+        {!selectedSection ? (
           <div className="animate-fade-in">
             {activeTab === 'subjects' && <MySubjects onSelectSubject={handleEnterSubject} user={user} stats={heroStats} />}
             {activeTab === 'bounty' && <BountyBoard onSelectQuest={handleBountyQuestSelect} />}
@@ -982,40 +1021,33 @@ export default function StudentDashboard({ user, onLogout }) {
             <div className="animate-fade-in space-y-6">
             
             {/* Course Header */}
-            <div className="flex items-center justify-between bg-slate-900/50 p-4 rounded-xl border border-purple-600/30">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-900/50 p-4 rounded-xl border border-purple-600/30">
               <div className="flex items-center gap-4">
                 <button 
                   onClick={handleExitSubject}
-                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-sm font-bold transition flex items-center gap-2"
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-sm font-bold transition flex items-center gap-2 shrink-0"
                 >
-                  ← Back to Subjects
+                  ← <span className="hidden sm:inline">Back to Subjects</span>
                 </button>
-                <div>
-                  <h2 className="text-xl font-bold text-white">{selectedBlock.section_code}</h2>
-                  <p className="text-sm text-slate-400">{selectedBlock.name}</p>
+                <div className="min-w-0">
+                  <h2 className="text-xl font-bold text-white truncate">{selectedSection.section_code}</h2>
+                  <p className="text-sm text-slate-400 truncate">{selectedSection.name}</p>
                 </div>
               </div>
-              <div className="text-right">
+              <div className="sm:text-right">
                 <span className="px-3 py-1 bg-purple-600/20 text-purple-300 rounded-full text-xs font-bold border border-purple-600/40">
-                  {selectedBlock.semester}
+                  {selectedSection.semester}
                 </span>
               </div>
             </div>
 
-            {/* Course Navigation Tabs */}
-            <div className="flex gap-2 border-b border-purple-600/40 pb-2">
-              {[
-                { id: 'lessons', label: '📚 Lessons' },  
-                { id: 'announcements', label: '📢 Announcements' },
-                { id: 'board', label: '🗺️ Quest Board' },
-                { id: 'log', label: '📜 Quest Log' },
-                { id: 'sandbox', label: '🧪 Sandbox' },
-                { id: 'hero', label: '🧙 Hero Sheet' },
-              ].map(tab => (
+            {/* Course Navigation Tabs — desktop only, mobile gets the fixed BottomNav below */}
+            <div className="hidden sm:flex gap-2 border-b border-purple-600/40 pb-2 overflow-x-auto">
+              {courseTabs.map(tab => (
                 <button
                   key={tab.id}
                   onClick={() => setCourseTab(tab.id)}
-                  className={`px-4 py-2 rounded-lg font-semibold transition ${
+                  className={`px-4 py-2 rounded-lg font-semibold transition whitespace-nowrap ${
                     courseTab === tab.id 
                       ? 'bg-purple-600 text-white shadow-lg shadow-purple-600/50' 
                       : 'text-slate-400 hover:text-white hover:bg-slate-800'
@@ -1026,36 +1058,35 @@ export default function StudentDashboard({ user, onLogout }) {
               ))}
             </div>
 
+            <BottomNav tabs={courseTabs} activeId={courseTab} onSelect={setCourseTab} accentId="sandbox" />
+
             {/* Course Content Area */}
             <div className="min-h-[500px]">
               {/* Lessons Tab Content */}
               {courseTab === 'lessons' && (
-                <StudentLessons subjectId={selectedBlock.subject_id} blockId={selectedBlock.id} blockName={selectedBlock.name} />
+                <StudentLessons subjectId={selectedSection.subject_id} sectionId={selectedSection.id} sectionName={selectedSection.name} />
               )}
               
               {courseTab === 'announcements' && (
-                <StudentAnnouncements classId={selectedBlock.id} blockName={selectedBlock.name} />
+                <StudentAnnouncements classId={selectedSection.id} sectionName={selectedSection.name} />
               )}
               {courseTab === 'board' && (
                 <ProblemList 
                   onSelectQuest={handleQuestSelect} 
                   currentLevel={heroStats?.level || 1}
-                  blockId={selectedBlock.id}
-                  subjectId={selectedBlock.subject_id}
+                  sectionId={selectedSection.id}
+                  subjectId={selectedSection.subject_id}
                 />
               )}
               {courseTab === 'log' && (
                 <QuestLog 
-                  blockId={selectedBlock.id}
+                  sectionId={selectedSection.id}
                 />
               )}
               {courseTab === 'sandbox' && (
                  <div className="h-[600px] rounded-xl overflow-hidden border border-emerald-600/30">
                     <ArcaneSandbox sandboxHealth={sandboxHealth} />
                  </div>
-              )}
-              {courseTab === 'hero' && heroStats && (
-                <ProgressStats stats={heroStats} username={user.username} fullName={user.full_name} />
               )}
             </div>
           </div>

@@ -1,24 +1,5 @@
-# =============================================================================
-#  Adventure Realm — Docker Sandbox Execution Engine
-#  backend/routes/sandbox.py  — COMPLETE FILE REPLACEMENT
-#
-#  Changes from original:
-#   1. Added is_compile_error() + get_compile_error_message() helpers.
-#      evaluate_code() in app.py imports these to detect javac/csc failures
-#      before treating stdout as program output.
-#   2. Added _parse_java_compile_error() / _parse_csharp_compile_error()
-#      to produce clean, student-friendly error messages from raw compiler
-#      output.
-#   3. COMPILE_LINE_OFFSETS dict documents the per-language offset between
-#      raw compiler line numbers and student-visible line numbers.
-#      Java offset is 0 because Solution.java and Main.java are separate
-#      files — javac errors already reference Solution.java line numbers
-#      directly.
-#   4. run_sandbox() endpoint now short-circuits on compile errors and
-#      returns a clean error payload instead of an empty stdout result.
-#   5. All other logic (rate limiting, Docker client, wrappers, source
-#      writer, health endpoint) is unchanged from the original.
-# =============================================================================
+# runs student code in a docker sandbox. also detects compile errors (javac/csc)
+# so we can show a clean message instead of just an empty output.
 
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
@@ -139,7 +120,7 @@ def _get_docker_client():
 
 
 # =============================================================================
-#  Compile-error detection and parsing  (NEW — imported by app.py)
+#  compile-error detection and parsing, app.py imports these
 # =============================================================================
 
 def _parse_java_compile_error(stderr: str) -> str:
@@ -515,7 +496,7 @@ def run_sandbox():
 
     result = _run_in_docker(code, language)
 
-    # ── Compile-error short-circuit (NEW) ──────────────────────────────────
+    # if it didn't even compile, don't bother treating stdout as real output
     if is_compile_error(result, language):
         clean_msg = get_compile_error_message(result, language)
         return jsonify({

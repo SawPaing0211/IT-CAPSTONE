@@ -16,10 +16,12 @@ export default function ProblemSubmissions() {
   const [error, setError] = useState(null)
   const [viewingSubmissionId, setViewingSubmissionId] = useState(null)
 
+  // Load submission data whenever the problem id changes
   useEffect(() => {
     fetchData()
   }, [problemId])
 
+  // Fetch this problem's submissions and per-student status
   const fetchData = async () => {
     setLoading(true)
     setError(null)
@@ -44,12 +46,14 @@ export default function ProblemSubmissions() {
     }
   }
 
+  // Filter students by submission status
   const filteredStudents = students.filter(student => {
     if (filter === 'submitted') return student.submitted
     if (filter === 'pending') return !student.submitted
     return true
   })
 
+  // Compute submission counts and the average score across submitted students
   const submittedCount = students.filter(s => s.submitted).length
   const pendingCount = students.filter(s => !s.submitted).length
   const avgScore = submittedCount > 0
@@ -177,7 +181,7 @@ export default function ProblemSubmissions() {
               <tr>
                 <td colSpan="6" className="p-8 text-center text-slate-500">
                   {students.length === 0
-                    ? 'No students enrolled in your blocks yet.'
+                    ? 'No students enrolled in your classes yet.'
                     : 'No students match this filter.'}
                 </td>
               </tr>

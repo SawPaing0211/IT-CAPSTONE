@@ -43,6 +43,7 @@ export default function InstructorDashboard({ user, onLogout }) {
     { path: '/instructor/achievements', label: 'Achievements', icon: '🏆' },
   ]
 
+  // Check whether a nav item matches the current route
   const isActive = (path, exact = false) => {
     if (exact) return location.pathname === path
     return location.pathname.startsWith(path)

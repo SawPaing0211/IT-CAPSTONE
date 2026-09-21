@@ -108,7 +108,7 @@ export default function Landing({ onLogin }) {
               </button>
             </div>
 
-            {/* ✅ COMMUNITY STATS - Server Wide (Not Personal) */}
+            {/* stats for the whole server, not just me */}
             <div className="grid md:grid-cols-3 gap-6 mb-16 max-w-4xl mx-auto">
               <div className="bg-gradient-to-b from-purple-900/40 to-slate-900/80 p-6 rounded-xl border-2 border-purple-600/30 shadow-lg">
                 <div className="text-4xl mb-3">🗡️</div>

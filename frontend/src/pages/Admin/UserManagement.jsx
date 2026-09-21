@@ -85,6 +85,7 @@ export default function UserManagement() {
     setTimeout(() => setToast(null), type === 'warning' ? 6500 : 4000)
   }
 
+  // Only the master admin account can create other administrators
   const isMasterAdmin = (() => {
     try {
       const u = JSON.parse(localStorage.getItem('user') || '{}')
@@ -92,12 +93,14 @@ export default function UserManagement() {
     } catch { return false }
   })()
 
+  // Clear the add-user form back to its defaults
   const resetAddUserForm = () => {
     setAddUserForm({ username: '', email: '', password: '', role: 'student', section_id: '' })
     setAddUserError('')
     setAddUserSuccess('')
   }
 
+  // Validate the new user form and submit it to the server
   const handleAddUser = async () => {
     setAddUserError('')
     setAddUserSuccess('')
@@ -140,11 +143,13 @@ export default function UserManagement() {
     }
   }
 
+  // Re-fetch users and sections whenever a filter or search term changes
   useEffect(() => {
     fetchUsers()
     fetchSections()
   }, [roleFilter, sectionFilter, statusFilter, search])
 
+  // Fetch users matching the current filters from the server
   const fetchUsers = async () => {
     try {
       const token = localStorage.getItem('token')
@@ -172,6 +177,7 @@ export default function UserManagement() {
     }
   }
 
+  // Fetch the list of class code sections for the filter dropdown
   const fetchSections = async () => {
     try {
       const token = localStorage.getItem('token')
@@ -187,6 +193,7 @@ export default function UserManagement() {
     }
   }
 
+  // Send the edited user fields to the server
   const handleUpdateUser = async (userId, updates) => {
     try {
       const token = localStorage.getItem('token')
@@ -236,6 +243,7 @@ export default function UserManagement() {
     })
   }
 
+  // Delete the user now that the confirmation phrase has been typed
   const performDeleteUser = async (userId) => {
     setConfirmLoading(true)
     try {
@@ -270,6 +278,7 @@ export default function UserManagement() {
     })
   }
 
+  // Delete every student account now that the confirmation phrase has been typed
   const performBulkDeleteStudents = async () => {
     setConfirmLoading(true)
     try {
@@ -296,6 +305,7 @@ export default function UserManagement() {
     }
   }
 
+  // Unlock a user account that was locked after failed login attempts
   const handleUnlockUser = async (userId, username) => {
     try {
       const token = localStorage.getItem('token')
@@ -312,7 +322,7 @@ export default function UserManagement() {
   const filteredUsers = users.filter(user => {
     if (roleFilter !== 'all' && user.role !== roleFilter) return false
     if (sectionFilter !== 'all') {
-      const enrolled = (user.blocks || []).some(b => String(b.id) === sectionFilter)
+      const enrolled = (user.sections || []).some(s => String(s.id) === sectionFilter)
       if (!enrolled) return false
     }
     if (statusFilter !== 'all') {
@@ -331,6 +341,7 @@ export default function UserManagement() {
     return true
   })
 
+  // Split the user list into admin, instructor, and student groups for the tables below
   const groupedUsers = {
     admin: users.filter(u => u.role === 'administrator'),
     instructor: users.filter(u => u.role === 'instructor'),
@@ -376,6 +387,7 @@ export default function UserManagement() {
           {/* Header Actions */}
           <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
             <div className="flex gap-3 flex-wrap">
+              {/* Download a CSV report of all users */}
               <button
                 onClick={async () => {
                   const token = localStorage.getItem('token')
@@ -810,9 +822,9 @@ function UserSection({ title, icon, users, onManage, onRecover, onDelete, onUnlo
 
                 {/* CLASS CODE column — shows section_no values */}
                 <td className="p-4">
-                  {user.blocks && user.blocks.length > 0 ? (
+                  {user.sections && user.sections.length > 0 ? (
                     <div className="flex flex-wrap gap-1">
-                      {[...new Set(user.blocks.map(b => b.section_code))].map((code, idx) => (
+                      {[...new Set(user.sections.map(s => s.section_code))].map((code, idx) => (
                         <span
                           key={idx}
                           className="px-2.5 py-1 bg-purple-600/20 text-purple-300 rounded-lg text-sm font-bold border border-purple-600/40 shadow-sm"

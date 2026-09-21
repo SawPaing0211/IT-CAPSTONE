@@ -17,6 +17,7 @@ export default function MySubjects({ onSelectSubject, user, stats }) {
   const [subjects, setSubjects] = useState([])
   const [loading, setLoading] = useState(true)
 
+  // Fetch the student's enrolled subjects
   useEffect(() => {
     const fetchSubjects = async () => {
       try {
@@ -35,20 +36,39 @@ export default function MySubjects({ onSelectSubject, user, stats }) {
     fetchSubjects()
   }, [])
 
+  // Show skeleton cards while subjects are loading, shaped like the real grid below
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-[60vh]">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-16 w-16 border-4 border-purple-600 border-t-transparent mx-auto mb-4"></div>
-          <p className="text-purple-300 font-mono text-lg">Loading your subjects...</p>
+      <div className="p-4 sm:p-6 max-w-6xl mx-auto space-y-6 animate-pulse">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div>
+            <div className="h-8 w-48 bg-slate-800 rounded-lg" />
+            <div className="h-4 w-64 bg-slate-800 rounded mt-2" />
+          </div>
+          <div className="h-10 w-40 bg-slate-800 rounded-xl" />
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {[...Array(3)].map((_, i) => (
+            <div key={i} className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
+              <div className="flex items-start justify-between mb-4">
+                <div className="w-14 h-14 bg-slate-800 rounded-xl" />
+                <div className="h-5 w-16 bg-slate-800 rounded-full" />
+              </div>
+              <div className="h-5 w-3/4 bg-slate-800 rounded mb-3" />
+              <div className="h-4 w-24 bg-slate-800 rounded mb-4" />
+              <div className="h-3 w-32 bg-slate-800 rounded" />
+              <div className="h-9 w-full bg-slate-800 rounded-lg mt-6" />
+            </div>
+          ))}
         </div>
       </div>
     )
   }
 
+  // Show an empty state when the student isn't enrolled in any subjects
   if (subjects.length === 0) {
     return (
-      <div className="p-6 max-w-4xl mx-auto">
+      <div className="p-4 sm:p-6 max-w-4xl mx-auto">
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-12 text-center">
           <div className="text-6xl mb-4">📚</div>
           <h2 className="text-2xl font-bold text-white mb-2">No Subjects Enrolled</h2>
@@ -60,21 +80,21 @@ export default function MySubjects({ onSelectSubject, user, stats }) {
   }
 
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-6">
+    <div className="p-4 sm:p-6 max-w-6xl mx-auto space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
-          <h1 className="text-3xl font-bold text-white flex items-center gap-3">
-            <span className="text-4xl">🎓</span>
+          <h1 className="text-2xl sm:text-3xl font-bold text-white flex items-center gap-3">
+            <span className="text-3xl sm:text-4xl">🎓</span>
             My Subjects
           </h1>
-          <p className="text-slate-400 mt-1">
+          <p className="text-slate-400 mt-1 text-sm sm:text-base">
             Welcome back, <span className="text-purple-400 font-semibold">{user?.full_name || user?.username}</span>! 
             Here are your enrolled subjects.
           </p>
         </div>
-        <div className="bg-gradient-to-r from-purple-900/30 to-pink-900/30 border border-purple-600/30 rounded-xl px-6 py-3">
-          <p className="text-sm text-purple-300 font-bold">{subjects.length} {subjects.length === 1 ? 'Subject' : 'Subjects'} Enrolled</p>
+        <div className="self-start sm:self-auto shrink-0 bg-gradient-to-r from-purple-900/30 to-pink-900/30 border border-purple-600/30 rounded-xl px-4 sm:px-6 py-2 sm:py-3">
+          <p className="text-sm text-purple-300 font-bold whitespace-nowrap">{subjects.length} {subjects.length === 1 ? 'Subject' : 'Subjects'} Enrolled</p>
         </div>
       </div>
 
@@ -83,6 +103,7 @@ export default function MySubjects({ onSelectSubject, user, stats }) {
         {subjects.map((subject) => (
           <div
             key={subject.id}
+            // Build the subject payload and hand it up to the dashboard
             onClick={() => {
               const subjectData = {
                 id: subject.id,
@@ -119,7 +140,7 @@ export default function MySubjects({ onSelectSubject, user, stats }) {
             {/* Class Code Badge */}
             <div className="mb-3">
               <span className="px-2.5 py-0.5 bg-slate-700 rounded text-xs font-bold text-slate-300">
-                🏷️ {subject.section_no || subject.block_code || 'No Class Code'}
+                🏷️ {subject.section_no || 'No Class Code'}
               </span>
             </div>
             

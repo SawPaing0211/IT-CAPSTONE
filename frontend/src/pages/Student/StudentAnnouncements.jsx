@@ -7,10 +7,11 @@
 import { useState, useEffect } from 'react'
 import { api } from '../../api/client'
 
-export default function StudentAnnouncements({ classId, blockName }) {
+export default function StudentAnnouncements({ classId, sectionName }) {
   const [announcements, setAnnouncements] = useState([])
   const [loading, setLoading] = useState(true)
 
+  // Fetch announcements posted for this subject
   useEffect(() => {
     const fetchAnnouncements = async () => {
       setLoading(true)
@@ -33,22 +34,35 @@ export default function StudentAnnouncements({ classId, blockName }) {
     urgent: { label: 'Urgent', color: 'text-red-400',    bg: 'bg-red-500/10',    border: 'border-red-500/20' },
   }
 
+  // Show skeleton cards while announcements are being fetched
   if (loading) {
     return (
-      <div className="text-center py-20 text-purple-300 animate-pulse">
-        Loading announcements...
+      <div className="p-4 sm:p-6 max-w-4xl mx-auto space-y-4">
+        <div>
+          <div className="h-7 bg-slate-800 rounded w-48 mb-2 animate-pulse" />
+          <div className="h-4 bg-slate-800 rounded w-64 animate-pulse" />
+        </div>
+        {[...Array(3)].map((_, i) => (
+          <div key={i} className="bg-slate-900 border border-slate-800 rounded-xl p-5 animate-pulse">
+            <div className="h-4 bg-slate-800 rounded w-16 mb-3" />
+            <div className="h-5 bg-slate-800 rounded w-2/3 mb-2" />
+            <div className="h-3 bg-slate-800 rounded w-full mb-1" />
+            <div className="h-3 bg-slate-800 rounded w-3/4" />
+          </div>
+        ))}
       </div>
     )
   }
 
+  // Show an empty state when the instructor hasn't posted anything yet
   if (announcements.length === 0) {
     return (
-      <div className="p-6 max-w-4xl mx-auto">
+      <div className="p-4 sm:p-6 max-w-4xl mx-auto">
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-12 text-center">
           <div className="text-6xl mb-4">📢</div>
           <h2 className="text-2xl font-bold text-white mb-2">No Announcements Yet</h2>
           <p className="text-slate-400">
-            Your instructor hasn't posted anything for {blockName} yet.
+            Your instructor hasn't posted anything for {sectionName} yet.
           </p>
         </div>
       </div>
@@ -56,12 +70,12 @@ export default function StudentAnnouncements({ classId, blockName }) {
   }
 
   return (
-    <div className="p-6 max-w-4xl mx-auto space-y-4">
+    <div className="p-4 sm:p-6 max-w-4xl mx-auto space-y-4">
       <div>
         <h2 className="text-2xl font-bold text-white flex items-center gap-2">
           <span>📢</span> Announcements
         </h2>
-        <p className="text-slate-400 text-sm mt-1">Updates from your instructor for {blockName}</p>
+        <p className="text-slate-400 text-sm mt-1">Updates from your instructor for {sectionName}</p>
       </div>
 
       {announcements.map(a => {

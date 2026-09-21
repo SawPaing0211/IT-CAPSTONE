@@ -27,6 +27,7 @@ export default function DashboardOverview() {
   const [activityFilter, setActivityFilter]     = useState('all')
   const [activityLoading, setActivityLoading]   = useState(false)
 
+  // Fetch dashboard stats and class list on mount
   useEffect(() => {
     const fetchDashboardData = async () => {
       try {
@@ -326,7 +327,7 @@ export default function DashboardOverview() {
             </div>
             <div className="p-4 space-y-2">
               {[
-                { icon: '⚔️', label: 'Create Quest',     sub: 'Add new challenge',         color: 'purple', path: '/instructor/create-problem' },
+                { icon: '⚔️', label: 'Create Quest',     sub: 'Add new challenge',         color: 'purple', path: '/instructor/create-problem/pick-class' },
                 { icon: '🏫', label: 'View Classes',        sub: 'Manage class list',          color: 'blue',   path: '/instructor/classes' },
                 { icon: '📢', label: 'Post Announcement',   sub: 'Communicate with students',  color: 'pink',   path: '/instructor/announcements' },
               ].map(action => {

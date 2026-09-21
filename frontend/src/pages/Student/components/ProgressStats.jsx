@@ -81,6 +81,7 @@ export default function ProgressStats({ stats, username, fullName }) {
     }
   }, [achievements, loadingAchievements])
 
+  // Trigger the fade-in animation once the component mounts
   useEffect(() => {
     setAnimated(true)
   }, [])

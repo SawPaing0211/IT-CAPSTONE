@@ -1,38 +1,9 @@
-// ─────────────────────────────────────────────────────────────────────────────
-// InstructorAssignments.jsx
-// Admin page: assign an instructor to teach a subject in a specific class code.
+// admin page for assigning an instructor to teach a subject in a class code.
+// picking a subject filters the class code list down to sections for just that subject.
 //
-// HOW THIS PAGE WORKS (plain english for future-me):
-//   - Admin picks an instructor, then a subject, then a class code.
-//   - The class code list is FILTERED — you only see sections that belong to
-//     the currently selected subject. Before this fix, ALL 31 sections showed
-//     regardless of what subject you chose, which was confusing.
-//   - The instructor picker is a styled dark dropdown (NOT the ugly white browser
-//     default select). It uses the same PortalDropdown trick as the Subject and
-//     Class Code pickers so it can't be clipped by overflow:hidden on the modal.
-//   - Every assignment shows as an instructor "card" on the main page, with
-//     edit/delete buttons that appear on hover.
-//
-// THE PORTAL TRICK (why we render dropdowns outside the modal):
-//   Normally a dropdown inside a modal gets cut off because the modal has
-//   overflow:hidden. createPortal() renders the dropdown directly on <body>
-//   so it floats freely on top of everything. We use getBoundingClientRect()
-//   on the trigger button to position it in exactly the right spot.
-//
-// DATA FLOW:
-//   Page loads → fetch assignments + instructors + subjects + sections in parallel
-//   Admin selects subject in the form → sectionsBySubject filtered client-side
-//   Admin submits → POST /api/admin/instructor-assignments → refetch → re-render
-//
-// KEY BACKEND ENDPOINTS USED:
-//   GET  /api/admin/instructor-assignments  → list all assignments
-//   POST /api/admin/instructor-assignments  → create one
-//   PUT  /api/admin/instructor-assignments/:id → edit one
-//   DELETE /api/admin/instructor-assignments/:id → remove one
-//   GET  /api/admin/users?role=instructor    → instructor list for dropdown
-//   GET  /api/admin/subjects                 → subject list
-//   GET  /api/admin/sections-list            → all sections (we filter client-side)
-// ─────────────────────────────────────────────────────────────────────────────
+// dropdowns render through a portal straight onto <body> so they don't get
+// clipped by the modal's overflow:hidden, positioned using the button's own
+// bounding rect.
 
 import { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
@@ -187,7 +158,7 @@ function PortalDropdown({ triggerRef, open, onClose, children, minWidth = 320 })
 
 
 // ─────────────────────────────────────────────────────────────────────────────
-// INSTRUCTOR PICKER  (NEW — replaces the ugly native <select>)
+// this is my own searchable dropdown instead of the ugly native <select>
 // A custom searchable dropdown for picking an instructor.
 // Renders via PortalDropdown so it's never clipped by the modal.
 //
@@ -218,6 +189,7 @@ function InstructorPicker({ value, onChange, instructors }) {
     )
   })
 
+  // Open the dropdown and focus the search box
   const handleOpen = () => {
     setOpen(o => !o)
     setQuery('')
@@ -323,6 +295,7 @@ function SubjectPicker({ value, onChange, subjects }) {
     return acc
   }, {})
 
+  // Open the dropdown and focus the search box
   const handleOpen = () => {
     setOpen(o => !o)
     setQuery('')
@@ -1085,6 +1058,7 @@ export default function InstructorAssignments() {
   })
 
   const hasFilters = searchTerm || filterInstructor !== 'all' || filterSubject !== 'all' || filterSection !== 'all'
+  // Reset all filters and the search box back to their defaults
   const clearFilters = () => {
     setSearchTerm('')
     setFilterInstructor('all')

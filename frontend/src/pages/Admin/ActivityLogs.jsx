@@ -142,6 +142,7 @@ function ExpandedRow({ log, onClose }) {
             <div>
               <p className="text-slate-500 text-xs uppercase tracking-widest mb-1">IP Address</p>
               <p className="text-slate-200 font-mono">{log.ip || 'N/A'}</p>
+              {/* Label the IP as external or localhost */}
               {log.ip && log.ip !== '127.0.0.1' && (
                 <p className="text-slate-500 text-xs mt-1">External IP</p>
               )}
@@ -165,16 +166,19 @@ function MultiSelect({ options, selected, onChange, placeholder }) {
   const [open, setOpen] = useState(false)
   const ref = useRef()
 
+  // Close the dropdown when clicking outside it
   useEffect(() => {
     const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [])
 
+  // Add or remove an action type from the selected filters
   const toggle = (val) => {
     onChange(selected.includes(val) ? selected.filter(v => v !== val) : [...selected, val])
   }
 
+  // Build the label shown on the filter button
   const label = selected.length === 0 ? placeholder
     : selected.length === 1 ? getMeta(selected[0]).label
     : `${selected.length} actions selected`
@@ -254,6 +258,7 @@ export default function ActivityLogs() {
   const criticalActions = ['USER_DELETED', 'SUBJECT_DELETED', 'SECTION_DELETED', 'DATABASE_BACKUP']
 
   // ── Fetch ────────────────────────────────────────────────────────────
+  // Fetch audit logs from the backend with the current filters and pagination
   const fetchLogs = useCallback(async () => {
     setLoading(true)
     try {
@@ -309,6 +314,7 @@ export default function ActivityLogs() {
     }
   }, [page, actionFilters, search, datePreset, sortDir])
 
+  // Reload logs whenever the filters, page, or sort order change
   useEffect(() => { fetchLogs() }, [fetchLogs])
 
   // Debounce search
@@ -376,6 +382,7 @@ export default function ActivityLogs() {
     if (type === 'today')    { setDatePreset('today'); setPage(1) }
   }
 
+  // Flip the sort direction and jump back to page one
   const toggleSort = () => {
     setSortDir(d => d === 'desc' ? 'asc' : 'desc')
     setPage(1)

@@ -12,7 +12,9 @@ export default function CreateProblem() {
   const [selectedSubjectId, setSelectedSubjectId] = useState(null)
   const [activeSection, setActiveSection] = useState(1)
   const [toast, setToast] = useState(null) // { message, type: 'success' | 'error' }
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
+  // Automatically dismiss the toast after a few seconds
   useEffect(() => {
     if (!toast) return
     const timer = setTimeout(() => setToast(null), 4000)
@@ -30,8 +32,8 @@ export default function CreateProblem() {
     problem_type: 'coding',
     languages: ['python'],
     is_event_quest: false,
-    // ✅ visible_to_blocks stores SubjectSection IDs (matches backend validation)
-    visible_to_blocks: [],
+    // visible_to_sections stores SubjectSection IDs, not subject IDs
+    visible_to_sections: [],
     hints: [],
     tags: [],
     prerequisites: [],
@@ -67,7 +69,7 @@ export default function CreateProblem() {
               problem_type: problemData.problem_type || 'coding',
               languages: problemData.languages || ['python'],
               is_event_quest: problemData.is_event_quest || false,
-              visible_to_blocks: problemData.visible_to_blocks || [],
+              visible_to_sections: problemData.visible_to_sections || [],
               hints: problemData.hints || [],
               tags: problemData.tags || [],
               prerequisites: problemData.prerequisites || [],
@@ -117,7 +119,7 @@ export default function CreateProblem() {
       try {
         const token = localStorage.getItem('token')
         const res = await fetch(
-          `http://localhost:5000/api/instructor/blocks-by-subject?subject_id=${selectedSubjectId}`,
+          `http://localhost:5000/api/instructor/sections-by-subject?subject_id=${selectedSubjectId}`,
           { headers: { Authorization: `Bearer ${token}` } }
         )
         if (res.ok) {
@@ -126,7 +128,7 @@ export default function CreateProblem() {
           // Remove any selected sections that are no longer valid for this subject
           setFormData(prev => ({
             ...prev,
-            visible_to_blocks: prev.visible_to_blocks.filter(sid =>
+            visible_to_sections: prev.visible_to_sections.filter(sid =>
               data.some(s => s.id === sid)
             )
           }))
@@ -142,6 +144,20 @@ export default function CreateProblem() {
     setFormData(prev => ({ ...prev, [field]: value }))
   }
 
+  // where Back / after-submit should go, this is for making sure it lands on the right class instead of just going back blind
+  const resolveBackTarget = () => {
+    const from = searchParams.get('from')
+    if (from) return from
+    if (formData.visible_to_sections.length > 0) {
+      return `/instructor/class/${formData.visible_to_sections[0]}`
+    }
+    if (sectionsBySubject.length > 0) {
+      return `/instructor/class/${sectionsBySubject[0].id}`
+    }
+    return '/instructor/problems'
+  }
+
+  // Toggle a programming language on or off in the allowed list
   const handleLanguageToggle = (language) => {
     setFormData(prev => {
       const languages = prev.languages.includes(language)
@@ -151,6 +167,7 @@ export default function CreateProblem() {
     })
   }
 
+  // Add, edit, and remove hints for this problem
   const handleHintAdd = () => {
     setFormData(prev => ({ ...prev, hints: [...prev.hints, { text: '', xp_penalty: 10 }] }))
   }
@@ -163,6 +180,7 @@ export default function CreateProblem() {
     setFormData(prev => ({ ...prev, hints: prev.hints.filter((_, i) => i !== index) }))
   }
 
+  // Add, edit, and remove test cases for this problem
   const handleTestCaseAdd = () => {
     setFormData(prev => ({
       ...prev,
@@ -181,8 +199,13 @@ export default function CreateProblem() {
     }))
   }
 
+  // Validate the quest form, then create or update it on the server
   const handleSubmit = async (e) => {
     e.preventDefault()
+    // guards against a double-click (or an impatient re-click during the
+    // 1.2s success-toast delay below) firing this twice and creating two
+    // identical quests, since the backend has no dedup protection either
+    if (isSubmitting) return
 
     const maxXP = { Easy: 100, Medium: 250, Hard: 500 }
     if (formData.xp_reward > maxXP[formData.difficulty]) {
@@ -202,12 +225,13 @@ export default function CreateProblem() {
       return
     }
 
+    setIsSubmitting(true)
     try {
       const token = localStorage.getItem('token')
       const payload = {
         ...formData,
         subject_id: selectedSubjectId,
-        // ✅ visible_to_blocks now holds SubjectSection IDs — matches backend validation
+        // visible_to_sections holds SubjectSection IDs here too
         is_published: true
       }
 
@@ -227,14 +251,16 @@ export default function CreateProblem() {
         // gives the toast a moment on screen before leaving the page —
         // alert() used to force this pause automatically since it blocks
         // until dismissed; a toast doesn't block, so this does it manually
-        setTimeout(() => navigate('/instructor/problems'), 1200)
+        setTimeout(() => navigate(resolveBackTarget()), 1200)
       } else {
         const error = await res.json()
         showToast(`Failed to save quest: ${error.error}`, 'error')
+        setIsSubmitting(false)
       }
     } catch (err) {
       console.error('Failed to save problem:', err)
       showToast('Failed to save problem. Check console for details.', 'error')
+      setIsSubmitting(false)
     }
   }
 
@@ -264,11 +290,7 @@ export default function CreateProblem() {
       )}
       {/* Header */}
       <div className="flex items-center gap-4">
-        <button onClick={() => {
-          const from = searchParams.get('from')
-          if (from) navigate(from)
-          else navigate(-1)
-        }} className="text-slate-400 hover:text-white transition">
+        <button onClick={() => navigate(resolveBackTarget())} className="text-slate-400 hover:text-white transition">
           ← Back
         </button>
         <div>
@@ -339,6 +361,21 @@ export default function CreateProblem() {
               )}
               {!subjectsLoading && assignedSubjects.length === 0 && (
                 <p className="text-amber-400 text-xs mt-1">⚠️ No subjects assigned. Contact admin.</p>
+              )}
+              {/* Confirmation once a subject is picked here — echoes the tone of
+                  the locked "🔒 Set by this class" state above, so choosing from
+                  this dropdown feels just as deliberate/confirmed as arriving
+                  with the subject already set. */}
+              {!searchParams.get('subject_id') && selectedSubjectId && (
+                <p className="text-xs text-purple-300 mt-2 flex items-center gap-1.5">
+                  📚 Creating this quest for
+                  <span className="font-semibold text-purple-200">
+                    {assignedSubjects.find(s => s.id === selectedSubjectId)?.name}
+                  </span>
+                  {sectionsBySubject.length === 1 && (
+                    <span className="text-slate-500">— Section {sectionsBySubject[0].section_no}</span>
+                  )}
+                </p>
               )}
             </div>
 
@@ -478,10 +515,7 @@ export default function CreateProblem() {
               </label>
             </div>
 
-            {/* ✅ FIX: Section visibility — now lists SubjectSection objects
-                 Label says "Sections" not "Blocks" to match reality.
-                 IDs sent as visible_to_blocks are SubjectSection IDs,
-                 which the backend validates via get_instructor_sections_for_subject. */}
+            {/* section visibility, lists SubjectSection objects, IDs sent match what the backend expects */}
             <div>
               <label className="block text-slate-400 text-sm mb-3">
                 Visible To Sections
@@ -501,13 +535,13 @@ export default function CreateProblem() {
                     <label key={sec.id} className="flex items-center gap-3 p-3 rounded-lg hover:bg-slate-700 transition cursor-pointer">
                       <input
                         type="checkbox"
-                        // ✅ store SubjectSection.id in visible_to_blocks
-                        checked={formData.visible_to_blocks.includes(sec.id)}
+                        // stores SubjectSection.id here
+                        checked={formData.visible_to_sections.includes(sec.id)}
                         onChange={(e) => {
                           if (e.target.checked) {
-                            handleInputChange('visible_to_blocks', [...formData.visible_to_blocks, sec.id])
+                            handleInputChange('visible_to_sections', [...formData.visible_to_sections, sec.id])
                           } else {
-                            handleInputChange('visible_to_blocks', formData.visible_to_blocks.filter(id => id !== sec.id))
+                            handleInputChange('visible_to_sections', formData.visible_to_sections.filter(id => id !== sec.id))
                           }
                         }}
                         className="w-5 h-5 rounded border-slate-600 text-purple-600 focus:ring-purple-500"
@@ -719,9 +753,9 @@ export default function CreateProblem() {
                 { label: 'Hints',              value: `${formData.hints.length} hint(s) added` },
                 {
                   label: 'Visible To Sections',
-                  value: formData.visible_to_blocks.length === 0
+                  value: formData.visible_to_sections.length === 0
                     ? 'All my sections'
-                    : `${formData.visible_to_blocks.length} section(s) selected`
+                    : `${formData.visible_to_sections.length} section(s) selected`
                 },
               ].map(row => (
                 <div key={row.label} className="bg-slate-800/50 rounded-xl p-4 border border-slate-700">
@@ -755,9 +789,10 @@ export default function CreateProblem() {
           ) : (
             <button
               type="submit"
-              className="px-8 py-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-xl text-white font-bold transition shadow-lg shadow-purple-600/20"
+              disabled={isSubmitting}
+              className="px-8 py-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl text-white font-bold transition shadow-lg shadow-purple-600/20"
             >
-              {isEditing ? '✨ Update Quest' : '✨ Create Quest'}
+              {isSubmitting ? '⏳ Saving...' : (isEditing ? '✨ Update Quest' : '✨ Create Quest')}
             </button>
           )}
         </div>

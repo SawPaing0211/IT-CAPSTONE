@@ -20,6 +20,7 @@ function relativeTime(iso) {
   return `${Math.floor(diff / 86400)}d ago`
 }
 
+// Pick a badge color based on the audit action's keyword
 function actionColor(action = '') {
   if (!action) return 'bg-slate-700/40 text-slate-300'
   if (action.includes('DELETE') || action.includes('CLEAR'))
@@ -52,6 +53,7 @@ export default function DashboardOverview({ onNavigate }) {
 
   // ── Data fetching ────────────────────────────────────────────────────────
 
+  // Fetch the dashboard stats and maintenance mode state
   const fetchStats = useCallback(async () => {
     try {
       const res = await fetch(`${API}/api/admin/dashboard-stats`, {
@@ -69,6 +71,7 @@ export default function DashboardOverview({ onNavigate }) {
     }
   }, [])
 
+  // Fetch class code sections for the enrollment totals
   const fetchSections = useCallback(async () => {
     try {
       const res = await fetch(`${API}/api/admin/sections`, {
@@ -517,6 +520,7 @@ function MiniCard({ label, value, trend, onClick }) {
 
 // Activity feed row
 function ActivityRow({ activity }) {
+  // Pick an icon based on which keyword the action contains
   const iconMap = {
     DELETE: { bg: 'bg-red-900/30', icon: '🗑️' },
     CREATE: { bg: 'bg-emerald-900/30', icon: '✅' },

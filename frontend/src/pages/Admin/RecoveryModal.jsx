@@ -25,10 +25,12 @@ export default function RecoveryModal({ user, onClose, onSuccess }) {
   const [success, setSuccess] = useState('')
   const [showPassword, setShowPassword] = useState(false)
 
+  // Reset the user's password on the backend
   const handleReset = async () => {
     setError('')
     setSuccess('')
 
+    // Require at least 6 characters before hitting the backend
     if (!newPassword || newPassword.length < 6) {
       setError('Password must be at least 6 characters.')
       return
@@ -61,6 +63,7 @@ export default function RecoveryModal({ user, onClose, onSuccess }) {
     }
   }
 
+  // Rate the new password's strength by length for the meter below the field
   const passwordStrength = () => {
     const len = newPassword.length
     if (len === 0) return null

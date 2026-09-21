@@ -16,7 +16,9 @@ export default function StudentCodeEditor({
   const [output, setOutput] = useState(null)
   const [isLoading, setIsLoading] = useState(false)
   const [activeTab, setActiveTab] = useState('problem')
-  const [isFullscreen, setIsFullscreen] = useState(false)
+  // mobile-only: which of the two panels (normally shown side by side) is
+  // visible below the md breakpoint, since there's no room for both at once
+  const [mobilePanel, setMobilePanel] = useState('problem')
   const [showHints, setShowHints] = useState(false)
   const [usedHints, setUsedHints] = useState([])
   const [xpGained, setXpGained] = useState(0)
@@ -28,6 +30,7 @@ export default function StudentCodeEditor({
   const [showSuccessAnim, setShowSuccessAnim] = useState(false)
   const [combo, setCombo] = useState(0)
   const [autoSaveTimer, setAutoSaveTimer] = useState(null)
+  const [showResetConfirm, setShowResetConfirm] = useState(false)
   const editorRef = useRef(null)
   const editorContainerRef = useRef(null)
   const monacoRef = useRef(null)
@@ -236,7 +239,7 @@ useEffect(() => {
       setCode(starter?.[language] || '')
     }
     
-    // FIXED: Wrap async logic in named async function
+    // wrapped in a named async function so it's easier to follow
     const checkSubmission = async () => {
       try {
         const token = localStorage.getItem('token')
@@ -293,10 +296,6 @@ useEffect(() => {
     return () => clearTimeout(timer)
   }, [code, quest, language])
 
-  const toggleFullscreen = () => {
-    setIsFullscreen(!isFullscreen)
-  }
-
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -313,13 +312,10 @@ useEffect(() => {
           setTimeout(() => saveIndicator.textContent = '', 2000)
         }
       }
-      if (e.key === 'Escape' && isFullscreen) {
-        setIsFullscreen(false)
-      }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [code, language, quest, isFullscreen])
+  }, [code, language, quest])
 
   // Monaco ResizeObserver
   useEffect(() => {
@@ -385,7 +381,7 @@ useEffect(() => {
     }
   }
 
-  // NEW: Test code for instructors (no submission, no XP)
+  // this is for instructors testing code without submitting or earning xp
   const handleTestCode = async () => {
     setIsLoading(true)
     setOutput(null)
@@ -442,7 +438,7 @@ useEffect(() => {
     }
   }
 
-  // 🔒 UPDATED: Using api.post instead of fetch
+  // using api.post here instead of fetch
     const handleSubmit = async () => {
     setIsLoading(true)
     setOutput(null)
@@ -491,16 +487,19 @@ useEffect(() => {
     }
   }
 
-  const handleReset = () => {
-    if (confirm('Reset code to starter template?')) {
-      const starter = typeof quest.starter_code === 'string'
-        ? JSON.parse(quest.starter_code)
-        : quest.starter_code
-      setCode(starter[language] || '')
-      localStorage.removeItem(`forge_code_${quest.id}_${language}`)
-    }
+  // Reset the code back to the quest's starter template
+  const handleReset = () => setShowResetConfirm(true)
+
+  const confirmReset = () => {
+    const starter = typeof quest.starter_code === 'string'
+      ? JSON.parse(quest.starter_code)
+      : quest.starter_code
+    setCode(starter[language] || '')
+    localStorage.removeItem(`forge_code_${quest.id}_${language}`)
+    setShowResetConfirm(false)
   }
 
+  // Download the current code as a file
   const handleDownload = () => {
     const blob = new Blob([code], { type: 'text/plain' })
     const url = URL.createObjectURL(blob)
@@ -522,6 +521,7 @@ useEffect(() => {
     }
   }
 
+  // Play a short sound when a quest is completed
   const playSuccessSound = () => {
     const audio = new Audio('/sounds/success.mp3')
     audio.volume = 0.3
@@ -549,6 +549,7 @@ useEffect(() => {
     unicodeHighlight: { ambiguousCharacters: false, invisibleCharacters: false },
   }
 
+  // Show a loading state until the quest data arrives
   if (!quest) {
     return (
       <div className="h-screen flex items-center justify-center text-slate-400 bg-slate-950">
@@ -563,9 +564,7 @@ useEffect(() => {
   return (
     // Root: locked to 100vh, flex column, no overflow
     <div
-      className={`flex flex-col bg-slate-950 text-slate-100 overflow-hidden ${
-        isFullscreen ? 'fixed inset-0 z-[9999]' : ''
-      }`}
+      className="flex flex-col bg-slate-950 text-slate-100 overflow-hidden"
       style={{ height: '100vh' }}
     >
 
@@ -595,69 +594,101 @@ useEffect(() => {
         </div>
       )}
 
-      {/* ── HEADER (shrink-0, fixed 56px) ── */}
-      <header className="h-14 bg-slate-900/90 border-b border-purple-600/40 flex items-center justify-between px-4 shrink-0 z-10">
-        <div className="flex items-center gap-4">
+      {/* Reset-code confirm dialog — same style as the sandbox's save dialog,
+          replaces the plain browser confirm() popup */}
+      {showResetConfirm && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[9999] flex items-center justify-center px-4">
+          <div className="bg-slate-900 border-2 border-purple-600/50 rounded-2xl p-6 w-full max-w-xs shadow-2xl">
+            <h3 className="font-bold text-white mb-2">🔄 Reset code?</h3>
+            <p className="text-sm text-slate-400 mb-4">This swaps your code back to the starter template. What you've written will be lost.</p>
+            <div className="flex gap-2">
+              <button onClick={() => setShowResetConfirm(false)}
+                className="flex-1 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 text-sm transition">Cancel</button>
+              <button onClick={confirmReset}
+                className="flex-1 py-2 bg-red-600 hover:bg-red-500 rounded-lg text-white font-bold text-sm transition">Reset</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── HEADER (shrink-0) — title/meta stack into one truncating column so
+          they can't wrap and collide with the back button or fullscreen icon
+          on a narrow phone screen; badge + save indicator moved down into the
+          meta row for the same reason ── */}
+      <header className="min-h-14 bg-slate-900/90 border-b border-purple-600/40 flex items-center justify-between gap-2 px-3 sm:px-4 py-2 shrink-0 z-10">
+        <div className="flex items-center gap-2 sm:gap-4 min-w-0">
           <button
             onClick={onReturn}
-            className="flex items-center gap-2 text-slate-400 hover:text-white transition text-sm"
+            className="flex items-center gap-1 text-slate-400 hover:text-white transition text-sm shrink-0 min-w-[32px]"
           >
-            ← Back to Quests
+            <span aria-hidden="true">←</span>
+            <span className="hidden sm:inline">Back to Quests</span>
           </button>
-          <div className="h-6 w-px bg-slate-700"></div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="font-bold text-white">{quest.title}</h1>
-              {quest.is_event_quest && (
-                <span className="px-2 py-0.5 bg-gradient-to-r from-yellow-600 to-purple-600 text-white text-[10px] font-bold rounded-full animate-pulse">
-                  🎉 EVENT
-                </span>
-              )}
-            </div>
-            <div className="flex items-center gap-3 text-[10px] text-slate-400">
-              <span className={`px-2 py-0.5 rounded border ${
+          <div className="h-6 w-px bg-slate-700 hidden sm:block shrink-0"></div>
+          <div className="min-w-0">
+            <h1 className="font-bold text-white text-sm sm:text-base truncate">{quest.title}</h1>
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-slate-400 mt-0.5">
+              <span className={`px-2 py-0.5 rounded border shrink-0 ${
                 quest.difficulty === 'Easy'   ? 'bg-green-600/20 text-green-400' :
                 quest.difficulty === 'Medium' ? 'bg-yellow-600/20 text-yellow-400' :
                                                 'bg-red-600/20 text-red-400'
               }`}>
                 {quest.difficulty}
               </span>
-              <span>🎯 {quest.xp_reward} XP</span>
-              <span>•</span>
-              <span>{quest.problem_type || 'coding'}</span>
+              <span className="shrink-0">🎯 {quest.xp_reward} XP</span>
+              <span className="hidden sm:inline">•</span>
+              <span className="hidden sm:inline">{quest.problem_type || 'coding'}</span>
+              {quest.is_event_quest && (
+                <span className="shrink-0 px-2 py-0.5 bg-gradient-to-r from-yellow-600 to-purple-600 text-white text-[9px] font-bold rounded-full animate-pulse">
+                  🎉 EVENT
+                </span>
+              )}
+              <span id="save-indicator" className="shrink-0 text-slate-500"></span>
             </div>
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
-          <span id="save-indicator" className="text-[10px] text-slate-500"></span>
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
           <div className="hidden sm:flex items-center gap-1 bg-slate-800/80 px-3 py-1.5 rounded-lg border border-purple-600/30">
             <span className="text-purple-400 font-bold text-xs">Lvl {heroLevel}</span>
           </div>
-          <button
-            onClick={toggleFullscreen}
-            className={`p-2 rounded-lg transition border ${
-              isFullscreen
-                ? 'bg-purple-600/40 border-purple-500 text-white shadow-lg shadow-purple-600/40'
-                : 'hover:bg-slate-800 border-transparent text-slate-400 hover:text-white'
-            }`}
-            title={isFullscreen ? 'Exit Fullscreen (Esc)' : 'Enter Fullscreen'}
-          >
-            {isFullscreen ? '◱' : '⛶'}
-          </button>
         </div>
       </header>
 
-      {/* ── MAIN BODY (fills remaining height, no overflow) ── */}
+      {/* ── MOBILE PANEL SWITCHER (below md, only one panel fits) ── */}
+      <div className="md:hidden flex border-b border-purple-600/20 bg-slate-900/50 shrink-0">
+        <button
+          onClick={() => setMobilePanel('problem')}
+          className={`flex-1 px-4 py-2.5 text-sm font-bold transition ${
+            mobilePanel === 'problem'
+              ? 'bg-purple-600/20 text-purple-400 border-b-2 border-purple-600'
+              : 'text-slate-400'
+          }`}
+        >
+          📜 Problem
+        </button>
+        <button
+          onClick={() => setMobilePanel('code')}
+          className={`flex-1 px-4 py-2.5 text-sm font-bold transition ${
+            mobilePanel === 'code'
+              ? 'bg-purple-600/20 text-purple-400 border-b-2 border-purple-600'
+              : 'text-slate-400'
+          }`}
+        >
+          💻 Code
+        </button>
+      </div>
+
+      {/* ── MAIN BODY (fills remaining height, no overflow) ──
+          Mobile: single column, only the panel picked above is shown.
+          md+: original side-by-side grid, both panels always shown. */}
       <div
-        className="flex-1 grid grid-cols-[minmax(300px,1fr)_3fr] overflow-hidden"
+        className="flex-1 grid grid-cols-1 md:grid-cols-[minmax(300px,1fr)_3fr] overflow-hidden"
         style={{ minHeight: 0 }}
       >
 
         {/* ── LEFT PANEL ── */}
-        <div className={`border-r border-purple-600/20 flex flex-col bg-slate-950 overflow-hidden ${
-          isFullscreen ? 'min-w-[250px]' : 'min-w-[300px]'
-        }`}>
+        <div className={`${mobilePanel === 'problem' ? 'flex' : 'hidden'} md:flex border-r-0 md:border-r border-purple-600/20 flex-col bg-slate-950 overflow-hidden md:min-w-[300px]`}>
 
           {/* Tabs */}
           <div className="flex border-b border-purple-600/20 bg-slate-900/50 shrink-0">
@@ -811,50 +842,52 @@ useEffect(() => {
         </div>
 
         {/* ── RIGHT PANEL ── */}
-        <div className="flex flex-col bg-slate-950 overflow-hidden">
+        <div className={`${mobilePanel === 'code' ? 'flex' : 'hidden'} md:flex flex-col bg-slate-950 overflow-hidden`}>
 
-          {/* Toolbar (~48px, shrink-0) */}
-          <div className="flex items-center justify-between px-4 py-2 bg-slate-900/80 border-b border-purple-600/20 shrink-0">
-            <div className="flex gap-1">
+          {/* Toolbar (~48px, shrink-0) — icon-only below sm, full labels sm+
+              (side by side, this row has 3+ buttons plus a filename label;
+              at phone width that overflows unless text collapses to icons) */}
+          <div className="flex items-center justify-between px-2 sm:px-4 py-2 bg-slate-900/80 border-b border-purple-600/20 shrink-0 gap-1 overflow-x-auto">
+            <div className="flex gap-1 shrink-0">
               {quest.languages?.map(lang => (
                 <button
                   key={lang}
                   onClick={() => setLanguage(lang)}
-                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition flex items-center gap-1.5 ${
+                  className={`px-2 sm:px-3 py-1.5 rounded-md text-xs font-medium transition flex items-center gap-1.5 ${
                     language === lang
                       ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white border border-purple-400 shadow-lg'
                       : 'text-slate-400 hover:text-white hover:bg-slate-800/60 border border-transparent'
                   }`}
                 >
-                  {lang === 'python' ? '🐍' : lang === 'java' ? '☕' : '🔷'} {lang}
+                  {lang === 'python' ? '🐍' : lang === 'java' ? '☕' : '🔷'} <span className="hidden sm:inline">{lang}</span>
                 </button>
               ))}
             </div>
-            <div className="flex items-center gap-2">
-              {/* ← NEW: Try in Sandbox Button */}
+            <div className="flex items-center gap-1 sm:gap-2 shrink-0">
+              {/* try in sandbox button */}
               {onOpenSandbox && (
                 <button
                   onClick={() => onOpenSandbox(code, language)}
-                  className="px-3 py-1.5 text-xs text-emerald-400 hover:text-emerald-300 hover:bg-emerald-900/30 border border-emerald-600/30 rounded-lg transition flex items-center gap-1"
+                  className="px-2 sm:px-3 py-1.5 text-xs text-emerald-400 hover:text-emerald-300 hover:bg-emerald-900/30 border border-emerald-600/30 rounded-lg transition flex items-center gap-1"
                   title="Take your current code to the sandbox to experiment"
                 >
-                  🧪 Try in Sandbox
+                  🧪 <span className="hidden sm:inline">Try in Sandbox</span>
                 </button>
               )}
-              
+
               <button
                 onClick={handleReset}
-                className="px-3 py-1.5 text-xs text-slate-400 hover:text-white transition flex items-center gap-1"
+                className="px-2 sm:px-3 py-1.5 text-xs text-slate-400 hover:text-white transition flex items-center gap-1"
               >
-                🔄 Reset
+                🔄 <span className="hidden sm:inline">Reset</span>
               </button>
               <button
                 onClick={handleDownload}
-                className="px-3 py-1.5 text-xs text-slate-400 hover:text-white transition flex items-center gap-1"
+                className="px-2 sm:px-3 py-1.5 text-xs text-slate-400 hover:text-white transition flex items-center gap-1"
               >
-                📥 Download
+                📥 <span className="hidden sm:inline">Download</span>
               </button>
-              <span className="text-[10px] text-slate-500">
+              <span className="hidden sm:inline text-[10px] text-slate-500">
                 Main.{language === 'python' ? 'py' : language === 'java' ? 'java' : 'cs'}
               </span>
             </div>

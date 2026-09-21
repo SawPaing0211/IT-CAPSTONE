@@ -26,6 +26,7 @@ export default function ClassDetail() {
   const [stats, setStats]         = useState({ total: 0, problems: 0, atRisk: 0 })
   const [loading, setLoading]     = useState(true)
 
+  // Fetch the class info and its students to compute the stats strip
   useEffect(() => {
     const fetchClassDetail = async () => {
       try {
@@ -107,7 +108,7 @@ export default function ClassDetail() {
           </div>
         </div>
 
-        {/* fixed: was a dead button before, now actually switches to analytics tab */}
+        {/* used to be a dead button, now actually switches to analytics tab */}
         <button
           onClick={() => setActiveTab('analytics')}
           className="px-4 py-2 bg-purple-600/10 hover:bg-purple-600/20 border border-purple-600/20 text-purple-400 hover:text-purple-300 rounded-lg text-sm font-medium transition flex items-center gap-2"

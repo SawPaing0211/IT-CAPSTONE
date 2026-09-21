@@ -1,20 +1,4 @@
-// course materials — instructor creates lessons and uploads files for students.
-//
-// draft = private (only instructor can see it)
-// published = visible to students
-//
-// the advance scheduling workflow is just draft mode:
-//   create week 3 lesson now → leave as Draft → students can't see it
-//   when week 3 starts → click Publish → students see it immediately
-//   want to hide it again → click Unpublish → back to Draft
-//
-// instructor can view any lesson (draft or published) by clicking the card.
-// students only see published ones.
-//
-// fixed: block_id was hardcoded to null, now sends section_id correctly.
-// fixed: NaN MB — get_lessons now returns file_size from backend.
-// fixed: publish toggle now works both ways and updates local state immediately.
-// added: delete lesson (with confirmation), view lesson modal, file download.
+// this is for uploading lessons/modules and files for students. draft = only i can see it, published = students can see it
 
 import { useState, useEffect } from 'react'
 
@@ -38,9 +22,35 @@ const formatSize = (bytes) => {
 }
 
 // ── View Lesson Modal ─────────────────────────────────────────────────────────
-function LessonModal({ lesson, onClose }) {
+function LessonModal({ lesson, onClose, onFileDeleted }) {
   const [downloading, setDownloading] = useState(null)
+  const [files, setFiles]             = useState(lesson.files || [])
+  const [fileToDelete, setFileToDelete] = useState(null) // file pending confirm, or null
+  const [deletingFile, setDeletingFile] = useState(false)
 
+  // Delete the file pending confirmation from this lesson
+  const confirmDeleteFile = async () => {
+    if (!fileToDelete) return
+    setDeletingFile(true)
+    try {
+      const token = localStorage.getItem('token')
+      const res = await fetch(
+        `${API}/api/lessons/${lesson.id}/files/${fileToDelete.id}`,
+        { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } }
+      )
+      if (res.ok) {
+        setFiles(prev => prev.filter(f => f.id !== fileToDelete.id))
+        onFileDeleted?.(lesson.id, fileToDelete.id)
+      }
+    } catch (err) {
+      console.error('Failed to delete file:', err)
+    } finally {
+      setDeletingFile(false)
+      setFileToDelete(null)
+    }
+  }
+
+  // Download an attached file
   const handleDownload = async (file) => {
     setDownloading(file.id)
     try {
@@ -97,38 +107,72 @@ function LessonModal({ lesson, onClose }) {
             <p className="text-slate-300 text-sm leading-relaxed">{lesson.description}</p>
           </div>
 
-          {lesson.files?.length > 0 && (
+          {files.length > 0 && (
             <div>
               <p className="text-slate-500 text-xs font-medium uppercase tracking-wider mb-3">
-                Attached Files ({lesson.files.length})
+                Attached Files ({files.length})
               </p>
               <div className="space-y-2">
-                {lesson.files.map(file => (
-                  <div
-                    key={file.id}
-                    className="flex items-center gap-3 px-4 py-3 bg-slate-800 rounded-xl border border-slate-700 hover:border-purple-600/30 transition group"
-                  >
-                    <span className="text-xl shrink-0">{fileIcon(file.filename)}</span>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-white text-sm font-medium truncate">{file.filename}</p>
-                      {file.file_size > 0 && (
-                        <p className="text-slate-500 text-xs">{formatSize(file.file_size)}</p>
-                      )}
-                    </div>
-                    <button
-                      onClick={() => handleDownload(file)}
-                      disabled={downloading === file.id}
-                      className="px-3 py-1.5 bg-purple-600/10 hover:bg-purple-600/20 text-purple-400 border border-purple-600/20 rounded-lg text-xs font-bold transition disabled:opacity-50 shrink-0"
+                {files.map(file => (
+                  fileToDelete?.id === file.id ? (
+                    // inline confirm — replaces this row only, rather than a
+                    // second modal stacked on top of this one
+                    <div
+                      key={file.id}
+                      className="flex items-center gap-3 px-4 py-3 bg-red-950/30 rounded-xl border border-red-600/40"
                     >
-                      {downloading === file.id ? '⏳' : '⬇️ Download'}
-                    </button>
-                  </div>
+                      <span className="text-red-300 text-sm flex-1 min-w-0 truncate">
+                        Remove <span className="font-semibold">"{file.filename}"</span> from this module?
+                      </span>
+                      <button
+                        onClick={() => setFileToDelete(null)}
+                        disabled={deletingFile}
+                        className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 text-xs font-bold transition disabled:opacity-50 shrink-0"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={confirmDeleteFile}
+                        disabled={deletingFile}
+                        className="px-3 py-1.5 bg-red-600 hover:bg-red-500 rounded-lg text-white text-xs font-bold transition disabled:opacity-50 shrink-0"
+                      >
+                        {deletingFile ? '...' : 'Remove'}
+                      </button>
+                    </div>
+                  ) : (
+                    <div
+                      key={file.id}
+                      className="flex items-center gap-3 px-4 py-3 bg-slate-800 rounded-xl border border-slate-700 hover:border-purple-600/30 transition group"
+                    >
+                      <span className="text-xl shrink-0">{fileIcon(file.filename)}</span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-white text-sm font-medium truncate">{file.filename}</p>
+                        {file.file_size > 0 && (
+                          <p className="text-slate-500 text-xs">{formatSize(file.file_size)}</p>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => handleDownload(file)}
+                        disabled={downloading === file.id}
+                        className="px-3 py-1.5 bg-purple-600/10 hover:bg-purple-600/20 text-purple-400 border border-purple-600/20 rounded-lg text-xs font-bold transition disabled:opacity-50 shrink-0"
+                      >
+                        {downloading === file.id ? '⏳' : '⬇️ Download'}
+                      </button>
+                      <button
+                        onClick={() => setFileToDelete(file)}
+                        title="Remove this file"
+                        className="p-1.5 hover:bg-red-900/20 rounded-lg text-slate-500 hover:text-red-400 transition shrink-0"
+                      >
+                        🗑️
+                      </button>
+                    </div>
+                  )
                 ))}
               </div>
             </div>
           )}
 
-          {(!lesson.files || lesson.files.length === 0) && (
+          {files.length === 0 && (
             <div className="text-center py-8 text-slate-500">
               <span className="text-3xl mb-2 block">📭</span>
               <p className="text-sm">No files attached to this lesson</p>
@@ -155,31 +199,20 @@ export default function CourseMaterials({ classId, subjectId }) {
   const [lessons, setLessons]               = useState([])
   const [loadingLessons, setLoadingLessons] = useState(true)
   const [filter, setFilter]                 = useState('all')
-  const [subjects, setSubjects]             = useState([])
-  const [sections, setSections]             = useState([])
-  const [loadingSubjects, setLoadingSubjects] = useState(true)
-  const [loadingSections, setLoadingSections] = useState(false)
   const [viewingLesson, setViewingLesson]   = useState(null) // lesson object to show in modal
 
+  // no subject/section picker here, this always lives inside one class tab already so it's auto scoped to that class
   const [formData, setFormData] = useState({
     title: '', description: '', week_number: 1,
-    subject_id: '', section_id: '', is_published: false, files: []
+    is_published: false, files: []
   })
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError]               = useState(null)
   const [success, setSuccess]           = useState(null)
+  const [deleteTarget, setDeleteTarget] = useState(null)
 
   const token = () => localStorage.getItem('token')
   const authHeaders = () => ({ 'Authorization': `Bearer ${token()}` })
-
-  // fetch subjects this instructor teaches
-  useEffect(() => {
-    fetch(`${API}/api/instructor/assigned-subjects`, { headers: authHeaders() })
-      .then(r => r.ok ? r.json() : [])
-      .then(setSubjects)
-      .catch(console.error)
-      .finally(() => setLoadingSubjects(false))
-  }, [])
 
   // fetch lessons
   const fetchLessons = async () => {
@@ -201,44 +234,35 @@ export default function CourseMaterials({ classId, subjectId }) {
   }
   useEffect(() => { fetchLessons() }, [classId])
 
-  // fetch sections when subject changes
-  useEffect(() => {
-    if (!formData.subject_id) { setSections([]); return }
-    setLoadingSections(true)
-    fetch(`${API}/api/instructor/blocks-by-subject?subject_id=${formData.subject_id}`, { headers: authHeaders() })
-      .then(r => r.ok ? r.json() : [])
-      .then(data => {
-        setSections(data)
-        setFormData(prev => ({
-          ...prev,
-          section_id: prev.section_id && data.some(s => s.id === parseInt(prev.section_id)) ? prev.section_id : ''
-        }))
-      })
-      .catch(console.error)
-      .finally(() => setLoadingSections(false))
-  }, [formData.subject_id])
-
+  // Sync a form field's value or checked state into state
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target
     setFormData(prev => ({ ...prev, [name]: type === 'checkbox' ? checked : value }))
   }
 
+  // Accept only supported file types under the size limit, and note any that got skipped
   const handleFileChange = (e) => {
     const validTypes = ['application/pdf',
-      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-      'application/msword', 'image/jpeg', 'image/png', 'application/zip']
-    const files = Array.from(e.target.files).filter(
-      f => validTypes.includes(f.type) && f.size <= 16 * 1024 * 1024
-    )
-    setFormData(prev => ({ ...prev, files: [...prev.files, ...files] }))
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation', // .pptx
+      'application/vnd.ms-powerpoint', // .ppt
+      'application/msword', // .doc
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // .docx
+      'image/jpeg', 'image/png', 'application/zip']
+    const incoming = Array.from(e.target.files)
+    const valid    = incoming.filter(f => validTypes.includes(f.type) && f.size <= 16 * 1024 * 1024)
+    const rejected = incoming.filter(f => !validTypes.includes(f.type) || f.size > 16 * 1024 * 1024)
+    if (rejected.length > 0) {
+      setError(`Skipped ${rejected.length} file${rejected.length > 1 ? 's' : ''} — unsupported type or over 16MB: ${rejected.map(f => f.name).join(', ')}`)
+    }
+    setFormData(prev => ({ ...prev, files: [...prev.files, ...valid] }))
   }
 
+  // Remove a staged file from the upload list before submitting
   const removeFile = (index) => {
     setFormData(prev => ({ ...prev, files: prev.files.filter((_, i) => i !== index) }))
   }
 
-  // toggle publish/unpublish — updates local state immediately so button
-  // reflects new state without waiting for a full re-fetch
+  // this is for the draft/publish toggle, updates right away so the button doesn't feel laggy
   const handleTogglePublish = async (lesson) => {
     const newState = !lesson.is_published
     // optimistic update — update UI immediately
@@ -263,15 +287,28 @@ export default function CourseMaterials({ classId, subjectId }) {
     }
   }
 
-  const handleDelete = async (lesson) => {
-    if (!confirm(`Delete "${lesson.title}"? This also removes all attached files and cannot be undone.`)) return
+  // Open the delete confirmation modal for a lesson
+  const handleDelete = (lesson) => {
+    setDeleteTarget(lesson)
+  }
+
+  // this is for keeping the file count in sync after deleting a file from inside the modal
+  const handleFileDeleted = (lessonId, fileId) => {
+    setLessons(prev => prev.map(l =>
+      l.id === lessonId ? { ...l, files: (l.files || []).filter(f => f.id !== fileId) } : l
+    ))
+  }
+
+  // Delete the lesson pending confirmation
+  const confirmDelete = async () => {
+    if (!deleteTarget) return
     try {
-      const res = await fetch(`${API}/api/lessons/${lesson.id}`, {
+      const res = await fetch(`${API}/api/lessons/${deleteTarget.id}`, {
         method: 'DELETE',
         headers: authHeaders()
       })
       if (res.ok) {
-        setLessons(prev => prev.filter(l => l.id !== lesson.id))
+        setLessons(prev => prev.filter(l => l.id !== deleteTarget.id))
         setSuccess('Lesson deleted.')
         setTimeout(() => setSuccess(null), 3000)
       } else {
@@ -279,12 +316,15 @@ export default function CourseMaterials({ classId, subjectId }) {
       }
     } catch {
       setError('Failed to delete lesson')
+    } finally {
+      setDeleteTarget(null)
     }
   }
 
+  // Create the lesson, then upload its attached files one by one
   const handleSubmit = async (e) => {
     e.preventDefault()
-    if (!formData.subject_id) { setError('Please select a subject first!'); return }
+    if (!subjectId) { setError('Still loading this class — try again in a moment.'); return }
     setIsSubmitting(true)
     setError(null)
     setSuccess(null)
@@ -296,8 +336,8 @@ export default function CourseMaterials({ classId, subjectId }) {
           title:        formData.title,
           description:  formData.description,
           week_number:  parseInt(formData.week_number),
-          subject_id:   parseInt(formData.subject_id),
-          section_id:   formData.section_id ? parseInt(formData.section_id) : null,
+          subject_id:   parseInt(subjectId),
+          section_id:   parseInt(classId),
           is_published: formData.is_published
         })
       })
@@ -321,7 +361,7 @@ export default function CourseMaterials({ classId, subjectId }) {
       setSuccess(formData.is_published
         ? '✅ Lesson created and published — students can see it!'
         : '✅ Lesson saved as Draft — students cannot see it yet. Publish when ready.')
-      setFormData({ title: '', description: '', week_number: 1, subject_id: '', section_id: '', is_published: false, files: [] })
+      setFormData({ title: '', description: '', week_number: 1, is_published: false, files: [] })
       setShowCreateForm(false)
       await fetchLessons()
       setTimeout(() => setSuccess(null), 5000)
@@ -332,6 +372,7 @@ export default function CourseMaterials({ classId, subjectId }) {
     }
   }
 
+  // Filter and sort lessons for the selected tab
   const filteredLessons = lessons
     .filter(l => {
       if (filter === 'published') return l.is_published
@@ -344,7 +385,37 @@ export default function CourseMaterials({ classId, subjectId }) {
     <div className="space-y-6">
 
       {viewingLesson && (
-        <LessonModal lesson={viewingLesson} onClose={() => setViewingLesson(null)} />
+        <LessonModal lesson={viewingLesson} onClose={() => setViewingLesson(null)} onFileDeleted={handleFileDeleted} />
+      )}
+
+      {deleteTarget && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-slate-900 border-2 border-red-600/40 rounded-2xl w-full max-w-sm shadow-2xl shadow-red-900/30 overflow-hidden">
+            <div className="p-6 text-center">
+              <div className="w-14 h-14 mx-auto mb-4 rounded-full bg-red-500/10 border border-red-500/20 flex items-center justify-center text-2xl">
+                🗑️
+              </div>
+              <h3 className="text-lg font-bold text-white mb-2">Delete Module?</h3>
+              <p className="text-slate-400 text-sm">
+                Delete <span className="text-white font-semibold">"{deleteTarget.title}"</span>? This also removes all attached files and cannot be undone.
+              </p>
+            </div>
+            <div className="flex gap-3 p-4 pt-0">
+              <button
+                onClick={() => setDeleteTarget(null)}
+                className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 rounded-xl text-slate-300 font-bold transition text-sm"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDelete}
+                className="flex-1 py-2.5 bg-red-600 hover:bg-red-500 rounded-xl text-white font-bold transition text-sm"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Header */}
@@ -360,7 +431,12 @@ export default function CourseMaterials({ classId, subjectId }) {
           onClick={() => { setShowCreateForm(true); setError(null) }}
           className="px-4 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white rounded-xl font-bold transition shadow-lg shadow-purple-600/20 flex items-center gap-2 text-sm"
         >
-          ➕ New Module
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+            <line x1="12" y1="5" x2="12" y2="19" />
+            <line x1="5" y1="12" x2="19" y2="12" />
+          </svg>
+          New Module
         </button>
       </div>
 
@@ -408,56 +484,15 @@ export default function CourseMaterials({ classId, subjectId }) {
             </div>
           </div>
 
-          {/* Subject */}
-          <div>
-            <label className="block text-slate-400 text-xs font-medium uppercase tracking-wider mb-2">Subject *</label>
-            {loadingSubjects ? (
-              <div className="flex items-center gap-2 text-slate-500 text-sm py-2">
-                <div className="animate-spin rounded-full h-4 w-4 border-2 border-purple-500 border-t-transparent" />
-                Loading subjects...
-              </div>
-            ) : (
-              <select
-                name="subject_id" value={formData.subject_id} onChange={handleChange} required
-                className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white outline-none cursor-pointer text-sm focus:border-purple-500/60 transition"
-              >
-                <option value="">Select a subject</option>
-                {subjects.map(s => (
-                  <option key={s.id} value={s.id}>{s.subject_code} — {s.name}</option>
-                ))}
-              </select>
-            )}
+          {/* Subject/Section — no picker: this form always creates the module for
+              the class tab it's opened from, so there's nothing to choose here. */}
+          <div className="flex items-center gap-2 px-4 py-2.5 bg-slate-800/50 border border-slate-700 rounded-xl text-slate-400 text-xs">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 text-purple-400 shrink-0">
+              <path d="M12 2 2 7l10 5 10-5-10-5Z" /><path d="M2 17l10 5 10-5" /><path d="M2 12l10 5 10-5" />
+            </svg>
+            This module will be created for this class only.
           </div>
-
-          {/* Section */}
-          {formData.subject_id && (
-            <div>
-              <label className="block text-slate-400 text-xs font-medium uppercase tracking-wider mb-2">
-                Section <span className="text-slate-600 normal-case font-normal">(optional — leave blank for all your sections)</span>
-              </label>
-              {loadingSections ? (
-                <div className="flex items-center gap-2 text-slate-500 text-sm py-2">
-                  <div className="animate-spin rounded-full h-4 w-4 border-2 border-purple-500 border-t-transparent" />
-                  Loading sections...
-                </div>
-              ) : (
-                <select
-                  name="section_id" value={formData.section_id} onChange={handleChange}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white outline-none cursor-pointer text-sm focus:border-purple-500/60 transition"
-                >
-                  <option value="">🌐 All My Sections (Subject-wide)</option>
-                  {sections.map(sec => (
-                    <option key={sec.id} value={sec.id}>
-                      🏫 Section {sec.section_no}{sec.semester ? ` (${sec.semester})` : ''}{sec.schedule ? ` — ${sec.schedule}` : ''}
-                    </option>
-                  ))}
-                </select>
-              )}
-              {sections.length === 0 && !loadingSections && (
-                <p className="text-yellow-500 text-xs mt-1">⚠️ Not assigned to any section for this subject</p>
-              )}
-            </div>
-          )}
 
           {/* Description */}
           <div>
@@ -495,26 +530,49 @@ export default function CourseMaterials({ classId, subjectId }) {
             )}
           </div>
 
-          {/* Publish toggle — with clear explanation of what draft vs published means */}
-          <div className={`flex items-center gap-3 p-4 rounded-xl border transition ${
-            formData.is_published
-              ? 'bg-green-900/10 border-green-600/20'
-              : 'bg-slate-800/50 border-slate-700'
-          }`}>
-            <input
-              type="checkbox" name="is_published" checked={formData.is_published}
-              onChange={handleChange}
-              className="w-5 h-5 rounded border-slate-600 text-purple-600 focus:ring-purple-500 cursor-pointer"
-            />
-            <div>
-              <p className="text-white font-medium text-sm">
-                {formData.is_published ? '✅ Publish immediately' : '📝 Save as Draft'}
-              </p>
-              <p className="text-slate-400 text-xs">
-                {formData.is_published
-                  ? 'Students will see this as soon as you save.'
-                  : 'Only you can see this. Publish it when the week starts.'}
-              </p>
+          {/* Visibility — both options always shown side by side, so it's obvious
+              which one is picked and what the other one does. A checkbox whose
+              own label flips between the two states hides that comparison. */}
+          <div>
+            <label className="block text-slate-400 text-xs font-medium uppercase tracking-wider mb-2">Visibility</label>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => setFormData(prev => ({ ...prev, is_published: false }))}
+                className={`text-left p-4 rounded-xl border-2 transition ${
+                  !formData.is_published
+                    ? 'bg-yellow-600/10 border-yellow-500/60'
+                    : 'bg-slate-800/50 border-slate-700 hover:border-slate-600'
+                }`}
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-lg">📝</span>
+                  <span className="text-white font-bold text-sm">Draft</span>
+                  {!formData.is_published && (
+                    <span className="ml-auto text-yellow-400 text-xs font-bold">✓ Selected</span>
+                  )}
+                </div>
+                <p className="text-slate-400 text-xs">Only you can see this. Publish it later when the week starts.</p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setFormData(prev => ({ ...prev, is_published: true }))}
+                className={`text-left p-4 rounded-xl border-2 transition ${
+                  formData.is_published
+                    ? 'bg-green-600/10 border-green-500/60'
+                    : 'bg-slate-800/50 border-slate-700 hover:border-slate-600'
+                }`}
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-lg">✅</span>
+                  <span className="text-white font-bold text-sm">Publish</span>
+                  {formData.is_published && (
+                    <span className="ml-auto text-green-400 text-xs font-bold">✓ Selected</span>
+                  )}
+                </div>
+                <p className="text-slate-400 text-xs">Visible to students as soon as you save.</p>
+              </button>
             </div>
           </div>
 
@@ -524,7 +582,7 @@ export default function CourseMaterials({ classId, subjectId }) {
               className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 rounded-xl text-slate-300 font-bold transition disabled:opacity-50 text-sm">
               Cancel
             </button>
-            <button type="submit" disabled={isSubmitting || !formData.subject_id}
+            <button type="submit" disabled={isSubmitting || !subjectId}
               className="flex-1 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 disabled:from-slate-700 disabled:to-slate-700 disabled:cursor-not-allowed rounded-xl text-white font-bold transition flex items-center justify-center gap-2 text-sm">
               {isSubmitting
                 ? <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Saving...</>
@@ -575,7 +633,12 @@ export default function CourseMaterials({ classId, subjectId }) {
               </p>
               {lessons.length === 0 && (
                 <button onClick={() => setShowCreateForm(true)}
-                  className="px-5 py-2.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl font-bold transition text-sm">
+                  className="px-5 py-2.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl font-bold transition text-sm inline-flex items-center gap-2">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                    strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+                    <line x1="12" y1="5" x2="12" y2="19" />
+                    <line x1="5" y1="12" x2="19" y2="12" />
+                  </svg>
                   Create First Module
                 </button>
               )}

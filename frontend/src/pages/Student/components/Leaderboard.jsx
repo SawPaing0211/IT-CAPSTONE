@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import MobileSheet from '../../../components/MobileSheet'
 
 const AVATAR_GRADIENTS = [
   'from-purple-600 to-blue-600',
@@ -29,38 +30,69 @@ function getDisplayName(player) {
 }
 
 export default function Leaderboard({ currentUsername }) {
-  const [filter, setFilter] = useState('block')
+  const [filter, setFilter] = useState('section')
   const [animated, setAnimated] = useState(false)
   const [leaders, setLeaders] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [subjects, setSubjects] = useState([])
+  const [selectedSectionId, setSelectedSectionId] = useState(null)
+  const [showSubjectPicker, setShowSubjectPicker] = useState(false)
+  const subjectPickerAnchorRef = useRef(null)
 
   useEffect(() => {
     setAnimated(true)
   }, [])
 
+  // Load the student's subjects once, so "My Guild" can offer a picker when
+  // they're enrolled in more than one — previously this always silently used
+  // whichever subject happened to be first
+  useEffect(() => {
+    const loadSubjects = async () => {
+      try {
+        const token = localStorage.getItem('token')
+        const res = await fetch('http://localhost:5000/api/student/subjects', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        })
+        if (res.ok) {
+          const data = await res.json()
+          setSubjects(data)
+          if (data.length > 0) {
+            setSelectedSectionId(data[0].section_id)
+          } else {
+            // no subjects to scope "My Guild" to — stop waiting on a
+            // section_id that's never going to arrive
+            setLoading(false)
+          }
+        } else {
+          setLoading(false)
+        }
+      } catch (err) {
+        console.error('Failed to load subjects for leaderboard picker:', err)
+      }
+    }
+    loadSubjects()
+  }, [])
+
+  // Re-fetch the leaderboard whenever the filter or the picked subject changes
   useEffect(() => {
     fetchLeaderboard()
-  }, [filter])
+  }, [filter, selectedSectionId])
 
+  // Fetch the leaderboard for the selected filter
   const fetchLeaderboard = async () => {
+    // "My Guild" needs to know which subject before it can fetch anything —
+    // wait for that rather than briefly flashing the global board first
+    if (filter === 'section' && !selectedSectionId) return
+
     setLoading(true)
     setError(null)
     try {
       const token = localStorage.getItem('token')
 
-      // Determine block_id for "My Block" filter
       let url = 'http://localhost:5000/api/leaderboard'
-      if (filter === 'block') {
-        const subjRes = await fetch('http://localhost:5000/api/student/subjects', {
-          headers: { 'Authorization': `Bearer ${token}` }
-        })
-        if (subjRes.ok) {
-          const subjects = await subjRes.json()
-          if (subjects.length > 0) {
-            url += `?section_id=${subjects[0].section_id}`
-          }
-        }
+      if (filter === 'section' && selectedSectionId) {
+        url += `?section_id=${selectedSectionId}`
       }
 
       const res = await fetch(url, {
@@ -86,6 +118,7 @@ export default function Leaderboard({ currentUsername }) {
     }
   }
 
+  // Derive the podium and the logged-in student's own standing
   const topThree = leaders.slice(0, 3)
   const currentUser = leaders.find(u => u.username === currentUsername) || null
 
@@ -100,27 +133,64 @@ export default function Leaderboard({ currentUsername }) {
       </div>
 
       {/* Filter Tabs */}
-      <div className={`flex justify-center gap-2 mb-8 transition-all duration-700 delay-100 ${animated ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4'}`}>
-        <button
-          onClick={() => setFilter('block')}
-          className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-300 ${
-            filter === 'block'
-              ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-lg scale-105'
-              : 'bg-slate-800/60 text-slate-300 hover:text-white hover:scale-105'
-          }`}
-        >
-          🏰 My Block
-        </button>
-        <button
-          onClick={() => setFilter('global')}
-          className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-300 ${
-            filter === 'global'
-              ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-lg scale-105'
-              : 'bg-slate-800/60 text-slate-300 hover:text-white hover:scale-105'
-          }`}
-        >
-          🌍 Global
-        </button>
+      <div className={`flex flex-col items-center gap-3 mb-8 transition-all duration-700 delay-100 ${animated ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4'}`}>
+        <div className="flex justify-center gap-2 flex-wrap">
+          <button
+            onClick={() => setFilter('section')}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-300 ${
+              filter === 'section'
+                ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-lg scale-105'
+                : 'bg-slate-800/60 text-slate-300 hover:text-white hover:scale-105'
+            }`}
+          >
+            🏰 My Guild
+          </button>
+          <button
+            onClick={() => setFilter('global')}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-300 ${
+              filter === 'global'
+                ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-lg scale-105'
+                : 'bg-slate-800/60 text-slate-300 hover:text-white hover:scale-105'
+            }`}
+          >
+            🌍 Global
+          </button>
+        </div>
+
+        {/* Which subject to rank — only worth showing once there's actually
+            more than one to pick between. Uses the app's own themed sheet
+            instead of a native <select>, since a native dropdown's option
+            list can't be restyled and shows up as a stark white OS popup
+            over this dark theme. */}
+        {filter === 'section' && subjects.length > 1 && (
+          <div ref={subjectPickerAnchorRef}>
+            <button
+              onClick={() => setShowSubjectPicker(!showSubjectPicker)}
+              className="flex items-center gap-2 px-3 py-1.5 bg-slate-900 border border-purple-600/40 rounded-lg text-white text-xs transition hover:border-purple-500 max-w-full"
+            >
+              <span className="truncate">
+                {subjects.find(s => s.section_id === selectedSectionId)?.section_no} - {subjects.find(s => s.section_id === selectedSectionId)?.name}
+              </span>
+              <span className="text-slate-400 shrink-0">▼</span>
+            </button>
+            <MobileSheet show={showSubjectPicker} onClose={() => setShowSubjectPicker(false)} widthClass="sm:w-72" anchorRef={subjectPickerAnchorRef}>
+              <p className="text-[10px] text-slate-500 uppercase tracking-wider px-4 pt-3 pb-1 font-bold">Pick a subject</p>
+              {subjects.map(s => (
+                <button
+                  key={s.section_id}
+                  onClick={() => { setSelectedSectionId(s.section_id); setShowSubjectPicker(false) }}
+                  className={`w-full flex items-center gap-2 px-4 py-3 sm:py-2 text-left text-sm transition ${
+                    s.section_id === selectedSectionId
+                      ? 'bg-purple-600/20 text-purple-300'
+                      : 'text-slate-300 hover:text-white hover:bg-slate-800'
+                  }`}
+                >
+                  {s.section_no} - {s.name}
+                </button>
+              ))}
+            </MobileSheet>
+          </div>
+        )}
       </div>
 
       {/* Loading */}
@@ -160,7 +230,7 @@ export default function Leaderboard({ currentUsername }) {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
             {/* 2nd Place */}
             {topThree[1] && (
-              <div className={`md:order-1 bg-gradient-to-br from-slate-700/40 to-slate-800/40 border-2 border-slate-500/40 rounded-2xl p-6 text-center relative overflow-hidden transition-all duration-700 delay-200 hover:scale-105 ${animated ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-10'}`}>
+              <div className={`order-2 md:order-1 bg-gradient-to-br from-slate-700/40 to-slate-800/40 border-2 border-slate-500/40 rounded-2xl p-6 text-center relative overflow-hidden transition-all duration-700 delay-200 hover:scale-105 ${animated ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-10'}`}>
                 <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-slate-500/10 to-transparent pointer-events-none" />
                 <div className="relative z-10">
                   <div className="text-slate-300 text-sm font-semibold mb-2 flex items-center justify-center gap-1 animate-bounce">
@@ -188,7 +258,7 @@ export default function Leaderboard({ currentUsername }) {
 
             {/* 1st Place */}
             {topThree[0] && (
-              <div className={`md:order-2 bg-gradient-to-br from-yellow-600/30 to-amber-700/30 border-2 border-yellow-500/60 rounded-2xl p-8 text-center relative overflow-hidden transition-all duration-700 delay-300 hover:scale-105 ${animated ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-10'}`}>
+              <div className={`order-1 md:order-2 bg-gradient-to-br from-yellow-600/30 to-amber-700/30 border-2 border-yellow-500/60 rounded-2xl p-8 text-center relative overflow-hidden transition-all duration-700 delay-300 hover:scale-105 ${animated ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-10'}`}>
                 <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-yellow-500/20 to-transparent pointer-events-none animate-pulse" />
                 <div className="relative z-10">
                   <div className="text-yellow-300 text-sm font-semibold mb-2 flex items-center justify-center gap-1 animate-bounce">
@@ -216,7 +286,7 @@ export default function Leaderboard({ currentUsername }) {
 
             {/* 3rd Place */}
             {topThree[2] && (
-              <div className={`md:order-3 bg-gradient-to-br from-amber-800/30 to-orange-900/30 border-2 border-orange-600/40 rounded-2xl p-6 text-center relative overflow-hidden transition-all duration-700 delay-200 hover:scale-105 ${animated ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-10'}`}>
+              <div className={`order-3 md:order-3 bg-gradient-to-br from-amber-800/30 to-orange-900/30 border-2 border-orange-600/40 rounded-2xl p-6 text-center relative overflow-hidden transition-all duration-700 delay-200 hover:scale-105 ${animated ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-10'}`}>
                 <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-orange-500/10 to-transparent pointer-events-none" />
                 <div className="relative z-10">
                   <div className="text-orange-300 text-sm font-semibold mb-2 flex items-center justify-center gap-1 animate-bounce">

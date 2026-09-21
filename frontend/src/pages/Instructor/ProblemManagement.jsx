@@ -14,9 +14,26 @@ export default function ProblemManagement({ classId, subjectId }) {
   const [problems, setProblems] = useState([])
   const [loading, setLoading]   = useState(true)
   const [search, setSearch]     = useState('')
+  const [deleteTarget, setDeleteTarget] = useState(null)
+  const [success, setSuccess]   = useState(null)
+  const [deleteError, setDeleteError] = useState(null)
 
+  // Load quests whenever the class changes
   useEffect(() => { fetchProblems() }, [classId])
 
+  // From inside a class tab, subjectId is already known — go straight to the
+  // locked-subject wizard. Reached standalone (no class context), route
+  // through the class picker first instead of dropping straight into a bare
+  // subject dropdown.
+  const goToCreateQuest = () => {
+    if (subjectId) {
+      navigate(`/instructor/create-problem?from=${encodeURIComponent(fromPath)}&subject_id=${subjectId}`)
+    } else {
+      navigate('/instructor/create-problem/pick-class')
+    }
+  }
+
+  // Fetch quests for this class, or all instructor quests if none specified
   const fetchProblems = async () => {
     try {
       const token = localStorage.getItem('token')
@@ -32,20 +49,41 @@ export default function ProblemManagement({ classId, subjectId }) {
     }
   }
 
-  const handleDelete = async (id) => {
-    if (!confirm('Delete this quest? This also removes all student submissions for it.')) return
+  const handleDelete = (problem) => {
+    setDeleteTarget(problem)
+  }
+
+  // Delete the selected quest and remove it from the local list. A failed
+  // request used to close the confirm dialog silently, with no sign the
+  // quest was still sitting in the database — this now surfaces that instead
+  // of leaving the instructor to assume it worked.
+  const confirmDelete = async () => {
+    if (!deleteTarget) return
+    const target = deleteTarget
+    setDeleteTarget(null)
     try {
       const token = localStorage.getItem('token')
-      const res = await fetch(`http://localhost:5000/api/problems/${id}`, {
+      const res = await fetch(`http://localhost:5000/api/problems/${target.id}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       })
-      if (res.ok) setProblems(problems.filter(p => p.id !== id))
+      if (res.ok) {
+        setProblems(problems.filter(p => p.id !== target.id))
+        setSuccess('Quest deleted.')
+        setTimeout(() => setSuccess(null), 3000)
+      } else {
+        const error = await res.json().catch(() => ({}))
+        setDeleteError(error.error || `Couldn't delete "${target.title}". Please try again.`)
+        setTimeout(() => setDeleteError(null), 5000)
+      }
     } catch (err) {
       console.error('Failed to delete problem:', err)
+      setDeleteError(`Couldn't delete "${target.title}" — check your connection and try again.`)
+      setTimeout(() => setDeleteError(null), 5000)
     }
   }
 
+  // Filter quests by title search
   const filtered = problems.filter(p =>
     p.title.toLowerCase().includes(search.toLowerCase())
   )
@@ -84,12 +122,24 @@ export default function ProblemManagement({ classId, subjectId }) {
           <p className="text-slate-400 mt-0.5 text-sm">Create and manage coding quests for your students</p>
         </div>
         <button
-          onClick={() => navigate(`/instructor/create-problem?from=${encodeURIComponent(fromPath)}${subjectId ? `&subject_id=${subjectId}` : ''}`)}
+          onClick={goToCreateQuest}
           className="px-4 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white rounded-xl font-bold transition shadow-lg shadow-purple-600/20 flex items-center gap-2 text-sm"
         >
           ⚔️ Create Quest
         </button>
       </div>
+
+      {success && (
+        <div className="p-4 bg-green-900/30 border border-green-600/40 rounded-xl text-green-300 text-sm flex items-center gap-2">
+          ✅ {success}
+        </div>
+      )}
+
+      {deleteError && (
+        <div className="p-4 bg-red-900/30 border border-red-600/40 rounded-xl text-red-300 text-sm flex items-center gap-2">
+          ⚠️ {deleteError}
+        </div>
+      )}
 
       {/* Stat Strip */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -143,7 +193,7 @@ export default function ProblemManagement({ classId, subjectId }) {
                     </p>
                     {!search && (
                       <button
-                        onClick={() => navigate(`/instructor/create-problem?from=${encodeURIComponent(fromPath)}${subjectId ? `&subject_id=${subjectId}` : ''}`)}
+                        onClick={goToCreateQuest}
                         className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-sm font-bold transition mt-1"
                       >
                         Create Your First Quest
@@ -238,7 +288,7 @@ export default function ProblemManagement({ classId, subjectId }) {
                           ✏️
                         </button>
                         <button
-                          onClick={() => handleDelete(problem.id)}
+                          onClick={() => handleDelete(problem)}
                           title="Delete"
                           className="p-2 hover:bg-red-500/10 rounded-lg transition text-slate-500 hover:text-red-400"
                         >
@@ -258,6 +308,37 @@ export default function ProblemManagement({ classId, subjectId }) {
         <p className="text-slate-600 text-xs text-right">
           Showing {filtered.length} of {problems.length} quests
         </p>
+      )}
+
+      {/* Delete confirmation modal */}
+      {deleteTarget && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-slate-900 border-2 border-red-600/40 rounded-2xl w-full max-w-sm shadow-2xl shadow-red-900/30 overflow-hidden">
+            <div className="p-6 text-center">
+              <div className="w-14 h-14 mx-auto mb-4 rounded-full bg-red-500/10 border border-red-500/20 flex items-center justify-center text-2xl">
+                🗑️
+              </div>
+              <h3 className="text-lg font-bold text-white mb-2">Delete Quest?</h3>
+              <p className="text-slate-400 text-sm">
+                Delete <span className="text-white font-semibold">"{deleteTarget.title}"</span>? This also removes all student submissions for it.
+              </p>
+            </div>
+            <div className="flex gap-3 p-4 pt-0">
+              <button
+                onClick={() => setDeleteTarget(null)}
+                className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 rounded-xl text-slate-300 font-bold transition text-sm"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDelete}
+                className="flex-1 py-2.5 bg-red-600 hover:bg-red-500 rounded-xl text-white font-bold transition text-sm"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

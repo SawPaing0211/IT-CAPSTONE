@@ -29,10 +29,12 @@ export default function SubjectsManagement() {
     subject_type: 'lab',
   })
 
+  // Load all subjects when the page mounts
   useEffect(() => {
     fetchSubjects()
   }, [])
 
+  // Fetch the list of subjects from the server
   const fetchSubjects = async () => {
     try {
       const token = localStorage.getItem('token')
@@ -50,6 +52,7 @@ export default function SubjectsManagement() {
     }
   }
 
+  // Send the new subject to the server and refresh the list
   const handleCreateSubject = async () => {
     if (!newSubject.name.trim()) {
       showToast('Subject name is required', 'error')
@@ -65,7 +68,7 @@ export default function SubjectsManagement() {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          // ✅ Include internal_subject_no in payload
+          // adamson's own subject number, not the same as our subject code
           internal_subject_no: newSubject.internal_subject_no.trim() || null,
           name: newSubject.name.trim(),
           description: newSubject.description.trim(),
@@ -101,11 +104,13 @@ export default function SubjectsManagement() {
     }
   }
 
+  // Display a temporary toast message
   const showToast = (message, type = 'success') => {
     setToast({ message, type })
     setTimeout(() => setToast(null), 4000)
   }
 
+  // Load the selected subject into the edit form
   const handleEditClick = (subject) => {
     setEditingSubject(subject)
     setEditForm({
@@ -121,6 +126,7 @@ export default function SubjectsManagement() {
     setShowEditModal(true)
   }
 
+  // Save the edited subject details to the server
   const handleSaveEdit = async () => {
     if (!editForm.name.trim()) {
       showToast('Subject name is required', 'error')
@@ -162,6 +168,7 @@ export default function SubjectsManagement() {
     setDeleteTarget({ id: subjectId, name: subjectName })
   }
 
+  // Delete the subject that's pending confirmation
   const confirmDeleteSubject = async () => {
     if (!deleteTarget) return
     try {
@@ -186,6 +193,7 @@ export default function SubjectsManagement() {
     }
   }
 
+  // Show a spinner while subjects are still loading
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
@@ -396,7 +404,7 @@ export default function SubjectsManagement() {
                   </div>
                   <div className="flex-1">
                     <div className="flex items-center gap-2 flex-wrap mb-1">
-                      {/* ✅ Show Subject Number (Adamson's internal number) */}
+                      {/* adamson's internal subject number */}
                       {subject.internal_subject_no && (
                         <span className="font-mono text-xs font-bold bg-slate-800 text-yellow-300 border border-yellow-600/30 px-2 py-0.5 rounded">
                           {subject.internal_subject_no}
@@ -466,7 +474,7 @@ export default function SubjectsManagement() {
             {/* Body */}
             <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
 
-              {/* ✅ Subject Number + Subject Code + Name */}
+              {/* subject number, code, and name */}
               <div className="grid grid-cols-3 gap-3">
                 {/* Adamson Subject Number */}
                 <div>
@@ -591,7 +599,7 @@ export default function SubjectsManagement() {
                     <div className="w-10 h-10 bg-gradient-to-br from-purple-600 to-pink-600 rounded-xl flex items-center justify-center text-lg flex-shrink-0">💻</div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        {/* ✅ Preview shows both numbers */}
+                        {/* preview so you can see both numbers before saving */}
                         {newSubject.internal_subject_no && (
                           <span className="font-mono text-xs font-bold bg-slate-700 text-yellow-300 px-2 py-0.5 rounded">
                             {newSubject.internal_subject_no}

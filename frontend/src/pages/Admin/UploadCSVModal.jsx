@@ -4,10 +4,9 @@ const API = 'http://localhost:5000'
 
 // ─── Required columns for the enrollment endpoint ────────────────────
 const REQUIRED_COLS = ['student_id', 'firstname', 'lastname', 'year_level', 'student_type']
-const OPTIONAL_COLS = ['middlename', 'suffix', 'block_code', 'section_no', 'subject_code']
-
+const OPTIONAL_COLS = ['middlename', 'suffix', 'class_code', 'section_no', 'subject_code']
 const SAMPLE_CSV = [
-  'student_id,firstname,middlename,lastname,suffix,year_level,student_type,block_code,section_no,subject_code',
+  'student_id,firstname,middlename,lastname,suffix,year_level,student_type,class_code,section_no,subject_code',
   '2024-00001,Juan,Santos,Dela Cruz,,1,regular,IT101,,,',
   '2024-00002,Maria,Reyes,Garcia,,1,regular,IT101,,,',
   '2024-00003,Jose,Bautista,Mendoza,,1,regular,IT102,,,',
@@ -90,7 +89,7 @@ function ColPill({ name, required }) {
 }
 
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────
-export default function UploadCSVModal({ blocks = [], onClose, onSuccess }) {
+export default function UploadCSVModal({ onClose, onSuccess }) {
   const fileRef = useRef(null)
 
   // steps: 'select' | 'preview' | 'uploading' | 'done'
@@ -109,6 +108,7 @@ export default function UploadCSVModal({ blocks = [], onClose, onSuccess }) {
     setTimeout(() => setToast(null), 4000)
   }
 
+  // Read the selected CSV file, parse it, and move to the preview step
   const readAndParse = (f) => {
     if (!f) return
     if (!f.name.toLowerCase().endsWith('.csv')) {
@@ -134,6 +134,7 @@ export default function UploadCSVModal({ blocks = [], onClose, onSuccess }) {
     reader.readAsText(f)
   }
 
+  // Handle a file dropped onto the drop zone
   const onDrop = useCallback((e) => {
     e.preventDefault(); setIsDragging(false)
     readAndParse(e.dataTransfer.files[0])
@@ -186,6 +187,7 @@ export default function UploadCSVModal({ blocks = [], onClose, onSuccess }) {
     URL.revokeObjectURL(url)
   }
 
+  // Reset the modal back to the file-select step
   const reset = () => {
     setStep('select'); setFile(null); setParsed(null)
     setClientErrs([]); setResult(null); setShowAllRows(false)
@@ -266,9 +268,8 @@ export default function UploadCSVModal({ blocks = [], onClose, onSuccess }) {
               <div className="bg-slate-800/60 rounded-xl p-4 border border-green-600/20">
                 <p className="text-green-400 font-bold text-sm mb-1">🏫 Regular Students</p>
                 <p className="text-slate-400 text-xs leading-relaxed">
-                  Set <code className="text-purple-300">student_type=regular</code> and fill <code className="text-purple-300">block_code</code>.
-                  Account is created and student is enrolled in that block.
-                  Block auto-closes when full.
+                  Set <code className="text-purple-300">student_type=regular</code> and fill <code className="text-purple-300">class_code</code>.                  Account is created and student is enrolled in that class code.
+                  Class code auto-closes when full.
                 </p>
               </div>
               <div className="bg-slate-800/60 rounded-xl p-4 border border-blue-600/20">
@@ -483,8 +484,7 @@ export default function UploadCSVModal({ blocks = [], onClose, onSuccess }) {
                       <th className="text-left px-4 py-2 text-slate-400 font-medium text-xs">Row</th>
                       <th className="text-left px-4 py-2 text-slate-400 font-medium text-xs">Student ID</th>
                       <th className="text-left px-4 py-2 text-slate-400 font-medium text-xs">Status</th>
-                      <th className="text-left px-4 py-2 text-slate-400 font-medium text-xs">Block / Section</th>
-                    </tr>
+                      <th className="text-left px-4 py-2 text-slate-400 font-medium text-xs">Class Code / Section</th>                    </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800">
                     {result.results.map((r, i) => (
@@ -493,8 +493,7 @@ export default function UploadCSVModal({ blocks = [], onClose, onSuccess }) {
                         <td className="px-4 py-2 text-slate-300 font-mono text-xs">{r.student_id || '—'}</td>
                         <td className="px-4 py-2"><StatusBadge status={r.status} /></td>
                         <td className="px-4 py-2 text-slate-400 text-xs">
-                          {r.block ?? r.section ?? r.reason ?? r.errors?.join(', ') ?? ''}
-                        </td>
+                          {r.class_code ?? r.section ?? r.reason ?? r.errors?.join(', ') ?? ''}                        </td>
                       </tr>
                     ))}
                   </tbody>

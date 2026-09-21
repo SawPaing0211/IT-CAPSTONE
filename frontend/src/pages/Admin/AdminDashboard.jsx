@@ -458,6 +458,7 @@ export default function AdminDashboard({ user, onLogout }) {
     if (isMobile) setSidebarOpen(false)
   }, [activeTab, isMobile])
 
+  // Manually re-fetch stats and show the syncing spinner
   const handleSync = useCallback(() => fetchStats(true), [fetchStats])
 
   const activeTabData = useMemo(() => tabs.find(t => t.id === activeTab), [tabs, activeTab])

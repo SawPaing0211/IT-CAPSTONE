@@ -1,27 +1,4 @@
-// ============================================================================
-// App.jsx — top-level router
-//
-// PERSONAL NOTE TO FUTURE ME:
-// There are TWO different patterns being used for the 3 dashboards, on purpose:
-//
-//   1. INSTRUCTOR dashboard = "router-driven".
-//      InstructorDashboard.jsx renders <Outlet/>, so the <Route> children
-//      below (classes, problems, announcements, etc.) actually swap in and
-//      out inside it. Each tab = a real URL. Browser back/forward works.
-//
-//   2. STUDENT and ADMIN dashboards = "self-contained".
-//      StudentDashboard.jsx and AdminDashboard.jsx do NOT render <Outlet/>.
-//      They manage their own tabs with useState internally and decide what
-//      to show themselves. So for these two, do NOT add child <Route>s —
-//      there's nothing to render them into. Just point the wildcard path
-//      straight at the dashboard component and let it do its own thing.
-//
-// If I ever forget this and add a child route under /student/* or /admin/*
-// expecting it to show up, it won't — because there's no Outlet waiting
-// for it. Either (a) add <Outlet/> to that dashboard and convert it to the
-// router-driven pattern, or (b) keep doing internal tab state and don't
-// bother with child routes for it.
-// ============================================================================
+// note to self: instructor dashboard uses routes + <Outlet/> so tabs get real URLs. student/admin dashboards just switch tabs internally, no child routes for those two.
 
 import { useState, useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom'
@@ -40,6 +17,7 @@ import DashboardOverview from './pages/Instructor/DashboardOverview'
 import MyClasses from './pages/Instructor/MyClasses'
 import ProblemManagement from './pages/Instructor/ProblemManagement'
 import CreateProblem from './pages/Instructor/CreateProblem'
+import SelectClassForQuest from './pages/Instructor/SelectClassForQuest'
 import ClassDetail from './pages/Instructor/ClassDetail'
 import Announcements from './pages/Instructor/Announcements'
 import PlagiarismCheck from './pages/Instructor/PlagiarismCheck'
@@ -48,12 +26,7 @@ import CourseMaterials from './pages/Instructor/CourseMaterials'
 import ProblemSubmissions from './pages/Instructor/ProblemSubmissions'
 import InstructorAchievements from './pages/Instructor/InstructorAchievements'
 
-// NOTE: Student and Admin sub-pages (MySubjects, Leaderboard, ProgressStats,
-// QuestLog, UserManagement, ActivityLogs, etc.) are NOT imported or routed
-// here anymore. StudentDashboard.jsx and AdminDashboard.jsx import and render
-// them directly themselves, switched by internal tab state. Routing them here
-// too was dead code — the URL would change but nothing would visually update,
-// since neither dashboard has an <Outlet/> to receive it.
+// student/admin sub-pages are handled inside those dashboards themselves, not routed here
 
 function AppContent() {
   const [user, setUser] = useState(null)
@@ -122,9 +95,7 @@ function AppContent() {
       <Route path="/" element={<Landing onLogin={() => navigate('/auth')} />} />
       <Route path="/auth" element={<Auth onLogin={handleLogin} />} />
 
-      {/* ── Instructor Routes — ROUTER-DRIVEN (has <Outlet/>) ──────────────
-          Every child route below actually renders, because
-          InstructorDashboard.jsx has <Outlet/> in its layout. */}
+      {/* instructor side, uses <Outlet/> so these tabs are real pages */}
       <Route
         path="/instructor/*"
         element={
@@ -133,22 +104,21 @@ function AppContent() {
           </ProtectedRoute>
         }
       >
-        <Route index element={<DashboardOverview />} />
-        <Route path="classes" element={<MyClasses />} />
-        <Route path="class/:id" element={<ClassDetail />} />
-        <Route path="problems" element={<ProblemManagement />} />
-        <Route path="create-problem" element={<CreateProblem />} />
+        <Route index element={<DashboardOverview />} /> {/* the home tab when you first log in */}
+        <Route path="classes" element={<MyClasses />} /> {/* list of my classes */}
+        <Route path="class/:id" element={<ClassDetail />} /> {/* one class, tabs inside for materials/quests/etc */}
+        <Route path="problems" element={<ProblemManagement />} /> {/* the quests list */}
+        <Route path="create-problem" element={<CreateProblem />} /> {/* the quest builder wizard */}
+        <Route path="create-problem/pick-class" element={<SelectClassForQuest />} /> {/* pick a class first when there's no class context yet */}
         <Route path="problem/:problemId/submissions" element={<ProblemSubmissions />} />
-        <Route path="announcements" element={<Announcements />} />
+        <Route path="announcements" element={<Announcements />} /> {/* posting announcements to students */}
         <Route path="plagiarism" element={<PlagiarismCheck />} />
         <Route path="analytics" element={<Analytics />} />
-        <Route path="materials" element={<CourseMaterials />} />
+        <Route path="materials" element={<CourseMaterials />} /> {/* uploading modules/lessons/files */}
         <Route path="achievements" element={<InstructorAchievements />} />
       </Route>
 
-      {/* ── Student Routes — SELF-CONTAINED (no <Outlet/>) ─────────────────
-          StudentDashboard manages "subjects / hall / hero / sandbox" tabs
-          itself. No child routes — wildcard just hands off to it. */}
+      {/* student side manages its own tabs internally, no child routes needed */}
       <Route
         path="/student/*"
         element={
@@ -158,9 +128,7 @@ function AppContent() {
         }
       />
 
-      {/* ── Admin Routes — SELF-CONTAINED (no <Outlet/>) ───────────────────
-          AdminDashboard manages "dashboard / sections / users / assignments /
-          activity" tabs itself. Same deal as Student above. */}
+      {/* admin side, same deal, manages its own tabs internally */}
       <Route
         path="/admin/*"
         element={
