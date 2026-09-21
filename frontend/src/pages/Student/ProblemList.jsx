@@ -1,25 +1,27 @@
 import { useState, useEffect } from 'react'
 
-export default function ProblemList({ onSelectQuest, currentLevel, blockId, subjectId }) {
-  console.log('🎯 ProblemList received:', { blockId, subjectId })
+export default function ProblemList({ onSelectQuest, currentLevel, sectionId, subjectId }) {
   const [quests, setQuests] = useState([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('all')
   const [animated, setAnimated] = useState(false)
 
+  // Re-fetch quests whenever the filter or subject changes
   useEffect(() => {
     setAnimated(true)
     fetchQuests()
-  }, [filter, blockId, subjectId]) 
+  }, [filter, sectionId, subjectId]) 
 
+  // Fetch the quest list for the current filter and subject
   const fetchQuests = async () => {
     try {      
       const token = localStorage.getItem('token')
       let url = 'http://localhost:5000/api/problems'
       
       // Build query params
+      // (section filtering happens server-side from the student's own
+      // enrollment — no section_id param needed or read by the backend)
       const params = []
-      if (blockId) params.push(`block_id=${blockId}`)
       if (subjectId) params.push(`subject_id=${subjectId}`) 
       if (filter === 'coding' || filter === 'debugging') {
         params.push(`type=${filter}`)
@@ -33,11 +35,8 @@ export default function ProblemList({ onSelectQuest, currentLevel, blockId, subj
         headers: { 'Authorization': `Bearer ${token}` }
       })
 
-      console.log('📡 Fetched from URL:', url, '- Status:', res.status)
-
       if (res.ok) {
         const data = await res.json()
-        console.log('📡 Fetched from URL:', url, '- Status:', res.status)
         const filtered = filter === 'event'
           ? data.filter(q => q.is_event_quest)
           : data
@@ -91,6 +90,7 @@ export default function ProblemList({ onSelectQuest, currentLevel, blockId, subj
     Hard: 'bg-red-600/20 text-red-400 border-red-600/40'
   }
 
+  // Show skeleton placeholders while quests are loading
   if (loading) {
     return (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -178,14 +178,14 @@ export default function ProblemList({ onSelectQuest, currentLevel, blockId, subj
                 {/* Description */}
                 <p className="text-slate-300 text-sm mb-4 line-clamp-2">{quest.description}</p>
 
-                {/* Instructor & Block Info */}
+                {/* Instructor & Class Code Info */}
                 <div className="flex items-center gap-2 text-[10px] text-slate-400 mb-3 pb-3 border-b border-slate-700/50">
                   <span>👨‍🏫 {quest.instructor_name}</span>
-                  {/* Only show block name if NOT in course context */}
-                  {!blockId && (
+                  {/* Only show class code if NOT already inside that class's context */}
+                  {!sectionId && (
                     <>
                       <span>•</span>
-                      <span>🏛️ {quest.block_names?.[0] || 'All Blocks'}</span>
+                      <span>🏛️ {quest.section_names?.[0] || 'All Class Codes'}</span>
                     </>
                   )}
                   {quest.due_date && (

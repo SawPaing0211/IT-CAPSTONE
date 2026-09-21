@@ -2,7 +2,7 @@ import { useState } from 'react'
 
 // ─── this whole thing pops up when you click "Manage" on a user ───────────────
 // props:
-//   user     - the user object from the backend (has role, xp, level, blocks, etc.)
+//   user     - the user object from the backend (has role, xp, level, sections, etc.)
 //   sections - all available class codes/sections (from /api/admin/sections-list)
 //   onClose  - called when X or Cancel is clicked
 //   onSave   - called with the updated form data when Save is clicked
@@ -18,9 +18,9 @@ export default function EditUserModal({ user, sections = [], onClose, onSave }) 
   })
 
   // which sections this user is already enrolled in
-  // user.blocks comes from the backend as the enrolled sections array
+  // user.sections comes from the backend as the enrolled sections array
   const [selectedSectionIds, setSelectedSectionIds] = useState(
-    (user.blocks || []).map(b => b.id).filter(Boolean)
+    (user.sections || []).map(s => s.id).filter(Boolean)
   )
 
   // just the search box text for filtering the section list
