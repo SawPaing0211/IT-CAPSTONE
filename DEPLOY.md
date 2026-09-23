@@ -1,21 +1,41 @@
 # Deploying Forge.dev
 
-Two pieces: the **frontend** (Vercel) and the **backend + database** (your own
-Oracle Cloud "Always Free" VM, via Docker Compose) — the backend can't live on
-a typical free PaaS because the code sandbox needs a real Docker daemon.
+Two pieces: the **frontend** (Vercel) and the **backend + database** (a VPS,
+via Docker Compose) — the backend can't live on a typical free PaaS because
+the code sandbox needs a real Docker daemon.
 
-## 1. Provision the VM (you do this — needs your own Oracle account)
+## Quick testing without a VPS yet
 
-1. Sign up at oracle.com/cloud/free (identity verification required — do this
-   first, it can take a bit).
-2. Create a VM instance: **Ampere A1 (Arm)** shape, "Always Free" eligible,
-   4 OCPUs / 24GB RAM is the free-tier max — plenty for this. Ubuntu 22.04 or
-   24.04 image.
-3. In the VM's networking / Security List (or NSG), open ingress ports
-   **80** and **443** (HTTP/HTTPS) in addition to the default 22 (SSH) —
-   Oracle blocks everything else by default even after you configure the
-   VM's own firewall.
-4. Note the VM's public IP. SSH in: `ssh ubuntu@<public-ip>`.
+If you just need testers to try the live app before the VPS is set up,
+Cloudflare Quick Tunnels work well and need no account or setup:
+
+```bash
+cloudflared tunnel --url http://localhost:5000   # backend, in one terminal
+cloudflared tunnel --url http://localhost:5173   # frontend, in another
+```
+
+Each command prints a random `https://<random-words>.trycloudflare.com`
+URL. Put the backend one in `frontend/.env.local` as `VITE_API_URL=...`,
+restart `npm run dev`, and set `CORS_ORIGINS` to the frontend one before
+starting Flask. The URLs change every time you restart the tunnels (sleep,
+shutdown, or a dropped connection all count), so this is fine for one-off
+testing days but not a permanent link.
+
+## 1. Get a VPS
+
+We're using DigitalOcean, paid for with the credit from the **GitHub
+Student Developer Pack** (education.github.com/pack) — once your
+application is approved, claim the DigitalOcean offer from your GitHub
+Education benefits page and create a droplet:
+
+1. Choose the cheapest **Ubuntu 22.04 or 24.04** droplet — 1-2 GB RAM is
+   enough to start.
+2. In the droplet's firewall settings, open ports **80** and **443**
+   (HTTP/HTTPS) in addition to the default 22 (SSH).
+3. Note the droplet's public IP. SSH in: `ssh root@<public-ip>`.
+
+(Any other VPS — Oracle Cloud, Azure, a school-provided server — works the
+same way from step 2 onward; only the sign-up step differs.)
 
 ## 2. Install Docker on the VM
 
@@ -30,12 +50,9 @@ docker compose version
 ## 3. Get the code onto the VM
 
 ```bash
-git clone <your-repo-url> forge-dev
+git clone https://github.com/SawPaing0211/IT-CAPSTONE.git forge-dev
 cd forge-dev
 ```
-
-(If the repo isn't pushed anywhere yet, `git init` + push to a private GitHub
-repo first — easiest way to get code onto the VM.)
 
 ## 4. Configure secrets
 
@@ -91,8 +108,8 @@ via Certbot in one command.
 ## 9. End-to-end test
 
 Open the Vercel URL, log in, and exercise: auth, a quest submission through
-the code sandbox, and the instructor Analytics/Activities pages (the ones
-that hit the database the most).
+the code sandbox, and the instructor Analytics/Plagiarism/Activities pages
+(the ones that hit the database and Gemini API the most).
 
 ---
 

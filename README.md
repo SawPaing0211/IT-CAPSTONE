@@ -1,7 +1,7 @@
 # Forge.Dev - Interactive Coding Learning Platform
 
 ## 🚀 Project Overview
-An interactive platform for learning programming languages (Python, Java, C#) with gamified elements. Features include a coding sandbox, quest system, block/subject management, and admin controls.
+An interactive platform for learning programming languages (Python, Java, C#) with gamified elements. Features include a coding sandbox, quest system, block/subject management, AI-assisted plagiarism detection, and admin controls.
 
 ## 🛠️ Tech Stack
 - **Frontend**: React, Vite, TailwindCSS
@@ -25,18 +25,19 @@ Before running the project, ensure you have installed:
 ```bash
 git clone https://github.com/SawPaing0211/IT-CAPSTONE.git
 cd IT-CAPSTONE
+```
 
-2. Database Setup (Docker)
+### 2. Database Setup (Docker)
 The project uses a MySQL database running in Docker.
 Open your terminal and run:
-
+```bash
 docker run --name forge-mysql -p 3306:3306 -e MYSQL_ALLOW_EMPTY_PASSWORD=yes -d mysql:8.0
-
+```
 Wait about 30 seconds for the database to initialize.
 
-
-3. Backend Setup
+### 3. Backend Setup
 Navigate to the backend folder and set up the Python environment:
+```bash
 cd backend
 
 # Create virtual environment (Windows)
@@ -46,17 +47,27 @@ python -m venv venv
 # Install dependencies
 pip install -r requirements.txt
 # OR if requirements.txt is missing, run:
-# pip install flask flask-cors flask-jwt-extended flask-sqlalchemy pymysql cryptography requests
+# pip install flask flask-cors flask-jwt-extended flask-sqlalchemy pymysql cryptography requests google-genai python-dotenv
+```
 
+Copy `.env.example` to `.env` in the `backend/` folder:
+```bash
+copy .env.example .env
+```
+The app runs fine locally without editing anything in it — except for the
+**AI Plagiarism Detection** feature, which needs a `GEMINI_API_KEY`. Get a
+free one at [aistudio.google.com](https://aistudio.google.com), paste it
+into `backend/.env`, and restart the server.
+
+```bash
 # Run the backend server
 python app.py
-
+```
 Backend will run on http://localhost:5000
 
-
-4. Frontend Setup
+### 4. Frontend Setup
 Open a new terminal window in the root folder:
-
+```bash
 cd frontend
 
 # Install dependencies
@@ -64,29 +75,31 @@ npm install
 
 # Run the development server
 npm run dev
-
+```
 Frontend will run on http://localhost:5173
 
-
-5. Sandbox Setup (Optional - For Code Execution)
+### 5. Sandbox Setup (Optional - For Code Execution)
 If you want the code execution feature (Python/Java/C# sandbox) to work, build the Docker images:
-
+```bash
 cd backend/forge-sandbox
 .\build_images.bat
+```
 
-How to Use
-Login/Register: Go to http://localhost:5173 and create an account.
+---
 
-Admin Panel: If you are an admin, go to the Admin Dashboard to manage users and blocks.
+## How to Use
+- **Login/Register**: Go to http://localhost:5173 and create an account.
+- **Admin Panel**: If you are an admin, go to the Admin Dashboard to manage users and blocks.
+- **Instructor**: Create blocks, assign subjects, create problems/quests, and run the AI Plagiarism Detection scan on student submissions.
+- **Student**: View subjects, attempt quests, and check progress — in-progress code autosaves both locally and to the server, so it isn't lost if the browser or laptop shuts down mid-quest.
 
-Instructor: Create blocks, assign subjects, and create problems/quests.
+## Folder Structure
+- `backend/`: Flask API server
+- `frontend/`: React Client application
+- `backend/forge-sandbox/`: Dockerfiles for code execution
 
-Student: View subjects, attempt quests, and check progress.
+See `DEPLOY.md` for hosting a live version instead of running it locally.
 
-Folder Structure
-backend/: Flask API server
-frontend/: React Client application
-backend/forge-sandbox/: Dockerfiles for code execution
-
+---
 
 Rejano, Paul Christian Caleb I.
