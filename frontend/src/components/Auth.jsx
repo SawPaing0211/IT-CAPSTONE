@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
+import { Link } from 'react-router-dom'
 import { API_BASE } from '../api/client'
 
 // minimalist line-art eye icons for the password show/hide toggle
@@ -143,6 +144,28 @@ export default function Auth({ onLogin }) {
           ></div>
         ))}
       </div>
+
+      {/* Back to landing */}
+      <Link
+        to="/"
+        className="group absolute top-4 left-4 sm:top-6 sm:left-6 z-20 flex items-center gap-2 pl-3 pr-4 py-2 rounded-full bg-slate-900/60 backdrop-blur-md border border-purple-500/30 text-slate-300 text-sm font-medium hover:text-white hover:border-purple-400/60 hover:bg-slate-900/80 transition-all duration-300 shadow-lg shadow-black/20"
+      >
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={2.2}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className="transition-transform duration-300 group-hover:-translate-x-1"
+        >
+          <path d="M19 12H5" />
+          <path d="M11 18l-6-6 6-6" />
+        </svg>
+        Back
+      </Link>
 
       <div className="relative z-10 w-full max-w-md">
         {/* Form Container */}
