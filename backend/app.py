@@ -146,6 +146,23 @@ class Submission(db.Model):
     error_msg    = db.Column(db.Text,    nullable=True)
     submitted_at = db.Column(db.DateTime, default=datetime.utcnow)
 
+class CodeDraft(db.Model):
+    # in-progress code for a quest a student hasn't submitted yet.
+    # autosaved every few seconds from the editor so a power outage,
+    # a crashed browser, or opening the quest on a different machine
+    # doesn't lose the student's work -- this used to live only in
+    # the browser's localStorage, which none of those situations survive.
+    __tablename__ = 'code_drafts'
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'problem_id', 'language', name='uq_code_draft'),
+    )
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    problem_id = db.Column(db.Integer, db.ForeignKey('problems.id'), nullable=False)
+    language = db.Column(db.Enum('python', 'java', 'csharp'), nullable=False)
+    code = db.Column(db.Text, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
 class HintReveal(db.Model):
     # records that a specific student revealed a specific hint on a
     # specific problem — one row per (student, problem, hint) combo,
@@ -1713,6 +1730,61 @@ def get_my_submission(problem_id):
         "language": sub.language
     }), 200
 
+@app.route('/api/problems/<int:problem_id>/draft', methods=['GET'])
+@jwt_required()
+def get_code_draft(problem_id):
+    """Fetch this student's in-progress code for a quest, if any was autosaved."""
+    user_id = int(get_jwt_identity())
+    language = request.args.get('language', 'python')
+
+    draft = CodeDraft.query.filter_by(
+        user_id=user_id, problem_id=problem_id, language=language
+    ).first()
+
+    if not draft:
+        return jsonify({"code": None}), 200
+
+    return jsonify({
+        "code": draft.code,
+        "updated_at": draft.updated_at.isoformat()
+    }), 200
+
+@app.route('/api/problems/<int:problem_id>/draft', methods=['PUT'])
+@jwt_required()
+def save_code_draft(problem_id):
+    """Autosave (or manual-save) this student's in-progress code for a quest."""
+    user_id = int(get_jwt_identity())
+    data = request.get_json() or {}
+    language = data.get('language', 'python')
+    code = data.get('code', '')
+
+    draft = CodeDraft.query.filter_by(
+        user_id=user_id, problem_id=problem_id, language=language
+    ).first()
+
+    if draft:
+        draft.code = code
+    else:
+        draft = CodeDraft(user_id=user_id, problem_id=problem_id, language=language, code=code)
+        db.session.add(draft)
+
+    db.session.commit()
+    return jsonify({"saved": True}), 200
+
+@app.route('/api/problems/<int:problem_id>/draft', methods=['DELETE'])
+@jwt_required()
+def clear_code_draft(problem_id):
+    """Drop the saved draft for a quest, e.g. after a successful submit or a manual reset."""
+    user_id = int(get_jwt_identity())
+    language = request.args.get('language', 'python')
+
+    CodeDraft.query.filter_by(
+        user_id=user_id, problem_id=problem_id, language=language
+    ).delete()
+    db.session.commit()
+
+    return jsonify({"deleted": True}), 200
+
 @app.route('/api/problems/<int:problem_id>/run', methods=['POST'])
 @jwt_required()
 @rate_limit(max_calls=20, period=60)
@@ -2638,11 +2710,12 @@ Write a brief 2-3 sentence verdict for the instructor. Be direct and specific:
 Keep it concise and practical. Do not be accusatory — just describe what you observe."""
 
             response = client.models.generate_content(
-                # gemini-1.5-flash-8b is dead — all 1.5 models were shut down by
-                # Google in 2026 and now 404. 2.5 Flash is the current free-tier
-                # workhorse (2.5 Flash-Lite also works if you want more headroom
-                # on the free daily quota — swap the string below if you hit limits).
-                model='gemini-2.5-flash',
+                # gemini-1.5-flash-8b is dead -- all 1.5 models were shut down by
+                # Google in 2026 and now 404. 2.5 Flash followed the same path
+                # later in 2026 ("no longer available to new users") -- Google's
+                # own 404 response names the replacement, 3.6 Flash, which is
+                # the current free-tier workhorse as of this writing.
+                model='gemini-3.6-flash',
                 contents=prompt
             )
             pair["ai_verdict"] = response.text

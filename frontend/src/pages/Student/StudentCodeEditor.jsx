@@ -3,14 +3,33 @@ import Editor from '@monaco-editor/react'
 import { api, API_BASE} from '../../api/client'
 import DownloadIcon from '../../components/DownloadIcon'
 
-export default function StudentCodeEditor({ 
-  quest, 
-  onVictory, 
-  onReturn, 
+export default function StudentCodeEditor({
+  quest,
+  onVictory,
+  onReturn,
   heroLevel,
-  onOpenSandbox  
+  onOpenSandbox
 }) {
   const LANG_LINE_OFFSET = { python: 0, java: 0, csharp: 7 }
+
+  // Draft code is cached in localStorage, which is shared by the whole
+  // browser -- without the student's own id in the key, whoever coded
+  // last on this machine would have their draft handed to the next
+  // student who logs in and opens the same quest. Falls back to 'anon'
+  // only if there's genuinely no token yet (shouldn't happen on this
+  // authenticated page, but better than crashing).
+  const getStorageKey = (questId, lang) => {
+    const token = localStorage.getItem('token')
+    let uid = 'anon'
+    if (token) {
+      try {
+        uid = JSON.parse(atob(token.split('.')[1])).sub || 'anon'
+      } catch (err) {
+        uid = 'anon'
+      }
+    }
+    return `forge_code_${uid}_${questId}_${lang}`
+  }
 
   const [code, setCode] = useState('')
   const [language, setLanguage] = useState('python')
@@ -26,8 +45,8 @@ export default function StudentCodeEditor({
   const [userRole, setUserRole] = useState(null)
   const [isQuestCompleted, setIsQuestCompleted] = useState(false)
   const [hasSubmitted, setHasSubmitted] = useState(false)
-  const [priorSubmission, setPriorSubmission] = useState(null) 
-  const [savedCode, setSavedCode] = useState('')   
+  const [priorSubmission, setPriorSubmission] = useState(null)
+  const [savedCode, setSavedCode] = useState('')
   const [showSuccessAnim, setShowSuccessAnim] = useState(false)
   const [combo, setCombo] = useState(0)
   const [autoSaveTimer, setAutoSaveTimer] = useState(null)
@@ -145,7 +164,7 @@ const formatErrorOutput = (rawOutput, language) => {
     const seen = new Set()
     const lines = rawOutput.split('\n')
 
-    for (const line of lines) { 
+    for (const line of lines) {
       const trimmed = line.trim()
       if (!trimmed) continue
 
@@ -226,10 +245,14 @@ useEffect(() => {
       setUserRole('student')
     }
   }
-  
+
   if (quest?.id) {
-    // Load saved code for this quest + language
-    const saved = localStorage.getItem(`forge_code_${quest.id}_${language}`)
+    // Load saved code for this quest + language. localStorage is checked
+    // first so there's no flash of starter code while the network request
+    // is in flight; the server draft (if any) then takes over once it
+    // comes back, since that's the copy that survives a wiped browser,
+    // a crashed machine, or opening the quest somewhere else.
+    const saved = localStorage.getItem(getStorageKey(quest.id, language))
     if (saved) {
       setSavedCode(saved)
       setCode(saved)
@@ -239,7 +262,21 @@ useEffect(() => {
         : quest.starter_code
       setCode(starter?.[language] || '')
     }
-    
+
+    const loadServerDraft = async () => {
+      try {
+        const res = await api.get(`/api/problems/${quest.id}/draft?language=${language}`)
+        if (res?.code) {
+          setSavedCode(res.code)
+          setCode(res.code)
+          localStorage.setItem(getStorageKey(quest.id, language), res.code)
+        }
+      } catch (err) {
+        console.error('Failed to load server draft:', err)
+      }
+    }
+    loadServerDraft()
+
     // wrapped in a named async function so it's easier to follow
     const checkSubmission = async () => {
       try {
@@ -259,7 +296,7 @@ useEffect(() => {
         console.error('Failed to check submission status:', err)
       }
     }
-    
+
     checkSubmission() // Call the async function
   }
 }, [quest, language]) // Re-run when quest or language changes
@@ -285,7 +322,12 @@ useEffect(() => {
     if (autoSaveTimer) clearTimeout(autoSaveTimer)
     const timer = setTimeout(() => {
       if (quest?.id && code) {
-        localStorage.setItem(`forge_code_${quest.id}_${language}`, code)
+        localStorage.setItem(getStorageKey(quest.id, language), code)
+        // Also push to the backend so the draft survives a wiped browser,
+        // a crashed machine, or logging in from somewhere else --
+        // localStorage alone only protects the current browser profile.
+        api.put(`/api/problems/${quest.id}/draft`, { code, language })
+          .catch(err => console.error('Failed to save draft to server:', err))
         const saveIndicator = document.getElementById('save-indicator')
         if (saveIndicator) {
           saveIndicator.textContent = 'Saved'
@@ -306,7 +348,11 @@ useEffect(() => {
       }
       if ((e.ctrlKey || e.metaKey) && e.key === 's') {
         e.preventDefault()
-        localStorage.setItem(`forge_code_${quest?.id}_${language}`, code)
+        localStorage.setItem(getStorageKey(quest?.id, language), code)
+        if (quest?.id) {
+          api.put(`/api/problems/${quest.id}/draft`, { code, language })
+            .catch(err => console.error('Failed to save draft to server:', err))
+        }
         const saveIndicator = document.getElementById('save-indicator')
         if (saveIndicator) {
           saveIndicator.textContent = 'Saved!'
@@ -367,7 +413,7 @@ useEffect(() => {
       setOutput({
         ...data,
         status: data.passed === data.total ? 'accepted' : 'wrong_answer',
-        score: null,  
+        score: null,
         xp_earned: 0,
         is_run_mode: true  // flag so UI can show "Run result, not submitted"
       })
@@ -386,14 +432,14 @@ useEffect(() => {
   const handleTestCode = async () => {
     setIsLoading(true)
     setOutput(null)
-    
+
     // Clear previous markers
     if (monacoRef.current && editorRef.current) {
       monacoRef.current.editor.setModelMarkers(
         editorRef.current.getModel(), 'forge', []
       )
     }
-    
+
     try {
       const token = localStorage.getItem('token')
       const res = await fetch(`${API_BASE}/api/problems/${quest.id}/test`, {
@@ -404,7 +450,7 @@ useEffect(() => {
         },
         body: JSON.stringify({ code, language })
       })
-      
+
       if (res.ok) {
         const data = await res.json()
         setOutput({
@@ -412,13 +458,13 @@ useEffect(() => {
           status: 'test_mode',
           message: data.message
         })
-        
+
         // Highlight errors if any tests failed
         if (data.test_results) {
           const errorOutput = data.test_results.find(t => !t.passed)?.output || ''
           parseAndHighlightErrors(errorOutput, language)
         }
-        
+
         // Show feedback
         if (data.passed === data.total) {
           alert(`✅ All ${data.total} test cases passed! (Test mode)`)
@@ -454,12 +500,14 @@ useEffect(() => {
       // were used, so it always awarded full XP no matter what.
       const data = await api.post('/api/submissions', { problem_id: quest.id, code, language, used_hints: usedHints })
       setOutput({ ...data, is_run_mode: false })
-      
+
       // Save code to localStorage on submit
       if (quest?.id) {
-        localStorage.setItem(`forge_code_${quest.id}_${language}`, code)
+        localStorage.setItem(getStorageKey(quest.id, language), code)
+        api.put(`/api/problems/${quest.id}/draft`, { code, language })
+          .catch(err => console.error('Failed to save draft to server:', err))
       }
-      
+
       // Lock submit after ANY submission (accepted, error, partial, etc.)
       setHasSubmitted(true)
       setPriorSubmission(data)
@@ -475,7 +523,7 @@ useEffect(() => {
     } catch (err) {
       if (err.status === 409 || err.message?.includes('Already submitted')) {
         setHasSubmitted(true)
-        setOutput({ 
+        setOutput({
           error: 'You have already submitted this problem. Use Run to test your code.',
           status: 'error',
           is_run_mode: false
@@ -496,7 +544,9 @@ useEffect(() => {
       ? JSON.parse(quest.starter_code)
       : quest.starter_code
     setCode(starter[language] || '')
-    localStorage.removeItem(`forge_code_${quest.id}_${language}`)
+    localStorage.removeItem(getStorageKey(quest.id, language))
+    api.delete(`/api/problems/${quest.id}/draft?language=${language}`)
+      .catch(err => console.error('Failed to clear draft on server:', err))
     setShowResetConfirm(false)
   }
 
@@ -910,7 +960,7 @@ useEffect(() => {
               options={editorOptions}
               onMount={(editor, monaco) => {
                 editorRef.current = editor
-                monacoRef.current = monaco   
+                monacoRef.current = monaco
                 setTimeout(() => editor.layout(), 100)
               }}
             />
@@ -1066,4 +1116,4 @@ useEffect(() => {
       </div>{/* end main body grid */}
     </div>/* end root */
   )
-} 
+}
