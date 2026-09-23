@@ -82,6 +82,20 @@ function SandboxHealthBanner({ health }) {
   )
 }
 
+// localStorage here is shared by the whole browser -- without the
+// student's own id in the key, sandbox code and saved scrolls would leak
+// to whoever else uses the same machine/browser next. Falls back to
+// 'anon' only if there's genuinely no token yet.
+const getSandboxUid = () => {
+  const token = localStorage.getItem('token')
+  if (!token) return 'anon'
+  try {
+    return JSON.parse(atob(token.split('.')[1])).sub || 'anon'
+  } catch (err) {
+    return 'anon'
+  }
+}
+
 // ─── Arcane Sandbox Component (inline, no separate file) ──────────────────
 function ArcaneSandbox({ seedCode = null, seedLanguage = 'python', sandboxHealth }) {
   const [lang, setLang]                 = useState(seedLanguage)
@@ -99,7 +113,7 @@ function ArcaneSandbox({ seedCode = null, seedLanguage = 'python', sandboxHealth
   const savedAnchorRef     = useRef(null)
   const settingsAnchorRef  = useRef(null)
   const [savedScrolls, setSavedScrolls] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('arcane_saved') || '[]') } catch { return [] }
+    try { return JSON.parse(localStorage.getItem(`arcane_saved_${getSandboxUid()}`) || '[]') } catch { return [] }
   })
   const [saveDialog, setSaveDialog]     = useState(false)
   const [saveName, setSaveName]         = useState('')
@@ -119,14 +133,14 @@ function ArcaneSandbox({ seedCode = null, seedLanguage = 'python', sandboxHealth
   // Persist code per language
   useEffect(() => {
     if (!seedCode) {
-      const saved = localStorage.getItem(`arcane_code_${lang}`)
+      const saved = localStorage.getItem(`arcane_code_${getSandboxUid()}_${lang}`)
       setCode(saved || SPELL_TEMPLATES[lang]?.blank?.code || '')
     }
   }, [lang])
 
   // Save code to localStorage whenever it changes
   useEffect(() => {
-    if (!seedCode && code) localStorage.setItem(`arcane_code_${lang}`, code)
+    if (!seedCode && code) localStorage.setItem(`arcane_code_${getSandboxUid()}_${lang}`, code)
   }, [code, lang])
 
   // ResizeObserver — catches the editor's own box changing size (Monaco's
@@ -221,7 +235,7 @@ function ArcaneSandbox({ seedCode = null, seedLanguage = 'python', sandboxHealth
     const scroll = { id: Date.now(), name: saveName.trim(), code, language: lang, ts: new Date().toLocaleDateString() }
     const updated = [scroll, ...savedScrolls.slice(0, 7)]
     setSavedScrolls(updated)
-    localStorage.setItem('arcane_saved', JSON.stringify(updated))
+    localStorage.setItem(`arcane_saved_${getSandboxUid()}`, JSON.stringify(updated))
     setSaveName(''); setSaveDialog(false)
   }
 
@@ -381,7 +395,7 @@ function ArcaneSandbox({ seedCode = null, seedLanguage = 'python', sandboxHealth
                     </button>
                     <button onClick={() => {
                       const u = savedScrolls.filter(x => x.id !== s.id)
-                      setSavedScrolls(u); localStorage.setItem('arcane_saved', JSON.stringify(u))
+                      setSavedScrolls(u); localStorage.setItem(`arcane_saved_${getSandboxUid()}`, JSON.stringify(u))
                     }} className="text-slate-600 hover:text-red-400 text-xs transition">✕</button>
                   </div>
                 ))
@@ -590,16 +604,16 @@ function ArcaneSandbox({ seedCode = null, seedLanguage = 'python', sandboxHealth
 // heads up to myself: the tabs got renamed a while back ('quests' -> 'subjects')
 // so anything setting activeTab needs to use 'subjects', not the old name
 export default function StudentDashboard({ user, onLogout }) {
-  const [activeTab, setActiveTab]             = useState('subjects')  
+  const [activeTab, setActiveTab]             = useState('subjects')
   const [selectedQuest, setSelectedQuest]     = useState(null)
   const [heroStats, setHeroStats]             = useState(null)
   const [loading, setLoading]                 = useState(true)
   const [showProfileMenu, setShowProfileMenu] = useState(false)
   const [showNotifications, setShowNotifications] = useState(false)
-  const [sandboxSeed, setSandboxSeed]         = useState(null)  
-  const [sandboxHealth, setSandboxHealth]     = useState(null)  
-  const [selectedSection, setSelectedSection]   = useState(null)  
-  const [courseTab, setCourseTab] = useState('lessons') 
+  const [sandboxSeed, setSandboxSeed]         = useState(null)
+  const [sandboxHealth, setSandboxHealth]     = useState(null)
+  const [selectedSection, setSelectedSection]   = useState(null)
+  const [courseTab, setCourseTab] = useState('lessons')
 
   const profileRef      = useRef(null)
   const notificationRef = useRef(null)
@@ -684,7 +698,7 @@ export default function StudentDashboard({ user, onLogout }) {
   const handleQuestSelect = (quest) => {
   console.log(`📚 Selected quest: ${quest.id} - ${quest.title}`)
   // Check if this quest is already completed
-  const isCompleted = localStorage.getItem(`quest_completed_${quest.id}`)
+  const isCompleted = localStorage.getItem(`quest_completed_${user?.username || 'anon'}_${quest.id}`)
   if (isCompleted === 'true') {
     console.log(`✅ Quest ${quest.id} is already completed!`)
   }
@@ -695,10 +709,10 @@ export default function StudentDashboard({ user, onLogout }) {
   const handleVictory = (xpEarned, newLevel) => {
   // Mark quest as completed in localStorage
   if (selectedQuest?.id) {
-    localStorage.setItem(`quest_completed_${selectedQuest.id}`, 'true')
+    localStorage.setItem(`quest_completed_${user?.username || 'anon'}_${selectedQuest.id}`, 'true')
     console.log(`✅ Quest ${selectedQuest.id} marked as completed`)
   }
-  
+
   setHeroStats(prev => ({ ...prev, total_xp: (prev?.total_xp || 0) + xpEarned, level: newLevel }))
 }
 
@@ -710,14 +724,14 @@ export default function StudentDashboard({ user, onLogout }) {
     setActiveTab('sandbox')
   }
   const handleLogoutClick = () => { setShowProfileMenu(false); onLogout() }
-  
+
   // Navigation handlers for nested subject view
   const handleEnterSubject = (subject) => {
     console.log('📚 Entering subject:', subject)
   // subject contains: { id, name, section_id, section_no, semester, instructor }
     setSelectedSection({
-      id: subject.section_id,        
-      section_code: subject.section_no, 
+      id: subject.section_id,
+      section_code: subject.section_no,
       name: subject.name,
       semester: subject.semester,
       instructor: subject.instructor,
@@ -1080,11 +1094,11 @@ export default function StudentDashboard({ user, onLogout }) {
           <>
             {/* ================= MODE 2: COURSE VIEW (Subject Selected) ================= */}
             <div className="animate-fade-in space-y-6">
-            
+
             {/* Course Header */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-900/50 p-4 rounded-xl border border-purple-600/30">
               <div className="flex items-center gap-4">
-                <button 
+                <button
                   onClick={handleExitSubject}
                   className="px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-sm font-bold transition flex items-center gap-2 shrink-0"
                 >
@@ -1109,8 +1123,8 @@ export default function StudentDashboard({ user, onLogout }) {
                   key={tab.id}
                   onClick={() => setCourseTab(tab.id)}
                   className={`px-4 py-2 rounded-lg font-semibold transition whitespace-nowrap ${
-                    courseTab === tab.id 
-                      ? 'bg-purple-600 text-white shadow-lg shadow-purple-600/50' 
+                    courseTab === tab.id
+                      ? 'bg-purple-600 text-white shadow-lg shadow-purple-600/50'
                       : 'text-slate-400 hover:text-white hover:bg-slate-800'
                   }`}
                 >
@@ -1127,20 +1141,20 @@ export default function StudentDashboard({ user, onLogout }) {
               {courseTab === 'lessons' && (
                 <StudentLessons subjectId={selectedSection.subject_id} sectionId={selectedSection.id} sectionName={selectedSection.name} />
               )}
-              
+
               {courseTab === 'announcements' && (
                 <StudentAnnouncements classId={selectedSection.id} sectionName={selectedSection.name} />
               )}
               {courseTab === 'board' && (
-                <ProblemList 
-                  onSelectQuest={handleQuestSelect} 
+                <ProblemList
+                  onSelectQuest={handleQuestSelect}
                   currentLevel={heroStats?.level || 1}
                   sectionId={selectedSection.id}
                   subjectId={selectedSection.subject_id}
                 />
               )}
               {courseTab === 'log' && (
-                <QuestLog 
+                <QuestLog
                   sectionId={selectedSection.id}
                 />
               )}

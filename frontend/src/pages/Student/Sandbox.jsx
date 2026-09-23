@@ -2,6 +2,20 @@ import { useState, useEffect, useRef } from 'react'
 import Editor from '@monaco-editor/react'
 import { api } from '../../api/client'
 
+// localStorage here is shared by the whole browser -- without the
+// student's own id in the key, sandbox code and saved scrolls would leak
+// to whoever else uses the same machine/browser next. Falls back to
+// 'anon' only if there's genuinely no token yet.
+const getUid = () => {
+  const token = localStorage.getItem('token')
+  if (!token) return 'anon'
+  try {
+    return JSON.parse(atob(token.split('.')[1])).sub || 'anon'
+  } catch (err) {
+    return 'anon'
+  }
+}
+
 // ─── Starter spell templates ───────────────────────────────────────────────
 const SPELL_TEMPLATES = {
   python: {
@@ -29,7 +43,7 @@ const SPELL_TEMPLATES = {
 const LANG_META = {
   python: { icon: '🐍', label: 'Python', ext: 'py', color: 'from-cyan-500 to-blue-600' },
   java:   { icon: '☕', label: 'Java',   ext: 'java', color: 'from-orange-500 to-red-600' },
-  csharp: { icon: '🔷', label: 'C#',     ext: 'cs', color: 'from-purple-500 to-pink-600' }, 
+  csharp: { icon: '🔷', label: 'C#',     ext: 'cs', color: 'from-purple-500 to-pink-600' },
 }
 
 const TEMPLATE_LABELS = {
@@ -112,7 +126,7 @@ export default function Sandbox({ onClose, initialCode = null, initialLanguage =
   const [showSettings, setShowSettings]  = useState(false)
   const [fontSize, setFontSize]           = useState(14)
   const [savedScrolls, setSavedScrolls]  = useState(() => {
-    try { return JSON.parse(localStorage.getItem('sandbox_saved') || '[]') } catch { return [] }
+    try { return JSON.parse(localStorage.getItem(`sandbox_saved_${getUid()}`) || '[]') } catch { return [] }
   })
   const [saveNameInput, setSaveNameInput] = useState('')
   const [showSaveDialog, setShowSaveDialog] = useState(false)
@@ -210,7 +224,7 @@ export default function Sandbox({ onClose, initialCode = null, initialLanguage =
   // ── Persist sandbox code across refreshes ─────────────────────────────
   useEffect(() => {
     if (!initialCode) {
-      const saved = localStorage.getItem(`sandbox_code_${language}`)
+      const saved = localStorage.getItem(`sandbox_code_${getUid()}_${language}`)
       if (saved) setCode(saved)
     }
   }, [language])
@@ -218,7 +232,7 @@ export default function Sandbox({ onClose, initialCode = null, initialLanguage =
   // Save code to localStorage whenever it changes
   useEffect(() => {
     if (!initialCode && code !== SPELL_TEMPLATES[language]?.blank) {
-      localStorage.setItem(`sandbox_code_${language}`, code)
+      localStorage.setItem(`sandbox_code_${getUid()}_${language}`, code)
     }
   }, [code, language])
 
@@ -242,7 +256,7 @@ export default function Sandbox({ onClose, initialCode = null, initialLanguage =
     }
     const updated = [scroll, ...savedScrolls.slice(0, 7)]
     setSavedScrolls(updated)
-    localStorage.setItem('sandbox_saved', JSON.stringify(updated))
+    localStorage.setItem(`sandbox_saved_${getUid()}`, JSON.stringify(updated))
     setSaveNameInput('')
     setShowSaveDialog(false)
   }
@@ -258,7 +272,7 @@ export default function Sandbox({ onClose, initialCode = null, initialLanguage =
   const deleteScroll = (id) => {
     const updated = savedScrolls.filter(s => s.id !== id)
     setSavedScrolls(updated)
-    localStorage.setItem('sandbox_saved', JSON.stringify(updated))
+    localStorage.setItem(`sandbox_saved_${getUid()}`, JSON.stringify(updated))
   }
 
   // ── Download code ──────────────────────────────────────────────────────
@@ -727,4 +741,4 @@ export default function Sandbox({ onClose, initialCode = null, initialLanguage =
       `}</style>
     </div>
   )
-} 
+}
