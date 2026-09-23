@@ -31,7 +31,7 @@ export default function Auth({ onLogin }) {
   e.preventDefault()
   setError('')
   setLoading(true)
-  
+
   try {
     const res = await fetch(`${API_BASE}/api/auth/login`, {
       method: 'POST',
@@ -39,7 +39,7 @@ export default function Auth({ onLogin }) {
       body: JSON.stringify({ username: formData.username, password: formData.password })
     })
     const data = await res.json()
-    
+
     if (res.status === 423) {
       setLockedInfo(data)
       setCountdown(data.remaining_seconds || 900)
@@ -62,7 +62,7 @@ export default function Auth({ onLogin }) {
       setLoading(false)
       return
     }
-    
+
     // Save tokens
     localStorage.setItem('token', data.access_token)
     localStorage.setItem('user', JSON.stringify(data.user))
@@ -103,7 +103,8 @@ export default function Auth({ onLogin }) {
               left: `${Math.random() * 100}%`,
               top: `${Math.random() * 100}%`,
               animationDelay: `${Math.random() * 5}s`,
-              animationDuration: `${5 + Math.random() * 10}s`
+              animationDuration: `${5 + Math.random() * 10}s`,
+              transition: 'left 1.8s ease-in-out, top 1.8s ease-in-out'
             }}
           ></div>
         ))}
@@ -112,7 +113,7 @@ export default function Auth({ onLogin }) {
       <div className="relative z-10 w-full max-w-md">
         {/* Form Container */}
         <div className="bg-slate-900/90 backdrop-blur-xl rounded-2xl border-2 border-purple-600/30 shadow-2xl shadow-purple-600/20 overflow-hidden">
-          
+
           {/* Header */}
           <div className="bg-gradient-to-r from-purple-600/20 to-pink-600/20 p-4 sm:p-6 border-b border-purple-600/30">
             <div className="flex items-center justify-center gap-3 mb-1.5 sm:mb-2">
@@ -137,7 +138,7 @@ export default function Auth({ onLogin }) {
                   <p className="text-red-300 font-black text-sm">Account Locked</p>
                 </div>
                 <p className="text-slate-300 text-xs leading-relaxed">
-                  Your account has been locked after <strong>3 failed attempts</strong>. 
+                  Your account has been locked after <strong>3 failed attempts</strong>.
                   Please contact your administrator to unlock your account.
                 </p>
                 <div className="flex items-center gap-2 p-2 bg-slate-800/60 rounded-lg">
@@ -206,8 +207,8 @@ export default function Auth({ onLogin }) {
             </div>
 
             {/* Submit Button */}
-            <button 
-              type="submit" 
+            <button
+              type="submit"
               disabled={loading}
               className="w-full py-3 sm:py-4 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-lg font-black text-sm sm:text-lg transition transform hover:scale-[1.02] shadow-xl shadow-purple-600/30 disabled:opacity-50 disabled:cursor-not-allowed border-2 border-purple-400/30 uppercase tracking-wider"
             >
