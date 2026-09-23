@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { API_BASE } from '../api/client'
 
 // minimalist line-art eye icons for the password show/hide toggle
@@ -20,6 +20,24 @@ function EyeOffIcon({ size = 18 }) {
 }
 
 export default function Auth({ onLogin }) {
+  // Small drifting particles -- position/timing rolled once on mount, not
+  // on every render, so typing in the form doesn't reshuffle them.
+  const particles = useMemo(() => Array.from({ length: 28 }, () => ({
+    left: Math.random() * 100,
+    top: Math.random() * 100,
+    size: 2 + Math.random() * 3,
+    delay: Math.random() * 8,
+    duration: 10 + Math.random() * 14,
+  })), [])
+
+  // Large soft glow orbs for depth in the background -- fewer, bigger,
+  // slower, so they read as ambient lighting rather than more particles.
+  const orbs = useMemo(() => [
+    { left: 12, top: 18, size: 380, color: 'rgba(168, 85, 247, 0.18)', duration: 22, delay: 0 },
+    { left: 78, top: 65, size: 460, color: 'rgba(236, 72, 153, 0.14)', duration: 26, delay: 3 },
+    { left: 55, top: 10, size: 300, color: 'rgba(99, 102, 241, 0.16)', duration: 30, delay: 6 },
+  ], [])
+
   const [formData, setFormData] = useState({ username: '', password: '' })
   const [error, setError] = useState('')
   const [lockedInfo, setLockedInfo] = useState(null)
@@ -95,16 +113,32 @@ export default function Auth({ onLogin }) {
     <div className="min-h-screen bg-gradient-to-b from-slate-950 via-purple-950/20 to-slate-950 flex items-center justify-center p-4 relative overflow-hidden">
       {/* Animated background */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        {[...Array(15)].map((_, i) => (
+        {orbs.map((orb, i) => (
           <div
-            key={i}
-            className="absolute w-2 h-2 bg-purple-500/20 rounded-full animate-float"
+            key={`orb-${i}`}
+            className="absolute rounded-full blur-3xl animate-drift"
             style={{
-              left: `${Math.random() * 100}%`,
-              top: `${Math.random() * 100}%`,
-              animationDelay: `${Math.random() * 5}s`,
-              animationDuration: `${5 + Math.random() * 10}s`,
-              transition: 'left 1.8s ease-in-out, top 1.8s ease-in-out'
+              left: `${orb.left}%`,
+              top: `${orb.top}%`,
+              width: `${orb.size}px`,
+              height: `${orb.size}px`,
+              background: orb.color,
+              animationDuration: `${orb.duration}s`,
+              animationDelay: `${orb.delay}s`,
+            }}
+          ></div>
+        ))}
+        {particles.map((p, i) => (
+          <div
+            key={`particle-${i}`}
+            className="absolute bg-purple-400/30 rounded-full animate-float"
+            style={{
+              left: `${p.left}%`,
+              top: `${p.top}%`,
+              width: `${p.size}px`,
+              height: `${p.size}px`,
+              animationDelay: `${p.delay}s`,
+              animationDuration: `${p.duration}s`,
             }}
           ></div>
         ))}
@@ -249,11 +283,23 @@ export default function Auth({ onLogin }) {
       {/* Custom CSS */}
       <style>{`
         @keyframes float {
-          0%, 100% { transform: translateY(0px); }
-          50% { transform: translateY(-20px); }
+          0%   { transform: translate(0px, 0px); }
+          25%  { transform: translate(12px, -18px); }
+          50%  { transform: translate(-6px, -32px); }
+          75%  { transform: translate(-14px, -12px); }
+          100% { transform: translate(0px, 0px); }
         }
         .animate-float {
-          animation: float 6s ease-in-out infinite;
+          animation: float 12s ease-in-out infinite;
+        }
+        @keyframes drift {
+          0%   { transform: translate(0px, 0px) scale(1); }
+          33%  { transform: translate(40px, -30px) scale(1.1); }
+          66%  { transform: translate(-30px, 25px) scale(0.95); }
+          100% { transform: translate(0px, 0px) scale(1); }
+        }
+        .animate-drift {
+          animation: drift 24s ease-in-out infinite;
         }
       `}</style>
     </div>
