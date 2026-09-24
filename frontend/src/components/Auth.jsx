@@ -148,7 +148,7 @@ export default function Auth({ onLogin }) {
       {/* Back to landing */}
       <Link
         to="/"
-        className="group absolute top-4 left-4 sm:top-6 sm:left-6 z-20 flex items-center gap-2 pl-3 pr-4 py-2 rounded-full bg-slate-900/60 backdrop-blur-md border border-purple-500/30 text-slate-300 text-sm font-medium hover:text-white hover:border-purple-400/60 hover:bg-slate-900/80 transition-all duration-300 shadow-lg shadow-black/20"
+        className="group absolute top-4 left-4 sm:top-6 sm:left-6 z-20 flex items-center gap-2 pl-4 pr-5 min-h-[44px] rounded-full bg-slate-900/60 backdrop-blur-md border border-purple-500/30 text-slate-300 text-sm font-medium hover:text-white hover:border-purple-400/60 hover:bg-slate-900/80 transition-all duration-300 shadow-lg shadow-black/20"
       >
         <svg
           width="16"
