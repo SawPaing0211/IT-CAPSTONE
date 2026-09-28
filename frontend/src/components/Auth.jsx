@@ -150,23 +150,9 @@ export default function Auth({ onLogin }) {
       <button
         type="button"
         onClick={() => navigate('/')}
-        className="group absolute top-4 left-4 sm:top-6 sm:left-6 z-20 flex items-center gap-2 pl-4 pr-5 min-h-[44px] rounded-full bg-slate-900/60 backdrop-blur-md border border-purple-500/30 text-slate-300 text-sm font-medium hover:text-white hover:border-purple-400/60 hover:bg-slate-900/80 transition-all duration-300 shadow-lg shadow-black/20"
+        className="absolute top-6 left-6 text-purple-300 hover:text-white transition z-20 font-bold text-lg"
       >
-        <svg
-          width="16"
-          height="16"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth={2.2}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          className="transition-transform duration-300 group-hover:-translate-x-1"
-        >
-          <path d="M19 12H5" />
-          <path d="M11 18l-6-6 6-6" />
-        </svg>
-        Back
+        ← Back
       </button>
 
       <div className="relative z-10 w-full max-w-md">
