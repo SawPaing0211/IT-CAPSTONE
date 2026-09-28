@@ -1,23 +1,7 @@
-import { useState } from 'react'
-import Auth from "./Auth";
+import { useNavigate } from 'react-router-dom'
 
-export default function Landing({ onLogin }) {
-  const [showAuth, setShowAuth] = useState(false)
-  const [authMode, setAuthMode] = useState('login')
-
-  if (showAuth) {
-    return (
-      <div className="relative">
-        <button 
-          onClick={() => setShowAuth(false)}
-          className="absolute top-6 left-6 text-purple-300 hover:text-white transition z-10 font-bold text-lg"
-        >
-          ← Back
-        </button>
-        <Auth onLogin={onLogin} initialMode={authMode} />
-      </div>
-    )
-  }
+export default function Landing() {
+  const navigate = useNavigate()
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-950 via-purple-950/30 to-slate-950 text-white relative overflow-hidden">
@@ -53,7 +37,7 @@ export default function Landing({ onLogin }) {
           </div>
           <div className="flex gap-3">
             <button
-              onClick={() => { setAuthMode('login'); setShowAuth(true) }}
+              onClick={() => navigate('/auth')}
               className="px-3 py-1.5 sm:px-6 sm:py-3 text-xs sm:text-base bg-slate-800/80 hover:bg-slate-700 border-2 border-slate-600 hover:border-purple-500 rounded-lg transition font-bold shadow-lg"
             >
               🎮 Login
@@ -93,7 +77,7 @@ export default function Landing({ onLogin }) {
             {/* CTA Buttons - Game Menu Style */}
             <div className="flex flex-col sm:flex-row gap-3 sm:gap-5 justify-center mb-8 sm:mb-20">
               <button
-                onClick={() => { setAuthMode('login'); setShowAuth(true) }}
+                onClick={() => navigate('/auth')}
                 className="group relative px-6 py-3.5 sm:px-8 sm:py-4 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-xl font-black text-sm sm:text-base transition transform hover:scale-105 shadow-2xl shadow-purple-600/50 border-2 sm:border-4 border-purple-400/30"
               >
                 <span className="flex items-center justify-center gap-2 sm:gap-3">

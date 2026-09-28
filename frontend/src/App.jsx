@@ -93,7 +93,7 @@ function AppContent() {
   return (
     <Routes>
       {/* Public Routes */}
-      <Route path="/" element={<Landing onLogin={() => navigate('/auth')} />} />
+      <Route path="/" element={<Landing />} />
       <Route path="/auth" element={<Auth onLogin={handleLogin} />} />
 
       {/* instructor side, uses <Outlet/> so these tabs are real pages */}
