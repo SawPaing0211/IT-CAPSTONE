@@ -60,6 +60,10 @@ free one at [aistudio.google.com](https://aistudio.google.com), paste it
 into `backend/.env`, and restart the server.
 
 ```bash
+# Check the database first (read-only), then create/upgrade it ONLY when you mean to
+python manage_schema.py status
+python manage_schema.py upgrade      # see docs/SCHEMA_UPGRADE.md; back up first
+
 # Run the backend server
 python app.py
 ```
