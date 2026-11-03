@@ -9,55 +9,29 @@
 //
 // filter tabs: All/Earned/In Progress/Locked. sort by default/xp/progress.
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useRef } from 'react'
 import MobileSheet from '../../components/MobileSheet'
 import AchievementBadge from '../../components/AchievementBadge'
-import { API_BASE } from '../../api/client'
-
-const API = API_BASE
+import useAchievements from '../../hooks/useAchievements'
+import { splitAchievements } from '../../utils/achievementView'
 
 const SORT_LABELS = { default: 'Default', xp: 'XP Reward', progress: 'Progress' }
 
 export default function InstructorAchievements() {
-  const [achievements, setAchievements] = useState([])
-  const [loading, setLoading]           = useState(true)
-  const [error, setError]               = useState(null)
   const [filter, setFilter]             = useState('all')
   const [sortBy, setSortBy]             = useState('default')
   const [showSortMenu, setShowSortMenu] = useState(false)
   const sortMenuRef = useRef(null)
 
-  // Fetch instructor achievements on mount
-  useEffect(() => {
-    const fetchAchievements = async () => {
-      setLoading(true)
-      setError(null)
-      try {
-        const token = localStorage.getItem('token')
-        if (!token) throw new Error('Not authenticated')
-        const res = await fetch(`${API}/api/instructor/achievements`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        })
-        if (res.status === 401) { localStorage.removeItem('token'); window.location.href = '/'; return }
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}))
-          throw new Error(err.error || 'Failed to fetch achievements')
-        }
-        setAchievements(await res.json())
-      } catch (err) {
-        console.error('Failed to fetch instructor achievements:', err)
-        setError(err.message)
-      } finally {
-        setLoading(false)
-      }
-    }
-    fetchAchievements()
-  }, [])
+  // Shared user-scoped store (celebrations are queued app-wide from just_earned).
+  const { achievements, loading, error, reload } = useAchievements()
 
   // Split achievements into earned, in-progress, and locked groups
-  const earned     = achievements.filter(a => a.is_earned)
-  const inProgress = achievements.filter(a => !a.is_earned && a.progress > 0)
-  const locked     = achievements.filter(a => !a.is_earned && a.progress === 0)
+  const split      = splitAchievements(achievements)
+  const earned     = split.earned
+  const unavailable = split.unavailable
+  const inProgress = split.locked.filter(a => a.progress > 0)
+  const locked     = split.locked.filter(a => !(a.progress > 0))
   const totalXP    = earned.reduce((sum, a) => sum + a.xp_reward, 0)
 
   // Filter achievements by the selected tab, then sort by the chosen order
@@ -66,6 +40,7 @@ export default function InstructorAchievements() {
       filter === 'earned'   ? earned :
       filter === 'progress' ? inProgress :
       filter === 'locked'   ? locked :
+      filter === 'unavailable' ? unavailable :
       achievements
 
     if (sortBy === 'xp') {
@@ -103,8 +78,8 @@ export default function InstructorAchievements() {
   if (error) return (
     <div className="flex flex-col items-center justify-center py-20 gap-4">
       <span className="text-5xl">⚠️</span>
-      <p className="text-red-400 font-semibold">{error}</p>
-      <button onClick={() => window.location.reload()} className="px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 text-sm font-medium transition">
+      <p className="text-red-400 font-semibold">{error.message || 'Failed to fetch achievements'}</p>
+      <button onClick={() => reload().catch(() => {})} className="px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 text-sm font-medium transition">
         🔄 Retry
       </button>
     </div>
@@ -121,7 +96,7 @@ export default function InstructorAchievements() {
         </div>
         {achievements.length > 0 && (
           <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-purple-500/10 border border-purple-500/20 rounded-lg">
-            <span className="text-purple-400 text-xs font-bold">{earned.length}/{achievements.length} Earned</span>
+            <span className="text-purple-400 text-xs font-bold">{earned.length}/{split.denominator} Earned</span>
           </div>
         )}
       </div>
@@ -142,23 +117,23 @@ export default function InstructorAchievements() {
       </div>
 
       {/* Overall progress bar */}
-      {achievements.length > 0 && (
+      {split.denominator > 0 && (
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3 sm:p-5">
           <div className="flex items-center justify-between mb-3">
             <p className="text-white font-semibold text-sm">Overall Completion</p>
             <p className="text-slate-400 text-sm tabular-nums">
-              {Math.round((earned.length / achievements.length) * 100)}%
+              {Math.round((earned.length / split.denominator) * 100)}%
             </p>
           </div>
           <div className="w-full h-3 bg-slate-800 rounded-full overflow-hidden">
             <div
               className="h-full bg-gradient-to-r from-purple-600 via-blue-500 to-cyan-400 rounded-full transition-all duration-1000"
-              style={{ width: `${(earned.length / achievements.length) * 100}%` }}
+              style={{ width: `${(earned.length / split.denominator) * 100}%` }}
             />
           </div>
           <div className="flex justify-between text-xs text-slate-600 mt-1.5">
             <span>0</span>
-            <span>{achievements.length} total</span>
+            <span>{split.denominator} total</span>
           </div>
         </div>
       )}
@@ -171,6 +146,7 @@ export default function InstructorAchievements() {
             { key: 'earned',   label: `Earned (${earned.length})` },
             { key: 'progress', label: `In Progress (${inProgress.length})` },
             { key: 'locked',   label: `Locked (${locked.length})` },
+            ...(unavailable.length ? [{ key: 'unavailable', label: `Not available yet (${unavailable.length})` }] : []),
           ].map(tab => (
             <button
               key={tab.key}

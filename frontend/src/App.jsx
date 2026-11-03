@@ -1,6 +1,6 @@
 // note to self: instructor dashboard uses routes + <Outlet/> so tabs get real URLs. student/admin dashboards just switch tabs internally, no child routes for those two.
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useLayoutEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom'
 
 // Public Components
@@ -26,13 +26,31 @@ import CourseMaterials from './pages/Instructor/CourseMaterials'
 import ProblemSubmissions from './pages/Instructor/ProblemSubmissions'
 import InstructorAchievements from './pages/Instructor/InstructorAchievements'
 import { API_BASE } from './api/client'
+import ChangePasswordModal from './components/ChangePasswordModal'
+import { CHANGE_PASSWORD_EVENT } from './utils/accountEvents'
+import { achievementStore } from './utils/achievementStore'
+import AchievementCelebrations from './components/AchievementCelebrations'
 
 // student/admin sub-pages are handled inside those dashboards themselves, not routed here
 
 function AppContent() {
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [showChangePw, setShowChangePw] = useState(false)
   const navigate = useNavigate()
+
+  // every role's account menu opens the same dialog
+  useEffect(() => {
+    const open = () => setShowChangePw(true)
+    window.addEventListener(CHANGE_PASSWORD_EVENT, open)
+    return () => window.removeEventListener(CHANGE_PASSWORD_EVENT, open)
+  }, [])
+
+  // a demo server (simulated code runner) says so; real servers report 'docker-sandbox'
+  const [simulatedRunner, setSimulatedRunner] = useState(false)
+  useEffect(() => {
+    fetch(`${API_BASE}/api/health`).then(r => r.json()).then(h => setSimulatedRunner(h.execution_mode === 'demo-stub')).catch(() => {})
+  }, [])
 
   useEffect(() => {
     const token = localStorage.getItem('token')
@@ -45,11 +63,13 @@ function AppContent() {
           if (data.id) setUser(data);
           else {
             localStorage.removeItem('token')
+            localStorage.removeItem('refresh_token')
             navigate('/auth')
           }
         })
         .catch(() => {
           localStorage.removeItem('token')
+          localStorage.removeItem('refresh_token')
           navigate('/auth')
         })
         .finally(() => setLoading(false))
@@ -66,8 +86,15 @@ function AppContent() {
     else if (userData.role === 'administrator') navigate('/admin')
   }
 
+  // The celebration queue/cache belong to exactly one signed-in account.
+  useLayoutEffect(() => {
+    achievementStore.setOwner(user && !user.must_change_password ? { id: user.id, role: user.role } : null)
+  }, [user?.id, user?.role, user?.must_change_password])
+
   const handleLogout = () => {
+    achievementStore.clear()
     localStorage.removeItem('token')
+    localStorage.removeItem('refresh_token')
     setUser(null)
     navigate('/')
   }
@@ -90,7 +117,30 @@ function AppContent() {
     )
   }
 
+  const mustChange = !!(user && user.must_change_password)
+
   return (
+    <>
+    {simulatedRunner && (
+      <div className="fixed top-0 inset-x-0 z-[100000] bg-amber-500 text-black text-xs font-bold text-center py-1 pointer-events-none">
+        DEMO: code results are simulated, not produced by the real sandbox
+      </div>
+    )}
+    {mustChange && (
+      <ChangePasswordModal
+        forced
+        onChanged={() => setUser(u => ({ ...u, must_change_password: false }))}
+        onLogout={handleLogout}
+      />
+    )}
+    {showChangePw && !mustChange && (
+      <ChangePasswordModal onClose={() => setShowChangePw(false)} onChanged={() => setTimeout(() => setShowChangePw(false), 1200)} />
+    )}
+    <AchievementCelebrations />
+    {mustChange ? (
+      // nothing else is mounted until the temporary password is replaced: every other API call is refused meanwhile
+      <div className="min-h-screen bg-slate-950" />
+    ) : (
     <Routes>
       {/* Public Routes */}
       <Route path="/" element={<Landing />} />
@@ -142,6 +192,8 @@ function AppContent() {
       {/* Catch All */}
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+    )}
+    </>
   )
 }
 

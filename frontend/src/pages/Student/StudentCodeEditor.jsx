@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import Editor from '@monaco-editor/react'
 import { api, API_BASE} from '../../api/client'
 import DownloadIcon from '../../components/DownloadIcon'
+import { achievementStore } from '../../utils/achievementStore'
 
 export default function StudentCodeEditor({
   quest,
@@ -33,6 +34,21 @@ export default function StudentCodeEditor({
 
   const [code, setCode] = useState('')
   const [language, setLanguage] = useState('python')
+
+  // Keep the active language valid for this quest. 'python' above is only a
+  // starting guess -- it's correct for most quests, but a quest that
+  // doesn't offer Python (e.g. Java-only) would otherwise keep sending
+  // 'python' to Run/Submit forever, since nothing else ever corrects it:
+  // the single remaining tab renders as if selected, but the state behind
+  // it never actually moves off the initial default unless a student
+  // clicks a tab -- and clicking the only tab there is produces no visible
+  // change, so there's no cue to do it. Previously this silently graded
+  // valid Java/C# submissions as Python syntax errors.
+  useEffect(() => {
+    if (quest?.languages?.length && !quest.languages.includes(language)) {
+      setLanguage(quest.languages[0])
+    }
+  }, [quest?.id, quest?.languages])
   const [output, setOutput] = useState(null)
   const [isLoading, setIsLoading] = useState(false)
   const [activeTab, setActiveTab] = useState('problem')
@@ -41,6 +57,8 @@ export default function StudentCodeEditor({
   const [mobilePanel, setMobilePanel] = useState('problem')
   const [showHints, setShowHints] = useState(false)
   const [usedHints, setUsedHints] = useState([])
+  // hint text is only sent by the server once a hint is revealed: { [index]: text }
+  const [hintTexts, setHintTexts] = useState({})
   const [xpGained, setXpGained] = useState(0)
   const [userRole, setUserRole] = useState(null)
   const [isQuestCompleted, setIsQuestCompleted] = useState(false)
@@ -51,6 +69,7 @@ export default function StudentCodeEditor({
   const [combo, setCombo] = useState(0)
   const [autoSaveTimer, setAutoSaveTimer] = useState(null)
   const [showResetConfirm, setShowResetConfirm] = useState(false)
+  const [showSubmitConfirm, setShowSubmitConfirm] = useState(false)
   const editorRef = useRef(null)
   const editorContainerRef = useRef(null)
   const monacoRef = useRef(null)
@@ -310,6 +329,7 @@ useEffect(() => {
       try {
         const res = await api.get(`/api/problems/${quest.id}/hints/revealed`)
         setUsedHints(res.revealed || [])
+        setHintTexts(res.texts || {})
       } catch (err) {
         console.error('Failed to load revealed hints:', err)
       }
@@ -321,7 +341,7 @@ useEffect(() => {
   useEffect(() => {
     if (autoSaveTimer) clearTimeout(autoSaveTimer)
     const timer = setTimeout(() => {
-      if (quest?.id && code) {
+      if (quest?.id && code && !hasSubmitted) {
         localStorage.setItem(getStorageKey(quest.id, language), code)
         // Also push to the backend so the draft survives a wiped browser,
         // a crashed machine, or logging in from somewhere else --
@@ -337,7 +357,7 @@ useEffect(() => {
     }, 5000)
     setAutoSaveTimer(timer)
     return () => clearTimeout(timer)
-  }, [code, quest, language])
+  }, [code, quest, language, hasSubmitted])
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -348,6 +368,7 @@ useEffect(() => {
       }
       if ((e.ctrlKey || e.metaKey) && e.key === 's') {
         e.preventDefault()
+        if (hasSubmitted) return
         localStorage.setItem(getStorageKey(quest?.id, language), code)
         if (quest?.id) {
           api.put(`/api/problems/${quest.id}/draft`, { code, language })
@@ -501,16 +522,17 @@ useEffect(() => {
       const data = await api.post('/api/submissions', { problem_id: quest.id, code, language, used_hints: usedHints })
       setOutput({ ...data, is_run_mode: false })
 
-      // Save code to localStorage on submit
-      if (quest?.id) {
-        localStorage.setItem(getStorageKey(quest.id, language), code)
-        api.put(`/api/problems/${quest.id}/draft`, { code, language })
-          .catch(err => console.error('Failed to save draft to server:', err))
-      }
+      // The graded code is stored with the submission itself. The server locks the
+      // draft once a final submission exists, so nothing is written here.
 
       // Lock submit after ANY submission (accepted, error, partial, etc.)
       setHasSubmitted(true)
       setPriorSubmission(data)
+
+      // The submission is committed at this point. Ask for achievements in the
+      // background: the store never rejects, and nothing here can turn a
+      // committed submit into a reported failure.
+      achievementStore.refreshAfterSubmit()
 
       if (data.status === 'accepted') {
         setIsQuestCompleted(true)
@@ -537,7 +559,7 @@ useEffect(() => {
   }
 
   // Reset the code back to the quest's starter template
-  const handleReset = () => setShowResetConfirm(true)
+  const handleReset = () => { if (!hasSubmitted) setShowResetConfirm(true) }
 
   const confirmReset = () => {
     const starter = typeof quest.starter_code === 'string'
@@ -562,11 +584,12 @@ useEffect(() => {
 
   const handleUseHint = async (hintId) => {
     if (usedHints.includes(hintId)) return
-    setUsedHints([...usedHints, hintId])
-    // records the reveal on the server right away, so it's permanent
-    // the moment it happens rather than only living in this browser tab
+    // records the reveal on the server first: it's permanent once recorded,
+    // and the server is also what sends back the hint text
     try {
-      await api.post(`/api/problems/${quest.id}/hints/${hintId}/reveal`, {})
+      const res = await api.post(`/api/problems/${quest.id}/hints/${hintId}/reveal`, {})
+      setHintTexts(prev => ({ ...prev, [hintId]: res?.text ?? '' }))
+      setUsedHints(prev => (prev.includes(hintId) ? prev : [...prev, hintId]))
     } catch (err) {
       console.error('Failed to record hint reveal:', err)
     }
@@ -641,6 +664,31 @@ useEffect(() => {
             >
               Continue Adventure
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Final-submission confirmation: Submit is graded once and cannot be repeated */}
+      {showSubmitConfirm && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[9999] flex items-center justify-center px-4" role="dialog" aria-modal="true">
+          <div className="bg-slate-900 border-2 border-green-600/50 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
+            <h3 className="font-bold text-white mb-2">⚔️ Submit your final answer?</h3>
+            <p className="text-sm text-slate-400 mb-4">
+              This is graded once and cannot be submitted again. Use <b>Run</b> as many times as you like to test
+              your code first. Run is not graded and gives no XP.
+            </p>
+            <div className="flex gap-2">
+              <button onClick={() => setShowSubmitConfirm(false)}
+                className="flex-1 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 text-sm transition">Keep editing</button>
+              <button
+                onClick={async () => {
+                  setShowSubmitConfirm(false)
+                  // keep the saved draft identical to the code being graded, before the server locks it
+                  try { await api.put(`/api/problems/${quest.id}/draft`, { code, language }) } catch { /* the submission still stores the code */ }
+                  handleSubmit()
+                }}
+                className="flex-1 py-2 bg-green-600 hover:bg-green-500 rounded-lg text-white font-bold text-sm transition">Submit final answer</button>
+            </div>
           </div>
         </div>
       )}
@@ -882,7 +930,9 @@ useEffect(() => {
                       <p className={`text-sm transition-all duration-300 ${
                         isUsed ? 'text-slate-300' : 'text-slate-600 blur-sm select-none'
                       }`}>
-                        {hint.text}
+                        {isUsed
+                          ? (hintTexts[idx] ?? hint.text ?? '')
+                          : 'This scroll stays sealed until you reveal it.'}
                       </p>
                     </div>
                   )
@@ -957,6 +1007,13 @@ useEffect(() => {
               value={code}
               onChange={(value) => setCode(value || '')}
               theme="vs-dark"
+              // Submit (graded, one-shot) stays locked by its own disabled=hasSubmitted
+              // below -- the editor itself used to go readOnly on hasSubmitted too, which
+              // blocked Run (ungraded, no XP, no lock) on every language once ANY language
+              // was conquered. That read as the page silently breaking: a student curious
+              // how they'd have solved it in another language got a cursor that accepted
+              // no input and no explanation why. Run carries no grading risk, so the editor
+              // stays writable after submission; only the graded Submit call is blocked.
               options={editorOptions}
               onMount={(editor, monaco) => {
                 editorRef.current = editor
@@ -1003,7 +1060,7 @@ useEffect(() => {
                   </button>
                 ) : (
                   <button
-                    onClick={handleSubmit}
+                    onClick={() => setShowSubmitConfirm(true)}
                     disabled={isLoading || hasSubmitted}
                     className={`px-4 py-1.5 rounded-md text-xs font-bold transition flex items-center gap-1.5 ${
                       hasSubmitted

@@ -88,40 +88,58 @@ export default function StudentCodeModal({ submissionId, onClose }) {
                 <pre style={styles.codeBlock}>{data.code}</pre>
               </div>
 
-              {/* Test results */}
-              {data.test_results?.length > 0 && (
+              {/* Recorded assessment: nothing here is executed or recalculated */}
+              <div style={styles.section}>
+                <div style={styles.sectionTitle}>Recorded result</div>
+                <div style={{ ...styles.testRow, flexWrap: "wrap", gap: 8 }}>
+                  <span style={styles.badge}>Status: {String(data.status || "").replace("_", " ")}</span>
+                  <span style={styles.badge}>Score: {data.score} XP</span>
+                  <span style={styles.badge}>Passed {data.passed_cases ?? 0} of {data.total_cases ?? 0} tests</span>
+                  {data.execution_mode === "demo-stub" && (
+                    <span style={{ ...styles.badge, color: "#fbbf24" }}>SIMULATED (demo) result, not real execution</span>
+                  )}
+                </div>
+                <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 6 }}>
+                  Stored when the student submitted. Opening this view does not run the code or change anything.
+                </div>
+                {data.error_msg && <div style={{ ...styles.testRow, color: "#f87171" }}>{data.error_msg}</div>}
+              </div>
+
+              {!data.results_recorded && (
+                <div style={{ ...styles.section, color: "#fbbf24", fontSize: 13 }}>
+                  {data.note || "No per-test results were recorded for this submission."}
+                </div>
+              )}
+
+              {data.results_recorded && data.test_results?.length > 0 && (
                 <div style={styles.section}>
                   <div style={styles.sectionTitle}>
-                    Test Case Results ({data.test_results.filter((r) => r.passed).length}/
+                    Per-test results ({data.test_results.filter((r) => r.passed).length}/
                     {data.test_results.length} passed)
                   </div>
                   <div style={styles.testGrid}>
-                    {data.test_results.map((r, i) => (
+                    {data.test_results.map((r) => (
                       <div
-                        key={i}
+                        key={r.index}
                         style={{
                           ...styles.testCard,
                           borderLeft: `3px solid ${r.passed ? "#4ade80" : "#f87171"}`,
                         }}
                       >
                         <div style={styles.testHeader}>
-                          <span>{r.passed ? "✅" : "❌"} Test {i + 1}</span>
-                          <span style={styles.runtime}>{r.runtime}</span>
+                          <span>{r.passed ? "✅" : "❌"} Test {r.index}{r.hidden ? " (hidden)" : ""}</span>
+                          <span style={styles.runtime}>{String(r.kind || "").replace("_", " ")}</span>
                         </div>
-                        <div style={styles.testRow}>
-                          <span style={styles.testLabel}>Input:</span>
-                          <code style={styles.testCode}>{r.test_case || "(none)"}</code>
-                        </div>
-                        <div style={styles.testRow}>
-                          <span style={styles.testLabel}>Expected:</span>
-                          <code style={styles.testCode}>{r.expected}</code>
-                        </div>
-                        {!r.passed && (
+                        {!r.hidden && r.message && (
+                          <div style={styles.testRow}>
+                            <span style={styles.testLabel}>Note:</span>
+                            <code style={styles.testCode}>{r.message}</code>
+                          </div>
+                        )}
+                        {!r.hidden && !r.passed && r.output && (
                           <div style={styles.testRow}>
                             <span style={styles.testLabel}>Got:</span>
-                            <code style={{ ...styles.testCode, color: "#f87171" }}>
-                              {r.output || r.message}
-                            </code>
+                            <code style={{ ...styles.testCode, color: "#f87171" }}>{r.output}</code>
                           </div>
                         )}
                       </div>

@@ -25,15 +25,17 @@ export default function RecoveryModal({ user, onClose, onSuccess }) {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [showPassword, setShowPassword] = useState(false)
+  const [issued, setIssued] = useState('')   // generated temporary password, shown once, never stored
 
-  // Reset the user's password on the backend
-  const handleReset = async () => {
+  // Reset the user's password on the backend. With generate=true the server
+  // creates the temporary password and returns it once.
+  const handleReset = async (generate = false) => {
     setError('')
     setSuccess('')
 
-    // Require at least 6 characters before hitting the backend
-    if (!newPassword || newPassword.length < 6) {
-      setError('Password must be at least 6 characters.')
+    // Same rule the server enforces: 8+ characters with a letter and a number
+    if (!generate && (!newPassword || newPassword.length < 8 || !/[A-Za-z]/.test(newPassword) || !/\d/.test(newPassword))) {
+      setError('Password must be at least 8 characters and include a letter and a number.')
       return
     }
 
@@ -46,14 +48,16 @@ export default function RecoveryModal({ user, onClose, onSuccess }) {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ new_password: newPassword })
+        body: JSON.stringify(generate ? { generate: true } : { new_password: newPassword })
       })
       const data = await res.json()
       if (res.ok) {
-        setSuccess(`✅ Password reset successfully for ${user.username}.`)
-        setTimeout(() => {
-          onSuccess()
-        }, 1500)
+        setSuccess(`Password reset for ${user.username}. They must choose a new password the next time they sign in.`)
+        if (data.temporary_password) {
+          setIssued(data.temporary_password)       // admin hands this over in person; close = gone
+        } else {
+          setTimeout(() => { onSuccess() }, 1500)
+        }
       } else {
         setError(data.error || 'Failed to reset password.')
       }
@@ -104,13 +108,16 @@ export default function RecoveryModal({ user, onClose, onSuccess }) {
         {/* Body */}
         <div className="p-6 space-y-4">
 
-          {/* Adamson email notice */}
+          {/* Institutional email notice */}
           <div className="flex items-start gap-2 p-3 bg-blue-600/10 border border-blue-600/30 rounded-lg">
             <span className="text-blue-400 mt-0.5">ℹ️</span>
             <div>
-              <p className="text-blue-300 text-xs font-semibold">Adamson Email Address</p>
+              <p className="text-blue-300 text-xs font-semibold">Sign-in email (identifier)</p>
               <p className="text-slate-400 text-xs mt-0.5">{user.email}</p>
-              <p className="text-slate-500 text-xs mt-1">Institutional emails are permanent and cannot be changed.</p>
+              <p className="text-slate-500 text-xs mt-1">
+                This may be a generated identifier, not a working inbox. Nothing is emailed:
+                give the temporary password to the user in person.
+              </p>
             </div>
           </div>
 
@@ -134,7 +141,7 @@ export default function RecoveryModal({ user, onClose, onSuccess }) {
                 type={showPassword ? 'text' : 'password'}
                 value={newPassword}
                 onChange={e => setNewPassword(e.target.value)}
-                placeholder="Enter new password (min. 6 characters)"
+                placeholder="Temporary password (8+ characters, letter and number)"
                 className="w-full bg-slate-800 border border-slate-700 focus:border-purple-500 rounded-lg px-4 py-2.5 pr-11 text-white outline-none transition placeholder-slate-500"
               />
               <button
@@ -158,19 +165,37 @@ export default function RecoveryModal({ user, onClose, onSuccess }) {
             )}
           </div>
 
+
+          {issued && (
+            <div className="p-3 bg-yellow-600/10 border border-yellow-600/40 rounded-lg">
+              <p className="text-yellow-300 text-xs font-semibold mb-1">Temporary password (shown once)</p>
+              <p className="font-mono text-white text-lg select-all">{issued}</p>
+              <p className="text-slate-400 text-xs mt-1">Give it to the user in person. It is not stored or emailed, and they must replace it at sign-in.</p>
+            </div>
+          )}
+
+          <button
+            type="button"
+            onClick={() => handleReset(true)}
+            disabled={loading || !!issued}
+            className="w-full py-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 rounded-lg text-slate-200 text-sm transition"
+          >
+            Generate a temporary password instead
+          </button>
+
         </div>
 
         {/* Footer */}
         <div className="flex gap-3 p-6 border-t border-purple-600/30">
           <button
-            onClick={onClose}
+            onClick={issued ? onSuccess : onClose}
             className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 font-medium transition"
           >
-            Cancel
+            {issued ? 'Done' : 'Cancel'}
           </button>
           <button
-            onClick={handleReset}
-            disabled={loading || !newPassword}
+            onClick={() => handleReset(false)}
+            disabled={loading || !newPassword || !!issued}
             className="flex-1 py-2.5 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-white font-black transition shadow-lg shadow-blue-600/30 flex items-center justify-center gap-2"
           >
             {loading ? (

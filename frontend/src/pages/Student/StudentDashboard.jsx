@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { openChangePassword } from '../../utils/accountEvents'
 import Editor from '@monaco-editor/react'
 import ProblemList from './ProblemList'
 import StudentCodeEditor from './StudentCodeEditor'
@@ -1027,6 +1028,7 @@ export default function StudentDashboard({ user, onLogout }) {
                 </div>
                 <div className="py-2">
                   <button onClick={handleGoToProgress} className="w-full px-4 py-2.5 text-left text-sm text-slate-300 hover:text-white hover:bg-slate-800/80 transition flex items-center gap-3"><span>📊</span> My Progress</button>
+                  <button onClick={() => { setShowProfileMenu(false); openChangePassword() }} className="w-full px-4 py-2.5 text-left text-sm text-slate-300 hover:text-white hover:bg-slate-800/80 transition flex items-center gap-3"><span>🔑</span> Change password</button>
                   <div className="border-t border-purple-600/30 my-2" />
                   <button onClick={handleLogoutClick} className="w-full px-4 py-2.5 text-left text-sm text-red-400 hover:text-red-300 hover:bg-red-600/10 transition flex items-center gap-3"><span>🚪</span> Logout</button>
                 </div>

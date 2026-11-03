@@ -86,13 +86,21 @@ export default function UserManagement() {
     setTimeout(() => setToast(null), type === 'warning' ? 6500 : 4000)
   }
 
-  // Only the master admin account can create other administrators
-  const isMasterAdmin = (() => {
-    try {
-      const u = JSON.parse(localStorage.getItem('user') || '{}')
-      return u.email === 'admin@adamson.edu.ph'
-    } catch { return false }
-  })()
+  // Settings come from the server (it also enforces them): whether this admin may
+  // create administrators, and the domain of generated student identifiers.
+  const [policy, setPolicy] = useState({ can_create_admins: false, student_email_domain: 'student.com' })
+  const isMasterAdmin = policy.can_create_admins
+  useEffect(() => {
+    let cancelled = false
+    fetch(`${API_BASE}/api/admin/policy`, {
+      headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
+    })
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => { if (d && !cancelled) setPolicy(prev => ({ ...prev, ...d })) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [])
+  const generatedStudentEmail = `${(addUserForm.username || '').trim().toLowerCase() || '<student ID>'}@${policy.student_email_domain}`
 
   // Clear the add-user form back to its defaults
   const resetAddUserForm = () => {
@@ -105,12 +113,13 @@ export default function UserManagement() {
   const handleAddUser = async () => {
     setAddUserError('')
     setAddUserSuccess('')
-    if (!addUserForm.username || !addUserForm.email || !addUserForm.password) {
-      setAddUserError('Username, email, and password are required.')
+    const isStudent = addUserForm.role === 'student'
+    if (!addUserForm.username || (!isStudent && !addUserForm.email) || !addUserForm.password) {
+      setAddUserError(isStudent ? 'Student ID and password are required.' : 'Username, email, and password are required.')
       return
     }
-    if (addUserForm.password.length < 6) {
-      setAddUserError('Password must be at least 6 characters.')
+    if (addUserForm.password.length < 8) {
+      setAddUserError('Password must be at least 8 characters, with a letter and a number.')
       return
     }
     setAddUserLoading(true)
@@ -118,7 +127,7 @@ export default function UserManagement() {
       const token = localStorage.getItem('token')
       const payload = {
         username: addUserForm.username,
-        email: addUserForm.email,
+        email: isStudent ? '' : addUserForm.email,   // students get a generated identifier
         password: addUserForm.password,
         role: addUserForm.role,
         section_ids: addUserForm.section_id ? [parseInt(addUserForm.section_id)] : []
@@ -669,16 +678,32 @@ export default function UserManagement() {
                     />
                   </div>
 
-                  <div>
-                    <label className="block text-sm text-slate-400 mb-1.5">Email <span className="text-red-400">*</span></label>
-                    <input
-                      type="email"
-                      value={addUserForm.email}
-                      onChange={e => setAddUserForm({ ...addUserForm, email: e.target.value })}
-                      placeholder="e.g. john@adamson.edu.ph"
-                      className="w-full bg-slate-800 border border-slate-700 focus:border-purple-500 rounded-lg px-4 py-2.5 text-white outline-none transition placeholder-slate-500"
-                    />
-                  </div>
+                  {addUserForm.role === 'student' ? (
+                    <div>
+                      <label className="block text-sm text-slate-400 mb-1.5">Generated sign-in email</label>
+                      <input
+                        type="text"
+                        readOnly
+                        value={generatedStudentEmail}
+                        className="w-full bg-slate-800/60 border border-slate-700 rounded-lg px-4 py-2.5 text-slate-300 outline-none"
+                      />
+                      <p className="text-xs text-slate-500 mt-1">
+                        Generated from the student ID. Students can sign in with the ID or this address.
+                        It is an identifier only, not a real inbox.
+                      </p>
+                    </div>
+                  ) : (
+                    <div>
+                      <label className="block text-sm text-slate-400 mb-1.5">Email <span className="text-red-400">*</span></label>
+                      <input
+                        type="email"
+                        value={addUserForm.email}
+                        onChange={e => setAddUserForm({ ...addUserForm, email: e.target.value })}
+                        placeholder="e.g. name@your-institution.example"
+                        className="w-full bg-slate-800 border border-slate-700 focus:border-purple-500 rounded-lg px-4 py-2.5 text-white outline-none transition placeholder-slate-500"
+                      />
+                    </div>
+                  )}
 
                   <div>
                     <label className="block text-sm text-slate-400 mb-1.5">Password <span className="text-red-400">*</span></label>
@@ -687,7 +712,7 @@ export default function UserManagement() {
                         type={showAddUserPassword ? 'text' : 'password'}
                         value={addUserForm.password}
                         onChange={e => setAddUserForm({ ...addUserForm, password: e.target.value })}
-                        placeholder="Min. 6 characters"
+                        placeholder="8+ characters, letter and number"
                         className="w-full bg-slate-800 border border-slate-700 focus:border-purple-500 rounded-lg px-4 py-2.5 pr-11 text-white outline-none transition placeholder-slate-500"
                       />
                       <button

@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import { API_BASE } from '../../api/client'
 
 // minimalist line-art eye icons for the password show/hide toggle
@@ -21,17 +21,6 @@ function EyeOffIcon({ size = 18 }) {
 
 const API = API_BASE
 
-// ── check if the logged-in user is the head admin ─────────────────────────────
-// only admin@adamson.edu.ph can create other admin accounts
-// everyone else only sees student + instructor options
-function isHeadAdmin() {
-  try {
-    const u = JSON.parse(localStorage.getItem('user') || '{}')
-    return u.email === 'admin@adamson.edu.ph'
-  } catch {
-    return false
-  }
-}
 
 // ── password strength scorer — same logic we use everywhere ──────────────────
 function scorePassword(pw) {
@@ -48,17 +37,18 @@ const STRENGTH_LABEL = ['', 'Very Weak', 'Weak', 'Fair', 'Strong', 'Very Strong'
 const STRENGTH_COLOR = ['', '#ef4444', '#f97316', '#eab308', '#3b82f6', '#22c55e']
 
 // ── required CSV columns for the enrollment upload ───────────────────────────
-const REQUIRED_CSV_COLS = ['student_id', 'firstname', 'lastname', 'year_level', 'student_type']
+const REQUIRED_CSV_COLS = ['student_id', 'firstname', 'lastname', 'student_type', 'section_no']
 
 // tiny delay helper for animation timing
 const delay = (ms) => new Promise(r => setTimeout(r, ms))
 
 // ── sample csv so admins can download a template and not guess the format ─────
 const SAMPLE_CSV = [
-  'student_id,firstname,middlename,lastname,suffix,year_level,student_type,class_code,section_no,subject_code',  '2024-00001,Juan,Santos,Dela Cruz,,1,regular,IT101,,,',
-  '2024-00002,Maria,Reyes,Garcia,,1,regular,IT101,,,',
-  '2024-30001,Pedro,Jose,Reyes,,3,irregular,,29017,IT115',
-  '2024-30001,Pedro,Jose,Reyes,,3,irregular,,29018,IT115L',
+  'student_id,firstname,middlename,lastname,suffix,student_type,section_no',
+  '2024-00001,Juan,Santos,Dela Cruz,,regular,29017',
+  '2024-00002,Maria,Reyes,Garcia,,regular,29017',
+  '2024-30001,Pedro,Jose,Reyes,,irregular,29017',
+  '2024-30001,Pedro,Jose,Reyes,,irregular,29018',
 ].join('\n')
 
 // ── tiny csv parser we lifted from UploadCSVModal — keeps things consistent ───
@@ -138,7 +128,20 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
   const [csvToast, setCsvToast]             = useState(null)
   const blobUrlRef                          = useRef(null)
 
-  const headAdmin = isHeadAdmin()
+  // Institution settings come from the server, so nothing here hardcodes a school.
+  // The server enforces both rules; this only decides what the form offers.
+  const [policy, setPolicy] = useState({ allowed_email_domain: '', student_email_domain: 'student.com', can_create_admins: false })
+  const headAdmin = policy.can_create_admins
+  useEffect(() => {
+    let cancelled = false
+    fetch(`${API}/api/admin/policy`, {
+      headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
+    })
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => { if (d && !cancelled) setPolicy(d) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [])
 
   // ── helpers ───────────────────────────────────────────────────────────────
   // Show a temporary toast for the single-user form
@@ -185,7 +188,8 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
     const errs = {}
     if (!form.username.trim())         errs.username = 'Username is required'
     else if (form.username.length < 3) errs.username = 'Min 3 characters'
-    if (!form.email.trim())            errs.email = 'Email is required'
+    if (form.role === 'student') { /* email is generated from the student ID */ }
+    else if (!form.email.trim())       errs.email = 'Email is required'
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) errs.email = 'Invalid email'
     if (!form.password)                errs.password = 'Password is required'
     else if (form.password.length < 8) errs.password = 'Min 8 characters'
@@ -204,7 +208,7 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           username:    form.username.trim(),
-          email:       form.email.trim().toLowerCase(),
+          email:       form.role === 'student' ? '' : form.email.trim().toLowerCase(),
           password:    form.password,
           role:        form.role,
           section_ids: form.section_id ? [parseInt(form.section_id)] : [],
@@ -403,7 +407,7 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
                       {[
                         { val: 'student',       label: 'Student',     icon: '🎓', desc: 'Enrolled learner'    },
                         { val: 'instructor',    label: 'Instructor',  icon: '👨‍🏫', desc: 'Course facilitator' },
-                        // only the head admin (admin@adamson.edu.ph) can create other admins
+                        // only the head admin can create other admins (decided by the server)
                         ...(headAdmin ? [{ val: 'administrator', label: 'Admin', icon: '🛡️', desc: 'Full access' }] : []),
                       ].map(r => (
                         <button
@@ -447,20 +451,38 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
                     {errors.username && <p className="text-red-400 text-xs mt-1">{errors.username}</p>}
                   </div>
 
-                  {/* email */}
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-2">
-                      Email Address *
-                    </label>
-                    <input
-                      type="email"
-                      value={form.email}
-                      onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
-                      placeholder="user@adamson.edu.ph"
-                      className={inputCls(errors.email)}
-                    />
-                    {errors.email && <p className="text-red-400 text-xs mt-1">{errors.email}</p>}
-                  </div>
+                  {/* email: generated for students, entered for staff */}
+                  {form.role === 'student' ? (
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-2">
+                        Generated sign-in email
+                      </label>
+                      <input
+                        type="text"
+                        readOnly
+                        value={`${form.username.trim().toLowerCase() || '<student ID>'}@${policy.student_email_domain}`}
+                        className={inputCls(false)}
+                      />
+                      <p className="text-slate-500 text-xs mt-1">
+                        Generated from the student ID; the student may sign in with the ID or this address.
+                        It is an identifier only, not a real inbox.
+                      </p>
+                    </div>
+                  ) : (
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-2">
+                        Email Address *
+                      </label>
+                      <input
+                        type="email"
+                        value={form.email}
+                        onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
+                        placeholder={policy.allowed_email_domain ? `user@${policy.allowed_email_domain}` : 'name@your-institution.example'}
+                        className={inputCls(errors.email)}
+                      />
+                      {errors.email && <p className="text-red-400 text-xs mt-1">{errors.email}</p>}
+                    </div>
+                  )}
 
                   {/* password + strength bar */}
                   <div>
@@ -590,7 +612,7 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
                   <div className="bg-slate-800/60 border border-slate-700/40 rounded-xl px-4 py-1">
                     {[
                       { label: 'Username', value: createdUser.username },
-                      { label: 'Email',    value: createdUser.email },
+                      { label: createdUser.role === 'student' ? 'Sign-in email (generated)' : 'Email', value: createdUser.email },
                       { label: 'Role',     value: (
                         <span className="capitalize px-2 py-0.5 bg-purple-600/30 text-purple-300 rounded text-xs">
                           {createdUser.role}
@@ -681,7 +703,8 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
                     <div className="bg-slate-800/60 rounded-xl p-3 border border-emerald-600/20">
                       <p className="text-emerald-400 font-bold text-xs mb-1">🏫 Regular</p>
                       <p className="text-slate-400 text-[11px] leading-relaxed">
-                        Set <code className="text-purple-300">student_type=regular</code> and fill <code className="text-purple-300">class_code</code>.                      </p>
+                        Set <code className="text-purple-300">student_type=regular</code> and fill <code className="text-purple-300">section_no</code> with their class code.
+                      </p>
                     </div>
                     <div className="bg-slate-800/60 rounded-xl p-3 border border-blue-600/20">
                       <p className="text-blue-400 font-bold text-xs mb-1">📋 Irregular</p>
@@ -700,7 +723,7 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
                           {c} <span className="text-red-400">*</span>
                         </span>
                       ))}
-                      {['middlename','suffix','class_code','section_no','subject_code'].map(c => (                        <span key={c} className="px-2 py-0.5 bg-slate-700 border border-slate-600 rounded-lg text-slate-400 text-[11px] font-mono">
+                      {['middlename','suffix'].map(c => (                        <span key={c} className="px-2 py-0.5 bg-slate-700 border border-slate-600 rounded-lg text-slate-400 text-[11px] font-mono">
                           {c}
                         </span>
                       ))}

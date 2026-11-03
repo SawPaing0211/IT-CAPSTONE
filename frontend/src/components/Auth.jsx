@@ -85,6 +85,7 @@ export default function Auth({ onLogin }) {
 
     // Save tokens
     localStorage.setItem('token', data.access_token)
+    data.user = { ...data.user, must_change_password: !!data.must_change_password }
     localStorage.setItem('user', JSON.stringify(data.user))
     if (data.refresh_token) {
       localStorage.setItem('refresh_token', data.refresh_token)
@@ -184,12 +185,8 @@ export default function Auth({ onLogin }) {
                 </div>
                 <p className="text-slate-300 text-xs leading-relaxed">
                   Your account has been locked after <strong>3 failed attempts</strong>.
-                  Please contact your administrator to unlock your account.
+                  Please contact your system administrator to unlock your account.
                 </p>
-                <div className="flex items-center gap-2 p-2 bg-slate-800/60 rounded-lg">
-                  <span className="text-blue-400">📧</span>
-                  <span className="text-blue-300 text-xs font-mono">admin@adamson.edu.ph</span>
-                </div>
                 <div className="flex items-center gap-2 p-2 bg-slate-800/60 rounded-lg">
                   <span className="text-yellow-400">⏱️</span>
                   <span className="text-yellow-300 text-xs">
@@ -271,17 +268,6 @@ export default function Auth({ onLogin }) {
 
           </form>
 
-          {/* Footer */}
-          <div className="bg-slate-950/50 p-3 sm:p-4 border-t border-purple-600/20">
-            <div className="flex items-center justify-center gap-4 text-xs text-slate-500">
-              <span className="flex items-center gap-1">
-                <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></span>
-                Server Online
-              </span>
-              <span>•</span>
-              <span>Secure Connection</span>
-            </div>
-          </div>
         </div>
 
         {/* Decorative Elements */}

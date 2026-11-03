@@ -51,116 +51,95 @@ const IconRotateCcw = (p) => (
   <Icon {...p}><polyline points="1 4 1 10 7 10" /><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" /></Icon>
 )
 
+
+// Only Maintenance Mode changes how the system behaves. Everything else on these
+// tabs is a read-only view of the values the running system really uses, loaded
+// from the server, so nothing here can look adjustable when it is not.
 const TABS = [
-  { id: 'general',       label: 'General',       icon: IconSchool },
-  { id: 'security',      label: 'Security',       icon: IconLock },
-  { id: 'execution',     label: 'Execution',      icon: IconZap },
-  { id: 'gamification',  label: 'Gamification',   icon: IconGamepad },
-  { id: 'plagiarism',    label: 'Plagiarism',     icon: IconSearch },
+  { id: 'access',     label: 'Access',      icon: IconLock },
+  { id: 'execution',  label: 'Execution',   icon: IconZap },
+  { id: 'xp',         label: 'XP rules',    icon: IconGamepad },
+  { id: 'plagiarism', label: 'Plagiarism',  icon: IconSearch },
 ]
 
+const LANG_LABEL = { python: 'Python', java: 'Java', csharp: 'C#' }
+
+function Row({ label, value }) {
+  return (
+    <div className="flex items-start justify-between gap-4 py-2 border-b border-slate-800/70">
+      <span className="text-slate-400 text-sm">{label}</span>
+      <span className="text-white text-sm font-semibold text-right">{value}</span>
+    </div>
+  )
+}
+
+function ReadOnlyNote() {
+  return (
+    <div className="flex items-start gap-2 p-3 bg-slate-800/60 border border-slate-700 rounded-lg text-xs text-slate-300">
+      <IconAlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
+      <span>These values are built into the application and cannot be changed on this page.</span>
+    </div>
+  )
+}
+
 export default function SystemSettingsModal({ onClose }) {
-  const [activeTab, setActiveTab] = useState('general')
-  const [config, setConfig] = useState({
-    // General
-    system_name: 'Forge.dev',
-    institution_name: '',
-    timezone: 'Asia/Manila',
-    // Security
-    maintenance_mode: 'false',
-    min_password_length: '8',
-    session_timeout: '60',
-    jwt_expiration_hours: '24',
-    // Execution
-    execution_timeout: '5',
-    enabled_languages: 'python,java,csharp',
-    memory_limit_mb: '256',
-    // Gamification
-    xp_multiplier: '1.0',
-    easy_xp_max: '100',
-    medium_xp_max: '250',
-    hard_xp_max: '500',
-    // Plagiarism
-    plagiarism_threshold: '0.85',
-    plagiarism_auto_flag: 'true',
-  })
+  const [activeTab, setActiveTab] = useState('access')
+  const [maintenance, setMaintenance] = useState(false)
+  const [effective, setEffective] = useState(null)
+  const [effectiveFailed, setEffectiveFailed] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [toast, setToast] = useState(null)
   const [dirty, setDirty] = useState(false)
-  const [showResetConfirm, setShowResetConfirm] = useState(false)
+  const [toast, setToast] = useState(null)
 
-  // Load the current system config when the modal opens
-  useEffect(() => { fetchConfig() }, [])
+  const showToast = (message, type = 'success') => {
+    setToast({ message, type })
+    setTimeout(() => setToast(null), 4000)
+  }
 
-  // Fetch the saved system configuration from the server
-  const fetchConfig = async () => {
-    try {
-      const token = localStorage.getItem('token')
-      const res = await fetch(`${API}/api/admin/config`, { headers: { 'Authorization': `Bearer ${token}` } })
-      if (res.ok) {
-        const data = await res.json()
-        setConfig(prev => ({ ...prev, ...data }))
-        setDirty(false)
-      } else if (res.status === 401) {
-        showToast('Your session has expired. Please log in again.', 'error')
-      } else {
-        showToast('Failed to load settings', 'error')
+  useEffect(() => {
+    let cancelled = false
+    const load = async () => {
+      const headers = { Authorization: `Bearer ${localStorage.getItem('token') || ''}` }
+      try {
+        const res = await fetch(`${API}/api/admin/config`, { headers })
+        if (res.ok) {
+          const data = await res.json()
+          if (!cancelled) setMaintenance(data.maintenance_mode === 'true')
+        } else if (res.status === 401) {
+          showToast('Your session has expired. Please log in again.', 'error')
+        } else {
+          showToast('Failed to load settings', 'error')
+        }
+      } catch {
+        showToast('Network error while loading settings', 'error')
       }
-    } catch (err) {
-      console.error(err)
-      showToast('Network error while loading settings', 'error')
+      try {
+        const res = await fetch(`${API}/api/admin/effective-settings`, { headers })
+        if (res.ok) { const d = await res.json(); if (!cancelled) setEffective(d) }
+        else if (!cancelled) setEffectiveFailed(true)
+      } catch {
+        if (!cancelled) setEffectiveFailed(true)
+      }
+      if (!cancelled) setLoading(false)
     }
-    finally { setLoading(false) }
-  }
+    load()
+    return () => { cancelled = true }
+  }, [])
 
-  const update = (key, value) => {
-    setConfig(prev => ({ ...prev, [key]: value }))
-    setDirty(true)
-  }
-
-  // Save the updated configuration to the server
   const handleSave = async () => {
     setSaving(true)
     try {
-      const token = localStorage.getItem('token')
-
-      // Send ALL configurable fields matching the backend allowed set
-      const payload = {
-        // General
-        system_name:          config.system_name,
-        institution_name:     config.institution_name,
-        timezone:             config.timezone,
-        // Security
-        maintenance_mode:     config.maintenance_mode,
-        min_password_length:  config.min_password_length,
-        session_timeout:      config.session_timeout,
-        jwt_expiration_hours: config.jwt_expiration_hours,
-        // Execution
-        execution_timeout:    config.execution_timeout,
-        enabled_languages:    config.enabled_languages,
-        memory_limit_mb:      config.memory_limit_mb,
-        // Gamification
-        xp_multiplier:        config.xp_multiplier,
-        easy_xp_max:          config.easy_xp_max,
-        medium_xp_max:        config.medium_xp_max,
-        hard_xp_max:          config.hard_xp_max,
-        // Plagiarism
-        plagiarism_threshold: config.plagiarism_threshold,
-        plagiarism_auto_flag: config.plagiarism_auto_flag,
-      }
-
       const res = await fetch(`${API}/api/admin/config`, {
         method: 'PUT',
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ maintenance_mode: maintenance ? 'true' : 'false' }),
       })
-
       if (res.ok) {
-        showToast('Settings saved successfully!', 'success')
+        showToast('Maintenance flag saved')
         setDirty(false)
       } else {
-        const err = await res.json()
+        const err = await res.json().catch(() => ({}))
         showToast(err.error || 'Failed to save', 'error')
       }
     } catch {
@@ -170,17 +149,10 @@ export default function SystemSettingsModal({ onClose }) {
     }
   }
 
-  // Display a temporary toast message
-  const showToast = (message, type = 'success') => {
-    setToast({ message, type })
-    setTimeout(() => setToast(null), 4000)
-  }
-
-  const languageList = config.enabled_languages.split(',').map(l => l.trim()).filter(Boolean)
-  // Add or remove a language from the enabled languages list
-  const toggleLanguage = (lang) => {
-    const list = languageList.includes(lang) ? languageList.filter(l => l !== lang) : [...languageList, lang]
-    update('enabled_languages', list.join(','))
+  const renderEffective = (render) => {
+    if (effectiveFailed) return <p className="text-red-300 text-sm">Could not load the current values from the server.</p>
+    if (!effective) return null
+    return <>{render(effective)}<ReadOnlyNote /></>
   }
 
   return (
@@ -193,14 +165,12 @@ export default function SystemSettingsModal({ onClose }) {
       )}
 
       <div className="bg-slate-900 border-2 border-purple-600/40 rounded-2xl w-full max-w-2xl shadow-2xl shadow-purple-900/30 overflow-hidden flex flex-col" style={{ maxHeight: '90vh' }}>
-
-        {/* Header */}
         <div className="bg-gradient-to-r from-purple-900/60 to-pink-900/40 px-6 py-5 border-b border-purple-600/30 flex items-center justify-between flex-shrink-0">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-gradient-to-br from-orange-500 to-red-500 rounded-xl flex items-center justify-center"><IconSettings className="w-5 h-5 text-white" /></div>
             <div>
               <h2 className="text-xl font-black text-white">System Settings</h2>
-              <p className="text-purple-300/70 text-xs">Configure platform-wide behaviour</p>
+              <p className="text-purple-300/70 text-xs">Only the maintenance status flag is adjustable; other values are shown for reference</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -210,8 +180,6 @@ export default function SystemSettingsModal({ onClose }) {
         </div>
 
         <div className="flex flex-1 min-h-0">
-
-          {/* Sidebar tabs */}
           <div className="w-40 bg-slate-900/80 border-r border-slate-800 p-2 flex-shrink-0">
             {TABS.map(t => {
               const TabIcon = t.icon
@@ -224,7 +192,6 @@ export default function SystemSettingsModal({ onClose }) {
             })}
           </div>
 
-          {/* Content */}
           <div className="flex-1 p-6 overflow-y-auto space-y-5">
             {loading ? (
               <div className="flex items-center justify-center h-40">
@@ -232,111 +199,67 @@ export default function SystemSettingsModal({ onClose }) {
               </div>
             ) : (
               <>
-                {/* GENERAL */}
-                {activeTab === 'general' && (
-                  <SettingsSection title="General Configuration" icon={IconSchool}>
-                    <Field label="System Name" hint="Displayed in the header and emails">
-                      <input type="text" value={config.system_name} onChange={e => update('system_name', e.target.value)}
-                        className="settings-input" placeholder="Forge.dev" />
-                    </Field>
-                    <Field label="Institution Name" hint="Your university or college name">
-                      <input type="text" value={config.institution_name} onChange={e => update('institution_name', e.target.value)}
-                        className="settings-input" placeholder="e.g., University of Technology" />
-                    </Field>
-                    <Field label="Timezone" hint="Used for timestamps and schedules">
-                      <select value={config.timezone} onChange={e => update('timezone', e.target.value)} className="settings-input">
-                        <option value="Asia/Manila">Asia/Manila (PHT, UTC+8)</option>
-                        <option value="Asia/Singapore">Asia/Singapore (SGT, UTC+8)</option>
-                        <option value="UTC">UTC</option>
-                        <option value="America/New_York">America/New_York (EST)</option>
-                      </select>
-                    </Field>
-                    <Field label="Maintenance Mode" hint="Disables student & instructor access temporarily">
-                      <Toggle value={config.maintenance_mode === 'true'} onChange={v => update('maintenance_mode', v ? 'true' : 'false')} />
-                    </Field>
-                  </SettingsSection>
-                )}
-
-                {/* SECURITY */}
-                {activeTab === 'security' && (
-                  <SettingsSection title="Security Settings" icon={IconLock}>
-                    <Field label="Min. Password Length" hint="Enforce stronger passwords (minimum 6)">
-                      <NumberInput value={config.min_password_length} onChange={v => update('min_password_length', v)} min={6} max={32} />
-                    </Field>
-                    <Field label="Session Timeout (minutes)" hint="Auto-logout users after inactivity">
-                      <NumberInput value={config.session_timeout} onChange={v => update('session_timeout', v)} min={5} max={480} />
-                    </Field>
-                    <Field label="JWT Expiration (hours)" hint="How long access tokens remain valid">
-                      <NumberInput value={config.jwt_expiration_hours} onChange={v => update('jwt_expiration_hours', v)} min={1} max={168} />
-                    </Field>
-                  </SettingsSection>
-                )}
-
-                {/* EXECUTION */}
-                {activeTab === 'execution' && (
-                  <SettingsSection title="Code Execution Engine" icon={IconZap}>
-                    <Field label="Execution Timeout (seconds)" hint="Max time a student's code is allowed to run">
-                      <NumberInput value={config.execution_timeout} onChange={v => update('execution_timeout', v)} min={1} max={30} />
-                    </Field>
-                    <Field label="Memory Limit (MB)" hint="Container memory cap per execution">
-                      <NumberInput value={config.memory_limit_mb} onChange={v => update('memory_limit_mb', v)} min={64} max={512} />
-                    </Field>
-                    <Field label="Enabled Languages" hint="Toggle which languages students can submit in">
-                      <div className="flex gap-2 flex-wrap">
-                        {['python', 'java', 'csharp'].map(lang => (
-                          <button key={lang} onClick={() => toggleLanguage(lang)}
-                            className={`px-3 py-1.5 rounded-lg text-sm font-semibold border-2 transition flex items-center gap-1.5 ${languageList.includes(lang) ? 'bg-purple-600/30 border-purple-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-600'}`}>
-                            <span className={`w-2 h-2 rounded-full flex-shrink-0 ${lang === 'python' ? 'bg-blue-400' : lang === 'java' ? 'bg-orange-400' : 'bg-purple-400'}`} />
-                            {lang}
-                          </button>
-                        ))}
-                      </div>
-                    </Field>
-                  </SettingsSection>
-                )}
-
-                {/* GAMIFICATION */}
-                {activeTab === 'gamification' && (
-                  <SettingsSection title="Gamification & XP" icon={IconGamepad}>
-                    <Field label="XP Multiplier" hint="Global multiplier applied to all XP rewards (1.0 = normal)">
-                      <input type="number" step="0.1" min="0.1" max="5" value={config.xp_multiplier} onChange={e => update('xp_multiplier', e.target.value)}
-                        className="settings-input w-28" />
-                    </Field>
-                    <Field label="Easy Quest Max XP" hint="Maximum XP reward for Easy difficulty">
-                      <NumberInput value={config.easy_xp_max} onChange={v => update('easy_xp_max', v)} min={10} max={500} />
-                    </Field>
-                    <Field label="Medium Quest Max XP" hint="Maximum XP reward for Medium difficulty">
-                      <NumberInput value={config.medium_xp_max} onChange={v => update('medium_xp_max', v)} min={50} max={1000} />
-                    </Field>
-                    <Field label="Hard Quest Max XP" hint="Maximum XP reward for Hard difficulty">
-                      <NumberInput value={config.hard_xp_max} onChange={v => update('hard_xp_max', v)} min={100} max={2000} />
-                    </Field>
-                  </SettingsSection>
-                )}
-
-                {/* PLAGIARISM */}
-                {activeTab === 'plagiarism' && (
-                  <SettingsSection title="Plagiarism Detection" icon={IconSearch}>
-                    <Field label="Similarity Threshold" hint="Submissions above this score are flagged (0.0–1.0)">
-                      <div className="space-y-2">
-                        <div className="flex items-center gap-3">
-                          <input type="range" min="0.5" max="1.0" step="0.01"
-                            value={config.plagiarism_threshold}
-                            onChange={e => update('plagiarism_threshold', e.target.value)}
-                            className="flex-1 accent-purple-500" />
-                          <span className="text-white font-mono font-bold w-12 text-right">{parseFloat(config.plagiarism_threshold).toFixed(2)}</span>
+                {activeTab === 'access' && (
+                  <>
+                    <SettingsSection title="Access" icon={IconSchool}>
+                      <div className="flex items-center justify-between gap-4">
+                        <div>
+                          <p className="text-white text-sm font-semibold">Maintenance Mode</p>
+                          <p className="text-slate-500 text-xs mt-1">Shows a Maintenance status on the administrator dashboard. It is a status flag only and does not block anyone from signing in.</p>
                         </div>
-                        {/* Describe how strict the current threshold is */}
-                        <p className="text-xs text-slate-500 flex items-center gap-1.5">
-                          {parseFloat(config.plagiarism_threshold) >= 0.90 && <><span className="w-2 h-2 rounded-full bg-green-500 flex-shrink-0" /> Conservative — only near-identical code flagged</>}
-                          {parseFloat(config.plagiarism_threshold) >= 0.80 && parseFloat(config.plagiarism_threshold) < 0.90 && <><span className="w-2 h-2 rounded-full bg-yellow-500 flex-shrink-0" /> Balanced — recommended setting</>}
-                          {parseFloat(config.plagiarism_threshold) < 0.80 && <><span className="w-2 h-2 rounded-full bg-red-500 flex-shrink-0" /> Aggressive — many false positives possible</>}
-                        </p>
+                        <Toggle value={maintenance} onChange={v => { setMaintenance(v); setDirty(true) }} />
                       </div>
-                    </Field>
-                    <Field label="Auto-Flag Suspicious Submissions" hint="Automatically mark for review without admin action">
-                      <Toggle value={config.plagiarism_auto_flag === 'true'} onChange={v => update('plagiarism_auto_flag', v ? 'true' : 'false')} />
-                    </Field>
+                    </SettingsSection>
+                    {effective && (
+                      <SettingsSection title="Sign-in sessions (read-only)" icon={IconLock}>
+                        <Row label="Access token lifetime" value={`${effective.authentication.access_token_minutes} minutes`} />
+                        <Row label="Refresh token lifetime" value={`${effective.authentication.refresh_token_days} days`} />
+                        <ReadOnlyNote />
+                      </SettingsSection>
+                    )}
+                  </>
+                )}
+
+                {activeTab === 'execution' && (
+                  <SettingsSection title="Code execution limits" icon={IconZap}>
+                    {renderEffective(e => (
+                      <>
+                        {Object.entries(e.execution.per_language).map(([lang, v]) => (
+                          <Row key={lang} label={LANG_LABEL[lang] || lang} value={`${v.timeout_seconds} s, ${v.memory_mb} MB`} />
+                        ))}
+                        <Row label="CPU per run" value={`${e.execution.cpu_cores} core`} />
+                        <Row label="Max processes" value={e.execution.max_processes} />
+                        <Row label="Max code length" value={`${e.execution.max_code_characters} characters`} />
+                        <Row label="Network" value={e.execution.network} />
+                      </>
+                    ))}
+                  </SettingsSection>
+                )}
+
+                {activeTab === 'xp' && (
+                  <SettingsSection title="XP rules" icon={IconGamepad}>
+                    {renderEffective(e => (
+                      <>
+                        {Object.entries(e.xp.max_xp_by_difficulty).map(([d, v]) => (
+                          <Row key={d} label={`${d} problem, max XP`} value={v} />
+                        ))}
+                        <Row label="Level" value={e.xp.level_rule} />
+                        <Row label="Failed attempt" value={e.xp.failed_attempt_minimum} />
+                        <Row label="Hint penalty" value={e.xp.hint_penalty} />
+                      </>
+                    ))}
+                  </SettingsSection>
+                )}
+
+                {activeTab === 'plagiarism' && (
+                  <SettingsSection title="Plagiarism checks" icon={IconSearch}>
+                    {renderEffective(e => (
+                      <>
+                        <Row label="Similarity threshold" value={e.plagiarism.threshold} />
+                        <Row label="Scan started" value={e.plagiarism.scan_trigger} />
+                        <Row label="AI explanation" value={e.plagiarism.ai_verdict_configured ? 'Configured' : 'Not configured'} />
+                      </>
+                    ))}
                   </SettingsSection>
                 )}
               </>
@@ -344,56 +267,14 @@ export default function SystemSettingsModal({ onClose }) {
           </div>
         </div>
 
-        {/* Footer */}
-        <div className="px-6 py-4 border-t border-slate-800 flex items-center justify-between bg-slate-900 flex-shrink-0">
-          <button onClick={() => setShowResetConfirm(true)}
-            className="text-slate-500 hover:text-slate-300 text-sm transition flex items-center gap-1.5"><IconRotateCcw className="w-3.5 h-3.5" /> Reset to defaults</button>
-          <div className="flex gap-3">
-            <button onClick={onClose} className="px-5 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-white font-bold transition text-sm">Cancel</button>
-            <button onClick={handleSave} disabled={saving || !dirty}
-              className="px-6 py-2 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 disabled:opacity-40 rounded-lg text-white font-bold transition shadow-lg shadow-purple-600/30 text-sm flex items-center gap-2">
-              {saving ? <><IconRotateCcw className="w-4 h-4 animate-spin" /> Saving…</> : <><IconSave className="w-4 h-4" /> Save Changes</>}
-            </button>
-          </div>
+        <div className="px-6 py-4 border-t border-slate-800 flex items-center justify-end gap-3 bg-slate-900 flex-shrink-0">
+          <button onClick={onClose} className="px-5 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-white font-bold transition text-sm">Close</button>
+          <button onClick={handleSave} disabled={saving || !dirty}
+            className="px-6 py-2 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 disabled:opacity-40 rounded-lg text-white font-bold transition text-sm flex items-center gap-2">
+            {saving ? <><IconRotateCcw className="w-4 h-4 animate-spin" /> Saving…</> : <><IconSave className="w-4 h-4" /> Save maintenance flag</>}
+          </button>
         </div>
       </div>
-
-      {showResetConfirm && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
-          <div className="bg-slate-900 border-2 border-red-600/40 rounded-2xl w-full max-w-sm shadow-2xl shadow-red-900/30 overflow-hidden">
-            <div className="p-6 space-y-4">
-              <div className="flex items-center gap-3">
-                <div className="w-11 h-11 bg-red-600/20 border border-red-600/40 rounded-xl flex items-center justify-center shrink-0">
-                  <IconAlertTriangle className="w-5 h-5 text-red-400" />
-                </div>
-                <div>
-                  <h3 className="text-white font-bold text-lg">Reset to Defaults?</h3>
-                  <p className="text-slate-400 text-sm">Unsaved changes will be discarded</p>
-                </div>
-              </div>
-              <p className="text-slate-300 text-sm">
-                This reloads all settings from the last saved configuration, discarding anything you've changed here.
-              </p>
-            </div>
-            <div className="flex gap-3 p-6 pt-0">
-              <button
-                onClick={() => setShowResetConfirm(false)}
-                className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 rounded-xl text-slate-300 font-bold transition text-sm"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => { fetchConfig(); setShowResetConfirm(false) }}
-                className="flex-1 py-2.5 bg-red-600 hover:bg-red-500 rounded-xl text-white font-bold transition text-sm flex items-center justify-center gap-1.5"
-              >
-                <IconRotateCcw className="w-4 h-4" /> Reset
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <style>{`.settings-input { width: 100%; background: #1e293b; border: 1px solid #334155; border-radius: 0.5rem; padding: 0.5rem 1rem; color: white; outline: none; transition: border-color 0.15s; } .settings-input:focus { border-color: #9333ea; }`}</style>
     </div>
   )
 }
@@ -405,32 +286,6 @@ function SettingsSection({ title, icon: SectionIcon, children }) {
         {SectionIcon && <SectionIcon className="w-4 h-4 text-purple-300 flex-shrink-0" />}{title}
       </h3>
       <div className="space-y-4">{children}</div>
-    </div>
-  )
-}
-
-function Field({ label, hint, children }) {
-  return (
-    <div>
-      <div className="flex items-center justify-between mb-1.5">
-        <label className="text-white text-sm font-semibold">{label}</label>
-      </div>
-      {children}
-      {hint && <p className="text-slate-500 text-xs mt-1.5">{hint}</p>}
-    </div>
-  )
-}
-
-function NumberInput({ value, onChange, min, max }) {
-  return (
-    <div className="flex items-center gap-2">
-      <button onClick={() => onChange(String(Math.max(min, parseInt(value || 0) - 1)))}
-        className="w-8 h-8 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg text-white flex items-center justify-center font-bold transition">−</button>
-      <input type="number" value={value} onChange={e => onChange(e.target.value)} min={min} max={max}
-        className="w-20 text-center settings-input" />
-      <button onClick={() => onChange(String(Math.min(max, parseInt(value || 0) + 1)))}
-        className="w-8 h-8 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg text-white flex items-center justify-center font-bold transition">+</button>
-      <span className="text-slate-600 text-xs">{min}–{max}</span>
     </div>
   )
 }

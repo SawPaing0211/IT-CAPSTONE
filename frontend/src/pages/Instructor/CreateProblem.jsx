@@ -330,13 +330,18 @@ export default function CreateProblem() {
           Step {activeSection} of {sections_nav.length} — {sections_nav.find(s => s.id === activeSection)?.title}
         </p>
 
-        <div className="hidden sm:flex items-center justify-between">
+        {/* overflow-x-auto is the safety net here: even if every step's label
+            fits on some screens, this guarantees "Review" (or any step) is
+            never pushed off-screen with no way to reach it. justify-between
+            was dropped because it fights with a scrolling container — it
+            only "works" until content overflows, which was exactly the bug. */}
+        <div className="hidden sm:flex items-center gap-1 overflow-x-auto pb-1 -mx-1 px-1">
           {sections_nav.map((sec, idx) => (
-            <div key={sec.id} className="flex items-center">
+            <div key={sec.id} className="flex items-center shrink-0">
               <button
                 type="button"
                 onClick={() => setActiveSection(sec.id)}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all duration-300 ${
+                className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-all duration-300 whitespace-nowrap shrink-0 ${
                   activeSection === sec.id
                     ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-lg shadow-purple-600/40 scale-105'
                     : activeSection > sec.id
@@ -344,11 +349,14 @@ export default function CreateProblem() {
                     : 'text-slate-400 hover:bg-slate-800'
                 }`}
               >
-                <span className={`text-xl transition-transform duration-300 ${activeSection === sec.id ? 'scale-125' : ''}`}>{sec.icon}</span>
-                <span className="hidden lg:inline font-medium text-sm">{sec.title}</span>
+                <span className={`text-lg transition-transform duration-300 ${activeSection === sec.id ? 'scale-125' : ''}`}>{sec.icon}</span>
+                {/* labels now wait for xl (not lg) before showing — lg was
+                    exactly wide enough to print every label but not wide
+                    enough to also fit all 7 of them plus connectors */}
+                <span className="hidden xl:inline font-medium text-sm">{sec.title}</span>
               </button>
               {idx < sections_nav.length - 1 && (
-                <div className={`w-16 h-0.5 mx-2 transition-colors duration-500 ${activeSection > sec.id ? 'bg-green-600' : 'bg-slate-700'}`} />
+                <div className={`w-5 md:w-8 h-0.5 mx-1 shrink-0 transition-colors duration-500 ${activeSection > sec.id ? 'bg-green-600' : 'bg-slate-700'}`} />
               )}
             </div>
           ))}

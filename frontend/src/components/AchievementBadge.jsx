@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
+import { isUnavailable } from '../utils/achievementView'
 
 export default function AchievementBadge({ badge, showTooltip = true, size = 'md' }) {
   const [showTip, setShowTip] = useState(false)
@@ -16,6 +17,7 @@ export default function AchievementBadge({ badge, showTooltip = true, size = 'md
     xp_reward,
     earned_at 
   } = badge
+  const unavailable = isUnavailable(badge)
 
   // Prepare the portal to render on the whole page body
   useEffect(() => {
@@ -36,7 +38,7 @@ export default function AchievementBadge({ badge, showTooltip = true, size = 'md
     lg: 'w-20 h-20 text-3xl'
   }
 
-  const progressPercent = Math.min((progress / max_progress) * 100, 100)
+  const progressPercent = max_progress > 0 ? Math.min((progress / max_progress) * 100, 100) : 0
   
   const badgeColor = is_earned 
     ? 'from-purple-600 to-pink-600 border-purple-400 shadow-purple-600/30' 
@@ -71,9 +73,11 @@ export default function AchievementBadge({ badge, showTooltip = true, size = 'md
           hover:scale-110 hover:shadow-xl hover:border-purple-300
           focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 focus:ring-offset-slate-900
           ${sizes[size]}
-          ${!is_earned && 'grayscale hover:grayscale-0'}
+          ${!is_earned && (unavailable ? 'grayscale opacity-60' : 'grayscale hover:grayscale-0')}
         `}
-        title={name}
+        title={unavailable ? `${name} — Not available yet` : name}
+        aria-label={`${name}${is_earned ? ', earned' : unavailable ? ', not available yet' : ', locked'}`}
+        data-unavailable={unavailable ? 'true' : undefined}
       >
         {/* Icon sits in its own clipped, centered layer. Some devices'
             emoji fonts swap in a glyph with different metrics than the
@@ -116,7 +120,7 @@ export default function AchievementBadge({ badge, showTooltip = true, size = 'md
             
             <p className="text-sm text-slate-400 mb-3 leading-relaxed">{description}</p>
             
-            {!is_earned && max_progress > 0 && (
+            {!is_earned && !unavailable && max_progress > 0 && (
               <div className="mb-2">
                 <div className="flex justify-between text-xs text-slate-500 mb-1">
                   <span>Progress</span>
@@ -132,7 +136,11 @@ export default function AchievementBadge({ badge, showTooltip = true, size = 'md
               <p className="text-xs text-green-400">🎉 Earned: {new Date(earned_at).toLocaleDateString()}</p>
             )}
             
-            {xp_reward > 0 && (
+            {unavailable && (
+              <p className="text-xs text-slate-400 font-semibold">Not available yet</p>
+            )}
+
+            {!unavailable && xp_reward > 0 && (
               <p className="text-xs text-yellow-400 font-bold mt-1">🎁 Reward: +{xp_reward} XP</p>
             )}
           </div>

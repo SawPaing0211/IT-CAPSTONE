@@ -92,28 +92,6 @@ export default function Landing() {
               </button>
             </div>
 
-            {/* stats for the whole server, not just me */}
-            <div className="grid grid-cols-3 gap-2 sm:gap-4 mb-8 sm:mb-14 max-w-3xl mx-auto">
-              <div className="bg-gradient-to-b from-purple-900/40 to-slate-900/80 p-2.5 sm:p-5 rounded-xl border-2 border-purple-600/30 shadow-lg">
-                <div className="text-xl sm:text-3xl mb-1 sm:mb-2">🗡️</div>
-                <div className="text-purple-300 font-mono text-[8px] sm:text-xs mb-0.5 sm:mb-1 leading-tight truncate">QUESTS SOLVED</div>
-                <div className="text-sm sm:text-2xl font-bold text-white leading-none">12,847</div>
-                <div className="text-[8px] sm:text-xs text-green-400 mt-1 sm:mt-1.5 font-mono truncate">+124 today</div>
-              </div>
-              <div className="bg-gradient-to-b from-pink-900/40 to-slate-900/80 p-2.5 sm:p-5 rounded-xl border-2 border-pink-600/30 shadow-lg">
-                <div className="text-xl sm:text-3xl mb-1 sm:mb-2">⚡</div>
-                <div className="text-pink-300 font-mono text-[8px] sm:text-xs mb-0.5 sm:mb-1 leading-tight truncate">TOTAL XP</div>
-                <div className="text-sm sm:text-2xl font-bold text-white leading-none">2.4M</div>
-                <div className="text-[8px] sm:text-xs text-green-400 mt-1 sm:mt-1.5 font-mono truncate">+8.5k today</div>
-              </div>
-              <div className="bg-gradient-to-b from-blue-900/40 to-slate-900/80 p-2.5 sm:p-5 rounded-xl border-2 border-blue-600/30 shadow-lg">
-                <div className="text-xl sm:text-3xl mb-1 sm:mb-2">👥</div>
-                <div className="text-blue-300 font-mono text-[8px] sm:text-xs mb-0.5 sm:mb-1 leading-tight truncate">PLAYERS</div>
-                <div className="text-sm sm:text-2xl font-bold text-white leading-none">847</div>
-                <div className="text-[8px] sm:text-xs text-green-400 mt-1 sm:mt-1.5 font-mono truncate">142 online</div>
-              </div>
-            </div>
-
             {/* Feature Cards - RPG Inventory Style */}
             <div className="grid sm:grid-cols-3 gap-3 sm:gap-5 mb-8 sm:mb-16 max-w-5xl mx-auto">
               {[
@@ -181,7 +159,7 @@ export default function Landing() {
 
         {/* Footer */}
         <footer className="container mx-auto px-4 sm:px-6 py-4 sm:py-8 text-center text-slate-500 text-[10px] sm:text-sm border-t border-slate-800">
-          <p className="font-mono">⚔️ Forge.dev • Capstone Project • Adamson University ⚔️</p>
+          <p className="font-mono">⚔️ Forge.dev • Capstone Project • Adamson University • Built for La Consolacion University ⚔️</p>
         </footer>
       </div>
 

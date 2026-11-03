@@ -12,6 +12,7 @@
 // tab bar instead (same BottomNav component the student side uses).
 
 import { useState, useEffect, useRef } from 'react'
+import { openChangePassword } from '../../utils/accountEvents'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import BottomNav from '../../components/BottomNav'
 import MobileSheet from '../../components/MobileSheet'
@@ -179,11 +180,6 @@ export default function InstructorDashboard({ user, onLogout }) {
           </div>
 
           <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-            {/* system status pill — same as admin, hidden on small screens to save space */}
-            <div className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-green-500/10 border border-green-500/20 rounded-lg">
-              <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
-              <span className="text-green-400 text-xs font-semibold">All Systems OK</span>
-            </div>
             {/* user badge — tappable so Sign Out is reachable on mobile too */}
             <div ref={accountMenuRef} className="relative">
               <button
@@ -204,6 +200,13 @@ export default function InstructorDashboard({ user, onLogout }) {
                   <p className="text-xs text-purple-300 mt-0.5">Instructor</p>
                 </div>
                 <div className="py-2">
+                  <button
+                    onClick={() => { setShowAccountMenu(false); openChangePassword() }}
+                    className="w-full px-4 py-2.5 text-left text-sm text-slate-300 hover:text-white hover:bg-slate-800/80 transition flex items-center gap-3"
+                  >
+                    <span>🔑</span> Change password
+                  </button>
+                  <div className="border-t border-purple-600/30 my-2" />
                   <button
                     onClick={() => { setShowAccountMenu(false); onLogout() }}
                     className="w-full px-4 py-2.5 text-left text-sm text-red-400 hover:text-red-300 hover:bg-red-600/10 transition flex items-center gap-3"

@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback } from 'react'
+import { REQUIRED_COLS, parseCSV, checkRows } from '../../utils/enrollmentCsv'
 import { API_BASE } from '../../api/client'
 
 const API = API_BASE
@@ -8,15 +9,14 @@ const API = API_BASE
 // what the backend enrolls a student into — for BOTH regular and irregular
 // students. class_code/subject_code used to be separate fields but the
 // server never reads them, so they've been dropped here to match.
-const REQUIRED_COLS = ['student_id', 'firstname', 'lastname', 'year_level', 'student_type', 'section_no']
 const OPTIONAL_COLS = ['middlename', 'suffix']
 const SAMPLE_CSV = [
-  'student_id,firstname,middlename,lastname,suffix,year_level,student_type,section_no',
-  '2024-00001,Juan,Santos,Dela Cruz,,1,regular,IT101',
-  '2024-00002,Maria,Reyes,Garcia,,1,regular,IT101',
-  '2024-00003,Jose,Bautista,Mendoza,,1,regular,IT102',
-  '2024-30001,Pedro,Jose,Reyes,,3,irregular,29017',
-  '2024-30001,Pedro,Jose,Reyes,,3,irregular,29018',
+  'student_id,firstname,middlename,lastname,suffix,student_type,section_no',
+  '2024-00001,Juan,Santos,Dela Cruz,,regular,IT101',
+  '2024-00002,Maria,Reyes,Garcia,,regular,IT101',
+  '2024-00003,Jose,Bautista,Mendoza,,regular,IT102',
+  '2024-30001,Pedro,Jose,Reyes,,irregular,29017',
+  '2024-30001,Pedro,Jose,Reyes,,irregular,29018',
 ].join('\n')
 
 // ─── inline icons (no icon library — keeps this self-contained) ──────
@@ -79,46 +79,6 @@ const IconClipboard = (p) => (
 )
 
 
-// ─── tiny CSV parser ──────────────────────────────────────────────────
-function parseCSV(text) {
-  const lines = text.trim().split(/\r?\n/)
-  if (lines.length < 2) return { headers: [], rows: [] }
-  const headers = lines[0].split(',').map(h => h.trim().toLowerCase())
-  const rows = []
-  for (let i = 1; i < lines.length; i++) {
-    const line = lines[i].trim()
-    if (!line) continue
-    const cells = []
-    let cur = '', inQ = false
-    for (let j = 0; j < line.length; j++) {
-      const ch = line[j]
-      if (ch === '"') { inQ = !inQ }
-      else if (ch === ',' && !inQ) { cells.push(cur.trim()); cur = '' }
-      else cur += ch
-    }
-    cells.push(cur.trim())
-    const row = {}
-    headers.forEach((h, idx) => { row[h] = cells[idx] ?? '' })
-    rows.push(row)
-  }
-  return { headers, rows }
-}
-
-// ─── client-side row validation ──────────────────────────────────────
-function validateRow(row, idx) {
-  const errs = []
-  if (!row.student_id?.trim())    errs.push('student_id required')
-  if (!row.firstname?.trim())     errs.push('firstname required')
-  if (!row.lastname?.trim())      errs.push('lastname required')
-  const yl = parseInt(row.year_level)
-  if (!row.year_level?.trim() || isNaN(yl) || yl < 1 || yl > 6)
-                                  errs.push('year_level must be 1–6')
-  const st = row.student_type?.trim().toLowerCase()
-  if (st !== 'regular' && st !== 'irregular')
-                                  errs.push("student_type must be 'regular' or 'irregular'")
-  return errs.length ? { row: idx + 2, student_id: row.student_id, errors: errs } : null
-}
-
 // ─── status badge ─────────────────────────────────────────────────────
 function StatusBadge({ status }) {
   const map = {
@@ -169,6 +129,7 @@ export default function UploadCSVModal({ onClose, onSuccess }) {
   const [file,       setFile]       = useState(null)
   const [parsed,     setParsed]     = useState(null)
   const [clientErrs, setClientErrs] = useState([])
+  const [clientWarns, setClientWarns] = useState([])
   const [isDragging, setIsDragging] = useState(false)
   const [result,     setResult]     = useState(null)
   const [toast,      setToast]      = useState(null)
@@ -198,9 +159,10 @@ export default function UploadCSVModal({ onClose, onSuccess }) {
         showToast(`Missing columns: ${missing.join(', ')}`, 'error')
         setFile(null); return
       }
-      const errs = rows.map((r, i) => validateRow(r, i)).filter(Boolean)
+      const { errs, warns } = checkRows(rows)
       setParsed({ headers, rows })
       setClientErrs(errs)
+      setClientWarns(warns)
       setStep('preview')
     }
     reader.readAsText(f)
@@ -262,7 +224,7 @@ export default function UploadCSVModal({ onClose, onSuccess }) {
   // Reset the modal back to the file-select step
   const reset = () => {
     setStep('select'); setFile(null); setParsed(null)
-    setClientErrs([]); setResult(null); setShowAllRows(false)
+    setClientErrs([]); setClientWarns([]); setResult(null); setShowAllRows(false)
   }
 
   // ── counts for preview step ───────────────────────────────────────────
@@ -422,7 +384,7 @@ export default function UploadCSVModal({ onClose, onSuccess }) {
               {clientErrs.length > 0 && (
                 <div className="bg-red-900/20 border border-red-600/30 rounded-xl p-4 space-y-1.5">
                   <p className="text-red-300 text-sm font-bold flex items-center gap-1.5">
-                    <IconAlertTriangle className="w-4 h-4" /> Validation issues (these rows will be skipped):
+                    <IconAlertTriangle className="w-4 h-4" /> Problems found (the server will skip these rows):
                   </p>
                   {clientErrs.slice(0, 6).map((e, i) => (
                     <p key={i} className="text-red-400 text-xs font-mono">
@@ -434,6 +396,19 @@ export default function UploadCSVModal({ onClose, onSuccess }) {
                   )}
                 </div>
               )}
+
+              {clientWarns.length > 0 && (
+                <div className="bg-amber-900/20 border border-amber-600/30 rounded-xl p-4 space-y-1.5">
+                  <p className="text-amber-300 text-sm font-bold">Check these rows ({clientWarns.length}):</p>
+                  {clientWarns.slice(0, 4).map((e, i) => (
+                    <p key={i} className="text-amber-400 text-xs font-mono">Row {e.row} · {e.student_id} — {e.errors.join(', ')}</p>
+                  ))}
+                  {clientWarns.length > 4 && <p className="text-amber-500 text-xs">…and {clientWarns.length - 4} more</p>}
+                </div>
+              )}
+              <p className="text-slate-500 text-xs">
+                This preview checks the file's layout only. Class codes, existing accounts and duplicates are checked by the server when you enroll, and its result is final.
+              </p>
 
               {/* Preview table */}
               <div className="rounded-xl overflow-hidden border border-slate-700">
@@ -585,7 +560,7 @@ export default function UploadCSVModal({ onClose, onSuccess }) {
             )}
 
             {/* Credential CSV download */}
-            {result.credential_csv && (
+            {result.credential_csv && (result.summary?.created ?? 0) > 0 && (
               <div className="bg-blue-900/20 border border-blue-600/30 rounded-xl p-4 flex items-center gap-4">
                 <div className="w-10 h-10 rounded-xl bg-blue-600/20 flex items-center justify-center flex-shrink-0">
                   <IconLock className="w-5 h-5 text-blue-300" />

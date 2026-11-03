@@ -80,7 +80,7 @@ export default function Analytics({ classId }) {
     insights.push({
       type: 'positive', icon: '🎉',
       title: `Top student: ${stats.top_performers[0].full_name}`,
-      desc: `${stats.top_performers[0].xp} XP, ${stats.top_performers[0].solved} problems solved. ${successRate >= 70 ? 'Class is performing above passing threshold.' : 'Class average is below passing — may need extra support.'}`,
+      desc: `${stats.top_performers[0].xp} XP, ${stats.top_performers[0].solved} problems solved.`,
     })
   }
   if (insights.length === 0) {

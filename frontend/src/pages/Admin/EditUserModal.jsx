@@ -298,7 +298,6 @@ export default function EditUserModal({ user, sections = [], onClose, onSave }) 
               <div className="flex items-center gap-2 bg-slate-800/50 border border-slate-700/50 rounded-xl px-4 py-2.5">
                 <span className="text-slate-600 text-sm">✉</span>
                 <span className="text-slate-500 text-sm truncate">{user.email}</span>
-                <span className="ml-auto text-xs text-slate-700 flex-shrink-0 font-mono">@adamson.edu.ph</span>
               </div>
               <p className="text-slate-700 text-xs mt-1">Emails are assigned by the registrar and cannot be changed.</p>
             </div>

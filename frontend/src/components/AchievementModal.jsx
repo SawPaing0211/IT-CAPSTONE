@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import AchievementBadge from './AchievementBadge'
+import { splitAchievements } from '../utils/achievementView'
 
 export default function AchievementModal({ achievements, onClose }) {
   // Close on Escape key
@@ -19,9 +20,8 @@ export default function AchievementModal({ achievements, onClose }) {
 
   const [filter, setFilter] = useState('all')
 
-  const earned = achievements.filter(b => b.is_earned)
-  const locked = achievements.filter(b => !b.is_earned)
-  const visible = filter === 'earned' ? earned : filter === 'locked' ? locked : achievements
+  const { earned, locked, unavailable, denominator } = splitAchievements(achievements)
+  const visible = filter === 'earned' ? earned : filter === 'locked' ? locked : filter === 'unavailable' ? unavailable : achievements
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
@@ -41,7 +41,7 @@ export default function AchievementModal({ achievements, onClose }) {
               <span>🏆</span> My Achievements
             </h2>
             <p className="text-slate-400 text-sm mt-1">
-              {earned.length} of {achievements.length} badges earned
+              {earned.length} of {denominator} badges earned
             </p>
           </div>
           <button 
@@ -58,6 +58,7 @@ export default function AchievementModal({ achievements, onClose }) {
             { key: 'all',    label: `All (${achievements.length})` },
             { key: 'earned', label: `Earned (${earned.length})` },
             { key: 'locked', label: `Locked (${locked.length})` },
+            ...(unavailable.length ? [{ key: 'unavailable', label: `Not available yet (${unavailable.length})` }] : []),
           ].map(tab => (
             <button
               key={tab.key}

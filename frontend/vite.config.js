@@ -5,6 +5,7 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   server: {
+    port: 5300,
     // Vite's dev server blocks requests from hostnames it doesn't
     // recognize by default. Since we're testing through a Cloudflare
     // Tunnel (a random *.trycloudflare.com hostname, not localhost),

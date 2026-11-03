@@ -1,31 +1,53 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import AchievementBadge from "../../../components/AchievementBadge"
 import AchievementModal from "../../../components/AchievementModal"
-import { triggerConfetti } from '../../../utils/confetti'
-import AchievementToast from '../../../components/AchievementToast'
+import useAchievements from '../../../hooks/useAchievements'
+import { splitAchievements } from '../../../utils/achievementView'
+import MobileSheet from '../../../components/MobileSheet'
 import { API_BASE } from '../../../api/client'
 
 export default function ProgressStats({ stats, username, fullName }) {
   const [animated, setAnimated] = useState(false)
   const [hoveredDay, setHoveredDay] = useState(null)
-  const [achievements, setAchievements] = useState([])
-  const [loadingAchievements, setLoadingAchievements] = useState(true)
+  // Shared, user-scoped store. Celebrations are queued app-wide from the server's
+  // just_earned flag; this page only displays the list.
+  const { achievements, loading: loadingAchievements } = useAchievements()
+  const ach = splitAchievements(achievements)
   const [showAllBadges, setShowAllBadges] = useState(false)
   const [realStats, setRealStats] = useState(null)
   const [recentSubmissions, setRecentSubmissions] = useState([])
 
-  // For celebration effects
-  const [newBadge, setNewBadge] = useState(null)
-  const [prevEarnedCount, setPrevEarnedCount] = useState(0)
+  // 'all' = every subject mixed together (the original behavior).
+  // Anything else is a subject id, which scopes every stat below to just
+  // that one subject's quests.
+  const [subjectId, setSubjectId] = useState('all')
+  const [subjectsList, setSubjectsList] = useState([])
+  const [showSubjectPicker, setShowSubjectPicker] = useState(false)
+  const subjectPickerAnchorRef = useRef(null)
 
-  // Fetch real stats + recent submissions
+  // Fetch the subjects this student is enrolled in, once, to populate the filter dropdown
+  useEffect(() => {
+    const fetchSubjects = async () => {
+      try {
+        const token = localStorage.getItem('token')
+        const res = await fetch(`${API_BASE}/api/student/subjects`, { headers: { 'Authorization': `Bearer ${token}` } })
+        if (res.ok) setSubjectsList(await res.json())
+      } catch (err) {
+        console.error('Failed to fetch subjects list:', err)
+      }
+    }
+    fetchSubjects()
+  }, [])
+
+  // Fetch real stats + recent submissions -- re-runs whenever the subject filter changes
   useEffect(() => {
     const fetchStats = async () => {
       try {
         const token = localStorage.getItem('token')
+        const subjectParam = subjectId !== 'all' ? `&subject_id=${subjectId}` : ''
         const [statsRes, subsRes] = await Promise.all([
-          fetch(`${API_BASE}/api/student/stats`, { headers: { 'Authorization': `Bearer ${token}` } }),
-          fetch(`${API_BASE}/api/student/submissions?limit=50`, { headers: { 'Authorization': `Bearer ${token}` } })
+          fetch(`${API_BASE}/api/student/stats${subjectId !== 'all' ? `?subject_id=${subjectId}` : ''}`, { headers: { 'Authorization': `Bearer ${token}` } }),
+          fetch(`${API_BASE}/api/student/submissions?limit=50${subjectParam}`, { headers: { 'Authorization': `Bearer ${token}` } })
         ])
         if (statsRes.ok) setRealStats(await statsRes.json())
         if (subsRes.ok) {
@@ -37,50 +59,7 @@ export default function ProgressStats({ stats, username, fullName }) {
       }
     }
     fetchStats()
-  }, [])
-
-  // Fetch achievements from API
-  useEffect(() => {
-    const fetchAchievements = async () => {
-      try {
-        const token = localStorage.getItem('token')
-        const res = await fetch(`${API_BASE}/api/student/achievements`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        })
-        if (res.ok) {
-          const data = await res.json()
-          setAchievements(data)
-        }
-      } catch (err) {
-        console.error('Failed to fetch achievements:', err)
-      } finally {
-        setLoadingAchievements(false)
-      }
-    }
-    fetchAchievements()
-  }, [])
-
-  // Detect newly earned badges and trigger celebration
-  useEffect(() => {
-    if (achievements.length > 0 && !loadingAchievements) {
-      const earnedBadges = achievements.filter(b => b.is_earned)
-      const currentEarnedCount = earnedBadges.length
-      
-      // If the count of earned badges increased, trigger celebration
-      if (currentEarnedCount > prevEarnedCount && prevEarnedCount > 0) {
-        // Find the most recently earned badge
-        const newestBadge = earnedBadges[earnedBadges.length - 1]
-        
-        // 🎊 Trigger confetti!
-        triggerConfetti()
-        
-        // 🔔 Show toast notification
-        setNewBadge(newestBadge)
-      }
-      
-      setPrevEarnedCount(currentEarnedCount)
-    }
-  }, [achievements, loadingAchievements])
+  }, [subjectId])
 
   // Trigger the fade-in animation once the component mounts
   useEffect(() => {
@@ -161,14 +140,67 @@ export default function ProgressStats({ stats, username, fullName }) {
     <div className="space-y-4">
       {/* Hero Header */}
       <div className={`bg-gradient-to-r from-purple-900/40 to-pink-900/40 border border-purple-600/40 rounded-2xl p-6 transition-all duration-700 ${animated ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4'}`}>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-4 flex-wrap">
           <div className="w-16 h-16 bg-gradient-to-br from-purple-600 to-pink-600 rounded-2xl flex items-center justify-center text-3xl font-bold shadow-lg shadow-purple-600/40 animate-pulse">
             {(fullName || username)?.[0]?.toUpperCase() || 'S'}
           </div>
-          <div>
+          <div className="flex-1 min-w-[180px]">
             <h2 className="text-2xl font-bold text-white">{fullName || username}'s Hero Sheet</h2>
             <p className="text-slate-500 text-xs font-mono">{username}</p>
             <p className="text-slate-400">Track your legendary progress</p>
+          </div>
+
+          {/* Subject filter: view stats mixed across every subject, or scoped to
+              just one. Uses the app's own themed sheet instead of a native
+              <select> — same pattern as the Leaderboard's subject picker,
+              since a native dropdown's option list can't be restyled and
+              shows up as a stark white OS popup over this dark theme. */}
+          <div className="ml-auto">
+            <label className="block text-[10px] text-purple-300 uppercase tracking-wider font-medium mb-1">
+              Viewing
+            </label>
+            <div ref={subjectPickerAnchorRef}>
+              <button
+                onClick={() => setShowSubjectPicker(!showSubjectPicker)}
+                className="flex items-center gap-2 px-3 py-2 bg-slate-900/70 border border-purple-600/40 rounded-lg text-white text-sm transition hover:border-purple-400 max-w-[220px]"
+              >
+                <span className="truncate">
+                  {subjectId === 'all'
+                    ? '🌐 All Subjects (Mixed)'
+                    : (() => {
+                        const s = subjectsList.find(s => String(s.id) === String(subjectId))
+                        return s ? `${s.name}${s.section_no ? ` — ${s.section_no}` : ''}` : 'All Subjects (Mixed)'
+                      })()}
+                </span>
+                <span className="text-slate-400 shrink-0">▼</span>
+              </button>
+              <MobileSheet show={showSubjectPicker} onClose={() => setShowSubjectPicker(false)} widthClass="sm:w-72" anchorRef={subjectPickerAnchorRef}>
+                <p className="text-[10px] text-slate-500 uppercase tracking-wider px-4 pt-3 pb-1 font-bold">Viewing</p>
+                <button
+                  onClick={() => { setSubjectId('all'); setShowSubjectPicker(false) }}
+                  className={`w-full flex items-center gap-2 px-4 py-3 sm:py-2 text-left text-sm transition ${
+                    subjectId === 'all'
+                      ? 'bg-purple-600/20 text-purple-300'
+                      : 'text-slate-300 hover:text-white hover:bg-slate-800'
+                  }`}
+                >
+                  🌐 All Subjects (Mixed)
+                </button>
+                {subjectsList.map(s => (
+                  <button
+                    key={s.id}
+                    onClick={() => { setSubjectId(s.id); setShowSubjectPicker(false) }}
+                    className={`w-full flex items-center gap-2 px-4 py-3 sm:py-2 text-left text-sm transition ${
+                      String(s.id) === String(subjectId)
+                        ? 'bg-purple-600/20 text-purple-300'
+                        : 'text-slate-300 hover:text-white hover:bg-slate-800'
+                    }`}
+                  >
+                    {s.name}{s.section_no ? ` — ${s.section_no}` : ''}
+                  </button>
+                ))}
+              </MobileSheet>
+            </div>
           </div>
         </div>
       </div>
@@ -380,14 +412,20 @@ export default function ProgressStats({ stats, username, fullName }) {
               <h3 className="text-base font-bold text-white flex items-center gap-2">
                 <span>🏆</span> Achievements
               </h3>
-              <button 
+              <button
                 onClick={() => setShowAllBadges(true)}
                 className="text-xs text-purple-400 hover:text-purple-300 transition flex items-center gap-1"
               >
                 View All →
               </button>
             </div>
-            
+
+            {subjectId !== 'all' && (
+              <p className="text-[10px] text-slate-500 -mt-2 mb-3 italic">
+                Badges are earned account-wide, across all subjects — not scoped by this filter.
+              </p>
+            )}
+
             {loadingAchievements ? (
               <div className="flex gap-3 justify-center py-4">
                 {[...Array(6)].map((_, i) => (
@@ -411,12 +449,18 @@ export default function ProgressStats({ stats, username, fullName }) {
                 <div className="flex items-center justify-center gap-4 text-xs text-slate-400">
                   <span className="flex items-center gap-1">
                     <span className="w-2 h-2 bg-purple-600 rounded-full" />
-                    {achievements.filter(b => b.is_earned).length} Earned
+                    {ach.earned.length} of {ach.denominator} Earned
                   </span>
                   <span className="flex items-center gap-1">
                     <span className="w-2 h-2 bg-slate-600 rounded-full" />
-                    {achievements.filter(b => !b.is_earned).length} Locked
+                    {ach.locked.length} Locked
                   </span>
+                  {ach.unavailable.length > 0 && (
+                    <span className="flex items-center gap-1">
+                      <span className="w-2 h-2 bg-slate-800 border border-slate-600 rounded-full" />
+                      {ach.unavailable.length} Not available yet
+                    </span>
+                  )}
                 </div>
               </>
             )}
@@ -464,13 +508,6 @@ export default function ProgressStats({ stats, username, fullName }) {
         </div>
       </div>
 
-      {/* 🎉 Celebration Toast */}
-      {newBadge && (
-        <AchievementToast 
-          badge={newBadge} 
-          onClose={() => setNewBadge(null)} 
-        />
-      )}
     </div>
   )
 }

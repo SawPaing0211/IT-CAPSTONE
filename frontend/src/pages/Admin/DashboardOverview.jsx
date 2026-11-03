@@ -174,7 +174,7 @@ export default function DashboardOverview({ onNavigate }) {
             <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500" />
           </span>
           <p className="text-red-300 text-sm font-medium flex-1">
-            <strong>Maintenance mode is ON.</strong> Students cannot log in. The platform is effectively read-only.
+            <strong>Maintenance status is ON.</strong> This is a status flag only; sign-in and features are not restricted.
           </p>
           <button
             onClick={toggleMaintenance}
@@ -225,15 +225,15 @@ export default function DashboardOverview({ onNavigate }) {
           {/* Platform Status */}
           <PrimaryCard
             label="Platform status"
-            badge={systemOk ? 'All systems operational' : 'Degraded — check logs'}
+            badge={systemOk ? 'Database reachable' : 'Check failed'}
             badgeVariant={systemOk ? 'ok' : 'alert'}
             statusLine={
               <span className={`flex items-center gap-2 text-lg font-semibold ${systemOk ? 'text-emerald-400' : 'text-red-400'}`}>
                 <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${systemOk ? 'bg-emerald-400' : 'bg-red-400'} animate-pulse`} />
-                {systemOk ? 'Operational' : 'Degraded'}
+                {systemOk ? 'Database connected' : 'Database check failed'}
               </span>
             }
-            subLabel="DB · API · Sandbox · 99.9% uptime"
+            subLabel="Result of the last database connection check. Sandbox and uptime are not monitored here."
             accentColor={systemOk ? 'emerald' : 'red'}
             action={healthError ? { label: 'View activity logs →', onClick: () => onNavigate?.('activity') } : null}
           />
@@ -241,7 +241,7 @@ export default function DashboardOverview({ onNavigate }) {
           {/* Active Users Today */}
           <PrimaryCard
             label="Active users today"
-            badge={`↑ +12%`}
+            badge="Today"
             badgeVariant="ok"
             statusLine={
               <span className="text-4xl font-black text-white tracking-tight">{activeToday}</span>
@@ -283,7 +283,7 @@ export default function DashboardOverview({ onNavigate }) {
           <MiniCard
             label="Total students"
             value={stats?.total_students ?? 0}
-            trend="+12%"
+            trend={null}
             onClick={() => onNavigate?.('users')}
           />
           <MiniCard
@@ -295,13 +295,13 @@ export default function DashboardOverview({ onNavigate }) {
           <MiniCard
             label="Class codes"
             value={totalSections}
-            trend="+8%"
+            trend={null}
             onClick={() => onNavigate?.('sections')}
           />
           <MiniCard
             label="Total enrolled"
             value={totalEnrolled}
-            trend="+3%"
+            trend={null}
             onClick={() => onNavigate?.('sections')}
           />
         </div>
@@ -321,7 +321,7 @@ export default function DashboardOverview({ onNavigate }) {
         <div>
           <p className="text-sm font-medium text-slate-300">Maintenance mode</p>
           <p className="text-xs text-slate-500 mt-0.5">
-            When ON, students cannot log in. Instructors and admins are unaffected.
+            When ON, a Maintenance status is shown. It is a status flag only and does not block sign-in.
           </p>
         </div>
         <button
@@ -385,10 +385,9 @@ export default function DashboardOverview({ onNavigate }) {
               <h3 className="text-sm font-semibold text-slate-200">System status</h3>
             </div>
             <div className="divide-y divide-slate-800/50 px-5">
-              <StatusRow label="Database"    value="Connected"   ok />
-              <StatusRow label="API server"  value="Operational" ok />
-              <StatusRow label="Code sandbox" value="Active"     ok />
-              <StatusRow label="Uptime"      value="99.9%"       ok />
+              <StatusRow label="Database"    value={systemOk ? 'Connected' : 'Check failed'} ok={systemOk} />
+              <StatusRow label="API server"  value={healthError ? 'Not responding' : 'Responding'} ok={!healthError} />
+              <p className="text-[11px] text-slate-500 py-2.5">The code sandbox and uptime are not monitored from this page.</p>
             </div>
           </div>
 

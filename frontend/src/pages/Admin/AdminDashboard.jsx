@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { openChangePassword } from '../../utils/accountEvents'
 import DashboardOverview from './DashboardOverview'
 import UserManagement from './UserManagement'
 import InstructorAssignments from './InstructorAssignments'
@@ -105,9 +106,9 @@ const TIPS = [
 // Shows as a small colored dot + label in the header and role banner.
 function healthDisplay(health, maintenanceMode) {
   if (maintenanceMode)          return { color: 'bg-amber-400',  text: 'Maintenance',    textColor: 'text-amber-400',  border: 'border-amber-600/20',  bg: 'bg-amber-600/10',  pulse: false }
-  if (health === 'operational') return { color: 'bg-green-400',  text: 'All Systems OK', textColor: 'text-green-400',  border: 'border-green-600/20',  bg: 'bg-green-600/10',  pulse: true  }
-  if (health === 'degraded')    return { color: 'bg-yellow-400', text: 'Degraded',        textColor: 'text-yellow-400', border: 'border-yellow-600/20', bg: 'bg-yellow-600/10', pulse: false }
-  return                               { color: 'bg-red-400',    text: 'System Down',     textColor: 'text-red-400',    border: 'border-red-600/20',    bg: 'bg-red-600/10',    pulse: false }
+  if (health === 'operational') return { color: 'bg-green-400',  text: 'Database connected', textColor: 'text-green-400',  border: 'border-green-600/20',  bg: 'bg-green-600/10',  pulse: true  }
+  if (health === 'degraded')    return { color: 'bg-yellow-400', text: 'Database degraded', textColor: 'text-yellow-400', border: 'border-yellow-600/20', bg: 'bg-yellow-600/10', pulse: false }
+  return                               { color: 'bg-red-400',    text: 'Database unreachable', textColor: 'text-red-400',    border: 'border-red-600/20',    bg: 'bg-red-600/10',    pulse: false }
 }
 
 // ─── TOOLTIP ─────────────────────────────────────────────────────────────────
@@ -270,6 +271,12 @@ function ProfileDropdown({ user, onLogout, onShortcuts }) {
             className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
           >
             <span>⌨️</span> Keyboard Shortcuts
+          </button>
+          <button
+            onClick={() => { openChangePassword(); setOpen(false) }}
+            className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
+          >
+            <span>🔑</span> Change password
           </button>
           <div className="border-t border-slate-700/50">
             <button

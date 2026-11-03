@@ -1,6 +1,18 @@
 import { useState, useEffect } from 'react'
 import { API_BASE } from '../../api/client'
 
+// Accent per year level so the list reads as four cohorts instead of one
+// repeated card — year is the one piece of structure every subject has.
+// Subjects with no year level fall back to the neutral/purple set.
+const YEAR_ACCENT = {
+  1: { grad: 'from-cyan-500 to-blue-600',    bar: 'bg-cyan-500',    border: 'border-cyan-500/25',    hoverBorder: 'hover:border-cyan-400/50',    text: 'text-cyan-300',    chip: 'bg-cyan-500/10 text-cyan-300 border-cyan-500/25',    label: '1st Year' },
+  2: { grad: 'from-fuchsia-500 to-purple-600', bar: 'bg-fuchsia-500', border: 'border-fuchsia-500/25', hoverBorder: 'hover:border-fuchsia-400/50', text: 'text-fuchsia-300', chip: 'bg-fuchsia-500/10 text-fuchsia-300 border-fuchsia-500/25', label: '2nd Year' },
+  3: { grad: 'from-amber-500 to-orange-600', bar: 'bg-amber-500',   border: 'border-amber-500/25',   hoverBorder: 'hover:border-amber-400/50',   text: 'text-amber-300',   chip: 'bg-amber-500/10 text-amber-300 border-amber-500/25',   label: '3rd Year' },
+  4: { grad: 'from-rose-500 to-red-600',     bar: 'bg-rose-500',    border: 'border-rose-500/25',    hoverBorder: 'hover:border-rose-400/50',    text: 'text-rose-300',    chip: 'bg-rose-500/10 text-rose-300 border-rose-500/25',    label: '4th Year' },
+}
+const NO_YEAR_ACCENT = { grad: 'from-slate-500 to-slate-600', bar: 'bg-slate-500', border: 'border-slate-700', hoverBorder: 'hover:border-slate-500/60', text: 'text-slate-300', chip: 'bg-slate-700/40 text-slate-300 border-slate-600/40', label: 'No Year Set' }
+const accentFor = (year) => YEAR_ACCENT[year] || NO_YEAR_ACCENT
+
 export default function SubjectsManagement() {
   const [subjects, setSubjects] = useState([])
   const [loading, setLoading] = useState(true)
@@ -26,7 +38,7 @@ export default function SubjectsManagement() {
     subject_code: '',
     units: '',
     department: '',
-    year_level: '',
+    year_level: '1',
     subject_type: 'lab',
   })
 
@@ -69,7 +81,7 @@ export default function SubjectsManagement() {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          // adamson's own subject number, not the same as our subject code
+          // the institution's own subject number, not the same as our subject code
           internal_subject_no: newSubject.internal_subject_no.trim() || null,
           name: newSubject.name.trim(),
           description: newSubject.description.trim(),
@@ -90,7 +102,7 @@ export default function SubjectsManagement() {
           subject_code: '', 
           units: '', 
           department: '', 
-          year_level: '', 
+          year_level: '1', 
           subject_type: 'lab' 
         })
         await fetchSubjects()
@@ -270,7 +282,7 @@ export default function SubjectsManagement() {
                     onChange={e => setEditForm({...editForm, internal_subject_no: e.target.value})}
                     placeholder="e.g., 290007"
                     className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-white placeholder-slate-500 outline-none focus:border-purple-500 transition font-mono tracking-widest text-sm" />
-                  <p className="text-slate-500 text-[10px] mt-1">Adamson internal ID</p>
+                  <p className="text-slate-500 text-[10px] mt-1">Internal subject ID</p>
                 </div>
                 <div>
                   <label className="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">Subject Code</label>
@@ -304,14 +316,15 @@ export default function SubjectsManagement() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">Year Level</label>
+                  <label className="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">Curriculum Year</label>
                   <select value={editForm.year_level} onChange={e => setEditForm({...editForm, year_level: e.target.value})}
                     className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-white outline-none focus:border-purple-500 transition text-sm">
-                    <option value="">Any</option>
-                    <option value="1">1st Year</option>
-                    <option value="2">2nd Year</option>
-                    <option value="3">3rd Year</option>
-                    <option value="4">4th Year</option>
+                    <option value="1">First-year subject</option>
+                    {/* an existing subject with another curriculum year stays visible
+                        until the official first-year list is confirmed */}
+                    {editForm.year_level && editForm.year_level !== '1' && (
+                      <option value={editForm.year_level}>Year {editForm.year_level} (not in scope, under review)</option>
+                    )}
                   </select>
                 </div>
                 <div>
@@ -352,42 +365,56 @@ export default function SubjectsManagement() {
       )}
 
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-white">Subjects Management</h1>
-          <p className="text-slate-400 mt-1">Create and manage course subjects</p>
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        <div className="flex items-center gap-4">
+          <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-purple-600 to-pink-600 flex items-center justify-center text-xl shadow-lg shadow-purple-900/40 shrink-0">
+            📚
+          </div>
+          <div>
+            <h1 className="text-2xl font-black text-white tracking-tight">Subjects Management</h1>
+            <p className="text-slate-500 text-sm mt-0.5">Create and manage course subjects</p>
+          </div>
         </div>
         <button
           onClick={() => setShowCreateModal(true)}
-          className="px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-xl text-white font-bold transition shadow-lg shadow-purple-600/30 flex items-center gap-2"
+          className="px-5 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-xl text-white font-bold text-sm transition shadow-lg shadow-purple-600/20 flex items-center gap-2"
         >
-          <span className="text-xl">📚</span> Create Subject
+          <span>+</span> New Subject
         </button>
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-gradient-to-br from-purple-900/30 to-slate-900 border border-purple-600/30 rounded-xl p-4">
-          <p className="text-slate-400 text-sm">Total Subjects</p>
-          <p className="text-3xl font-bold text-purple-300 mt-1">{subjects.length}</p>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="flex items-center gap-3 bg-slate-900/60 border border-slate-800 rounded-xl px-4 py-3">
+          <div className="w-9 h-9 rounded-lg bg-purple-600/15 text-purple-300 flex items-center justify-center text-lg shrink-0">📚</div>
+          <div>
+            <p className="text-2xl font-bold text-white leading-none">{subjects.length}</p>
+            <p className="text-slate-500 text-xs mt-1">Total Subjects</p>
+          </div>
         </div>
-        <div className="bg-gradient-to-br from-blue-900/30 to-slate-900 border border-blue-600/30 rounded-xl p-4">
-          <p className="text-slate-400 text-sm">Departments</p>
-          <p className="text-3xl font-bold text-blue-300 mt-1">
-            {new Set(subjects.map(s => s.department).filter(Boolean)).size}
-          </p>
+        <div className="flex items-center gap-3 bg-slate-900/60 border border-slate-800 rounded-xl px-4 py-3">
+          <div className="w-9 h-9 rounded-lg bg-blue-600/15 text-blue-300 flex items-center justify-center text-lg shrink-0">🏛️</div>
+          <div>
+            <p className="text-2xl font-bold text-white leading-none">
+              {new Set(subjects.map(s => s.department).filter(Boolean)).size}
+            </p>
+            <p className="text-slate-500 text-xs mt-1">Departments</p>
+          </div>
         </div>
-        <div className="bg-gradient-to-br from-emerald-900/30 to-slate-900 border border-emerald-600/30 rounded-xl p-4">
-          <p className="text-slate-400 text-sm">Avg. Units</p>
-          <p className="text-3xl font-bold text-emerald-300 mt-1">
-            {subjects.length && subjects.some(s => s.units)
-              ? (subjects.reduce((sum, s) => sum + (s.units || 0), 0) / subjects.filter(s => s.units).length).toFixed(1)
-              : '—'}
-          </p>
+        <div className="flex items-center gap-3 bg-slate-900/60 border border-slate-800 rounded-xl px-4 py-3">
+          <div className="w-9 h-9 rounded-lg bg-emerald-600/15 text-emerald-300 flex items-center justify-center text-lg shrink-0">⏱️</div>
+          <div>
+            <p className="text-2xl font-bold text-white leading-none">
+              {subjects.length && subjects.some(s => s.units)
+                ? (subjects.reduce((sum, s) => sum + (s.units || 0), 0) / subjects.filter(s => s.units).length).toFixed(1)
+                : '—'}
+            </p>
+            <p className="text-slate-500 text-xs mt-1">Avg. Units</p>
+          </div>
         </div>
       </div>
 
-      {/* Subjects List */}
+      {/* Subjects List, grouped by year level so cohorts are easy to scan */}
       {subjects.length === 0 ? (
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-12 text-center">
           <div className="text-6xl mb-4">📚</div>
@@ -395,60 +422,89 @@ export default function SubjectsManagement() {
           <p className="text-slate-400">Create your first subject to get started!</p>
         </div>
       ) : (
-        <div className="space-y-3">
-          {subjects.map(subject => (
-            <div key={subject.id} className="bg-slate-900 border border-slate-800 rounded-xl p-5 hover:border-purple-600/40 transition group">
-              <div className="flex items-start justify-between">
-                <div className="flex items-start gap-4 flex-1">
-                  <div className="w-12 h-12 bg-gradient-to-br from-purple-600 to-pink-600 rounded-xl flex items-center justify-center text-2xl flex-shrink-0">
-                    💻
+        <div className="space-y-8">
+          {Object.entries(
+            subjects.reduce((groups, s) => {
+              const key = YEAR_ACCENT[s.year_level] ? s.year_level : 'none'
+              ;(groups[key] ||= []).push(s)
+              return groups
+            }, {})
+          )
+            .sort(([a], [b]) => (a === 'none' ? 1 : b === 'none' ? -1 : a - b))
+            .map(([yearKey, group]) => {
+              const accent = YEAR_ACCENT[yearKey] || NO_YEAR_ACCENT
+              return (
+                <div key={yearKey}>
+                  <div className="flex items-center gap-3 mb-3">
+                    <span className={`w-2 h-2 rounded-full ${accent.bar}`} />
+                    <h2 className="text-sm font-bold text-slate-300">{accent.label}</h2>
+                    <span className="text-slate-600 text-xs">{group.length} subject{group.length === 1 ? '' : 's'}</span>
+                    <div className="flex-1 h-px bg-slate-800" />
                   </div>
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 flex-wrap mb-1">
-                      {/* adamson's internal subject number */}
-                      {subject.internal_subject_no && (
-                        <span className="font-mono text-xs font-bold bg-slate-800 text-yellow-300 border border-yellow-600/30 px-2 py-0.5 rounded">
-                          {subject.internal_subject_no}
-                        </span>
-                      )}
-                      {/* Subject Code */}
-                      {subject.subject_code && (
-                        <span className="font-mono text-xs font-bold bg-slate-800 text-purple-300 border border-purple-600/30 px-2 py-0.5 rounded">
-                          {subject.subject_code}
-                        </span>
-                      )}
-                      <h3 className="text-lg font-bold text-white">{subject.name}</h3>
-                    </div>
-                    {subject.description ? (
-                      <p className="text-slate-400 text-sm mb-2">{subject.description}</p>
-                    ) : (
-                      <p className="text-slate-600 text-sm italic mb-2">No description</p>
-                    )}
-                    <div className="flex items-center gap-2 flex-wrap">
-                      {subject.units && <span className="text-xs bg-blue-600/20 text-blue-300 border border-blue-600/30 px-2 py-0.5 rounded-full">{subject.units} units</span>}
-                      {subject.year_level && <span className="text-xs bg-green-600/20 text-green-300 border border-green-600/30 px-2 py-0.5 rounded-full">Year {subject.year_level}</span>}
-                      {subject.subject_type && <span className="text-xs bg-orange-600/20 text-orange-300 border border-orange-600/30 px-2 py-0.5 rounded-full capitalize">{subject.subject_type.replace('_', ' + ')}</span>}
-                      {subject.department && <span className="text-xs bg-purple-600/20 text-purple-300 border border-purple-600/30 px-2 py-0.5 rounded-full">{subject.department}</span>}
-                    </div>
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                    {group.map(subject => {
+                      const a = accentFor(subject.year_level)
+                      return (
+                        <div
+                          key={subject.id}
+                          className={`relative bg-slate-900/60 border ${a.border} ${a.hoverBorder} rounded-xl pl-5 pr-4 py-4 transition group overflow-hidden`}
+                        >
+                          <span className={`absolute left-0 top-0 bottom-0 w-1 ${a.bar}`} />
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex items-start gap-3 flex-1 min-w-0">
+                              <div className={`w-10 h-10 bg-gradient-to-br ${a.grad} rounded-xl flex items-center justify-center text-lg flex-shrink-0`}>
+                                💻
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  {subject.internal_subject_no && (
+                                    <span className="font-mono text-[11px] font-bold bg-slate-800 text-yellow-300/90 border border-yellow-600/25 px-1.5 py-0.5 rounded">
+                                      {subject.internal_subject_no}
+                                    </span>
+                                  )}
+                                  {subject.subject_code && (
+                                    <span className={`font-mono text-[11px] font-bold border px-1.5 py-0.5 rounded ${a.chip}`}>
+                                      {subject.subject_code}
+                                    </span>
+                                  )}
+                                </div>
+                                <h3 className="text-white font-bold truncate mt-1">{subject.name}</h3>
+                                {subject.description ? (
+                                  <p className="text-slate-500 text-xs mt-0.5 line-clamp-1">{subject.description}</p>
+                                ) : (
+                                  <p className="text-slate-700 text-xs italic mt-0.5">No description</p>
+                                )}
+                                <div className="flex items-center gap-1.5 flex-wrap mt-2">
+                                  {subject.units && <span className="text-[11px] text-slate-400 bg-slate-800/80 px-1.5 py-0.5 rounded-full">{subject.units} {subject.units === 1 ? 'unit' : 'units'}</span>}
+                                  {subject.subject_type && <span className="text-[11px] text-slate-400 bg-slate-800/80 px-1.5 py-0.5 rounded-full capitalize">{subject.subject_type.replace('_', ' + ')}</span>}
+                                  {subject.department && <span className="text-[11px] text-slate-400 bg-slate-800/80 px-1.5 py-0.5 rounded-full">{subject.department}</span>}
+                                </div>
+                              </div>
+                            </div>
+                            <div className="flex gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition shrink-0">
+                              <button
+                                onClick={() => handleEditClick(subject)}
+                                title="Edit subject"
+                                className="w-8 h-8 flex items-center justify-center bg-slate-800 hover:bg-purple-600/30 text-slate-400 hover:text-purple-300 rounded-lg transition"
+                              >
+                                ✏️
+                              </button>
+                              <button
+                                onClick={() => handleDeleteSubject(subject.id, subject.name)}
+                                title="Delete subject"
+                                className="w-8 h-8 flex items-center justify-center bg-slate-800 hover:bg-red-600/30 text-slate-400 hover:text-red-300 rounded-lg transition"
+                              >
+                                🗑️
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })}
                   </div>
                 </div>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => handleEditClick(subject)}
-                    className="px-4 py-2 bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 rounded-lg text-sm font-bold transition flex items-center gap-2"
-                  >
-                    <span>✏️</span> Edit
-                  </button>
-                  <button
-                    onClick={() => handleDeleteSubject(subject.id, subject.name)}
-                    className="px-4 py-2 bg-red-600/20 hover:bg-red-600/30 text-red-300 rounded-lg text-sm font-bold transition flex items-center gap-2"
-                  >
-                    <span>🗑️</span> Delete
-                  </button>
-                </div>
-              </div>
-            </div>
-          ))}
+              )
+            })}
         </div>
       )}
 
@@ -477,7 +533,7 @@ export default function SubjectsManagement() {
 
               {/* subject number, code, and name */}
               <div className="grid grid-cols-3 gap-3">
-                {/* Adamson Subject Number */}
+                {/* Internal subject number */}
                 <div>
                   <label className="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">
                     Subject Number
@@ -489,7 +545,7 @@ export default function SubjectsManagement() {
                     placeholder="e.g., 290007"
                     className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-white placeholder-slate-500 outline-none focus:border-purple-500 transition font-mono tracking-widest text-sm"
                   />
-                  <p className="text-slate-500 text-[10px] mt-1">Adamson internal ID</p>
+                  <p className="text-slate-500 text-[10px] mt-1">Internal subject ID</p>
                 </div>
                 
                 {/* Subject Code */}
@@ -549,17 +605,13 @@ export default function SubjectsManagement() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">Year Level</label>
+                  <label className="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">Curriculum Year</label>
                   <select
                     value={newSubject.year_level}
                     onChange={(e) => setNewSubject({...newSubject, year_level: e.target.value})}
                     className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-white outline-none focus:border-purple-500 transition text-sm"
                   >
-                    <option value="">Any</option>
-                    <option value="1">1st Year</option>
-                    <option value="2">2nd Year</option>
-                    <option value="3">3rd Year</option>
-                    <option value="4">4th Year</option>
+                    <option value="1">First-year subject</option>
                   </select>
                 </div>
                 <div>
@@ -645,7 +697,7 @@ export default function SubjectsManagement() {
                       subject_code: '', 
                       units: '', 
                       department: '', 
-                      year_level: '', 
+                      year_level: '1', 
                       subject_type: 'lab' 
                     })
                   }}

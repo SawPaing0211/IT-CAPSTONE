@@ -20,6 +20,7 @@ export default function DashboardOverview() {
   const [totalStudents, setTotalStudents]       = useState(0)
   const [loading, setLoading]                   = useState(true)
   const [avgScore, setAvgScore]                 = useState(0)
+  const [avgBasis, setAvgBasis]                 = useState(null)
   const [pendingReviews, setPendingReviews]     = useState(0)
   const [totalProblems, setTotalProblems]       = useState(0)
   const [newProblemsThisWeek, setNewProblemsThisWeek] = useState(0)
@@ -55,7 +56,9 @@ export default function DashboardOverview() {
 
         if (statsRes.ok) {
           const statsData = await statsRes.json()
+          if (typeof statsData.total_students === 'number') setTotalStudents(statsData.total_students)   // distinct students (a student in two classes counts once)
           setAvgScore(statsData.avg_score ?? 0)
+          setAvgBasis(statsData.avg_score_basis ?? null)
           setPendingReviews(statsData.pending_reviews ?? 0)
           setTotalProblems(statsData.total_problems ?? 0)
           setNewProblemsThisWeek(statsData.new_problems_this_week ?? 0)
@@ -134,14 +137,15 @@ export default function DashboardOverview() {
             bg: 'bg-purple-500/5',
           },
           {
-            label: 'Avg Class Score',
+            label: 'XP earned',
             value: `${avgScore}%`,
             icon: '📊',
             border: 'border-l-blue-500',
             text: 'text-blue-400',
             bg: 'bg-blue-500/5',
-            sub: avgScore >= 70 ? 'Above passing' : avgScore > 0 ? 'Below passing' : null,
-            subColor: avgScore >= 70 ? 'text-green-400' : 'text-red-400',
+            sub: avgBasis && avgBasis.submissions > 0 ? `${avgBasis.students_submitted}/${avgBasis.students_enrolled} students submitted` : 'No submissions yet',
+            subColor: 'text-slate-400',
+            title: avgBasis ? `Share of available XP earned on ${avgBasis.submissions} submitted quests (XP earned ÷ XP available). It is not a grade and not the share of test cases passed. Students who have not submitted are not counted as zero.` : undefined,
           },
           {
             label: 'Pending Reviews',
@@ -174,7 +178,7 @@ export default function DashboardOverview() {
             </div>
             <p className={`text-xl sm:text-3xl font-black ${card.text} tabular-nums`}>{card.value}</p>
             {card.sub && (
-              <p className={`text-[10px] sm:text-xs mt-0.5 sm:mt-1 font-medium ${card.subColor} truncate`}>{card.sub}</p>
+              <p className={`text-[10px] sm:text-xs mt-0.5 sm:mt-1 font-medium ${card.subColor} truncate`} title={card.title}>{card.sub}</p>
             )}
           </div>
         ))}
