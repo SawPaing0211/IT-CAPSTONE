@@ -1,0 +1,51 @@
+[
+  {
+    "quest": "Q01",
+    "complete_cases": 6,
+    "primary_and_alternative_python_match_all_cases": true,
+    "additional_vectors_per_reference": 441,
+    "intentional_wrong_python_rejected_by_cases": [
+      1,
+      3,
+      4,
+      5,
+      6
+    ],
+    "java_csharp": "source/manual algorithm review only; NOT compiled or run"
+  },
+  {
+    "quest": "Q02",
+    "complete_cases": 6,
+    "primary_and_alternative_python_match_all_cases": true,
+    "additional_vectors_per_reference": 125,
+    "intentional_wrong_python_rejected_by_cases": [
+      3
+    ],
+    "java_csharp": "source/manual algorithm review only; NOT compiled or run"
+  },
+  {
+    "quest": "Q03",
+    "complete_cases": 6,
+    "primary_and_alternative_python_match_all_cases": true,
+    "additional_vectors_per_reference": 102,
+    "intentional_wrong_python_rejected_by_cases": [
+      1,
+      3,
+      4,
+      5,
+      6
+    ],
+    "java_csharp": "source/manual algorithm review only; NOT compiled or run"
+  },
+  {
+    "quest": "Q04",
+    "complete_cases": 6,
+    "primary_and_alternative_python_match_all_cases": true,
+    "additional_vectors_per_reference": 304,
+    "intentional_wrong_python_rejected_by_cases": [
+      4,
+      6
+    ],
+    "java_csharp": "source/manual algorithm review only; NOT compiled or run"
+  }
+]

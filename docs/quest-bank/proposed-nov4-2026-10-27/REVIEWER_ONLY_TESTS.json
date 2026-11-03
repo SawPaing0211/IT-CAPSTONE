@@ -1,0 +1,166 @@
+[
+  {
+    "id": "Q01",
+    "cases": [
+      {
+        "input": "3 4\n",
+        "expected_output": "7\n",
+        "visible": true,
+        "purpose": "positive example"
+      },
+      {
+        "input": "0 0\n",
+        "expected_output": "0\n",
+        "visible": false,
+        "purpose": "zero"
+      },
+      {
+        "input": "-8 -5\n",
+        "expected_output": "-13\n",
+        "visible": false,
+        "purpose": "both negative"
+      },
+      {
+        "input": "-9 9\n",
+        "expected_output": "0\n",
+        "visible": false,
+        "purpose": "opposite signs"
+      },
+      {
+        "input": "1000000000 1000000000\n",
+        "expected_output": "2000000000\n",
+        "visible": false,
+        "purpose": "upper bound"
+      },
+      {
+        "input": "  -1000000000\n2  \n",
+        "expected_output": "-999999998\n",
+        "visible": false,
+        "purpose": "lower bound and whitespace"
+      }
+    ]
+  },
+  {
+    "id": "Q02",
+    "cases": [
+      {
+        "input": "3 8 5\n",
+        "expected_output": "8\n",
+        "visible": true,
+        "purpose": "middle greatest example"
+      },
+      {
+        "input": "9 2 1\n",
+        "expected_output": "9\n",
+        "visible": false,
+        "purpose": "first greatest"
+      },
+      {
+        "input": "1 2 9\n",
+        "expected_output": "9\n",
+        "visible": false,
+        "purpose": "last greatest"
+      },
+      {
+        "input": "-7 -2 -9\n",
+        "expected_output": "-2\n",
+        "visible": false,
+        "purpose": "all negative"
+      },
+      {
+        "input": "6 6 1\n",
+        "expected_output": "6\n",
+        "visible": false,
+        "purpose": "two-way tie"
+      },
+      {
+        "input": "-1000000000 -1000000000 -1000000000\n",
+        "expected_output": "-1000000000\n",
+        "visible": false,
+        "purpose": "all equal and lower bound"
+      }
+    ]
+  },
+  {
+    "id": "Q03",
+    "cases": [
+      {
+        "input": "6\n",
+        "expected_output": "12\n",
+        "visible": true,
+        "purpose": "even example"
+      },
+      {
+        "input": "0\n",
+        "expected_output": "0\n",
+        "visible": false,
+        "purpose": "empty range"
+      },
+      {
+        "input": "1\n",
+        "expected_output": "0\n",
+        "visible": false,
+        "purpose": "no even term"
+      },
+      {
+        "input": "2\n",
+        "expected_output": "2\n",
+        "visible": false,
+        "purpose": "first even"
+      },
+      {
+        "input": "9\n",
+        "expected_output": "20\n",
+        "visible": false,
+        "purpose": "odd upper endpoint"
+      },
+      {
+        "input": "100000\n",
+        "expected_output": "2500050000\n",
+        "visible": false,
+        "purpose": "upper bound and 64-bit result"
+      }
+    ]
+  },
+  {
+    "id": "Q04",
+    "cases": [
+      {
+        "input": "482\n",
+        "expected_output": "14\n",
+        "visible": true,
+        "purpose": "positive example"
+      },
+      {
+        "input": "0\n",
+        "expected_output": "0\n",
+        "visible": false,
+        "purpose": "zero"
+      },
+      {
+        "input": "7\n",
+        "expected_output": "7\n",
+        "visible": false,
+        "purpose": "single digit"
+      },
+      {
+        "input": "-305\n",
+        "expected_output": "8\n",
+        "visible": false,
+        "purpose": "negative with internal zero"
+      },
+      {
+        "input": "1000000000\n",
+        "expected_output": "1\n",
+        "visible": false,
+        "purpose": "upper bound with trailing zeroes"
+      },
+      {
+        "input": "-999999999\n",
+        "expected_output": "81\n",
+        "visible": false,
+        "purpose": "repeated high digits and negative sign"
+      }
+    ]
+  }
+]
