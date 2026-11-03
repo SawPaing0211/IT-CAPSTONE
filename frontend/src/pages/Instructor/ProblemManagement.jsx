@@ -18,6 +18,12 @@ export default function ProblemManagement({ classId, subjectId }) {
   const [deleteTarget, setDeleteTarget] = useState(null)
   const [success, setSuccess]   = useState(null)
   const [deleteError, setDeleteError] = useState(null)
+  // Set when the backend refuses a plain delete because real student
+  // submissions already exist for this quest (409 + submission_count) --
+  // deleting those would erase grading history without reversing the XP
+  // already awarded. Holds the target + the backend's own message so the
+  // second, stronger confirmation can show exactly why it's asking again.
+  const [forceDeleteTarget, setForceDeleteTarget] = useState(null)
 
   // Load quests whenever the class changes
   useEffect(() => { fetchProblems() }, [classId])
@@ -62,9 +68,22 @@ export default function ProblemManagement({ classId, subjectId }) {
     if (!deleteTarget) return
     const target = deleteTarget
     setDeleteTarget(null)
+    await doDelete(target, false)
+  }
+
+  // Re-run the delete with ?force=true after the instructor has seen and
+  // accepted the backend's warning about erasing real grading history.
+  const confirmForceDelete = async () => {
+    if (!forceDeleteTarget) return
+    const target = forceDeleteTarget.problem
+    setForceDeleteTarget(null)
+    await doDelete(target, true)
+  }
+
+  const doDelete = async (target, force) => {
     try {
       const token = localStorage.getItem('token')
-      const res = await fetch(`${API_BASE}/api/problems/${target.id}`, {
+      const res = await fetch(`${API_BASE}/api/problems/${target.id}${force ? '?force=true' : ''}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       })
@@ -72,11 +91,17 @@ export default function ProblemManagement({ classId, subjectId }) {
         setProblems(problems.filter(p => p.id !== target.id))
         setSuccess('Quest deleted.')
         setTimeout(() => setSuccess(null), 3000)
-      } else {
-        const error = await res.json().catch(() => ({}))
-        setDeleteError(error.error || `Couldn't delete "${target.title}". Please try again.`)
-        setTimeout(() => setDeleteError(null), 5000)
+        return
       }
+      const error = await res.json().catch(() => ({}))
+      // The backend blocked a plain delete because real submissions exist --
+      // ask again, this time showing why, instead of just failing.
+      if (res.status === 409 && typeof error.submission_count === 'number' && !force) {
+        setForceDeleteTarget({ problem: target, message: error.message })
+        return
+      }
+      setDeleteError(error.error || `Couldn't delete "${target.title}". Please try again.`)
+      setTimeout(() => setDeleteError(null), 5000)
     } catch (err) {
       console.error('Failed to delete problem:', err)
       setDeleteError(`Couldn't delete "${target.title}" — check your connection and try again.`)
@@ -336,6 +361,35 @@ export default function ProblemManagement({ classId, subjectId }) {
                 className="flex-1 py-2.5 bg-red-600 hover:bg-red-500 rounded-xl text-white font-bold transition text-sm"
               >
                 Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Stronger confirmation when real submissions exist for this quest */}
+      {forceDeleteTarget && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-slate-900 border-2 border-red-600/40 rounded-2xl w-full max-w-sm shadow-2xl shadow-red-900/30 overflow-hidden">
+            <div className="p-6 text-center">
+              <div className="w-14 h-14 mx-auto mb-4 rounded-full bg-red-500/10 border border-red-500/20 flex items-center justify-center text-2xl">
+                ⚠️
+              </div>
+              <h3 className="text-lg font-bold text-white mb-2">This quest has real submissions</h3>
+              <p className="text-slate-400 text-sm">{forceDeleteTarget.message}</p>
+            </div>
+            <div className="flex gap-3 p-4 pt-0">
+              <button
+                onClick={() => setForceDeleteTarget(null)}
+                className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 rounded-xl text-slate-300 font-bold transition text-sm"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmForceDelete}
+                className="flex-1 py-2.5 bg-red-600 hover:bg-red-500 rounded-xl text-white font-bold transition text-sm"
+              >
+                Delete anyway
               </button>
             </div>
           </div>

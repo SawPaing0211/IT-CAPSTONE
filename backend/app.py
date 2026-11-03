@@ -164,7 +164,6 @@ def _enforce_password_change():
 
 # ===== RATE LIMITING =====
 rate_limit_store = {}
-login_fail_store = {}   # { ip: {'count': n, 'locked_until': timestamp} }
 
 def rate_limit(max_calls=5, period=60):
     def decorator(f):
@@ -1179,15 +1178,19 @@ def login():
     identifier = str(data['username']).strip()
     if not identifier:
         return jsonify({"error": "Missing credentials"}), 400
-    ip = request.remote_addr
-    now = time.time()
 
-    # Check if IP is locked out
-    fail_record = login_fail_store.get(ip, {'count': 0, 'locked_until': 0})
-    if fail_record['locked_until'] > now:
-        remaining = int(fail_record['locked_until'] - now)
-        return jsonify({"error": f"Too many failed attempts. Try again in {remaining} seconds."}), 429
-
+    # NOTE: there used to be an IP-based lockout check here too, on top of the
+    # real, working per-account lockout below (3 fails -> that one account
+    # locked for 15 min). It was removed, not wired up, because it was dead
+    # code (nothing ever incremented its counter) AND wiring it up would have
+    # been actively dangerous as currently deployed: behind the Cloudflare
+    # quick tunnel, with no TRUSTED_PROXY_COUNT/forwarded-header handling,
+    # request.remote_addr is the tunnel's own loopback address for every
+    # request, not the real caller's. An IP-based lockout here would lock out
+    # every user sharing that (fake) IP -- i.e. everyone -- the moment a
+    # handful of failed logins happened anywhere. Add it back only once
+    # remote_addr can be trusted (a real reverse proxy + TRUSTED_PROXY_COUNT
+    # set correctly, or reading Cloudflare's CF-Connecting-IP).
     user, ambiguous = resolve_login_identifier(identifier)
     if ambiguous:
         logger.warning("Login identifier matched more than one account; refused.")
@@ -1233,8 +1236,7 @@ def login():
     if not user.is_active:
         return jsonify({"error": "Account disabled"}), 403
 
-    # Clear fail record and login attempts on successful login
-    login_fail_store.pop(ip, None)
+    # Clear login attempts on successful login
     user.login_attempts = 0
     user.locked_until = None
     user.last_login_at = datetime.utcnow()
@@ -1475,51 +1477,55 @@ def get_problems():
             ):
                 filtered.append(p)
 
-    result = []
-    for p in filtered:
-        # Parse starter_code if stored as string
-        starter = p.starter_code
-        if isinstance(starter, str):
-            try:
-                starter = json.loads(starter)
-            except:
-                starter = {}
-
-        # Get instructor name
-        instructor_name = "System"
-        if p.created_by:
-            instructor = User.query.get(p.created_by)
-            if instructor:
-                instructor_name = instructor.username
-
-        section_names = []
-        if p.visible_to_sections:
-            sections = SubjectSection.query.filter(SubjectSection.id.in_(p.visible_to_sections)).all()
-            section_names = [s.section_no for s in sections]
-
-        result.append({
-            "id": p.id,
-            "title": p.title,
-            "description": p.description,
-            "difficulty": p.difficulty,
-            "xp_reward": p.xp_reward,
-            "problem_type": p.problem_type,
-            "is_event_quest": p.is_event_quest,
-            "languages": p.languages or ['python'],
-            "hints": serialize_hints_for_viewer(p, user),
-            "tags": p.tags or [],
-            "starter_code": starter,
-            "test_cases": sanitize_test_cases_for_student(p.test_cases),
-            "estimated_time": p.estimated_time,
-            "partial_credit": p.partial_credit,
-            "auto_grade": p.auto_grade,
-            "due_date": p.due_date.isoformat() if p.due_date else None,
-            "instructor_name": instructor_name,
-            "section_names": section_names,
-            "created_at": p.created_at.isoformat()
-        })
+    result = [serialize_problem_for_viewer(p, user) for p in filtered]
 
     return jsonify(result), 200
+
+
+def serialize_problem_for_viewer(p, user):
+    """
+    Everything the student code editor (StudentCodeEditor.jsx) needs to
+    actually show a quest: description, hints, starter code, test cases --
+    not just the summary fields used for a list/card view. Shared by every
+    endpoint that may end up feeding a quest straight into that editor, so
+    a new entry point can't silently repeat the bug where /api/student/open-quests
+    (the Bounty Board) used to return only 7 summary fields, which the
+    editor rendered as a blank Problem/Test Cases/Hints tab for any quest
+    opened from there -- it never re-fetches full detail itself, it trusts
+    whatever `quest` object its caller passed in.
+    """
+    # Parse starter_code if stored as string
+    starter = p.starter_code
+    if isinstance(starter, str):
+        try:
+            starter = json.loads(starter)
+        except:
+            starter = {}
+    # Get instructor name
+    instructor_name = "System"
+    if p.created_by:
+        instructor = User.query.get(p.created_by)
+        if instructor:
+            instructor_name = instructor.username
+    section_names = []
+    if p.visible_to_sections:
+        sections = SubjectSection.query.filter(SubjectSection.id.in_(p.visible_to_sections)).all()
+        section_names = [s.section_no for s in sections]
+    return {
+        "id": p.id, "title": p.title, "description": p.description,
+        "difficulty": p.difficulty, "xp_reward": p.xp_reward,
+        "problem_type": p.problem_type, "is_event_quest": p.is_event_quest,
+        "languages": p.languages or ['python'],
+        "hints": serialize_hints_for_viewer(p, user),
+        "tags": p.tags or [], "starter_code": starter,
+        "test_cases": sanitize_test_cases_for_student(p.test_cases),
+        "estimated_time": p.estimated_time, "partial_credit": p.partial_credit,
+        "auto_grade": p.auto_grade,
+        "due_date": p.due_date.isoformat() if p.due_date else None,
+        "instructor_name": instructor_name, "section_names": section_names,
+        "created_at": p.created_at.isoformat()
+    }
+
 
 @app.route('/api/problems/<int:problem_id>', methods=['GET'])
 @jwt_required()
@@ -1678,6 +1684,31 @@ def delete_problem(problem_id):
 
     if problem.created_by != user_id and user.role != 'administrator':
         return jsonify({"error": "Not your problem"}), 403
+
+    # A problem delete is permanent and (via _wipe_problem_dependents below)
+    # takes every Submission row for it with it. Submissions are the only
+    # record of why a student's XP total is what it is -- User.xp is a
+    # running total updated at submission time, never recomputed from the
+    # submissions that remain, so deleting a live problem's submissions
+    # leaves students holding XP with no record left to justify it. Fine
+    # for throwaway/test problems nobody has graded work on; not fine once
+    # real students have submitted. Require an explicit, informed
+    # confirmation (?force=true) once that has happened, and point at
+    # unpublish (reversible, keeps the history) as the default path instead.
+    existing_submissions = Submission.query.filter_by(problem_id=problem_id).count()
+    force = str(request.args.get('force', '')).strip().lower() in ('true', '1', 'yes')
+    if existing_submissions > 0 and not force:
+        return jsonify({
+            "error": "This problem has graded submissions",
+            "message": (
+                f"{existing_submissions} student submission(s) exist for this problem. "
+                "Deleting it permanently erases that grading history (the XP students already "
+                "earned from it is NOT reversed, so it would no longer be accounted for by anything). "
+                "Unpublish the problem instead to hide it while keeping the history, or pass "
+                "?force=true to delete it anyway."
+            ),
+            "submission_count": existing_submissions,
+        }), 409
 
     # Clean up every row that still points at this problem -- a plain
     # Submission.query.delete() used to be the only cleanup here, which
@@ -2909,6 +2940,7 @@ def get_student_open_quests():
     # it locks and can't be attempted again. grouped by subject so the
     # Bounty Board can show a clear section break per subject.
     user_id = int(get_jwt_identity())
+    user = User.query.get(user_id)
 
     enrollments = IrregularEnrollment.query.filter_by(student_id=user_id).all()
     section_ids = [e.section_id for e in enrollments]
@@ -2937,15 +2969,7 @@ def get_student_open_quests():
                 continue
             if p.visible_to_sections and section.id not in p.visible_to_sections:
                 continue
-            open_quests.append({
-                "id": p.id,
-                "title": p.title,
-                "difficulty": p.difficulty,
-                "xp_reward": p.xp_reward,
-                "problem_type": p.problem_type,
-                "is_event_quest": p.is_event_quest,
-                "languages": p.languages or ['python'],
-            })
+            open_quests.append(serialize_problem_for_viewer(p, user))
 
         if not open_quests:
             continue

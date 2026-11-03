@@ -85,6 +85,25 @@ COMPILE_LINE_OFFSETS = {
 }
 
 
+# ─── Concurrency cap ───────────────────────────────────────────────────────
+# Nothing upstream of this limits how many Docker containers can be running
+# at once -- every Run/Submit/Test called _run_in_docker directly, so e.g.
+# 20 students clicking Submit in the same few seconds spawned 20 containers
+# at once (each C# run alone can reserve up to 512MB RAM; see MEM_LIMITS
+# above) with no ceiling, on whatever single machine is hosting this.
+# SANDBOX_MAX_CONCURRENT bounds that: only this many containers run at a
+# time; anyone past the limit waits in line instead of adding load. 6 is a
+# conservative default for a typical student laptop (4-8 CPU cores) --
+# raise it on a bigger host via the env var. A wait longer than
+# SANDBOX_QUEUE_TIMEOUT_SECONDS gives up with a clear "runner is busy"
+# infra error instead of hanging the request (and, for a graded Submit,
+# the student's one attempt is NOT consumed -- see ExecutionInfrastructureError
+# handling in app.py's create_submission).
+SANDBOX_MAX_CONCURRENT        = int(os.environ.get('SANDBOX_MAX_CONCURRENT', '6'))
+SANDBOX_QUEUE_TIMEOUT_SECONDS = int(os.environ.get('SANDBOX_QUEUE_TIMEOUT_SECONDS', '90'))
+_sandbox_concurrency = threading.Semaphore(SANDBOX_MAX_CONCURRENT)
+
+
 # ─── Rate limiting ─────────────────────────────────────────────────────────
 _rate_store: dict[str, list[float]] = {}
 _rate_lock = threading.Lock()
@@ -471,9 +490,24 @@ def _run_in_docker(code: str, language: str) -> dict:
     Callers should check is_compile_error(result, language) before treating
     stdout as program output.
     """
+    started = time.time()
+    if not _sandbox_concurrency.acquire(timeout=SANDBOX_QUEUE_TIMEOUT_SECONDS):
+        raise SandboxSetupError(
+            f'Code runner is at capacity (max {SANDBOX_MAX_CONCURRENT} concurrent runs); '
+            f'this request waited {SANDBOX_QUEUE_TIMEOUT_SECONDS}s and gave up.'
+        )
+    try:
+        return _run_in_docker_locked(code, language, started)
+    finally:
+        _sandbox_concurrency.release()
+
+
+def _run_in_docker_locked(code: str, language: str, started: float) -> dict:
+    """The actual container run, holding one of SANDBOX_MAX_CONCURRENT slots.
+    Split out of _run_in_docker so that function's acquire/finally/release stays
+    tiny and obviously correct no matter how this body grows."""
     client  = _get_docker_client()
     image   = DOCKER_IMAGES[language]
-    started = time.time()
 
     with sandbox_workdir() as tmpdir:
         src_path = _write_source(tmpdir, code, language)

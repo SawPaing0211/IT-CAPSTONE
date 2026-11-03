@@ -82,11 +82,29 @@ Write-Host "Updated backend/.env -> CORS_ORIGINS=$frontendUrl,http://localhost:5
 
 # ---------------------------------------------------------------
 # 6. Start the backend (after CORS is correct, so no restart needed later)
+#
+# Served with waitress, not `python app.py`. Flask's own dev server
+# (app.run()) handles ONE request at a time unless threaded=True is set,
+# so a single slow grading run (C# can take up to 60s) blocked every other
+# student's request for its whole duration. waitress is a real
+# multi-threaded WSGI server that runs on Windows (gunicorn, used in the
+# Docker/VPS path, needs fork() and cannot run on Windows at all).
+# It also never calls app.run(), so Flask's debug mode/Werkzeug debugger
+# -- a code-execution risk if left on and exposed through the tunnel --
+# is simply never reachable this way either.
+# Thread count: 12 is comfortably above what one Windows laptop's CPU/RAM
+# can run at once for Docker-sandboxed grading; routes/sandbox.py caps the
+# REAL concurrent Docker container count separately (SANDBOX_MAX_CONCURRENT),
+# so raising this number alone will not overload the host.
 # ---------------------------------------------------------------
-Write-Host "Starting backend server..." -ForegroundColor Cyan
+Write-Host "Starting backend server (waitress)..." -ForegroundColor Cyan
 Start-Process powershell -ArgumentList @(
     "-NoExit", "-Command",
-    "cd `"$backendDir`"; .\venv\Scripts\Activate.ps1; python app.py"
+    "cd `"$backendDir`"; .\venv\Scripts\Activate.ps1; " +
+    "if (-not (Get-Command waitress-serve -ErrorAction SilentlyContinue)) { " +
+    "Write-Host 'waitress is not installed in this venv -- run: pip install -r requirements.txt' -ForegroundColor Red; " +
+    "Read-Host 'Press Enter to close'; exit 1 }; " +
+    "waitress-serve --host=0.0.0.0 --port=5000 --threads=12 app:app"
 ) -WindowStyle Normal
 
 # ---------------------------------------------------------------
