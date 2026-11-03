@@ -1,2 +1,31 @@
 backend/.env
 .env
+.forge-logs/
+frontend/.env.local
+_testing/
+
+# stale local backups and generated plans
+*.backup
+identity_migration_plan*.csv
+
+# demo tooling output (synthetic, local only)
+demo_credentials.local.txt
+forge_demo.db
+docs/ui-handoff/*.zip
+
+# real-execution evidence is produced on the release machine, not tracked
+backend/docker_verification_*.json
+
+# backups and rehearsal output never belong in the repository
+backups/
+forge_full_backup_*/
+
+# unpacked copy of a review ZIP (reference only, never tracked or shipped)
+docs/ui-handoff/ForgeDev_Design_Preview_v2_Review/
+docs/ui-handoff/ForgeDev_Simple_Adventure_Preview_Review/
+simple-adventure-preview/dist/
+simple-adventure-preview/prebuilt-dist/
+
+# compiled python bytecode
+__pycache__/
+*.pyc
