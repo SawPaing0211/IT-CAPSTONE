@@ -3,15 +3,19 @@ load_dotenv()
 import os
 from flask import Flask, jsonify, request
 from flask_cors import CORS
-from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity, decode_token
+from flask_jwt_extended import JWTManager, create_access_token, create_refresh_token, jwt_required, get_jwt_identity, decode_token, verify_jwt_in_request
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from functools import wraps
 import subprocess, sys, time, csv, json, io, unicodedata, re, base64, secrets, string
 from io import StringIO
 from sqlalchemy import text, inspect, distinct
-from routes.sandbox import sandbox_bp, _run_in_docker
+from sqlalchemy.exc import IntegrityError, OperationalError
+import logging
+import uuid as _uuid
+logger = logging.getLogger('forge')
+from routes.sandbox import sandbox_bp, _run_in_docker, handles_setup_errors
 import re as _re
 from datetime import datetime as _dt, timedelta as _td
 from collections import defaultdict as _dd
@@ -19,19 +23,144 @@ from collections import defaultdict as _dd
 app = Flask(__name__)
 app.register_blueprint(sandbox_bp)
 
-# All of these come from the environment in production (see backend/.env.example) —
-# the hardcoded values are only ever used for local dev, where no .env is required.
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-change-in-production')
-app.config['JWT_SECRET_KEY'] = os.environ.get('JWT_SECRET_KEY', 'jwt-secret-change-in-production')
-app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'mysql+pymysql://root:@localhost/forge_dev')
+# FORGE_ENV=production (set in docker-compose.yml) switches on strict config:
+# the app refuses to start on missing/placeholder secrets instead of silently
+# falling back to the public dev defaults below, and the debugger is forced off.
+FORGE_ENV = os.environ.get('FORGE_ENV', 'development').strip().lower()
+IS_PRODUCTION = FORGE_ENV == 'production'
+
+_DEV_SECRET_KEY = 'dev-secret-change-in-production'
+_DEV_JWT_SECRET_KEY = 'jwt-secret-change-in-production'
+_PLACEHOLDER_SECRETS = {'', 'change-me', 'change-me-too', _DEV_SECRET_KEY, _DEV_JWT_SECRET_KEY}
+
+def _require_env(name):
+    # production-only: a required setting must be present and not a known placeholder
+    value = os.environ.get(name, '').strip()
+    if not value or (name.endswith('_KEY') and value in _PLACEHOLDER_SECRETS):
+        raise RuntimeError(
+            f"{name} is missing or still a placeholder, and FORGE_ENV=production. "
+            f"Set a real value in backend/.env (see backend/.env.example)."
+        )
+    return value
+
+# Locally (no .env needed) the dev fallbacks are used; in production they never are.
+if IS_PRODUCTION:
+    app.config['SECRET_KEY'] = _require_env('SECRET_KEY')
+    app.config['JWT_SECRET_KEY'] = _require_env('JWT_SECRET_KEY')
+    app.config['SQLALCHEMY_DATABASE_URI'] = _require_env('DATABASE_URL')
+else:
+    app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', _DEV_SECRET_KEY)
+    app.config['JWT_SECRET_KEY'] = os.environ.get('JWT_SECRET_KEY', _DEV_JWT_SECRET_KEY)
+    app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'mysql+pymysql://root:@localhost/forge_dev')
+
+# Behind nginx every request arrives from the proxy's address, which breaks
+# per-IP rate limiting / lockouts / audit logs. TRUSTED_PROXY_COUNT is how many
+# proxies sit in front of the app (1 = just nginx); 0 (default) trusts no
+# forwarded headers, which is right when the app is reached directly.
+_trusted_proxies = int(os.environ.get('TRUSTED_PROXY_COUNT', '0') or 0)
+if _trusted_proxies > 0:
+    from werkzeug.middleware.proxy_fix import ProxyFix
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=_trusted_proxies, x_proto=_trusted_proxies, x_host=_trusted_proxies)
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 # CORS_ORIGINS can be a comma-separated list, so both the local Vite dev server
 # and the deployed frontend can be allowed at once (e.g. during a staged rollout).
 _cors_origins = os.environ.get('CORS_ORIGINS', 'http://localhost:5173').split(',')
 CORS(app, origins=_cors_origins, supports_credentials=True)
+app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(minutes=15)    # same as the library default, now explicit
+app.config['JWT_REFRESH_TOKEN_EXPIRES'] = timedelta(days=7)
 jwt = JWTManager(app)
+# Demo/test mode may only ever point at a database whose name says so. This is the
+# guard that keeps a demo run from touching the real database by mistake.
+if os.environ.get('FORGE_DEMO', '').strip().lower() in ('1', 'true', 'yes'):
+    from sqlalchemy.engine import make_url as _mk
+    _dbname = (_mk(app.config['SQLALCHEMY_DATABASE_URI']).database or '').lower()
+    if not any(w in _dbname for w in ('demo', 'test')):
+        raise SystemExit(f"FORGE_DEMO is on but the database name {_dbname!r} does not contain 'demo' or 'test'. Refusing to start.")
+    # a name is not enough: a demo may only use a local file or a database on this machine, never a remote server
+    _u = _mk(app.config['SQLALCHEMY_DATABASE_URI'])
+    if not _u.drivername.startswith('sqlite') and (_u.host or '').lower() not in ('127.0.0.1', 'localhost', '::1'):
+        raise SystemExit(f"FORGE_DEMO is on but the database host {_u.host!r} is not this machine. Refusing to start.")
+# How code is run for grading. 'docker-sandbox' is the only real mode. demo_runner.py can switch
+# a throwaway demo process to 'demo-stub' (simulated results); that is recorded on every result
+# and shown by /api/health, so simulated results can never pass as real execution evidence.
+EXECUTION_MODE = 'docker-sandbox'
+_demo_flags = [k for k in ('FORGE_DEMO', 'FORGE_DEMO_RUNNER') if os.environ.get(k, '').strip()]
+if IS_PRODUCTION and _demo_flags:
+    raise SystemExit(f"Refusing to start in production with demo settings enabled: {', '.join(_demo_flags)}.")
+if IS_PRODUCTION and os.environ.get('FORGE_AUTO_SCHEMA', '').strip():
+    # start-up must never write to a production schema; upgrades are the explicit manage_schema.py command
+    raise SystemExit("Refusing to start in production with FORGE_AUTO_SCHEMA set (it would change the schema at start-up). Use manage_schema.py upgrade.")
 db = SQLAlchemy(app)
+
+@jwt.token_in_blocklist_loader
+def _reject_deactivated_users(jwt_header, jwt_payload):
+    # runs on every protected request: a deactivated/deleted account is
+    # locked out immediately instead of riding out its token's lifetime.
+    # The user row is cached in the session, so handlers' own User lookup is free.
+    # Refresh tokens are validated (incl. is_active) in /api/auth/refresh itself.
+    if jwt_payload.get('type') == 'refresh':
+        return False
+    try:
+        user = db.session.get(User, int(jwt_payload['sub']))
+    except (KeyError, TypeError, ValueError):
+        return True
+    # `is False` (not `not`): legacy rows with NULL is_active stay allowed
+    if user is None or user.is_active is False:
+        return True
+    # a password change/reset bumps token_version: older tokens (no claim = version 0) die
+    return int(jwt_payload.get('tv', 0)) != int(user.token_version or 0)
+
+
+# ===== PASSWORD POLICY (one rule everywhere: change, admin reset, admin-set passwords) =====
+PASSWORD_MIN_LENGTH = 8
+PASSWORD_MAX_LENGTH = 128
+
+
+def password_policy_error(password, user=None):
+    """None if acceptable, else a plain-language reason. Never logs the password."""
+    if not isinstance(password, str) or not password:
+        return "A password is required."
+    if len(password) < PASSWORD_MIN_LENGTH:
+        return f"Password must be at least {PASSWORD_MIN_LENGTH} characters."
+    if len(password) > PASSWORD_MAX_LENGTH:
+        return f"Password must be at most {PASSWORD_MAX_LENGTH} characters."
+    if not _re.search(r'[A-Za-z]', password) or not _re.search(r'\d', password):
+        return "Password must contain at least one letter and one number."
+    if user is not None:
+        low = password.lower()
+        for ident in (user.username, (user.email or '').split('@')[0]):
+            if ident and len(ident) >= 4 and low == ident.lower():
+                return "Password must not be the same as your username or email name."
+    return None
+
+
+def issue_tokens(user):
+    claims = {'tv': int(user.token_version or 0)}
+    return (create_access_token(identity=str(user.id), additional_claims=claims),
+            create_refresh_token(identity=str(user.id), additional_claims=claims))
+
+
+# Until a temporary/reset password is replaced, only these calls work.
+_PASSWORD_CHANGE_ALLOWED = {'/api/auth/login', '/api/auth/refresh', '/api/auth/me', '/api/auth/change-password'}
+
+
+@app.before_request
+def _enforce_password_change():
+    if request.method == 'OPTIONS' or not request.path.startswith('/api/') or request.path in _PASSWORD_CHANGE_ALLOWED:
+        return None
+    try:
+        verify_jwt_in_request(optional=True)
+        ident = get_jwt_identity()
+    except Exception:
+        return None            # bad/expired token: the route's own jwt check answers
+    if not ident:
+        return None
+    u = db.session.get(User, int(ident))
+    if u is not None and u.must_change_password:
+        return jsonify({"error": "password_change_required",
+                        "message": "You must change your temporary password before continuing."}), 403
+    return None
 
 # ===== RATE LIMITING =====
 rate_limit_store = {}
@@ -41,7 +170,14 @@ def rate_limit(max_calls=5, period=60):
     def decorator(f):
         @wraps(f)
         def decorated_function(*args, **kwargs):
-            ip = request.remote_addr
+            # Signed-in callers are counted per account, not per IP: a whole
+            # classroom behind one school/NAT address would otherwise share a
+            # single allowance. Anonymous callers (e.g. login) still use the IP.
+            try:
+                ident = get_jwt_identity()
+            except Exception:
+                ident = None
+            ip = f"user:{ident}" if ident else request.remote_addr
             now = time.time()
             if ip not in rate_limit_store: rate_limit_store[ip] = []
             rate_limit_store[ip] = [t for t in rate_limit_store[ip] if now - t < period]
@@ -73,6 +209,11 @@ class UserAchievement(db.Model):
     earned_at = db.Column(db.DateTime, default=datetime.utcnow)
     progress = db.Column(db.Integer, default=0)
 
+    # One award per user per achievement. db.create_all() adds this to NEW databases only; an existing
+    # database gets it from the explicit `manage_schema.py upgrade`, which refuses (and changes nothing)
+    # while duplicate pairs exist. schema_status() reports it as missing until it is effectively present.
+    __table_args__ = (db.UniqueConstraint('user_id', 'achievement_id', name='uq_user_achievement'),)
+
     user = db.relationship('User', backref=db.backref('user_achievements', lazy=True))
     achievement = db.relationship('Achievement')
 
@@ -90,6 +231,15 @@ class User(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     login_attempts = db.Column(db.Integer, default=0)
     locked_until = db.Column(db.DateTime, nullable=True)
+    # temporary/reset passwords must be replaced before anything else is allowed
+    must_change_password = db.Column(db.Boolean, nullable=False, default=False, server_default='0')
+    # bumped on every password change/reset: tokens issued earlier stop working
+    token_version = db.Column(db.Integer, nullable=False, default=0, server_default='0')
+    password_changed_at = db.Column(db.DateTime, nullable=True)
+    # set on every successful /api/auth/login -- NOT bumped by /refresh, so this is
+    # "last time they actually typed credentials in", not "last time their session
+    # was alive". Drives the admin dashboard's "Active users today" card.
+    last_login_at = db.Column(db.DateTime, nullable=True)
 
 class Problem(db.Model):
     __tablename__ = 'problems'
@@ -145,6 +295,30 @@ class Submission(db.Model):
     exec_ms      = db.Column(db.Integer, default=0)
     error_msg    = db.Column(db.Text,    nullable=True)
     submitted_at = db.Column(db.DateTime, default=datetime.utcnow)
+    # what the grader recorded at submission time: {"runner": ..., "tests": [{index, passed, kind, hidden, message, output?}]}.
+    # NULL on records made before this column existed (the viewer says so instead of guessing).
+    result_details = db.Column(db.JSON, nullable=True)
+
+class SubmissionSlot(db.Model):
+    """
+    Reservation of the single graded attempt for (student, problem).
+    UNIQUE(user_id, problem_id) is what makes simultaneous requests safe.
+    status: pending (being graded) | done (graded, result saved) | failed (runner broke; retry allowed)
+    """
+    __tablename__ = 'submission_slots'
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'problem_id', name='uq_submission_slot_user_problem'),
+    )
+    id          = db.Column(db.Integer, primary_key=True)
+    user_id     = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    problem_id  = db.Column(db.Integer, db.ForeignKey('problems.id'), nullable=False)
+    status      = db.Column(db.String(10), nullable=False, default='pending')
+    claimed_at  = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    finished_at = db.Column(db.DateTime, nullable=True)
+    error_msg   = db.Column(db.String(500), nullable=True)
+    # random value written by whoever currently owns the pending reservation;
+    # finishing or releasing only works while it still matches (late workers lose)
+    owner_token = db.Column(db.String(36), nullable=True)
 
 class CodeDraft(db.Model):
     # in-progress code for a quest a student hasn't submitted yet.
@@ -372,6 +546,140 @@ SUBJECT_DIFFICULTY_DEFAULTS = {
 
 SUPPORTED_SUBJECT_CODES = frozenset(row[1] for row in SUPPORTED_IT_SUBJECTS)
 
+# Curriculum year of the subjects Forge.dev supports (a property of the
+# SUBJECT only — students of any year level may take these subjects).
+FIRST_YEAR_CURRICULUM = 1
+
+# Highest XP an instructor may attach to a problem, by difficulty.
+MAX_XP_BY_DIFFICULTY = {'Easy': 100, 'Medium': 250, 'Hard': 500}
+
+# Where uploaded lesson files live. Default: <this folder>/uploads (in Docker: /app/uploads, the
+# forge-uploads volume). FORGE_UPLOADS_DIR relocates it (used for isolated recovery rehearsals).
+# Database rows keep a relative storage_path such as 'uploads/lessons/<lesson_id>/<uuid>.pdf'.
+UPLOAD_ROOT = os.path.abspath(os.environ.get('FORGE_UPLOADS_DIR') or os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads'))
+
+def upload_abs_path(storage_path):
+    """Absolute path for a stored relative path, or None if it would leave the uploads folder."""
+    rel = (storage_path or '').replace('\\', '/').lstrip('/')
+    if rel.startswith('uploads/'):
+        rel = rel[len('uploads/'):]
+    full = os.path.abspath(os.path.join(UPLOAD_ROOT, rel))
+    return full if full.startswith(UPLOAD_ROOT + os.sep) else None
+
+def parse_due_date(value):
+    """Parse a quest deadline sent by a client.
+    Returns (datetime_or_None, error_message_or_None). The database stores deadlines as naive UTC.
+    - ISO 8601 only ('2026-11-05T17:00:00', '2026-11-05T17:00:00+08:00', '...Z', or a plain date).
+    - A value with an offset or Z is converted to UTC; a value without one is taken as UTC.
+    - Empty / null means 'no value given' (None, no error). Any other unparseable value is an error;
+      it is never silently dropped."""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None, None
+    if not isinstance(value, str):
+        return None, "due_date must be an ISO 8601 date-time string"
+    text = value.strip()
+    if text.endswith(('Z', 'z')):
+        text = text[:-1] + '+00:00'
+    try:
+        dt = datetime.fromisoformat(text)
+    except ValueError:
+        return None, "due_date is not a valid ISO 8601 date-time (example: 2026-11-05T17:00:00+08:00)"
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt, None
+
+# Institution settings (La Consolacion University deployment).
+# There is deliberately NO built-in institution default for staff email rules or
+# the head administrator: an unset value disables the dependent feature instead of
+# silently authorizing some old address.
+#   STUDENT_EMAIL_DOMAIN  domain used for GENERATED student identifiers
+#                         (<student_id>@student.com). These are sign-in identifiers,
+#                         not deliverable inboxes, and the project does not own the domain.
+#   ALLOWED_EMAIL_DOMAIN  optional restriction for STAFF emails; empty = any valid email.
+#   HEAD_ADMIN_EMAIL      existing administrator account allowed to create/promote
+#                         administrators; empty = those operations are disabled.
+_DEFAULT_STUDENT_EMAIL_DOMAIN = 'student.com'
+_DOMAIN_RE = _re.compile(r'^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$')
+_EMAIL_RE = _re.compile(r'^[^@\s]+@[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$')
+
+# human-readable problems found while reading the settings (shown at startup and
+# by /api/admin/policy); never contain secrets
+CONFIG_DIAGNOSTICS = []
+
+
+def _read_setting(name, default, valid):
+    """Env value if present and well formed, else the default (with a diagnostic). Never crashes."""
+    raw = os.environ.get(name, '').strip().lower()
+    if name.endswith('_DOMAIN'):
+        raw = raw.lstrip('@')
+    if not raw:
+        return default
+    if not valid.match(raw):
+        CONFIG_DIAGNOSTICS.append(f"{name} is not a valid value ({raw!r}) and was ignored.")
+        print(f"WARNING: {name} is not a valid value ({raw!r}); ignored.")
+        return default
+    return raw
+
+
+STUDENT_EMAIL_DOMAIN = _read_setting('STUDENT_EMAIL_DOMAIN', _DEFAULT_STUDENT_EMAIL_DOMAIN, _DOMAIN_RE)
+ALLOWED_EMAIL_DOMAIN = _read_setting('ALLOWED_EMAIL_DOMAIN', '', _DOMAIN_RE)
+HEAD_ADMIN_EMAIL = _read_setting('HEAD_ADMIN_EMAIL', '', _EMAIL_RE)
+if not HEAD_ADMIN_EMAIL:
+    CONFIG_DIAGNOSTICS.append(
+        "HEAD_ADMIN_EMAIL is not set (or invalid): creating or promoting administrator "
+        "accounts is disabled. Ordinary sign-in is not affected.")
+    print("NOTICE: HEAD_ADMIN_EMAIL is not configured; creating/promoting administrators is disabled.")
+
+
+def normalize_email(value):
+    """Trimmed, lower-cased email for comparison (None for empty)."""
+    v = (value or '').strip().lower()
+    return v or None
+
+
+def normalize_student_id(value):
+    """Student IDs are strings; only surrounding whitespace is removed (leading zeros kept)."""
+    return str(value if value is not None else '').strip()
+
+
+def valid_student_id(sid):
+    """Non-empty, no whitespace, no '@' (so an ID can never look like an email)."""
+    return bool(sid) and len(sid) <= 64 and not _re.search(r'[\s@]', sid)
+
+
+def generated_student_email(student_id):
+    """Generated sign-in identifier for a student: <student_id>@<STUDENT_EMAIL_DOMAIN>."""
+    return f"{normalize_student_id(student_id).lower()}@{STUDENT_EMAIL_DOMAIN}"
+
+
+def email_domain_allowed(email):
+    """Staff email rule: a well-formed address, restricted to ALLOWED_EMAIL_DOMAIN only when one is configured."""
+    e = normalize_email(email)
+    if not e or not _EMAIL_RE.match(e):
+        return False
+    return (not ALLOWED_EMAIL_DOMAIN) or e.endswith('@' + ALLOWED_EMAIL_DOMAIN)
+
+
+def is_head_admin(user):
+    """The head admin is the only account allowed to create or promote admins (never true when unconfigured)."""
+    return bool(HEAD_ADMIN_EMAIL) and bool(user) and user.role == 'administrator' \
+        and normalize_email(user.email) == HEAD_ADMIN_EMAIL
+
+
+def subject_out_of_scope(subject):
+    """
+    True unless the subject is recorded as first-year curriculum. A missing or
+    invalid curriculum year counts as unclassified, so it is blocked too.
+    Year 1 alone does not prove the subject is in the official institutional
+    curriculum; that approval is a separate, still pending, step.
+    Used only to stop NEW activity: existing records stay readable and usable.
+    """
+    return bool(subject) and subject.year_level != FIRST_YEAR_CURRICULUM
+
+
+OUT_OF_SCOPE_MSG = ("This subject is not a recorded first-year curriculum subject, "
+                    "so new activity cannot be added to it.")
+
 
 def validate_it_subject_scope(subject_code: str):
     if not subject_code:
@@ -393,9 +701,15 @@ def validate_it_subject_scope(subject_code: str):
 
 
 def seed_it_subjects():
-    seeded, skipped = 0, 0
+    # Only first-year curriculum subjects are seeded (same rule as the admin
+    # create/edit endpoints). Entries marked for another curriculum year are
+    # left out of NEW seeding; existing rows are never touched or removed.
+    seeded, skipped, out_of_scope = 0, 0, 0
     for row in SUPPORTED_IT_SUBJECTS:
         internal_no, code, name, units, stype, yr, sem = row
+        if yr != FIRST_YEAR_CURRICULUM:
+            out_of_scope += 1
+            continue
         if Subject.query.filter_by(subject_code=code).first():
             skipped += 1
             continue
@@ -414,7 +728,8 @@ def seed_it_subjects():
         ))
         seeded += 1
     db.session.commit()
-    return {'seeded': seeded, 'skipped': skipped, 'total': len(SUPPORTED_IT_SUBJECTS)}
+    return {'seeded': seeded, 'skipped': skipped, 'out_of_scope': out_of_scope,
+            'total': len(SUPPORTED_IT_SUBJECTS)}
 
 
 # ===== HELPERS =====
@@ -494,6 +809,7 @@ def sanitize_code(code, language):
         return not any(pattern.lower() in code_lower for pattern in dangerous_patterns)
     return True
 
+@handles_setup_errors
 def _run_in_docker_with_stdin(code: str, language: str, stdin_input: str) -> dict:
     """
     like _run_in_docker() but pipes stdin_input into the container.
@@ -505,14 +821,14 @@ def _run_in_docker_with_stdin(code: str, language: str, stdin_input: str) -> dic
         DOCKER_IMAGES, MEM_LIMITS, CAP_DROP, SECURITY_OPTS,
         LANGUAGE_TIMEOUTS, LIMITS,
         _write_source, _generate_java_wrapper, _generate_csharp_wrapper,
-        _get_docker_client,
+        _get_docker_client, sandbox_workdir, make_workdir_readable,
     )
 
     client  = _get_docker_client()
     image   = DOCKER_IMAGES[language]
     started = time.time()
 
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with sandbox_workdir() as tmpdir:
         src_path = _write_source(tmpdir, code, language)
         filename = os.path.basename(src_path)
 
@@ -540,6 +856,7 @@ def _run_in_docker_with_stdin(code: str, language: str, stdin_input: str) -> dic
             with open(os.path.join(tmpdir, 'Program.cs'), 'w', encoding='utf-8') as f:
                 f.write(_generate_csharp_wrapper())
 
+        make_workdir_readable(tmpdir)
         container_src = f'/tmp/sandbox/{filename}'
 
         try:
@@ -634,6 +951,35 @@ def _run_in_docker_with_stdin(code: str, language: str, stdin_input: str) -> dic
             }
 
 
+def serialize_hints_for_viewer(problem, user):
+    """
+    Hints as the given user may see them. Instructors/admins get the stored
+    hints untouched. Students only get each hint's penalty plus the text of
+    hints they have already revealed (recorded in HintReveal); everything else
+    is withheld until /hints/<idx>/reveal is called, so the XP penalty can't
+    be bypassed by reading the API response.
+    """
+    hints = problem.hints or []
+    if user is not None and user.role != 'student':
+        return hints
+
+    revealed = set()
+    if user is not None and hints:
+        rows = HintReveal.query.filter_by(user_id=user.id, problem_id=problem.id).all()
+        revealed = {r.hint_index for r in rows}
+
+    out = []
+    for i, h in enumerate(hints):
+        h = h if isinstance(h, dict) else {}
+        is_revealed = i in revealed
+        out.append({
+            "xp_penalty": h.get('xp_penalty', 0),
+            "revealed":   is_revealed,
+            "text":       h.get('text', '') if is_revealed else None,
+        })
+    return out
+
+
 def sanitize_test_cases_for_student(test_cases):
     # strips the real input/expected off any test case an instructor
     # marked hidden, before it ever reaches a student — this covers the
@@ -648,8 +994,80 @@ def sanitize_test_cases_for_student(test_cases):
             sanitized.append(tc)
     return sanitized
 
-def evaluate_code(code, test_cases, language):
-    """Execute code in Docker sandbox and compare against test cases"""
+def _student_section_ids(user_id):
+    return {e.section_id for e in IrregularEnrollment.query.filter_by(student_id=user_id).all()}
+
+
+def user_can_access_problem(user, problem, historical=False):
+    """
+    Server-side access rule for a quest and everything attached to it
+    (details, test cases, hints, drafts, Run, Submit).
+      administrator : always
+      instructor    : created it, or is assigned to one of its classes / its subject
+      student       : enrolled (regular or irregular) in a class the quest is visible to.
+    historical=True additionally lets a student who ALREADY has a submission for the
+    quest keep reading it after leaving the class; it never allows new activity.
+    """
+    if not user or not problem:
+        return False
+    if user.role == 'administrator':
+        return True
+    if user.role == 'instructor':
+        if problem.created_by == user.id:
+            return True
+        q = TeacherAssignment.query.filter_by(instructor_id=user.id)
+        for ta in q.all():
+            if ta.section_id and ta.section_id in (problem.visible_to_sections or []):
+                return True
+        return False
+    if user.role == 'student':
+        if _student_section_ids(user.id) & set(problem.visible_to_sections or []):
+            return True
+        if historical and Submission.query.filter_by(user_id=user.id, problem_id=problem.id).first():
+            return True
+    return False
+
+
+def instructor_teaches_section(user, section_id):
+    """Administrators: any class. Instructors: only classes they are assigned to."""
+    if not user:
+        return False
+    if user.role == 'administrator':
+        return True
+    return user.role == 'instructor' and TeacherAssignment.query.filter_by(
+        instructor_id=user.id, section_id=section_id).first() is not None
+
+
+def deny_problem_access():
+    # 404 rather than 403 so a quest id in another class is not even confirmed to exist
+    return jsonify({"error": "Problem not available"}), 404
+
+
+class ExecutionInfrastructureError(RuntimeError):
+    """The code runner itself failed (Docker, setup, disk); this says nothing about the student's code."""
+
+
+def recorded_result_details(results):
+    """What is kept per graded submission. Hidden tests keep only pass/fail and kind: never their data."""
+    tests = []
+    for i, r in enumerate(results or []):
+        hidden = bool(r.get('hidden'))
+        item = {"index": i + 1, "passed": bool(r.get('passed')), "kind": r.get('kind') or ('passed' if r.get('passed') else 'wrong_output'),
+                "hidden": hidden}
+        if not hidden:
+            item["message"] = str(r.get('message') or '')[:200]
+            if not r.get('passed'):
+                item["output"] = str(r.get('output') or '')[:300]
+        tests.append(item)
+    return {"runner": EXECUTION_MODE, "tests": tests}
+
+
+def evaluate_code(code, test_cases, language, raise_on_infra=False):
+    """
+    Execute code in Docker sandbox and compare against test cases.
+    With raise_on_infra=True (used for GRADING) a runner failure raises
+    ExecutionInfrastructureError instead of being scored as a failed test.
+    """
     results = []
 
     for tc in test_cases:
@@ -657,12 +1075,19 @@ def evaluate_code(code, test_cases, language):
         expected  = tc.get('expected', '').strip()
         is_hidden = tc.get('visible', True) is False
 
-        result = _run_in_docker_with_stdin(code, language, input_val)
+        try:
+            result = _run_in_docker_with_stdin(code, language, input_val)
+        except Exception as exc:
+            if raise_on_infra:
+                raise ExecutionInfrastructureError(str(exc)) from exc
+            raise
 
         actual    = result.get('stdout', '').strip()
         stderr    = result.get('stderr', '').strip()
         timed_out = result.get('timed_out', False)
         error     = result.get('error', '')
+        if error and raise_on_infra:
+            raise ExecutionInfrastructureError(error)
 
         # grading itself always compares the real values above — this
         # only controls what gets reported back for a hidden test case,
@@ -679,6 +1104,7 @@ def evaluate_code(code, test_cases, language):
                 "output":    "🔒 Hidden" if is_hidden else "Timeout: execution exceeded time limit",
                 "runtime":   f"{result.get('elapsed', 0)/1000:.2f}s",
                 "message":   "Execution timeout",
+                "kind":      "timeout",
                 "hidden":    is_hidden
             })
         elif error or (result.get('returncode', 0) != 0 and not actual):
@@ -689,6 +1115,7 @@ def evaluate_code(code, test_cases, language):
                 "output":    "🔒 Hidden" if is_hidden else (stderr or error)[:500],
                 "runtime":   f"{result.get('elapsed', 0)/1000:.2f}s",
                 "message":   "🔒 Hidden test failed" if is_hidden else (stderr or error)[:80],
+                "kind":      "runtime_error",     # compile failure, crash, or no output at all
                 "hidden":    is_hidden
             })
         else:
@@ -700,6 +1127,7 @@ def evaluate_code(code, test_cases, language):
                 "output":    "🔒 Hidden" if is_hidden else actual[:100],
                 "runtime":   f"{result.get('elapsed', 0)/1000:.2f}s",
                 "message":   "Passed" if passed else ("🔒 Hidden test failed" if is_hidden else f"Expected: {expected[:50]}"),
+                "kind":      "passed" if passed else "wrong_output",
                 "hidden":    is_hidden
             })
 
@@ -715,13 +1143,42 @@ def register():
     # request here gets a clear reason instead of a confusing 404.
     return jsonify({"error": "Public registration is disabled. Accounts are created by an administrator."}), 410
 
+def resolve_login_identifier(identifier):
+    """
+    Map what the person typed to ONE account. Returns (user, ambiguous).
+    Accepts the username / student ID, or the account's email (case-insensitive).
+    A student's generated identifier <student_id>@<STUDENT_EMAIL_DOMAIN> also reaches
+    the student whose ID is that local part. If the possible matches are different
+    accounts the attempt is refused rather than guessed.
+    """
+    ident = (identifier or '').strip()
+    found = {}
+    u = User.query.filter_by(username=ident).first()
+    if u:
+        found[u.id] = u
+    if '@' in ident:
+        email = normalize_email(ident)
+        for u in User.query.filter(db.func.lower(User.email) == email).all():
+            found[u.id] = u
+        local, _, domain = email.rpartition('@')
+        if domain == STUDENT_EMAIL_DOMAIN and local:
+            u = User.query.filter(db.func.lower(User.username) == local, User.role == 'student').first()
+            if u:
+                found[u.id] = u
+    if len(found) > 1:
+        return None, True
+    return (next(iter(found.values())) if found else None), False
+
+
 @app.route('/api/auth/login', methods=['POST'])
 def login():
     data = request.get_json()
     if not data.get('username') or not data.get('password'):
         return jsonify({"error": "Missing credentials"}), 400
 
-    identifier = data['username'].strip()
+    identifier = str(data['username']).strip()
+    if not identifier:
+        return jsonify({"error": "Missing credentials"}), 400
     ip = request.remote_addr
     now = time.time()
 
@@ -731,10 +1188,10 @@ def login():
         remaining = int(fail_record['locked_until'] - now)
         return jsonify({"error": f"Too many failed attempts. Try again in {remaining} seconds."}), 429
 
-    user = (
-        User.query.filter_by(username=identifier).first() or
-        User.query.filter_by(email=identifier).first()
-    )
+    user, ambiguous = resolve_login_identifier(identifier)
+    if ambiguous:
+        logger.warning("Login identifier matched more than one account; refused.")
+        return jsonify({"error": "Invalid credentials"}), 401
 
     # Check account-level lockout first
     if user and user.locked_until:
@@ -742,8 +1199,7 @@ def login():
             remaining = int((user.locked_until - datetime.utcnow()).total_seconds())
             return jsonify({
                 "error": "Account locked",
-                "message": f"Your account has been locked after 3 failed attempts. Please contact your administrator.",
-                "contact": "admin@adamson.edu.ph",
+                "message": f"Your account has been locked after 3 failed attempts. Please contact your system administrator.",
                 "locked_until": user.locked_until.isoformat(),
                 "remaining_seconds": remaining
             }), 423
@@ -761,8 +1217,7 @@ def login():
                 db.session.commit()
                 return jsonify({
                     "error": "Account locked",
-                    "message": "Your account has been locked after 3 failed attempts. Please contact your administrator.",
-                    "contact": "admin@adamson.edu.ph",
+                    "message": "Your account has been locked after 3 failed attempts. Please contact your system administrator.",
                     "locked_until": user.locked_until.isoformat(),
                     "remaining_seconds": 900
                 }), 423
@@ -782,15 +1237,18 @@ def login():
     login_fail_store.pop(ip, None)
     user.login_attempts = 0
     user.locked_until = None
+    user.last_login_at = datetime.utcnow()
     db.session.commit()
 
-    # 🔒 ADD THESE TWO LINES:
-    refresh_token = create_access_token(identity=str(user.id), expires_delta=timedelta(days=7))
+    # real refresh token (type=refresh): jwt_required() rejects it on normal
+    # endpoints, so it can only be used at /api/auth/refresh
+    access_token, refresh_token = issue_tokens(user)
 
     return jsonify({
         "message": "Login successful",
-        "access_token": create_access_token(identity=str(user.id)),
-        "refresh_token": refresh_token,  # 🔒 ADD THIS LINE
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "must_change_password": bool(user.must_change_password),
         "user": {
             "id": user.id,
             "username": user.username,
@@ -801,6 +1259,42 @@ def login():
             "level": user.level
         }
     }), 200
+
+@app.route('/api/auth/change-password', methods=['POST'])
+@jwt_required()
+@rate_limit(max_calls=10, period=60)
+def change_password():
+    """Own password change. Always needs the current password (the temporary one when forced)."""
+    user = db.session.get(User, int(get_jwt_identity()))
+    data = request.get_json(silent=True) or {}
+    current, new = data.get('current_password'), data.get('new_password')
+    if not isinstance(current, str) or not isinstance(new, str) or not current or not new:
+        return jsonify({"error": "Current and new password are required."}), 400
+    if user.locked_until and user.locked_until > datetime.utcnow():
+        return jsonify({"error": "Account locked", "message": "Too many failed attempts. Contact your system administrator."}), 423
+    if not check_password_hash(user.password_hash, current):
+        # same safeguard as sign-in: repeated wrong current passwords lock the account
+        user.login_attempts = (user.login_attempts or 0) + 1
+        if user.login_attempts >= 3:
+            user.locked_until = datetime.utcnow() + timedelta(minutes=15)
+        db.session.commit()
+        return jsonify({"error": "Current password is incorrect."}), 400
+    err = password_policy_error(new, user)
+    if err:
+        return jsonify({"error": err}), 400
+    if check_password_hash(user.password_hash, new):
+        return jsonify({"error": "The new password must be different from the current one."}), 400
+    user.password_hash = generate_password_hash(new)
+    user.must_change_password = False
+    user.login_attempts = 0
+    user.locked_until = None
+    user.password_changed_at = datetime.utcnow()
+    user.token_version = int(user.token_version or 0) + 1         # every other session ends
+    db.session.commit()
+    access_token, refresh_token = issue_tokens(user)              # this session continues
+    return jsonify({"message": "Password changed.", "access_token": access_token,
+                    "refresh_token": refresh_token, "must_change_password": False}), 200
+
 
 @app.route('/api/auth/me', methods=['GET'])
 @jwt_required()
@@ -816,7 +1310,8 @@ def get_current_user():
         "email": user.email,
         "role": user.role,
         "xp": user.xp,
-        "level": user.level
+        "level": user.level,
+        "must_change_password": bool(user.must_change_password)
     }), 200
 
 # this is for refreshing the login token so people don't get logged out mid-session
@@ -827,13 +1322,20 @@ def refresh():
         return jsonify({'error': 'Refresh token required'}), 400
     try:
         decoded = decode_token(data['refresh_token'])
-        user_id = decoded['sub']
-        user = User.query.get(int(user_id))
+        # only a real refresh token is accepted here — an access token
+        # (or anything else signed with our key) must not mint new tokens
+        if decoded.get('type') != 'refresh':
+            return jsonify({'error': 'Invalid refresh token'}), 401
+        user_id = int(decoded['sub'])
+        user = db.session.get(User, user_id)
         if not user or not user.is_active:
             return jsonify({'error': 'Invalid refresh token'}), 401
-        new_token = create_access_token(identity=str(user_id))
-        return jsonify({'access_token': new_token})
+        if int(decoded.get('tv', 0)) != int(user.token_version or 0):
+            return jsonify({'error': 'Invalid refresh token'}), 401      # password changed since
+        return jsonify({'access_token': create_access_token(
+            identity=str(user_id), additional_claims={'tv': int(user.token_version or 0)})})
     except Exception:
+        # expired, malformed, bad signature, non-numeric sub, etc.
         return jsonify({'error': 'Invalid refresh token'}), 401
 
 # ===== PROBLEM ROUTES =====
@@ -860,11 +1362,7 @@ def create_problem():
             return jsonify({"error": f"Test case {i+1} invalid"}), 400
 
     # xp has to match the difficulty picked
-    max_xp = {
-        'Easy': 100,
-        'Medium': 250,
-        'Hard': 500
-    }
+    max_xp = MAX_XP_BY_DIFFICULTY
 
     # make sure the subject picked is actually valid
     subject_id = data.get('subject_id')
@@ -874,6 +1372,8 @@ def create_problem():
     # Verify instructor is assigned to teach this subject in at least one block
     if not is_instructor_assigned(user_id, subject_id):
         return jsonify({"error": "You are not assigned to teach this subject"}), 403
+    if subject_out_of_scope(Subject.query.get(subject_id)):
+        return jsonify({"error": OUT_OF_SCOPE_MSG}), 400
 
     # a quest belongs to a specific class code, never the whole subject --
     # empty used to silently mean "every section of this subject", which
@@ -896,13 +1396,10 @@ def create_problem():
         except:
             starter_code = {}
 
-    # Parse due_date if provided
-    due_date = None
-    if data.get('due_date'):
-        try:
-            due_date = datetime.fromisoformat(data['due_date'])
-        except:
-            due_date = None
+    # Parse due_date if provided (invalid values are rejected, not dropped)
+    due_date, due_err = parse_due_date(data.get('due_date'))
+    if due_err:
+        return jsonify({"error": "invalid_due_date", "message": due_err}), 400
 
     p = Problem(
         subject_id=subject_id,  # links this quest to a subject
@@ -1009,7 +1506,7 @@ def get_problems():
             "problem_type": p.problem_type,
             "is_event_quest": p.is_event_quest,
             "languages": p.languages or ['python'],
-            "hints": p.hints or [],
+            "hints": serialize_hints_for_viewer(p, user),
             "tags": p.tags or [],
             "starter_code": starter,
             "test_cases": sanitize_test_cases_for_student(p.test_cases),
@@ -1025,11 +1522,13 @@ def get_problems():
     return jsonify(result), 200
 
 @app.route('/api/problems/<int:problem_id>', methods=['GET'])
+@jwt_required()
 def get_problem_detail(problem_id):
     """Get single problem details (for student code editor)"""
+    viewer = db.session.get(User, int(get_jwt_identity()))
     problem = Problem.query.get_or_404(problem_id)
-    if not problem.is_published:
-        return jsonify({"error": "Problem not available"}), 404
+    if not problem.is_published or not user_can_access_problem(viewer, problem, historical=True):
+        return deny_problem_access()
 
     # Parse starter_code
     starter = problem.starter_code
@@ -1060,7 +1559,7 @@ def get_problem_detail(problem_id):
         "problem_type": problem.problem_type,
         "is_event_quest": problem.is_event_quest,
         "languages": problem.languages or ['python'],
-        "hints": problem.hints or [],
+        "hints": serialize_hints_for_viewer(problem, viewer),
         "starter_code": starter,
         "test_cases": sanitize_test_cases_for_student(problem.test_cases),
         "estimated_time": problem.estimated_time,
@@ -1088,6 +1587,9 @@ def update_problem(problem_id):
     data = request.get_json()
 
     # ===== VALIDATION (same as create) =====
+    new_due_date, due_err = parse_due_date(data.get('due_date'))
+    if due_err:
+        return jsonify({"error": "invalid_due_date", "message": due_err}), 400
     required = ['title', 'description', 'difficulty', 'xp_reward', 'test_cases']
     if not all(k in data for k in required):
         return jsonify({"error": "Missing required fields"}), 400
@@ -1099,7 +1601,7 @@ def update_problem(problem_id):
         return jsonify({"error": "At least one test case required"}), 400
 
     # XP Validation
-    max_xp = {'Easy': 100, 'Medium': 250, 'Hard': 500}
+    max_xp = MAX_XP_BY_DIFFICULTY
     if data['xp_reward'] > max_xp[data['difficulty']]:
         return jsonify({
             "error": f"XP reward exceeds maximum for {data['difficulty']} difficulty"
@@ -1112,6 +1614,8 @@ def update_problem(problem_id):
 
     if not is_instructor_assigned(user_id, subject_id):
         return jsonify({"error": "You are not assigned to teach this subject"}), 403
+    if subject_id != problem.subject_id and subject_out_of_scope(Subject.query.get(subject_id)):
+        return jsonify({"error": OUT_OF_SCOPE_MSG}), 400
 
     visible_to_sections = data.get('visible_to_sections', problem.visible_to_sections) or []
     if not visible_to_sections:
@@ -1140,12 +1644,9 @@ def update_problem(problem_id):
     problem.auto_grade = data.get('auto_grade', problem.auto_grade)
     problem.plagiarism_threshold = data.get('plagiarism_threshold', problem.plagiarism_threshold)
 
-    # Parse due_date
-    if data.get('due_date'):
-        try:
-            problem.due_date = datetime.fromisoformat(data['due_date'])
-        except:
-            pass
+    # due_date was validated before any field was changed; an absent/empty value leaves the stored one as is
+    if new_due_date is not None:
+        problem.due_date = new_due_date
 
     # Handle starter_code
     starter_code = data.get('starter_code')
@@ -1178,8 +1679,16 @@ def delete_problem(problem_id):
     if problem.created_by != user_id and user.role != 'administrator':
         return jsonify({"error": "Not your problem"}), 403
 
-    # Clean up related submissions
-    Submission.query.filter_by(problem_id=problem_id).delete()
+    # Clean up every row that still points at this problem -- a plain
+    # Submission.query.delete() used to be the only cleanup here, which
+    # left SubmissionSlot/CodeDraft/HintReveal/PlagiarismReport rows
+    # behind for any problem that had ever been submitted to. MySQL's FK
+    # (RESTRICT, not CASCADE) then blocked the Problem delete outright,
+    # surfacing to the instructor as a generic "check your connection"
+    # error with no indication the quest actually had a block. Same fix
+    # as the account-delete cascade -- reuses the same helper so both
+    # stay correct together instead of drifting apart again.
+    _wipe_problem_dependents([problem_id])
 
     db.session.delete(problem)
     db.session.commit()
@@ -1213,6 +1722,8 @@ def create_lesson():
     # Verify instructor is assigned to this subject
     if not is_instructor_assigned(user_id, section.subject_id):
         return jsonify({"error": "You are not assigned to teach this subject"}), 403
+    if subject_out_of_scope(Subject.query.get(section.subject_id)):
+        return jsonify({"error": OUT_OF_SCOPE_MSG}), 400
 
     # Create lesson -- subject_id always derived from the section so the
     # two can never disagree
@@ -1273,12 +1784,12 @@ def upload_lesson_file(lesson_id):
     secure_name = f"{uuid.uuid4().hex}.{file_ext}"
 
     # Create uploads folder if not exists
-    upload_dir = os.path.join('uploads', 'lessons', str(lesson_id))
-    os.makedirs(upload_dir, exist_ok=True)
+    rel_dir = 'uploads/lessons/' + str(lesson_id)
+    os.makedirs(os.path.join(UPLOAD_ROOT, 'lessons', str(lesson_id)), exist_ok=True)
 
-    # Save file
-    file_path = os.path.join(upload_dir, secure_name)
-    file.save(file_path)
+    # Save file (the database keeps the relative path with forward slashes)
+    file_path = rel_dir + '/' + secure_name
+    file.save(upload_abs_path(file_path))
 
     # Create database record
     lesson_file = LessonFile(
@@ -1337,9 +1848,10 @@ def delete_lesson(lesson_id):
     import os
     files = LessonFile.query.filter_by(lesson_id=lesson_id).all()
     for f in files:
-        if f.storage_path and os.path.exists(f.storage_path):
+        ap = upload_abs_path(f.storage_path)
+        if ap and os.path.exists(ap):
             try:
-                os.remove(f.storage_path)
+                os.remove(ap)
             except OSError:
                 pass  # file already gone, no big deal
         db.session.delete(f)
@@ -1367,9 +1879,10 @@ def delete_lesson_file(lesson_id, file_id):
     if f.lesson_id != lesson_id:
         return jsonify({"error": "File not found"}), 404
 
-    if f.storage_path and os.path.exists(f.storage_path):
+    ap = upload_abs_path(f.storage_path)
+    if ap and os.path.exists(ap):
         try:
-            os.remove(f.storage_path)
+            os.remove(ap)
         except OSError:
             pass  # file already gone, no big deal
 
@@ -1414,18 +1927,13 @@ def download_lesson_file(lesson_id, file_id):
         if not section_ids:
             return jsonify({"error": "Not enrolled"}), 403
 
-        student_subject_ids = list(set(
-            s.subject_id for s in SubjectSection.query.filter(
-                SubjectSection.id.in_(section_ids)
-            ).all()
-        ))
-        if lesson.subject_id not in student_subject_ids:
+        # the lesson belongs to one class code and must be published
+        if not lesson.is_published or lesson.section_id not in section_ids:
             return jsonify({"error": "Access denied"}), 403
 
-    # storage_path is relative, so anchor it to this file's own folder —
-    # otherwise it breaks depending on where you launched flask from
-    abs_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), f.storage_path)
-    if not os.path.exists(abs_path):
+    # storage_path is relative; it is resolved against the uploads folder (never the launch directory)
+    abs_path = upload_abs_path(f.storage_path)
+    if not abs_path or not os.path.exists(abs_path):
         return jsonify({"error": "File not found on disk"}), 404
 
     return send_file(abs_path, as_attachment=True, download_name=f.original_filename)
@@ -1513,8 +2021,7 @@ def get_student_lessons():
             "files": [{
                 "id": f.id,
                 "filename": f.original_filename,
-                "file_type": f.file_type,
-                "storage_path": f.storage_path
+                "file_type": f.file_type
             } for f in files]
         })
 
@@ -1528,8 +2035,19 @@ def get_revealed_hints(problem_id):
     # this problem, so reopening or refreshing the page shows the right
     # hints as still-unblurred instead of resetting to "nothing revealed"
     user_id = int(get_jwt_identity())
+    prob = db.session.get(Problem, problem_id)
+    if not prob or not user_can_access_problem(db.session.get(User, user_id), prob, historical=True):
+        return deny_problem_access()
     revealed = HintReveal.query.filter_by(user_id=user_id, problem_id=problem_id).all()
-    return jsonify({"revealed": [r.hint_index for r in revealed]}), 200
+    hints = (prob.hints if prob else None) or []
+    # "texts" lets the editor show already-revealed hints after a refresh,
+    # since the text is no longer shipped with the problem for locked hints
+    texts = {
+        str(r.hint_index): hints[r.hint_index].get('text', '')
+        for r in revealed
+        if 0 <= r.hint_index < len(hints) and isinstance(hints[r.hint_index], dict)
+    }
+    return jsonify({"revealed": [r.hint_index for r in revealed], "texts": texts}), 200
 
 
 @app.route('/api/problems/<int:problem_id>/hints/<int:hint_index>/reveal', methods=['POST'])
@@ -1544,6 +2062,8 @@ def reveal_hint(problem_id, hint_index):
         return jsonify({"error": "Students only"}), 403
 
     prob = Problem.query.get_or_404(problem_id)
+    if not user_can_access_problem(user, prob):
+        return deny_problem_access()
     if not prob.hints or not (0 <= hint_index < len(prob.hints)):
         return jsonify({"error": "Invalid hint index"}), 400
 
@@ -1556,26 +2076,111 @@ def reveal_hint(problem_id, hint_index):
         ))
         db.session.commit()
 
-    return jsonify({"revealed": True, "xp_penalty": prob.hints[hint_index].get('xp_penalty', 0)}), 200
+    hint = prob.hints[hint_index] if isinstance(prob.hints[hint_index], dict) else {}
+    return jsonify({
+        "revealed":   True,
+        "xp_penalty": hint.get('xp_penalty', 0),
+        "text":       hint.get('text', ''),
+    }), 200
+
+
+# A graded submission is reserved BEFORE the code runs and written AFTER it
+# finishes, so no database transaction is open while Docker works and no
+# half-finished row ever shows up in scores, analytics or plagiarism scans.
+#
+#   submission_slots   one row per (student, problem), UNIQUE in the database
+#     pending -> done     the result (submission row + XP) was written
+#     pending -> failed   the code runner broke; the attempt is NOT consumed
+#
+# Only a legitimate assessed result (wrong answer, compile error, a student's
+# own timeout, ...) consumes the single graded attempt. A slot left "pending"
+# by a crash becomes claimable again after PENDING_SLOT_STALE_SECONDS.
+PENDING_SLOT_STALE_SECONDS = 15 * 60
+
+
+class SubmissionConflict(Exception):
+    """The student already has a graded submission, or one is being graded right now."""
+    def __init__(self, message, existing=None):
+        super().__init__(message)
+        self.message = message
+        self.existing = existing
+
+
+def claim_submission_slot(user_id, problem_id):
+    """
+    Reserve the one graded attempt (short transaction, committed before running).
+    Raises SubmissionConflict if it is taken. The UNIQUE key makes two
+    simultaneous requests safe: only one INSERT (or one UPDATE of a failed or
+    stale slot) can succeed.
+    """
+    # a legitimately graded submission from before slots existed
+    prior = Submission.query.filter_by(user_id=user_id, problem_id=problem_id).first()
+    if prior:
+        raise SubmissionConflict("You have already submitted this problem. Use Run to test your code.", prior)
+
+    now = datetime.utcnow()
+    token = str(_uuid.uuid4())
+    stale_before = now - timedelta(seconds=PENDING_SLOT_STALE_SECONDS)
+    slot = SubmissionSlot.query.filter_by(user_id=user_id, problem_id=problem_id).first()
+    if slot is None:
+        db.session.add(SubmissionSlot(user_id=user_id, problem_id=problem_id,
+                                      status='pending', claimed_at=now, owner_token=token))
+        try:
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+            raise SubmissionConflict("Your submission for this problem is already being processed.")
+        return token
+    if slot.status == 'done':
+        raise SubmissionConflict("You have already submitted this problem. Use Run to test your code.")
+    # 'failed' (runner broke last time) or a 'pending' slot abandoned by a crash:
+    # take it over with a single conditional UPDATE so only one request wins
+    won = SubmissionSlot.query.filter(
+        SubmissionSlot.id == slot.id,
+        db.or_(SubmissionSlot.status == 'failed',
+               db.and_(SubmissionSlot.status == 'pending', SubmissionSlot.claimed_at < stale_before)),
+    ).update({'status': 'pending', 'claimed_at': now, 'finished_at': None, 'owner_token': token},
+      synchronize_session=False)
+    db.session.commit()
+    if won != 1:
+        raise SubmissionConflict("Your submission for this problem is already being processed.")
+    return token
+
+
+def release_submission_slot(user_id, problem_id, error_text, token=None):
+    """The runner failed: free the attempt so the student can try again."""
+    try:
+        q = SubmissionSlot.query.filter_by(user_id=user_id, problem_id=problem_id, status='pending')
+        if token is not None:
+            q = q.filter_by(owner_token=token)       # only the current owner may release
+        q.update(
+            {'status': 'failed', 'finished_at': datetime.utcnow(), 'error_msg': (error_text or '')[:500]},
+            synchronize_session=False)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        logger.exception("could not release submission slot (user=%s problem=%s); it will expire on its own",
+                         user_id, problem_id)
 
 
 @app.route('/api/submissions', methods=['POST'])
 @jwt_required()
 @rate_limit(max_calls=10, period=60)
 def create_submission():
-    """Submit code for grading — fair scoring with partial credit and floor XP"""
+    """Submit code for grading: one graded attempt per problem, partial credit and floor XP."""
     user_id = int(get_jwt_identity())
     user = User.query.get(user_id)
     if user.role != 'student':
         return jsonify({"error": "Students only"}), 403
 
-    data = request.get_json()
+    data = request.get_json() or {}
     if not all(k in data for k in ['problem_id', 'code', 'language']):
         return jsonify({"error": "Missing fields"}), 400
 
     prob = Problem.query.get_or_404(data['problem_id'])
-    if not prob.is_published:
-        return jsonify({"error": "Problem unavailable"}), 404
+    if not prob.is_published or not user_can_access_problem(user, prob):
+        # unpublished, or not in one of this student's classes: nothing is claimed or graded
+        return deny_problem_access()
 
     # Deadline enforcement
     if prob.due_date and datetime.utcnow() > prob.due_date:
@@ -1585,123 +2190,144 @@ def create_submission():
             "due_date": prob.due_date.isoformat()
         }), 403
 
-    # once submitted once, can't resubmit this quest
-    prior = Submission.query.filter_by(
-        user_id=user_id,
-        problem_id=prob.id
-    ).first()
-    if prior:
-        return jsonify({
-            "error": "Already submitted",
-            "message": "You have already submitted this problem. Use Run to test your code.",
-            "submission_id": prior.id,
-            "status": prior.status,
-            "score": prior.score
-        }), 409
-
-    # XP floor table — 10% of xp_reward, minimum guaranteed even on errors
-    floor_xp = max(5, int(prob.xp_reward * 0.10))
-
-    sub = Submission(
-        user_id=user.id,
-        problem_id=prob.id,
-        code=data['code'],
-        language=data['language'],
-        status='error',
-        score=0
-    )
-    db.session.add(sub)
-    db.session.flush()
+    # plain values for use after the reservation is committed (ORM objects
+    # expire on commit and would otherwise reopen a transaction)
+    problem_id = prob.id
+    test_cases = list(prob.test_cases or [])
+    xp_reward  = prob.xp_reward
+    partial_pc = prob.partial_credit or 100
+    hints      = list(prob.hints or [])
+    code, language = data['code'], data['language']
 
     try:
-        results     = evaluate_code(data['code'], prob.test_cases, data['language'])
-        total       = len(results)
-        passed      = sum(1 for r in results if r['passed'])
-        has_timeout = any('Timeout' in r.get('output', '') for r in results)
-        has_error   = any(
-            r.get('message', '') not in ('Passed', '') and not r['passed']
-            for r in results
-        )
+        slot_token = claim_submission_slot(user_id, problem_id)
+    except SubmissionConflict as c:
+        body = {"error": "Already submitted", "message": c.message}
+        if c.existing is not None:
+            body.update({"submission_id": c.existing.id, "status": c.existing.status, "score": c.existing.score})
+        return jsonify(body), 409
 
-        # Determine status and score
-        if total == 0:
-            sub.status = 'error'
-            sub.score  = 0
+    # XP floor table — 10% of xp_reward, minimum guaranteed even on errors
+    floor_xp = max(5, int(xp_reward * 0.10))
 
-        elif passed == total:
-            sub.status = 'accepted'
-            sub.score  = prob.xp_reward
-
-        elif has_timeout:
-            sub.status = 'timeout'
-            sub.score  = floor_xp
-
-        elif passed == 0 and has_error:
-            sub.status = 'error'
-            sub.score  = floor_xp
-
-        elif passed == 0:
-            sub.status = 'wrong_answer'
-            sub.score  = floor_xp
-
-        else:
-            # Partial: some passed, some failed
-            partial_m  = (prob.partial_credit or 100) / 100.0
-            sub.status = 'partial'
-            sub.score  = max(floor_xp, int(prob.xp_reward * (passed / total) * partial_m))
-
-        sub.passed_cases = passed
-        sub.total_cases  = total
-
-        # each hint's xp_penalty (set by the instructor in createproblem.jsx)
-        # gets subtracted from this submission's score for every hint index
-        # the student revealed, floored at 0 so score never goes negative
-        revealed_hints = HintReveal.query.filter_by(user_id=user_id, problem_id=prob.id).all()
-        hint_penalty = 0
-        if prob.hints:
-            for r in revealed_hints:
-                if 0 <= r.hint_index < len(prob.hints):
-                    hint_penalty += prob.hints[r.hint_index].get('xp_penalty', 0)
-        sub.score = max(0, sub.score - hint_penalty)
-
-        # XP delta — only award improvement over student's previous best
-        best_prev = (Submission.query
-                     .filter_by(user_id=user_id, problem_id=prob.id)
-                     .filter(Submission.id != sub.id)
-                     .order_by(Submission.score.desc())
-                     .first())
-        prev_best_score = best_prev.score if best_prev else 0
-        xp_delta = max(0, sub.score - prev_best_score)
-
-        if xp_delta > 0:
-            user.xp   += xp_delta
-            user.level = 1 + (user.xp // 100)
-
-        db.session.commit()
-
+    # ── run the code (no database transaction is held open here) ──────────
+    try:
+        results = evaluate_code(code, test_cases, language, raise_on_infra=True)
+    except ExecutionInfrastructureError as e:
+        logger.error("grading runner failure (user=%s problem=%s): %s", user_id, problem_id, e)
+        release_submission_slot(user_id, problem_id, str(e), slot_token)
         return jsonify({
-            "submission_id": sub.id,
-            "status":        sub.status,
-            "score":         sub.score,
-            "passed_cases":  passed,
-            "total_cases":   total,
-            "xp_earned":     xp_delta,
-            "test_results":  results,
-            "user_xp":       user.xp,
-            "user_level":    user.level,
-            "scoring_note": (
-                f"All {total} test cases passed. Full XP awarded." if sub.status == 'accepted'
-                else f"{passed}/{total} test cases passed. {sub.score} XP awarded." if sub.status == 'partial'
-                else f"Participation credit awarded: {sub.score} XP."
-            )
-        }), 201
-
+            "error": "The code runner is temporarily unavailable.",
+            "message": "Your attempt was not counted. Please try again in a moment.",
+            "attempt_consumed": False,
+        }), 503
     except Exception as e:
+        logger.exception("unexpected grading failure (user=%s problem=%s)", user_id, problem_id)
+        release_submission_slot(user_id, problem_id, str(e), slot_token)
+        return jsonify({
+            "error": "Grading could not be completed.",
+            "message": "Your attempt was not counted. Please try again in a moment.",
+            "attempt_consumed": False,
+        }), 500
+
+    # ── score it ──────────────────────────────────────────────────────────
+    total       = len(results)
+    passed      = sum(1 for r in results if r['passed'])
+    # outcome of the STUDENT'S code, from what the runner reported per test
+    has_timeout = any(r.get('kind') == 'timeout' for r in results)
+    has_error   = any(r.get('kind') == 'runtime_error' for r in results)   # compile failure / crash
+    if total == 0:
+        status, score = 'error', 0
+    elif passed == total:
+        status, score = 'accepted', xp_reward
+    elif has_timeout:
+        status, score = 'timeout', floor_xp
+    elif passed == 0 and has_error:
+        status, score = 'error', floor_xp
+    elif passed == 0:
+        status, score = 'wrong_answer', floor_xp
+    else:
+        status = 'partial'
+        score  = max(floor_xp, int(xp_reward * (passed / total) * (partial_pc / 100.0)))
+
+    # ── write the result and the XP in ONE short transaction ──────────────
+    try:
+        # each hint's xp_penalty is subtracted once per revealed hint, floored at 0
+        hint_penalty = 0
+        for r in HintReveal.query.filter_by(user_id=user_id, problem_id=problem_id).all():
+            if 0 <= r.hint_index < len(hints):
+                hint_penalty += hints[r.hint_index].get('xp_penalty', 0)
+        score = max(0, score - hint_penalty)
+
+        # XP only for improvement over an earlier graded result (none exist under
+        # the current one-attempt policy, kept for submissions from older versions)
+        best_prev = (Submission.query.filter_by(user_id=user_id, problem_id=problem_id)
+                     .order_by(Submission.score.desc()).first())
+        xp_delta = max(0, score - (best_prev.score if best_prev else 0))
+
+        # Lock order matters on MySQL: take the student's row lock FIRST (the XP update),
+        # then insert the submission. Inserting first takes a shared lock on the user row
+        # through the foreign key, and two concurrent submissions then deadlock when both
+        # try to upgrade it (seen on a real MySQL 9 server in mysql_concurrency_check.py).
+        # A deadlock that still happens is retried; the whole write is one transaction.
+        for attempt in range(4):
+            try:
+                if xp_delta > 0:
+                    # increments are done by the database, so two submissions for
+                    # different problems at the same time cannot overwrite each other
+                    User.query.filter_by(id=user_id).update(
+                        {User.xp: User.xp + xp_delta}, synchronize_session=False)
+                    User.query.filter_by(id=user_id).update(
+                        {User.level: 1 + (User.xp // 100)}, synchronize_session=False)
+                slot_done = SubmissionSlot.query.filter_by(
+                    user_id=user_id, problem_id=problem_id, status='pending', owner_token=slot_token
+                ).update({'status': 'done', 'finished_at': datetime.utcnow()}, synchronize_session=False)
+                if slot_done != 1:
+                    # someone else took over a slot we held too long: do not grade twice
+                    db.session.rollback()
+                    return jsonify({"error": "Already submitted",
+                                    "message": "Your submission for this problem is already being processed."}), 409
+                sub = Submission(user_id=user_id, problem_id=problem_id, code=code, language=language,
+                                 status=status, score=score, passed_cases=passed, total_cases=total,
+                                 result_details=recorded_result_details(results))
+                db.session.add(sub)
+                db.session.commit()
+                break
+            except OperationalError as oe:
+                db.session.rollback()
+                code_no = getattr(getattr(oe, 'orig', None), 'args', [None])[0]
+                if code_no in (1213, 1205) and attempt < 3:      # deadlock / lock wait timeout
+                    time.sleep(0.05 * (attempt + 1))
+                    continue
+                raise
+    except Exception:
         db.session.rollback()
-        sub.status = 'error'
-        sub.score  = floor_xp
-        db.session.commit()
-        return jsonify({"error": str(e), "xp_earned": floor_xp}), 500
+        logger.exception("could not save the result (user=%s problem=%s)", user_id, problem_id)
+        # nothing was written; free the attempt so the student is not penalised
+        release_submission_slot(user_id, problem_id, 'result could not be saved', slot_token)
+        return jsonify({
+            "error": "Your result could not be saved.",
+            "message": "Your attempt was not counted. Please try again in a moment.",
+            "attempt_consumed": False,
+        }), 500
+
+    user = User.query.get(user_id)
+    return jsonify({
+        "submission_id": sub.id,
+        "status":        status,
+        "score":         score,
+        "passed_cases":  passed,
+        "total_cases":   total,
+        "xp_earned":     xp_delta,
+        "test_results":  results,
+        "user_xp":       user.xp,
+        "user_level":    user.level,
+        "scoring_note": (
+            f"All {total} test cases passed. Full XP awarded." if status == 'accepted'
+            else f"{passed}/{total} test cases passed. {score} XP awarded." if status == 'partial'
+            else f"Participation credit awarded: {score} XP."
+        )
+    }), 201
 
 @app.route('/api/problems/<int:problem_id>/my-submission', methods=['GET'])
 @jwt_required()
@@ -1736,6 +2362,9 @@ def get_code_draft(problem_id):
     """Fetch this student's in-progress code for a quest, if any was autosaved."""
     user_id = int(get_jwt_identity())
     language = request.args.get('language', 'python')
+    prob = db.session.get(Problem, problem_id)
+    if not prob or not user_can_access_problem(db.session.get(User, user_id), prob, historical=True):
+        return deny_problem_access()
 
     draft = CodeDraft.query.filter_by(
         user_id=user_id, problem_id=problem_id, language=language
@@ -1757,6 +2386,16 @@ def save_code_draft(problem_id):
     data = request.get_json() or {}
     language = data.get('language', 'python')
     code = data.get('code', '')
+    prob = db.session.get(Problem, problem_id)
+    me = db.session.get(User, user_id)
+    if not prob or not user_can_access_problem(me, prob):
+        return deny_problem_access()
+    if not isinstance(code, str) or len(code) > 100_000:
+        return jsonify({"error": "Code too large"}), 413
+    # once the graded submission exists the editor is read-only: a later autosave
+    # must not replace the code that was graded
+    if me.role == 'student' and Submission.query.filter_by(user_id=user_id, problem_id=problem_id).first():
+        return jsonify({"error": "Already submitted", "message": "This quest has a final graded submission; the draft is locked."}), 409
 
     draft = CodeDraft.query.filter_by(
         user_id=user_id, problem_id=problem_id, language=language
@@ -1798,8 +2437,8 @@ def run_problem_code(problem_id):
         return jsonify({"error": "Missing code or language"}), 400
 
     prob = Problem.query.get_or_404(problem_id)
-    if not prob.is_published:
-        return jsonify({"error": "Problem not available"}), 404
+    if not prob.is_published or not user_can_access_problem(user, prob):
+        return deny_problem_access()
 
     try:
         results = evaluate_code(data['code'], prob.test_cases, data['language'])
@@ -1833,8 +2472,8 @@ def test_problem_code(problem_id):
         return jsonify({"error": "Missing code or language"}), 400
 
     prob = Problem.query.get_or_404(problem_id)
-    if not prob.is_published:
-        return jsonify({"error": "Problem not available"}), 404
+    if not prob.is_published or not user_can_access_problem(user, prob):
+        return deny_problem_access()
 
     # Run the code against test cases
     try:
@@ -1860,9 +2499,16 @@ def get_student_submissions():
     user_id = int(get_jwt_identity())
     page = request.args.get('page', 1, type=int)
     limit = min(request.args.get('limit', 15, type=int), 50)
+    # optional Hero Sheet filter: only submissions for quests belonging to
+    # this one subject, instead of every subject the student is enrolled in
+    subject_id = request.args.get('subject_id', type=int)
 
-    total = Submission.query.filter_by(user_id=user_id).count()
-    subs = Submission.query.filter_by(user_id=user_id)\
+    base_query = Submission.query.filter_by(user_id=user_id)
+    if subject_id:
+        base_query = base_query.join(Problem).filter(Problem.subject_id == subject_id)
+
+    total = base_query.count()
+    subs = base_query\
         .order_by(Submission.submitted_at.desc())\
         .limit(limit).offset((page-1)*limit).all()
 
@@ -1912,11 +2558,48 @@ def calculate_streak(subs):
 @app.route('/api/student/stats', methods=['GET'])
 @jwt_required()
 def get_student_stats():
-    """Get student's gamification stats for dashboard"""
+    """Get student's gamification stats for dashboard.
+
+    By default this is account-wide (every subject mixed together), which
+    is the original behavior and still what `user.xp` / `user.level`
+    directly store. Passing ?subject_id=<id> instead scopes everything to
+    quests belonging to that one subject -- XP/level in that case can't
+    just read user.xp (that column has no per-subject breakdown), so it's
+    recomputed the same way real XP is ever awarded: the best score the
+    student ever got on each problem, summed up (see the xp_delta logic
+    in submit_solution). Achievement-bonus XP is NOT included in the
+    per-subject number, since badges themselves aren't tied to one
+    subject -- only real quest scores are.
+    """
     user_id = int(get_jwt_identity())
     user = User.query.get(user_id)
     if user.role != 'student':
         return jsonify({"error": "Students only"}), 403
+
+    subject_id = request.args.get('subject_id', type=int)
+
+    if subject_id:
+        subs = Submission.query.join(Problem)\
+            .filter(Submission.user_id == user.id, Problem.subject_id == subject_id).all()
+        accepted = len([s for s in subs if s.status == 'accepted'])
+        streak = calculate_streak(subs)
+
+        best_by_problem = {}
+        for s in subs:
+            if s.problem_id not in best_by_problem or s.score > best_by_problem[s.problem_id]:
+                best_by_problem[s.problem_id] = s.score
+        subject_xp = sum(best_by_problem.values())
+
+        return jsonify({
+            "total_xp": subject_xp,
+            "level": 1 + (subject_xp // 100),
+            "total_submissions": len(subs),
+            "accepted_submissions": accepted,
+            "success_rate": round((accepted/len(subs)*100), 1) if subs else 0.0,
+            "streak": streak,
+            "last_submission": subs[0].submitted_at.isoformat() if subs else None,
+            "scope": "subject"
+        }), 200
 
     subs = Submission.query.filter_by(user_id=user.id).all()
     accepted = len([s for s in subs if s.status == 'accepted'])
@@ -1929,8 +2612,152 @@ def get_student_stats():
         "accepted_submissions": accepted,
         "success_rate": round((accepted/len(subs)*100), 1) if subs else 0.0,
         "streak": streak,
-        "last_submission": subs[0].submitted_at.isoformat() if subs else None
+        "last_submission": subs[0].submitted_at.isoformat() if subs else None,
+        "scope": "global"
     }), 200
+
+
+# ===== ACHIEVEMENT AWARDING =====
+# What the code below can really measure. This is the ONLY source of `attainable`: a definition whose
+# requirement_type is not listed for its category cannot be earned today (nothing computes its progress).
+# Do not extend a list without also adding the progress calculation in the matching route.
+STUDENT_EARNABLE_TYPES = frozenset({'quest_count', 'streak', 'python_count', 'java_count',
+                                    'csharp_count', 'hard_count', 'debug_count'})
+INSTRUCTOR_EARNABLE_TYPES = frozenset({'lesson_count', 'problem_count', 'blocks_taught',
+                                       'subjects_taught', 'students_taught', 'file_count', 'student_quest'})
+EARNABLE_TYPES = {'student': STUDENT_EARNABLE_TYPES, 'instructor': INSTRUCTOR_EARNABLE_TYPES}
+AWARD_MAX_ATTEMPTS = 4                       # 1 try + 3 retries, only for deadlock / lock-wait errors
+_RETRYABLE_DB_CODES = (1213, 1205)           # MySQL/MariaDB: deadlock, lock wait timeout
+
+
+class AwardRetryExhausted(Exception):
+    """A recognised lock conflict persisted through every attempt. Nothing was written."""
+
+
+def achievement_attainable(category, requirement_type):
+    return requirement_type in EARNABLE_TYPES.get(category or '', frozenset())
+
+
+def _utc_iso(dt):
+    """Stored times are naive UTC. Send an explicit 'Z': a bare '2026-10-22T16:30:00' is read by browsers as
+    LOCAL time (a day early for Asia/Manila after 16:00 UTC). Whole seconds, matching the DATETIME column."""
+    if dt is None:
+        return None
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt.replace(microsecond=0).isoformat() + 'Z'
+
+
+def _award_attempt(user_id, candidates):
+    """ONE attempt, inside the caller's transaction (caller commits or rolls back).
+    candidates = [(achievement_id, xp_reward, progress)] - plain values, so a rollback/retry rebuilds
+    everything from the database and nothing depends on stale ORM state.
+
+    Lock order (the same as create_submission, which takes the users row first via its UPDATE):
+      1. the users row  (SELECT ... FOR UPDATE)  - serialises every XP writer for this user
+      2. this user's user_achievements rows (locking read)
+      3. INSERT missing awards -> UPDATE users.xp -> UPDATE users.level
+    The re-read in step 2 is a LOCKING read on purpose: under REPEATABLE READ a plain read would use the
+    snapshot opened earlier in the request and miss awards another request committed meanwhile.
+    Returns the set of achievement ids this attempt inserted."""
+    user = User.query.filter_by(id=user_id).with_for_update().populate_existing().first()
+    if user is None:
+        raise LookupError("user vanished")
+    have = {r[0] for r in db.session.query(UserAchievement.achievement_id)
+            .filter_by(user_id=user_id).with_for_update().all()}
+    created, gain = set(), 0
+    for ach_id, reward, progress in candidates:
+        if ach_id in have or ach_id in created:
+            continue
+        db.session.add(UserAchievement(user_id=user_id, achievement_id=ach_id, progress=progress))
+        created.add(ach_id)
+        gain += int(reward or 0)
+    db.session.flush()
+    if gain > 0:
+        # database-side arithmetic (never "user.xp += n" from an object that may be stale)
+        User.query.filter_by(id=user_id).update({User.xp: User.xp + gain}, synchronize_session=False)
+        # level follows the resulting XP in the same transaction (same rule create_submission uses).
+        # A zero-reward award writes no users row at all; unrelated historical level drift is not repaired here.
+        User.query.filter_by(id=user_id).update({User.level: 1 + (User.xp // 100)}, synchronize_session=False)
+    return created
+
+
+def award_achievements(user_id, candidates, sleep=None):
+    """Award rows + XP + level commit together or not at all. Retries only recognised lock conflicts (whole
+    transaction rolled back and rebuilt each time, bounded). Anything else is rolled back and re-raised."""
+    if not candidates:
+        return set()
+    for attempt in range(AWARD_MAX_ATTEMPTS):
+        try:
+            created = _award_attempt(user_id, candidates)
+            db.session.commit()
+            return created
+        except OperationalError as oe:
+            db.session.rollback()
+            code_no = getattr(getattr(oe, 'orig', None), 'args', [None])[0]
+            if code_no in _RETRYABLE_DB_CODES:
+                if attempt < AWARD_MAX_ATTEMPTS - 1:
+                    (sleep or time.sleep)(0.05 * (attempt + 1))
+                    continue
+                raise AwardRetryExhausted() from oe
+            raise
+        except BaseException:
+            db.session.rollback()
+            raise
+    raise AwardRetryExhausted()
+
+
+def _canonical_awards(user_id):
+    """{achievement_id: (earned_at, row_id)} from the durable rows. A historical duplicate pair is reported
+    as ONE earned achievement: the earliest RECORDED time (rows with no time never beat one that has it),
+    lowest id on ties. Originals are not touched and this does not claim to explain past XP."""
+    best = {}
+    for ua in UserAchievement.query.filter_by(user_id=user_id).order_by(UserAchievement.id).all():
+        key = (ua.earned_at is None, ua.earned_at or datetime.max, ua.id)
+        if ua.achievement_id not in best or key < best[ua.achievement_id][0]:
+            best[ua.achievement_id] = (key, ua.earned_at)
+    return {aid: v[1] for aid, v in best.items()}
+
+
+def serve_achievements(user_id, rows):
+    """rows = [(Achievement, current_progress_or_None, attainable)]. Awards what is newly met (one shared path
+    for every role), then describes the COMMITTED state. just_earned is true only for rows this request
+    inserted and committed. Returns a Flask response."""
+    plain = [(a.id, a.xp_reward, a.requirement_value, a.requirement_type, a.category, a.name,
+              a.description, a.icon, p, ok) for a, p, ok in rows]
+    earned_before = _canonical_awards(user_id)
+    candidates = [(i, reward, prog) for i, reward, need, rt, cat, nm, ds, ic, prog, ok in plain
+                  if ok and prog is not None and i not in earned_before and prog >= need]
+    try:
+        created = award_achievements(user_id, candidates)
+    except AwardRetryExhausted:
+        resp = jsonify({"error": "award_temporarily_unavailable", "retryable": True,
+                        "message": "Your achievements could not be updated right now. Nothing was changed; please try again."})
+        resp.status_code = 503
+        resp.headers['Retry-After'] = '1'
+        return resp
+    except Exception:
+        logger.exception("achievement award failed (user=%s); rolled back", user_id)
+        return jsonify({"error": "award_failed", "retryable": False,
+                        "message": "Your achievements could not be updated. Nothing was changed."}), 500
+    db.session.expire_all()          # describe what the database now holds (incl. a concurrent winner's award)
+    earned = _canonical_awards(user_id)
+    out = []
+    for i, reward, need, rt, cat, nm, ds, ic, prog, ok in plain:
+        out.append({
+            "id": i, "name": nm, "description": ds, "icon": ic,
+            "category": cat, "requirement_type": rt,
+            "xp_reward": reward,
+            "is_earned": i in earned,
+            "attainable": bool(ok),
+            "just_earned": i in created,
+            "progress": min(prog or 0, need),
+            "max_progress": need,
+            "requirement_value": need,
+            "earned_at": _utc_iso(earned.get(i)),
+        })
+    return jsonify(out), 200
+
 
 @app.route('/api/student/achievements', methods=['GET'])
 @jwt_required()
@@ -1954,17 +2781,9 @@ def get_student_achievements():
     # the real day-streak below — same rule /api/student/stats uses
     all_subs = Submission.query.filter_by(user_id=user_id).all()
 
-    # Get already earned achievements
-    earned = {ua.achievement_id: ua for ua in UserAchievement.query.filter_by(user_id=user_id).all()}
-
-    result = []
-    all_achievements = Achievement.query.filter_by(category='student').all()
-
-    for ach in all_achievements:
-        is_earned = ach.id in earned
-        current_progress = 0
-
-        # Calculate progress based on requirement type
+    rows = []
+    for ach in Achievement.query.filter_by(category='student').order_by(Achievement.id).all():
+        current_progress = None          # None = nothing measures this type: it can never be earned
         if ach.requirement_type == 'quest_count':
             current_progress = total_quests
         elif ach.requirement_type == 'streak':
@@ -1979,32 +2798,11 @@ def get_student_achievements():
             current_progress = hard_quests
         elif ach.requirement_type == 'debug_count':
             current_progress = debug_quests
-        # Add more types here as needed...
+        # a new type needs BOTH a branch here and an entry in STUDENT_EARNABLE_TYPES
+        rows.append((ach, current_progress, ach.requirement_type in STUDENT_EARNABLE_TYPES))
 
-        # Auto-earn if requirements met (and not already earned)
-        if not is_earned and current_progress >= ach.requirement_value:
-            db.session.add(UserAchievement(
-                user_id=user_id,
-                achievement_id=ach.id,
-                progress=current_progress
-            ))
-            user.xp += ach.xp_reward  # Award XP immediately
-            is_earned = True
-
-        result.append({
-            "id": ach.id,
-            "name": ach.name,
-            "description": ach.description,
-            "icon": ach.icon,
-            "xp_reward": ach.xp_reward,
-            "is_earned": is_earned,
-            "progress": min(current_progress, ach.requirement_value),  # Cap at max
-            "max_progress": ach.requirement_value,
-            "earned_at": earned[ach.id].earned_at.isoformat() if is_earned and ach.id in earned else None
-        })
-
-    db.session.commit()
-    return jsonify(result), 200
+    # Known limitation: this GET still performs awarding (kept for compatibility)
+    return serve_achievements(user_id, rows)
 
 @app.route('/api/instructor/achievements', methods=['GET'])
 @jwt_required()
@@ -2039,17 +2837,9 @@ def get_instructor_achievements():
         Lesson.created_by == user_id
     ).count()
 
-    # Get already earned achievements
-    earned = {ua.achievement_id: ua for ua in UserAchievement.query.filter_by(user_id=user_id).all()}
-
-    result = []
-    all_achievements = Achievement.query.filter_by(category='instructor').all()
-
-    for ach in all_achievements:
-        is_earned = ach.id in earned
-        current_progress = 0
-
-        # Calculate progress based on requirement type
+    rows = []
+    for ach in Achievement.query.filter_by(category='instructor').order_by(Achievement.id).all():
+        current_progress = None          # None = nothing measures this type: it can never be earned
         if ach.requirement_type == 'lesson_count':
             current_progress = lessons_created
         elif ach.requirement_type == 'problem_count':
@@ -2064,37 +2854,16 @@ def get_instructor_achievements():
             current_progress = files_uploaded
         elif ach.requirement_type == 'student_quest':
             # Count students who completed at least one quest in instructor's sections
+            current_progress = 0
             if section_ids_list:
                 current_progress = db.session.query(Submission.user_id).join(Problem).filter(
                     Problem.created_by == user_id,
                     Submission.status == 'accepted'
                 ).distinct().count()
-        # Add more types as needed...
+        # a new type needs BOTH a branch here and an entry in INSTRUCTOR_EARNABLE_TYPES
+        rows.append((ach, current_progress, ach.requirement_type in INSTRUCTOR_EARNABLE_TYPES))
 
-        # Auto-earn if requirements met (and not already earned)
-        if not is_earned and current_progress >= ach.requirement_value:
-            db.session.add(UserAchievement(
-                user_id=user_id,
-                achievement_id=ach.id,
-                progress=current_progress
-            ))
-            user.xp += ach.xp_reward
-            is_earned = True
-
-        result.append({
-            "id": ach.id,
-            "name": ach.name,
-            "description": ach.description,
-            "icon": ach.icon,
-            "xp_reward": ach.xp_reward,
-            "is_earned": is_earned,
-            "progress": min(current_progress, ach.requirement_value),
-            "max_progress": ach.requirement_value,
-            "earned_at": earned[ach.id].earned_at.isoformat() if is_earned and ach.id in earned else None
-        })
-
-    db.session.commit()
-    return jsonify(result), 200
+    return serve_achievements(user_id, rows)
 
 # ===== STUDENT BLOCK/SUBJECT ROUTES =====
 @app.route('/api/student/subjects', methods=['GET'])
@@ -2246,6 +3015,7 @@ def get_submissions_by_section():
 
 # ===== LEADERBOARD =====
 @app.route('/api/leaderboard', methods=['GET'])
+@jwt_required()
 def get_leaderboard():
     # block_id param ignored — blocks removed
 
@@ -2427,7 +3197,7 @@ def get_instructor_classes():
                 Lesson.subject_id.in_(my_subject_ids)
             ).count()
 
-        announcement_count = 0
+        announcement_count = Announcement.query.filter_by(class_id=s.id).count()
 
         result.append({
             "id": s.id,
@@ -2482,7 +3252,7 @@ def get_instructor_class_detail(classId):
             Lesson.subject_id.in_(my_subject_ids)
         ).count()
 
-    announcement_count = 0
+    announcement_count = Announcement.query.filter_by(class_id=section.id).count()
 
     return jsonify({
         "id": section.id,
@@ -2505,6 +3275,8 @@ def get_class_analytics(class_id):
     user    = User.query.get(user_id)
     if not is_instructor_or_admin(user):
         return jsonify({"error": "Unauthorized"}), 403
+    if not instructor_teaches_section(user, class_id):
+        return jsonify({"error": "Not your class"}), 403
 
     enrollments = IrregularEnrollment.query.filter_by(section_id=class_id).all()
     student_ids = [e.student_id for e in enrollments]
@@ -2608,6 +3380,11 @@ def plagiarism_scan():
 
     if not problem_id:
         return jsonify({"error": "problem_id required"}), 400
+    scan_problem = db.session.get(Problem, problem_id)
+    if not scan_problem or not user_can_access_problem(user, scan_problem):
+        return deny_problem_access()
+    if class_id and not instructor_teaches_section(user, class_id):
+        return jsonify({"error": "Not your class"}), 403
 
     query = Submission.query.filter_by(problem_id=problem_id)
     if class_id:
@@ -2764,23 +3541,28 @@ def get_instructor_dashboard_stats():
     # 2. Total problems created by this instructor
     total_problems = Problem.query.filter_by(created_by=user_id, is_published=True).count()
 
-    # 3. Average class score (from submissions)
+    # 3. Average score on submitted work: XP earned / XP available, as a percentage.
+    #    Submission.score is the XP awarded (max = that problem's xp_reward), so each
+    #    submission is measured against its own problem's xp_reward. Students who have
+    #    not submitted are NOT counted as zero; they are simply absent from this figure.
+    avg_score = 0
+    avg_basis = {"submissions": 0, "students_submitted": 0, "students_enrolled": total_students,
+                 "unsubmitted_students_excluded": True}
     if student_ids:
-        submissions = Submission.query.filter(
+        rows = db.session.query(Submission.user_id, Submission.score, Problem.xp_reward).join(
+            Problem, Problem.id == Submission.problem_id
+        ).filter(
             Submission.user_id.in_(student_ids),
-            Submission.problem_id.in_(
-                db.session.query(Problem.id).filter(Problem.created_by == user_id)
-            )
+            Problem.created_by == user_id,
+            Problem.is_published == True,
+            Problem.xp_reward > 0
         ).all()
-
-        if submissions:
-            total_score = sum(s.score for s in submissions)
-            max_possible = len(submissions) * 100  # Assuming max score is 100
-            avg_score = round((total_score / max_possible) * 100) if max_possible > 0 else 0
-        else:
-            avg_score = 0
-    else:
-        avg_score = 0
+        if rows:
+            earned = sum(r[1] or 0 for r in rows)
+            available = sum(r[2] for r in rows)
+            avg_score = round(earned / available * 100)
+            avg_basis["submissions"] = len(rows)
+            avg_basis["students_submitted"] = len({r[0] for r in rows})
 
     # 4. Pending reviews (submissions needing manual review)
     pending_reviews = Submission.query.filter(
@@ -2870,6 +3652,7 @@ def get_instructor_dashboard_stats():
         "total_students": total_students,
         "total_problems": total_problems,
         "avg_score": avg_score,
+        "avg_score_basis": avg_basis,
         "pending_reviews": pending_reviews,
         "new_problems_this_week": new_problems,
         "recent_activity": recent_activity,
@@ -2983,12 +3766,9 @@ def get_submission_code(submission_id):
 
     student = User.query.get(sub.user_id)
 
-    # Re-run test cases against submitted code to get per-test breakdown
-    try:
-        test_results = evaluate_code(sub.code, problem.test_cases, sub.language)
-    except Exception:
-        test_results = []
-
+    # Read-only: shows what was stored when the student submitted. Nothing is executed here,
+    # no attempt is consumed, no XP is awarded and no record is changed.
+    details = sub.result_details if isinstance(sub.result_details, dict) else None
     return jsonify({
         "submission_id": sub.id,
         "student": {
@@ -3004,8 +3784,17 @@ def get_submission_code(submission_id):
         "language": sub.language,
         "status": sub.status,
         "score": sub.score,
+        "passed_cases": sub.passed_cases,
+        "total_cases": sub.total_cases,
+        "error_msg": sub.error_msg,
         "submitted_at": sub.submitted_at.isoformat(),
-        "test_results": test_results
+        # True only when per-test results were recorded with this submission
+        "results_recorded": details is not None,
+        "execution_mode": (details or {}).get("runner"),
+        "test_results": (details or {}).get("tests", []),
+        "note": None if details is not None else
+                "This submission was saved before per-test results were recorded. Only the stored status, score and "
+                "pass counts are available; they were not re-run."
     }), 200
 
 @app.route('/api/instructor/assigned-subjects', methods=['GET'])
@@ -3081,6 +3870,10 @@ def create_announcement():
         owns = TeacherAssignment.query.filter_by(instructor_id=user.id, section_id=class_id).first()
         if not owns:
             return jsonify({"error": "You don't teach this class"}), 403
+    if class_id:
+        _sec = SubjectSection.query.get(class_id)
+        if _sec and subject_out_of_scope(Subject.query.get(_sec.subject_id)):
+            return jsonify({"error": OUT_OF_SCOPE_MSG}), 400
 
     a = Announcement(
         instructor_id=user.id,
@@ -3095,6 +3888,7 @@ def create_announcement():
     return jsonify({"message": "Announcement created", "announcement_id": a.id}), 201
 
 @app.route('/api/announcements', methods=['GET'])
+@jwt_required()
 def get_announcements():
     class_id = request.args.get('class_id', type=int)
     if class_id:
@@ -3223,7 +4017,7 @@ def admin_dashboard_stats(admin):
     {
         # ── Primary metrics ──────────────────────────────────────────────
         "system_health":       "operational" | "degraded" | "down",
-        "active_users_today":  <int>,   # unique users who submitted today
+        "active_users_today":  <int>,   # unique students/instructors who logged in today
         "enrollment_alerts":   <int>,   # students stuck in inactive sections
 
         # ── Secondary (compact) metrics ──────────────────────────────────
@@ -3257,12 +4051,20 @@ def admin_dashboard_stats(admin):
     system_health = 'operational' if db_ok else 'down'
 
     # ── 2. Active users today ────────────────────────────────────────────────
-    # Definition: unique users (any role) who made a submission today.
-    # This is more meaningful than "account created today" (the old metric).
+    # Definition: students and instructors who logged in today (last_login_at,
+    # stamped on every successful /api/auth/login). Used to count submissions
+    # instead, which undercounted badly: a student who ran code all period but
+    # hadn't yet hit the one-shot graded Submit showed as "not active", and an
+    # instructor could never show as active at all since instructors never
+    # create Submission rows. Admins are excluded on purpose -- their job here
+    # is keeping the system healthy, not using the quest pipeline, so folding
+    # them in would just dilute what this card is meant to tell an admin about
+    # their actual userbase.
     try:
         active_users_today = (
-            db.session.query(func.count(distinct(Submission.user_id)))
-            .filter(func.date(Submission.submitted_at) == today)
+            db.session.query(func.count(User.id))
+            .filter(User.role.in_(['student', 'instructor']))
+            .filter(func.date(User.last_login_at) == today)
             .scalar() or 0
         )
     except Exception:
@@ -3404,6 +4206,23 @@ def admin_overview(admin):
         "server_time": datetime.utcnow().isoformat()
     }), 200
 
+@app.route('/api/admin/policy', methods=['GET'])
+@admin_required
+def admin_policy(admin):
+    """Settings the admin forms need: email domain and whether this admin may create admins."""
+    head_exists = bool(HEAD_ADMIN_EMAIL) and User.query.filter(
+        db.func.lower(User.email) == HEAD_ADMIN_EMAIL,
+        User.role == 'administrator').first() is not None
+    return jsonify({
+        "allowed_email_domain": ALLOWED_EMAIL_DOMAIN,
+        "student_email_domain": STUDENT_EMAIL_DOMAIN,
+        "head_admin_configured": bool(HEAD_ADMIN_EMAIL),
+        "config_diagnostics": list(CONFIG_DIAGNOSTICS),
+        "can_create_admins": is_head_admin(admin),
+        # false means nobody can create administrators until that account exists
+        "head_admin_account_exists": head_exists,
+    }), 200
+
 @app.route('/api/admin/users', methods=['POST'])
 @admin_required
 def admin_create_user(admin):
@@ -3413,11 +4232,41 @@ def admin_create_user(admin):
         return jsonify({"error": "Missing required fields"}), 400
     if data['role'] not in ['student', 'instructor', 'administrator']:
         return jsonify({"error": "Invalid role"}), 400
-    if not data['email'].lower().endswith('@adamson.edu.ph'):
-        return jsonify({"error": "Only Adamson University email addresses (@adamson.edu.ph) are allowed."}), 400
-    if User.query.filter_by(username=data['username']).first():
+    if data['role'] == 'administrator' and not is_head_admin(admin):
+        return jsonify({"error": "Only the head administrator can create administrator accounts."}), 403
+    pw_err = password_policy_error(data.get('password'))
+    if pw_err:
+        return jsonify({"error": pw_err}), 400
+    role = data['role']
+    username = normalize_student_id(data['username']) if role == 'student' else (data['username'] or '').strip()
+    if not username:
+        return jsonify({"error": "Username is required"}), 400
+    if role == 'student':
+        # students are identified by ID; the email is a GENERATED identifier, not an inbox
+        if not valid_student_id(username):
+            return jsonify({"error": "Student ID must not contain spaces or '@'."}), 400
+        expected = generated_student_email(username)
+        supplied = normalize_email(data.get('email'))
+        if supplied and supplied != expected:
+            return jsonify({"error": f"Student sign-in emails are generated from the student ID ({expected}); a different address cannot be used."}), 400
+        data['email'] = expected
+    else:
+        if not email_domain_allowed(data['email']):
+            hint = f" (@{ALLOWED_EMAIL_DOMAIN})" if ALLOWED_EMAIL_DOMAIN else ""
+            return jsonify({"error": f"A valid staff email address{hint} is required."}), 400
+        if normalize_email(data['email']).endswith('@' + STUDENT_EMAIL_DOMAIN):
+            return jsonify({"error": f"@{STUDENT_EMAIL_DOMAIN} is reserved for generated student identifiers."}), 400
+        data['email'] = normalize_email(data['email'])
+    if HEAD_ADMIN_EMAIL and normalize_email(data['email']) == HEAD_ADMIN_EMAIL:
+        return jsonify({"error": "That email address is reserved for the head administrator."}), 400
+    data['username'] = username
+    # login accepts a username or an email, so a username equal to someone's
+    # email would shadow that person's login
+    if '@' in username and User.query.filter(db.func.lower(User.email) == username.lower()).first():
+        return jsonify({"error": "Username cannot match another account's email address"}), 400
+    if User.query.filter_by(username=username).first():
         return jsonify({"error": "Username already exists"}), 400
-    if User.query.filter_by(email=data['email']).first():
+    if User.query.filter(db.func.lower(User.email) == data['email']).first():
         return jsonify({"error": "Email already exists"}), 400
     new_user = User(
         username=data['username'],
@@ -3425,6 +4274,7 @@ def admin_create_user(admin):
         password_hash=generate_password_hash(data['password']),
         role=data['role'],
         is_active=True,
+        must_change_password=True,          # the admin knows this password: replace at first sign-in
         xp=0, level=1
     )
     db.session.add(new_user)
@@ -3432,6 +4282,9 @@ def admin_create_user(admin):
     if data.get('section_ids') and data['role'] == 'student':
         for sid in data['section_ids']:
             section = SubjectSection.query.get(int(sid))
+            if section and subject_out_of_scope(Subject.query.get(section.subject_id)):
+                db.session.rollback()
+                return jsonify({"error": f"Class code {section.section_no}: {OUT_OF_SCOPE_MSG}"}), 400
             if section:
                 existing = IrregularEnrollment.query.filter_by(
                     student_id=new_user.id, section_id=int(sid)
@@ -3538,6 +4391,9 @@ def admin_update_user(admin, user_id):
     data = request.get_json()
     changes = []
 
+    if 'role' in data and data['role'] == 'administrator' and target.role != 'administrator' \
+            and not is_head_admin(admin):
+        return jsonify({"error": "Only the head administrator can promote users to administrator."}), 403
     if 'role' in data and data['role'] in ['student','instructor','administrator']:
         if target.role != data['role']: changes.append(f"Role: {target.role} -> {data['role']}")
         target.role = data['role']
@@ -3552,6 +4408,16 @@ def admin_update_user(admin, user_id):
     if 'section_ids' in data:
         section_ids = data['section_ids']
         if target.role == 'student':
+            # sections the student already has are kept as they are; only NEW
+            # links to out-of-scope subjects are refused
+            already = {e.section_id for e in IrregularEnrollment.query.filter_by(student_id=user_id).all()}
+            for sid in (section_ids or []):
+                if int(sid) in already:
+                    continue
+                sec = SubjectSection.query.get(int(sid))
+                if sec and subject_out_of_scope(Subject.query.get(sec.subject_id)):
+                    db.session.rollback()
+                    return jsonify({"error": f"Class code {sec.section_no}: {OUT_OF_SCOPE_MSG}"}), 400
             IrregularEnrollment.query.filter_by(student_id=user_id).delete()
             if section_ids:
                 for sid in section_ids:
@@ -3563,6 +4429,14 @@ def admin_update_user(admin, user_id):
             else:
                 changes.append("Removed from all class codes")
         elif target.role == 'instructor':
+            _kept = {a.section_id for a in TeacherAssignment.query.filter_by(instructor_id=user_id).all()}
+            for sid in (section_ids or []):
+                if int(sid) in _kept:
+                    continue
+                _sec = SubjectSection.query.get(int(sid))
+                if _sec and subject_out_of_scope(Subject.query.get(_sec.subject_id)):
+                    db.session.rollback()
+                    return jsonify({"error": f"Class code {_sec.section_no}: {OUT_OF_SCOPE_MSG}"}), 400
             # this branch didn't exist before — the modal let you PICK class
             # codes for an instructor, but nothing ever saved it. same
             # "replace everything" pattern as the student branch above:
@@ -3608,18 +4482,97 @@ def admin_update_user(admin, user_id):
     log_admin_action(admin.id, "USER_UPDATED", f"Target: {target.username}. Changes: {', '.join(changes) if changes else 'None'}", target_id=user_id)
     return jsonify({"message": "User updated", "changes": changes}), 200
 
-def _cascade_delete_student_data(user_id):
-    # removes every row that references this student before the User row
+def _wipe_problem_dependents(problem_ids):
+    # every FK that points at problems.id, cleared in the order MySQL
+    # requires: PlagiarismReport points at submissions.id (not problems.id
+    # directly), so submissions have to be identified first and their
+    # reports cleared before the submissions themselves can go. The other
+    # three (SubmissionSlot/CodeDraft/HintReveal) point straight at
+    # problems.id and can be cleared any time before the Problem delete.
+    if not problem_ids:
+        return
+    submission_ids = [
+        row[0] for row in
+        db.session.query(Submission.id).filter(Submission.problem_id.in_(problem_ids)).all()
+    ]
+    if submission_ids:
+        PlagiarismReport.query.filter(
+            db.or_(
+                PlagiarismReport.submission_a_id.in_(submission_ids),
+                PlagiarismReport.submission_b_id.in_(submission_ids),
+            )
+        ).delete(synchronize_session=False)
+    SubmissionSlot.query.filter(SubmissionSlot.problem_id.in_(problem_ids)).delete(synchronize_session=False)
+    CodeDraft.query.filter(CodeDraft.problem_id.in_(problem_ids)).delete(synchronize_session=False)
+    HintReveal.query.filter(HintReveal.problem_id.in_(problem_ids)).delete(synchronize_session=False)
+    Submission.query.filter(Submission.problem_id.in_(problem_ids)).delete(synchronize_session=False)
+    Problem.query.filter(Problem.id.in_(problem_ids)).delete(synchronize_session=False)
+
+def _cascade_delete_user_data(user_id):
+    # removes every row that references this user before the User row
     # itself can be deleted — MySQL blocks deleting a row that's still
-    # referenced elsewhere (Submission/UserAchievement/HintReveal all
-    # point at users.id with no CASCADE set). shared by the single-user
-    # delete and the bulk-delete-all-students endpoints so both stay
-    # correct together instead of quietly drifting apart later.
+    # referenced elsewhere, and none of these foreign keys cascade at the
+    # database level. Covers both sides of the account, since the same
+    # endpoint deletes students, instructors, and (via admin_delete_user)
+    # any other role: a student's own submissions/achievements/enrollments,
+    # AND anything an instructor authored (quests/problems and course
+    # lessons) plus everything those rows themselves depend on. Shared by
+    # the single-user delete and the bulk-delete-all-students endpoints so
+    # both stay correct together instead of quietly drifting apart later.
+    import os
+
+    # --- instructor side: authored quests/problems and everything under them ---
+    problem_ids = [
+        row[0] for row in
+        db.session.query(Problem.id).filter_by(created_by=user_id).all()
+    ]
+    _wipe_problem_dependents(problem_ids)
+
+    # --- instructor side: authored course-material lessons + their files ---
+    for lesson in Lesson.query.filter_by(created_by=user_id).all():
+        for lesson_file in LessonFile.query.filter_by(lesson_id=lesson.id).all():
+            if lesson_file.storage_path and os.path.exists(lesson_file.storage_path):
+                try:
+                    os.remove(lesson_file.storage_path)
+                except OSError:
+                    pass  # file already gone from disk; the DB row still needs removing
+            db.session.delete(lesson_file)
+        db.session.delete(lesson)
+
+    Announcement.query.filter_by(instructor_id=user_id).delete()
+    TeacherAssignment.query.filter_by(instructor_id=user_id).delete()
+
+    # --- student side: this account's own hint reveals, achievements, drafts ---
     HintReveal.query.filter_by(user_id=user_id).delete()
     UserAchievement.query.filter_by(user_id=user_id).delete()
+    CodeDraft.query.filter_by(user_id=user_id).delete()
+
+    # PlagiarismReport rows point at submissions.id (not nullable, no
+    # cascade). Any submission that was ever run through the Instructor's
+    # Plagiarism Check — even just once — leaves a report row behind, and
+    # MySQL refuses to delete a submission that's still referenced. Those
+    # have to go before the submissions themselves.
+    own_submission_ids = [
+        row[0] for row in
+        db.session.query(Submission.id).filter_by(user_id=user_id).all()
+    ]
+    if own_submission_ids:
+        PlagiarismReport.query.filter(
+            db.or_(
+                PlagiarismReport.submission_a_id.in_(own_submission_ids),
+                PlagiarismReport.submission_b_id.in_(own_submission_ids),
+            )
+        ).delete(synchronize_session=False)
+
     Submission.query.filter_by(user_id=user_id).delete()
-    IrregularEnrollment.query.filter_by(student_id=user_id).delete()
-    TeacherAssignment.query.filter_by(instructor_id=user_id).delete()
+
+    # Release the student's seat in each section along with the enrollment
+    # row, so current_count doesn't stay inflated after they're gone.
+    for enr in IrregularEnrollment.query.filter_by(student_id=user_id).all():
+        section = SubjectSection.query.get(enr.section_id)
+        if section and section.current_count:
+            section.current_count = max(0, section.current_count - 1)
+        db.session.delete(enr)
 
 @app.route('/api/admin/users/<int:user_id>', methods=['DELETE'])
 @admin_required
@@ -3628,7 +4581,7 @@ def admin_delete_user(admin, user_id):
         return jsonify({"error": "Cannot delete own account"}), 400
     target = User.query.get_or_404(user_id)
 
-    _cascade_delete_student_data(user_id)
+    _cascade_delete_user_data(user_id)
     db.session.delete(target)
     db.session.commit()
 
@@ -3646,7 +4599,7 @@ def admin_bulk_delete_students(admin):
     count = len(students)
 
     for student in students:
-        _cascade_delete_student_data(student.id)
+        _cascade_delete_user_data(student.id)
         db.session.delete(student)
 
     db.session.commit()
@@ -3657,14 +4610,34 @@ def admin_bulk_delete_students(admin):
 @app.route('/api/admin/users/<int:user_id>/reset-password', methods=['POST'])
 @admin_required
 def admin_reset_password(admin, user_id):
+    """
+    Authorized recovery that does not depend on any inbox: the admin either types a
+    temporary password or asks for a generated one (returned ONCE in this response,
+    never logged). The student must replace it at next sign-in; old sessions end.
+    """
     target = User.query.get_or_404(user_id)
-    data = request.get_json()
-    if not data.get('new_password'):
+    data = request.get_json(silent=True) or {}
+    generated = False
+    new_pw = data.get('new_password')
+    if not new_pw and data.get('generate'):
+        new_pw, generated = _generate_secure_password(), True
+    if not new_pw:
         return jsonify({"error": "New password required"}), 400
-    target.password_hash = generate_password_hash(data['new_password'])
+    err = password_policy_error(new_pw, target)
+    if err:
+        return jsonify({"error": err}), 400
+    target.password_hash = generate_password_hash(new_pw)
+    target.must_change_password = True
+    target.token_version = int(target.token_version or 0) + 1
+    target.password_changed_at = datetime.utcnow()
+    target.login_attempts = 0
+    target.locked_until = None
     db.session.commit()
-    log_admin_action(admin.id, "PASSWORD_RESET", f"Reset password for {target.username}")
-    return jsonify({"message": "Password reset successfully"}), 200
+    log_admin_action(admin.id, "PASSWORD_RESET", f"Reset password for {target.username} (change required at next sign-in)")
+    body = {"message": "Password reset. The user must choose a new password at next sign-in."}
+    if generated:
+        body["temporary_password"] = new_pw
+    return jsonify(body), 200
 
 @app.route('/api/admin/users/<int:user_id>/unlock', methods=['POST'])
 @admin_required
@@ -3679,7 +4652,7 @@ def admin_unlock_user(admin, user_id):
 @app.route('/api/admin/users/<int:user_id>/email', methods=['PUT'])
 @admin_required
 def admin_update_email(admin, user_id):
-    return jsonify({"error": "Adamson email addresses are permanent and cannot be changed."}), 403
+    return jsonify({"error": "Institutional email addresses are permanent and cannot be changed."}), 403
 
 @app.route('/api/admin/config', methods=['GET'])
 @admin_required
@@ -3712,25 +4685,22 @@ def admin_get_config(admin):
         configs.setdefault(k, v)
     return jsonify(configs), 200
 
+# Only maintenance_mode is read by the running system. The other keys used to be
+# stored here but nothing ever consumed them, so saving them looked like it
+# changed behaviour when it did not. They are rejected now; the real, fixed
+# values are shown read-only by /api/admin/effective-settings.
+ADJUSTABLE_CONFIG_KEYS = {'maintenance_mode'}
+
+
 @app.route('/api/admin/config', methods=['PUT'])
 @admin_required
 def admin_update_config(admin):
-    data = request.get_json()
-    allowed = {
-        # General
-        'system_name', 'institution_name', 'timezone',
-        # Security
-        'maintenance_mode', 'min_password_length', 'session_timeout', 'jwt_expiration_hours',
-        # Execution
-        'execution_timeout', 'enabled_languages', 'memory_limit_mb',
-        # Gamification
-        'xp_multiplier', 'easy_xp_max', 'medium_xp_max', 'hard_xp_max',
-        # Plagiarism
-        'plagiarism_threshold', 'plagiarism_auto_flag',
-    }
-    invalid_keys = [k for k in data.keys() if k not in allowed]
-    if invalid_keys:
-        return jsonify({"error": f"Invalid config keys: {', '.join(invalid_keys)}"}), 400
+    data = request.get_json() or {}
+    not_adjustable = [k for k in data.keys() if k not in ADJUSTABLE_CONFIG_KEYS]
+    if not_adjustable:
+        return jsonify({
+            "error": f"These settings are fixed in the application and cannot be changed here: {', '.join(not_adjustable)}"
+        }), 400
     changes = []
     for k, v in data.items():
         existing = SystemConfig.query.filter_by(key=k).first()
@@ -3743,6 +4713,39 @@ def admin_update_config(admin):
     db.session.commit()
     log_admin_action(admin.id, "CONFIG_UPDATED", f"Changes: {', '.join(changes)}")
     return jsonify({"message": "Config updated", "changes": changes}), 200
+
+
+@app.route('/api/admin/effective-settings', methods=['GET'])
+@admin_required
+def admin_effective_settings(admin):
+    """Read-only view of the limits the running system really uses (nothing here is editable)."""
+    from routes.sandbox import LANGUAGE_TIMEOUTS, MEM_LIMITS, LIMITS
+    return jsonify({
+        "execution": {
+            "per_language": {
+                lang: {"timeout_seconds": LANGUAGE_TIMEOUTS[lang],
+                       "memory_mb": MEM_LIMITS[lang] // (1024 * 1024)}
+                for lang in LANGUAGE_TIMEOUTS
+            },
+            "cpu_cores": LIMITS['cpu_quota'] / LIMITS['cpu_period'],
+            "max_processes": LIMITS['pids_limit'],
+            "max_code_characters": LIMITS['code_max_chars'],
+            "max_output_bytes": LIMITS['output_bytes'],
+            "network": "disabled",
+        },
+        "xp": {
+            "max_xp_by_difficulty": MAX_XP_BY_DIFFICULTY,
+            "level_rule": "level = 1 + total XP // 100",
+            "failed_attempt_minimum": "10% of the problem's XP (at least 5)",
+            "hint_penalty": "set per hint by the instructor",
+        },
+        "authentication": {"access_token_minutes": 15, "refresh_token_days": 7},
+        "plagiarism": {
+            "threshold": "chosen per problem (default 0.85) and per scan (default 85%)",
+            "scan_trigger": "manual, started by an instructor or administrator",
+            "ai_verdict_configured": bool(os.environ.get('GEMINI_API_KEY')),
+        },
+    }), 200
 
 @app.route('/api/admin/audit-logs', methods=['GET'])
 @admin_required
@@ -4006,6 +5009,65 @@ def admin_bulk_upload_csv(admin):
     return jsonify({"error": "This endpoint is deprecated. Use /api/admin/enrollment/bulk-upload instead."}), 410
 
 
+def build_backup_sql(tables_to_export, who_label):
+    """SQL text (bytes) for the given tables. Used by the admin endpoint and by backup_full.py."""
+    import io
+    def _sql_literal(val):
+        import json as _json
+        if val is None:
+            return 'NULL'
+        if isinstance(val, bool):
+            return '1' if val else '0'
+        if isinstance(val, (int, float)):
+            return str(val)
+        if isinstance(val, datetime):
+            return "'" + val.strftime('%Y-%m-%d %H:%M:%S.%f') + "'"
+        if isinstance(val, (dict, list)):
+            val = _json.dumps(val, ensure_ascii=False)
+        elif isinstance(val, (bytes, bytearray)):
+            return "0x" + bytes(val).hex() if val else "''"
+        else:
+            val = str(val)
+        # MySQL string literal: backslashes first, then quotes, control characters
+        val = (val.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n")
+                  .replace("\r", "\\r").replace("\x00", "\\0"))
+        return "'" + val + "'"
+
+    # ── Build SQL dump ────────────────────────────────────────────────
+    buf = io.StringIO()
+    ts  = datetime.utcnow().isoformat()
+
+    buf.write(f"-- Forge.dev Database Backup\n")
+    buf.write(f"-- Generated : {ts} UTC\n")
+    buf.write(f"-- Tables    : {', '.join(t.name for t in tables_to_export)}\n")
+    buf.write(f"-- Requested by: {who_label}\n")
+    buf.write("-- Contains password hashes and personal data: store securely.\n")
+    buf.write("-- Uploaded lesson files are NOT inside this SQL file; back up the uploads folder separately.\n\n")
+    buf.write("SET FOREIGN_KEY_CHECKS=0;\n\n")
+
+    for table in tables_to_export:
+        try:
+            rows = db.session.execute(table.select()).fetchall()
+            if not rows:
+                buf.write(f"-- Table `{table.name}` is empty\n\n")
+                continue
+            columns = [c.name for c in table.columns]
+            buf.write(f"-- ── {table.name} ({len(rows)} rows) ──\n")
+            buf.write(f"TRUNCATE TABLE `{table.name}`;\n")
+            col_list = ', '.join(f'`{c}`' for c in columns)
+            for row in rows:
+                val_list = ', '.join(_sql_literal(row._mapping[c]) for c in columns)
+                buf.write(f"INSERT INTO `{table.name}` ({col_list}) VALUES ({val_list});\n")
+            buf.write("\n")
+        except Exception as e:
+            buf.write(f"-- ERROR exporting {table.name}: {e}\n\n")
+
+    buf.write("SET FOREIGN_KEY_CHECKS=1;\n")
+    buf.write(f"-- End of backup\n")
+
+    return buf.getvalue().encode('utf-8')
+
+
 @app.route('/api/admin/backup', methods=['POST'])
 @admin_required
 def admin_backup_database(admin):
@@ -4026,89 +5088,23 @@ def admin_backup_database(admin):
     data = request.get_json(silent=True) or {}
     tables_param = data.get('tables', 'all')
 
-    # ── Resolve which models / table names to export ──────────────────
-    ALL_MODELS = [
-        ('users',               User),
-        ('subject_sections',    SubjectSection),
-        ('subjects',            Subject),
-        ('problems',            Problem),
-        ('submissions',         Submission),
-        ('audit_logs',          AuditLog),
-        ('achievements',        Achievement),
-        ('teacher_assignments', TeacherAssignment),
-        ('announcements',       Announcement),
-        ('system_config',       SystemConfig),
-    ]
-
-    if tables_param == 'all':
-        models_to_export = ALL_MODELS
-    elif isinstance(tables_param, list):
-        key_set = set(tables_param)
-        models_to_export = [(tbl, mdl) for tbl, mdl in ALL_MODELS if tbl in key_set]
+    # ── Resolve which tables to export ────────────────────────────────
+    # Every table the application defines is included (the old list left out enrollments,
+    # lessons, files, achievements earned, drafts, submission slots ... so a restore lost them).
+    all_tables = list(db.metadata.sorted_tables)          # parents before children
+    if tables_param == 'all' or not isinstance(tables_param, list):
+        tables_to_export = all_tables
     else:
-        models_to_export = ALL_MODELS
+        wanted = set(tables_param)
+        tables_to_export = [t for t in all_tables if t.name in wanted]
 
-    # ── Build SQL dump ────────────────────────────────────────────────
-    buf = io.StringIO()
-    ts  = datetime.utcnow().isoformat()
-
-    buf.write(f"-- Forge.dev Database Backup\n")
-    buf.write(f"-- Generated : {ts} UTC\n")
-    buf.write(f"-- Tables    : {', '.join(t for t, _ in models_to_export)}\n")
-    buf.write(f"-- Admin     : {admin.username} (ID {admin.id})\n\n")
-    buf.write("SET FOREIGN_KEY_CHECKS=0;\n\n")
-
-    for table_name, model_cls in models_to_export:
-        try:
-            rows = db.session.query(model_cls).all()
-            if not rows:
-                buf.write(f"-- Table `{table_name}` is empty\n\n")
-                continue
-
-            # Introspect columns from the mapper
-            columns = [c.key for c in model_cls.__mapper__.columns]
-
-            buf.write(f"-- ── {table_name} ({len(rows)} rows) ──\n")
-            buf.write(f"TRUNCATE TABLE `{table_name}`;\n")
-
-            for row in rows:
-                values = []
-                for col in columns:
-                    val = getattr(row, col, None)
-                    if val is None:
-                        values.append('NULL')
-                    elif isinstance(val, bool):
-                        values.append('1' if val else '0')
-                    elif isinstance(val, (int, float)):
-                        values.append(str(val))
-                    elif isinstance(val, datetime):
-                        values.append(f"'{val.isoformat()}'")
-                    elif isinstance(val, (dict, list)):
-                        import json as _json
-                        safe = _json.dumps(val).replace("'", "\\'")
-                        values.append(f"'{safe}'")
-                    else:
-                        safe = str(val).replace("\\", "\\\\").replace("'", "\\'")
-                        values.append(f"'{safe}'")
-
-                col_list = ', '.join(f'`{c}`' for c in columns)
-                val_list = ', '.join(values)
-                buf.write(f"INSERT INTO `{table_name}` ({col_list}) VALUES ({val_list});\n")
-
-            buf.write("\n")
-        except Exception as e:
-            buf.write(f"-- ERROR exporting {table_name}: {e}\n\n")
-
-    buf.write("SET FOREIGN_KEY_CHECKS=1;\n")
-    buf.write(f"-- End of backup\n")
-
-    sql_bytes = buf.getvalue().encode('utf-8')
+    sql_bytes = build_backup_sql(tables_to_export, f"{admin.username} (ID {admin.id})")
 
     # ── Log the action ────────────────────────────────────────────────
     log_admin_action(
         admin.id,
         'DATABASE_BACKUP',
-        f"Backup generated: {len(models_to_export)} tables, {len(sql_bytes)//1024} KB",
+        f"Backup generated: {len(tables_to_export)} tables, {len(sql_bytes)//1024} KB",
     )
 
     filename = f"forge_backup_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.sql"
@@ -4165,6 +5161,12 @@ def admin_create_subject(admin):
                 return jsonify({"error": "Year level must be between 1 and 6"}), 400
         except (ValueError, TypeError):
             return jsonify({"error": "Year level must be a valid integer"}), 400
+    # Forge.dev covers first-year curriculum subjects only. This is the
+    # SUBJECT's curriculum year, not a classification of the students taking it.
+    if year_level is None:
+        year_level = FIRST_YEAR_CURRICULUM
+    elif year_level != FIRST_YEAR_CURRICULUM:
+        return jsonify({"error": "Only first-year curriculum subjects are supported."}), 400
 
     # ── subject_type ──────────────────────────────────────────────────
     allowed_types = {'lab', 'lecture_lab', 'elective'}
@@ -4366,8 +5368,11 @@ def admin_update_subject(admin, subject_id):
                     return jsonify({"error": "Year level must be between 1 and 6"}), 400
             except (ValueError, TypeError):
                 return jsonify({"error": "Year level must be a valid integer"}), 400
-        subject.year_level = year_level
-        changes.append(f"year_level → {year_level}")
+        # The curriculum year of an existing subject is never changed through
+        # this endpoint: legacy rows stay as they are until the official
+        # curriculum is confirmed. Sending the current value back is fine.
+        if year_level != subject.year_level:
+            return jsonify({"error": "The curriculum year of an existing subject cannot be changed here."}), 400
 
     # ── subject_type ──────────────────────────────────────────────────
     if 'subject_type' in data:
@@ -4491,6 +5496,8 @@ def admin_create_instructor_assignment(admin):
     subject = Subject.query.get(subject_id)
     if not subject:
         return jsonify({"error": "Invalid subject ID"}), 400
+    if subject_out_of_scope(subject):
+        return jsonify({"error": OUT_OF_SCOPE_MSG}), 400
 
     section = SubjectSection.query.get(section_id)
     if not section:
@@ -4589,6 +5596,9 @@ def admin_update_instructor_assignment(admin, assignment_id):
     subject = Subject.query.get(subject_id)
     if not subject:
         return jsonify({"error": "Invalid subject ID"}), 400
+    unchanged_target = (subject_id == assignment.subject_id and section_id == assignment.section_id)
+    if subject_out_of_scope(subject) and not unchanged_target:
+        return jsonify({"error": OUT_OF_SCOPE_MSG}), 400
 
     section = SubjectSection.query.get(section_id)
     if not section:
@@ -4690,7 +5700,8 @@ def admin_seed_subjects(admin):
     result = seed_it_subjects()
     log_admin_action(
         admin.id, 'SUBJECTS_SEEDED',
-        f"Seeded {result['seeded']} IT subjects, {result['skipped']} already existed."
+        f"Seeded {result['seeded']} IT subjects, {result['skipped']} already existed, "
+        f"{result['out_of_scope']} not seeded (not first-year curriculum)."
     )
     return jsonify({
         "message": f"Seeded {result['seeded']} subjects. {result['skipped']} already existed.",
@@ -4754,7 +5765,7 @@ def _clean_name_part(token: str) -> str:
 
 def _build_email_local(firstname: str, middlename: str, lastname: str) -> str:
     """
-    Build the local part of the Adamson email address.
+    Build the local part of the institutional email address.
     Rules (from spec):
       - Full first name (can be compound, e.g. "Paul Christian Caleb")
       - Full middle name (not just initial); skip if blank
@@ -4798,18 +5809,18 @@ def _generate_enrollment_email(
     existing_emails: set,
 ) -> str:
     """
-    Return a unique @adamson.edu.ph email.
+    Return a unique institutional email (ALLOWED_EMAIL_DOMAIN).
     Duplicate → append numeric part of student_id, e.g. paul.rejano.202400100
     """
     local = _build_email_local(firstname, middlename, lastname)
-    email = f"{local}@adamson.edu.ph"
+    email = f"{local}@{ALLOWED_EMAIL_DOMAIN}"
 
     if email not in existing_emails:
         return email
 
     # Collision — append digits from student_id
     id_digits = re.sub(r"[^0-9]", "", student_id_raw)
-    email = f"{local}.{id_digits}@adamson.edu.ph"
+    email = f"{local}.{id_digits}@{ALLOWED_EMAIL_DOMAIN}"
     return email  # caller adds to set
 
 
@@ -4841,13 +5852,15 @@ def admin_bulk_enrollment_upload(admin):
 
     CSV columns (header row required, order does NOT matter):
         student_id, firstname, middlename, lastname, suffix,
-        year_level, student_type, section_no
+        student_type, section_no
+    (middlename and suffix are optional. Extra columns, including a legacy
+    year_level column from older files, are accepted and ignored.)
 
     Regular row example (one section — their fixed cohort's class code):
-        2024-00001,Juan,Santos,Dela Cruz,,1,regular,29022
+        2024-00001,Juan,Santos,Dela Cruz,,regular,29022
 
     Irregular row example (one row per section — same student_id repeats):
-        2024-00100,Pedro,Jose,Reyes,,3,irregular,29144
+        2024-00100,Pedro,Jose,Reyes,,irregular,29144
 
     Returns JSON:
     {
@@ -4891,9 +5904,10 @@ def admin_bulk_enrollment_upload(admin):
     # (section_no) already knows its own subject internally, so specifying
     # it again here was always redundant. requiring 2 columns that do
     # nothing just confused anyone building the CSV.
+    # middlename/suffix are optional (read with .get() below), and so is any
+    # legacy year_level column: it is never required and its value is ignored.
     required_cols = {
-        "student_id", "firstname", "middlename", "lastname", "suffix",
-        "year_level", "student_type", "section_no",
+        "student_id", "firstname", "lastname", "student_type", "section_no",
     }
     missing_cols = required_cols - set(rows[0].keys())
     if missing_cols:
@@ -4910,10 +5924,15 @@ def admin_bulk_enrollment_upload(admin):
         str(s.section_no).strip(): s
         for s in SubjectSection.query.filter_by(is_active=True).all()
     }
+    # class codes that belong to out-of-scope subjects: found, but not enrollable
+    out_of_scope_nos = {
+        no for no, s in sections_by_no.items()
+        if subject_out_of_scope(Subject.query.get(s.subject_id))
+    }
 
     # existing emails in DB (for duplicate-email guard)
     existing_emails: set = {
-        row[0] for row in db.session.query(User.email).all()
+        (row[0] or '').strip().lower() for row in db.session.query(User.email).all()
     }
 
     # existing usernames (username = student_id without hyphens, e.g. "2024-00001")
@@ -4977,15 +5996,10 @@ def admin_bulk_enrollment_upload(admin):
         ln = row.get("lastname",   "").strip()
         mn = row.get("middlename", "").strip()
         sx = row.get("suffix",     "").strip()
-        yl = row.get("year_level", "").strip()
 
         if not fn or not ln:
             row_errors.append(f"Row {idx} (student_id={sid}): firstname/lastname missing — skipped")
             return None, None, False
-
-        year_level_int = None
-        if yl.isdigit() and 1 <= int(yl) <= 6:
-            year_level_int = int(yl)
 
         # --- username = student_id (matches existing CSV convention) ---
         if sid in existing_usernames:
@@ -4998,11 +6012,14 @@ def admin_bulk_enrollment_upload(admin):
             row_errors.append(f"Row {idx} (student_id={sid}): username conflict — skipped")
             return None, None, False
 
-        # --- email generation ------------------------------------------
-        email = _generate_enrollment_email(fn, mn, ln, sx, sid, existing_emails)
+        # --- generated sign-in identifier: <student_id>@STUDENT_EMAIL_DOMAIN ---
+        if not valid_student_id(sid):
+            row_errors.append(f"Row {idx} (student_id={sid}): student ID must not contain spaces or '@' — skipped")
+            return None, None, False
+        email = generated_student_email(sid)
         if email in existing_emails:
             row_errors.append(
-                f"Row {idx} (student_id={sid}): email '{email}' already taken — skipped"
+                f"Row {idx} (student_id={sid}): identifier '{email}' already belongs to another account — skipped"
             )
             return None, None, False
 
@@ -5015,6 +6032,7 @@ def admin_bulk_enrollment_upload(admin):
             username      = sid,
             email         = email,
             password_hash = generate_password_hash(plain_pwd),
+            must_change_password = True,
             role          = "student",
             full_name     = full_name,
             is_active     = True,
@@ -5054,6 +6072,12 @@ def admin_bulk_enrollment_upload(admin):
             row_errors.append(f"Row {idx} (student_id={sid}): section_no is empty — skipped")
             continue
 
+        if section_no in out_of_scope_nos:
+            skipped_count += 1
+            results.append({"row": idx, "student_id": sid, "status": "error",
+                             "reason": f"section '{section_no}' belongs to a subject outside the first-year scope"})
+            row_errors.append(f"Row {idx} (student_id={sid}): section '{section_no}' is outside the supported first-year subjects — skipped")
+            continue
         section = sections_by_no.get(section_no)
         if not section:
             skipped_count += 1
@@ -5118,6 +6142,12 @@ def admin_bulk_enrollment_upload(admin):
                 )
                 continue
 
+            if section_no in out_of_scope_nos:
+                skipped_count += 1
+                results.append({"row": idx, "student_id": sid, "status": "error",
+                                 "reason": f"section '{section_no}' belongs to a subject outside the first-year scope"})
+                row_errors.append(f"Row {idx} (student_id={sid}): section '{section_no}' is outside the supported first-year subjects — skipped")
+                continue
             section = sections_by_no.get(section_no)
             if not section:
                 skipped_count += 1
@@ -5235,7 +6265,8 @@ def admin_bulk_upload_users(admin):
         role_type : 'student' or 'instructor'
         file      : the CSV file
 
-    Student CSV columns  : student_id, firstname, lastname, year_level
+    Student CSV columns  : student_id, firstname, lastname
+    (a legacy year_level column is accepted and ignored)
     Instructor CSV columns: employee_id, firstname, lastname, department
 
     Returns a summary + base64-encoded credential CSV for download.
@@ -5273,7 +6304,7 @@ def admin_bulk_upload_users(admin):
     # Validate required columns
     headers = {k.strip().lower() for k in rows[0].keys()}
     required = (
-        {'student_id', 'firstname', 'lastname', 'year_level'}
+        {'student_id', 'firstname', 'lastname'}
         if role_type == 'student'
         else {'employee_id', 'firstname', 'lastname', 'department'}
     )
@@ -5312,9 +6343,6 @@ def admin_bulk_upload_users(admin):
                 sid = row.get('student_id', '')
                 if not sid or not sid.isdigit() or not (7 <= len(sid) <= 10):
                     row_errors.append('student_id must be 7–10 digits')
-                yl = row.get('year_level', '')
-                if not yl.isdigit() or int(yl) not in range(1, 7):
-                    row_errors.append('year_level must be 1–6')
             else:
                 eid = row.get('employee_id', '')
                 if not eid or len(eid) > 20:
@@ -5327,15 +6355,19 @@ def admin_bulk_upload_users(admin):
 
             # Build email and username
             if role_type == 'student':
-                email    = f"{row['student_id']}@adamson.edu.ph"
+                email    = generated_student_email(row['student_id'])
                 username = row['student_id']
             else:
-                fn_clean = ''.join(c for c in fn.lower() if c.isalpha())
-                ln_clean = ''.join(c for c in ln.lower() if c.isalpha())
-                email    = f"{ln_clean}.{fn_clean}@adamson.edu.ph"
+                # staff addresses are never invented: an explicit, valid email is required
+                email = normalize_email(row.get('email'))
+                if not email_domain_allowed(email) or email.endswith('@' + STUDENT_EMAIL_DOMAIN):
+                    msg = ['email column must hold a valid staff email address']
+                    errors.append({'row': row_num, 'errors': msg})
+                    results.append({'row': row_num, 'status': 'error', 'errors': msg})
+                    continue
                 username = row.get('employee_id', email.split('@')[0])
 
-            if User.query.filter_by(email=email).first():
+            if (HEAD_ADMIN_EMAIL and email.lower() == HEAD_ADMIN_EMAIL) or User.query.filter(db.func.lower(User.email) == email.lower()).first():
                 results.append({
                     'row': row_num, 'status': 'skipped',
                     'reason': 'email_exists', 'email': email
@@ -5347,6 +6379,7 @@ def admin_bulk_upload_users(admin):
                 username      = username,
                 email         = email,
                 password_hash = generate_password_hash(temp_pwd),
+                must_change_password = True,
                 role          = 'instructor' if role_type == 'instructor' else 'student',
                 is_active     = True,
                 xp            = 0,
@@ -5467,6 +6500,8 @@ def admin_create_section(admin):
     subject = Subject.query.get(data['subject_id'])
     if not subject:
         return jsonify({"error": "Subject not found"}), 404
+    if subject_out_of_scope(subject):
+        return jsonify({"error": OUT_OF_SCOPE_MSG}), 400
 
     # Check global uniqueness (matches DB constraint)
     existing = SubjectSection.query.filter_by(section_no=section_no).first()
@@ -5512,6 +6547,15 @@ def admin_update_section(admin, section_id):
     section = SubjectSection.query.get_or_404(section_id)
     data = request.get_json()
     changes = []
+
+    # checked before anything is modified, so a refusal leaves no partial change:
+    # a section may not be moved INTO, or reactivated under, an unapproved subject
+    if 'subject_id' in data and data['subject_id'] != section.subject_id:
+        if subject_out_of_scope(Subject.query.get(data['subject_id'])):
+            return jsonify({"error": OUT_OF_SCOPE_MSG}), 400
+    if data.get('is_active') and not section.is_active:
+        if subject_out_of_scope(Subject.query.get(data.get('subject_id', section.subject_id))):
+            return jsonify({"error": OUT_OF_SCOPE_MSG}), 400
 
     if 'section_no' in data:
         new_no = str(data['section_no']).strip()
@@ -5776,6 +6820,10 @@ def admin_bulk_upload_sections(admin):
             errors += 1
             results.append({"row": idx, "status": "error", "reason": f"subject_code '{subject_code}' not found"})
             continue
+        if subject_out_of_scope(subject):
+            errors += 1
+            results.append({"row": idx, "status": "error", "reason": f"subject '{subject_code}' is outside the supported first-year curriculum"})
+            continue
 
         block = None
 
@@ -5832,187 +6880,354 @@ def admin_bulk_upload_sections(admin):
 # ===== UTILITY & INIT =====
 @app.route('/api/health')
 def health():
-    return jsonify({"status": "running", "version": "1.0"}), 200
+    return jsonify({"status": "running", "version": "1.0", "execution_mode": EXECUTION_MODE,
+                    "schema_up_to_date": SCHEMA_STATE.get("up_to_date")}), 200
 
-with app.app_context():
-    # this has to run FIRST, before literally anything else in this block —
-    # everything below (seeding achievements, the teacher_assignments
-    # migrations, the problems table column check) queries or ALTERs tables
-    # that only exist after this line runs. used to be called down at the
-    # bottom of this same block instead, which only "worked" because
-    # whoever ran this locally already had the tables from a previous run.
-    # on a brand new empty database it broke immediately — the achievement
-    # seed-check below has no try/except, so it just crashed on startup.
-    db.create_all()
+def apply_schema_and_seed():
+    """
+    Create missing tables, add missing columns, seed default rows.
+    This WRITES to the database, so it never runs on import by default. It runs only when
+    you ask for it: `python manage_schema.py upgrade` (prints the target and asks to confirm),
+    or FORGE_AUTO_SCHEMA=1 (for throwaway test/demo databases and the test suite).
+    """
+    with app.app_context():
+        # this has to run FIRST, before literally anything else in this block —
+        # everything below (seeding achievements, the teacher_assignments
+        # migrations, the problems table column check) queries or ALTERs tables
+        # that only exist after this line runs. used to be called down at the
+        # bottom of this same block instead, which only "worked" because
+        # whoever ran this locally already had the tables from a previous run.
+        # on a brand new empty database it broke immediately — the achievement
+        # seed-check below has no try/except, so it just crashed on startup.
+        db.create_all()
 
-        # ===== SEED ACHIEVEMENTS =====
-    if not Achievement.query.first():
-        achievements_data = [
-            # --- STUDENT BADGES (12) ---
-            {"name": "First Steps", "desc": "Complete your first quest", "icon": "🎯", "xp": 10, "type": "quest_count", "val": 1, "cat": "student"},
-            {"name": "Quest Master", "desc": "Complete 10 quests", "icon": "⚔️", "xp": 50, "type": "quest_count", "val": 10, "cat": "student"},
-            {"name": "Week Warrior", "desc": "Maintain a 7-day streak", "icon": "🔥", "xp": 20, "type": "streak", "val": 7, "cat": "student"},
-            {"name": "Python Novice", "desc": "Solve 5 Python quests", "icon": "🐍", "xp": 15, "type": "python_count", "val": 5, "cat": "student"},
-            {"name": "Java Apprentice", "desc": "Solve 5 Java quests", "icon": "☕", "xp": 15, "type": "java_count", "val": 5, "cat": "student"},
-            {"name": "C# Wizard", "desc": "Solve 5 C# quests", "icon": "🔷", "xp": 15, "type": "csharp_count", "val": 5, "cat": "student"},
-            {"name": "Hard Coder", "desc": "Complete 5 Hard quests", "icon": "💀", "xp": 40, "type": "hard_count", "val": 5, "cat": "student"},
-            {"name": "Debug Master", "desc": "Complete 5 Debugging quests", "icon": "🐛", "xp": 30, "type": "debug_count", "val": 5, "cat": "student"},
-            {"name": "Marathon Coder", "desc": "Maintain a 30-day streak", "icon": "🏃", "xp": 100, "type": "streak", "val": 30, "cat": "student"},
-            {"name": "Perfect Score", "desc": "Get 100% on a Hard quest", "icon": "💯", "xp": 25, "type": "perfect_hard", "val": 1, "cat": "student"},
-            {"name": "Sandbox Wizard", "desc": "Run code in Sandbox 10 times", "icon": "🧪", "xp": 20, "type": "sandbox_runs", "val": 10, "cat": "student"},
-            {"name": "Leaderboard Champ", "desc": "Reach Top 10 on Leaderboard", "icon": "", "xp": 50, "type": "leaderboard", "val": 10, "cat": "student"},
+            # ===== SEED ACHIEVEMENTS =====
+        if not Achievement.query.first():
+            achievements_data = [
+                # --- STUDENT BADGES (12) ---
+                {"name": "First Steps", "desc": "Complete your first quest", "icon": "🎯", "xp": 10, "type": "quest_count", "val": 1, "cat": "student"},
+                {"name": "Quest Master", "desc": "Complete 10 quests", "icon": "⚔️", "xp": 50, "type": "quest_count", "val": 10, "cat": "student"},
+                {"name": "Week Warrior", "desc": "Maintain a 7-day streak", "icon": "🔥", "xp": 20, "type": "streak", "val": 7, "cat": "student"},
+                {"name": "Python Novice", "desc": "Solve 5 Python quests", "icon": "🐍", "xp": 15, "type": "python_count", "val": 5, "cat": "student"},
+                {"name": "Java Apprentice", "desc": "Solve 5 Java quests", "icon": "☕", "xp": 15, "type": "java_count", "val": 5, "cat": "student"},
+                {"name": "C# Wizard", "desc": "Solve 5 C# quests", "icon": "🔷", "xp": 15, "type": "csharp_count", "val": 5, "cat": "student"},
+                {"name": "Hard Coder", "desc": "Complete 5 Hard quests", "icon": "💀", "xp": 40, "type": "hard_count", "val": 5, "cat": "student"},
+                {"name": "Debug Master", "desc": "Complete 5 Debugging quests", "icon": "🐛", "xp": 30, "type": "debug_count", "val": 5, "cat": "student"},
+                {"name": "Marathon Coder", "desc": "Maintain a 30-day streak", "icon": "🏃", "xp": 100, "type": "streak", "val": 30, "cat": "student"},
+                {"name": "Perfect Score", "desc": "Get 100% on a Hard quest", "icon": "💯", "xp": 25, "type": "perfect_hard", "val": 1, "cat": "student"},
+                {"name": "Sandbox Wizard", "desc": "Run code in Sandbox 10 times", "icon": "🧪", "xp": 20, "type": "sandbox_runs", "val": 10, "cat": "student"},
+                {"name": "Leaderboard Champ", "desc": "Reach Top 10 on Leaderboard", "icon": "", "xp": 50, "type": "leaderboard", "val": 10, "cat": "student"},
 
-            # --- INSTRUCTOR BADGES (15) ---
-            {"name": "First Module", "desc": "Create your first module", "icon": "📖", "xp": 25, "type": "lesson_count", "val": 1, "cat": "instructor"},
-            {"name": "Activity Architect", "desc": "Create 10 activities", "icon": "🧩", "xp": 60, "type": "problem_count", "val": 10, "cat": "instructor"},
-            {"name": "Class Starter", "desc": "Have a student complete a quest", "icon": "🚀", "xp": 20, "type": "student_quest", "val": 1, "cat": "instructor"},
-            {"name": "Engagement Booster", "desc": "80%+ students attempt a quest", "icon": "📈", "xp": 40, "type": "engagement", "val": 80, "cat": "instructor"},
-            {"name": "Curriculum Builder", "desc": "Create lessons for 3 weeks", "icon": "🗂️", "xp": 50, "type": "lesson_weeks", "val": 3, "cat": "instructor"},
-            {"name": "Resource Curator", "desc": "Attach files to 10 lessons", "icon": "📎", "xp": 30, "type": "file_count", "val": 10, "cat": "instructor"},
-            {"name": "Multimedia Master", "desc": "Add videos to 5 lessons", "icon": "🎬", "xp": 25, "type": "video_count", "val": 5, "cat": "instructor"},
-            {"name": "Clear Explainer", "desc": "Lesson with 95% completion", "icon": "🗣️", "xp": 45, "type": "lesson_completion", "val": 95, "cat": "instructor"},
-            {"name": "Activity Solver", "desc": "Activity with <10% error rate", "icon": "🔍", "xp": 40, "type": "problem_quality", "val": 10, "cat": "instructor"},
-            {"name": "Innovation Award", "desc": "Create a quest with hints", "icon": "💡", "xp": 50, "type": "hints_used", "val": 1, "cat": "instructor"},
-            {"name": "Student Success", "desc": "70%+ students pass all quests", "icon": "🎓", "xp": 75, "type": "class_pass_rate", "val": 70, "cat": "instructor"},
-            {"name": "Daily Educator", "desc": "Login and act for 14 days", "icon": "📅", "xp": 30, "type": "instructor_streak", "val": 14, "cat": "instructor"},
-            {"name": "Semester Veteran", "desc": "Teach for 16 weeks", "icon": "🎓", "xp": 100, "type": "weeks_taught", "val": 16, "cat": "instructor"},
-            {"name": "Multi-Class Maestro", "desc": "Teach 3 different subjects", "icon": "🎭", "xp": 60, "type": "subjects_taught", "val": 3, "cat": "instructor"},
-            {"name": "Platform Pioneer", "desc": "Use new features within 1 week", "icon": "🚀", "xp": 20, "type": "early_adopter", "val": 1, "cat": "instructor"}
-        ]
+                # --- INSTRUCTOR BADGES (15) ---
+                {"name": "First Module", "desc": "Create your first module", "icon": "📖", "xp": 25, "type": "lesson_count", "val": 1, "cat": "instructor"},
+                {"name": "Activity Architect", "desc": "Create 10 activities", "icon": "🧩", "xp": 60, "type": "problem_count", "val": 10, "cat": "instructor"},
+                {"name": "Class Starter", "desc": "Have a student complete a quest", "icon": "🚀", "xp": 20, "type": "student_quest", "val": 1, "cat": "instructor"},
+                {"name": "Engagement Booster", "desc": "80%+ students attempt a quest", "icon": "📈", "xp": 40, "type": "engagement", "val": 80, "cat": "instructor"},
+                {"name": "Curriculum Builder", "desc": "Create lessons for 3 weeks", "icon": "🗂️", "xp": 50, "type": "lesson_weeks", "val": 3, "cat": "instructor"},
+                {"name": "Resource Curator", "desc": "Attach files to 10 lessons", "icon": "📎", "xp": 30, "type": "file_count", "val": 10, "cat": "instructor"},
+                {"name": "Multimedia Master", "desc": "Add videos to 5 lessons", "icon": "🎬", "xp": 25, "type": "video_count", "val": 5, "cat": "instructor"},
+                {"name": "Clear Explainer", "desc": "Lesson with 95% completion", "icon": "🗣️", "xp": 45, "type": "lesson_completion", "val": 95, "cat": "instructor"},
+                {"name": "Activity Solver", "desc": "Activity with <10% error rate", "icon": "🔍", "xp": 40, "type": "problem_quality", "val": 10, "cat": "instructor"},
+                {"name": "Innovation Award", "desc": "Create a quest with hints", "icon": "💡", "xp": 50, "type": "hints_used", "val": 1, "cat": "instructor"},
+                {"name": "Student Success", "desc": "70%+ students pass all quests", "icon": "🎓", "xp": 75, "type": "class_pass_rate", "val": 70, "cat": "instructor"},
+                {"name": "Daily Educator", "desc": "Login and act for 14 days", "icon": "📅", "xp": 30, "type": "instructor_streak", "val": 14, "cat": "instructor"},
+                {"name": "Semester Veteran", "desc": "Teach for 16 weeks", "icon": "🎓", "xp": 100, "type": "weeks_taught", "val": 16, "cat": "instructor"},
+                {"name": "Multi-Class Maestro", "desc": "Teach 3 different subjects", "icon": "🎭", "xp": 60, "type": "subjects_taught", "val": 3, "cat": "instructor"},
+                {"name": "Platform Pioneer", "desc": "Use new features within 1 week", "icon": "🚀", "xp": 20, "type": "early_adopter", "val": 1, "cat": "instructor"}
+            ]
 
-        for data in achievements_data:
-            db.session.add(Achievement(
-                name=data["name"],
-                description=data["desc"],
-                icon=data["icon"],
-                xp_reward=data["xp"],
-                requirement_type=data["type"],
-                requirement_value=data["val"],
-                category=data["cat"]
-            ))
-        db.session.commit()
-        print("✅ Seeded 27 Achievements")
-        # ── TeacherAssignment migration: block_id → section_id ──────────────
-    # Step 1: add section_id if missing
-    try:
-        with db.engine.connect() as conn:
-            conn.execute(text(
-                "ALTER TABLE teacher_assignments ADD COLUMN section_id INTEGER NULL "
-                "REFERENCES subject_sections(id) ON DELETE SET NULL"
-            ))
-            conn.commit()
-            print("✅ teacher_assignments.section_id column added")
-    except Exception:
-        pass  # Already exists
-
-    # Step 2: drop old unique constraint (handles both possible names)
-    for old_constraint in ('unique_teacher_assignment', 'uq_teacher_assignment_old'):
+            for data in achievements_data:
+                db.session.add(Achievement(
+                    name=data["name"],
+                    description=data["desc"],
+                    icon=data["icon"],
+                    xp_reward=data["xp"],
+                    requirement_type=data["type"],
+                    requirement_value=data["val"],
+                    category=data["cat"]
+                ))
+            db.session.commit()
+            print("✅ Seeded 27 Achievements")
+            # ── TeacherAssignment migration: block_id → section_id ──────────────
+        # Step 1: add section_id if missing
         try:
             with db.engine.connect() as conn:
                 conn.execute(text(
-                    f"ALTER TABLE teacher_assignments DROP INDEX {old_constraint}"
+                    "ALTER TABLE teacher_assignments ADD COLUMN section_id INTEGER NULL "
+                    "REFERENCES subject_sections(id) ON DELETE SET NULL"
                 ))
                 conn.commit()
+                print("✅ teacher_assignments.section_id column added")
         except Exception:
-            pass
+            pass  # Already exists
 
-    # Step 3: drop block_id column if it still exists
-    try:
-        with db.engine.connect() as conn:
-            # Check if column exists first (information_schema is safe to query)
-            result = conn.execute(text(
-                "SELECT COUNT(*) FROM information_schema.COLUMNS "
-                "WHERE TABLE_NAME='teacher_assignments' AND COLUMN_NAME='block_id' "
-                "AND TABLE_SCHEMA=DATABASE()"
-            ))
-            if result.scalar() > 0:
+        # Step 2: drop old unique constraint (handles both possible names)
+        for old_constraint in ('unique_teacher_assignment', 'uq_teacher_assignment_old'):
+            try:
+                with db.engine.connect() as conn:
+                    conn.execute(text(
+                        f"ALTER TABLE teacher_assignments DROP INDEX {old_constraint}"
+                    ))
+                    conn.commit()
+            except Exception:
+                pass
+
+        # Step 3: drop block_id column if it still exists
+        try:
+            with db.engine.connect() as conn:
+                # Check if column exists first (information_schema is safe to query)
+                result = conn.execute(text(
+                    "SELECT COUNT(*) FROM information_schema.COLUMNS "
+                    "WHERE TABLE_NAME='teacher_assignments' AND COLUMN_NAME='block_id' "
+                    "AND TABLE_SCHEMA=DATABASE()"
+                ))
+                if result.scalar() > 0:
+                    conn.execute(text(
+                        "ALTER TABLE teacher_assignments DROP COLUMN block_id"
+                    ))
+                    conn.commit()
+                    print("✅ teacher_assignments.block_id column removed")
+        except Exception as e:
+            print(f"⚠️  block_id removal skipped: {e}")
+
+        # Step 4: add new unique constraint if missing
+        try:
+            with db.engine.connect() as conn:
                 conn.execute(text(
-                    "ALTER TABLE teacher_assignments DROP COLUMN block_id"
+                    "ALTER TABLE teacher_assignments "
+                    "ADD CONSTRAINT uq_teacher_assignment "
+                    "UNIQUE (instructor_id, subject_id, section_id)"
                 ))
                 conn.commit()
-                print("✅ teacher_assignments.block_id column removed")
-    except Exception as e:
-        print(f"⚠️  block_id removal skipped: {e}")
+                print("✅ uq_teacher_assignment constraint added")
+        except Exception:
+            pass  # Already exists
 
-    # Step 4: add new unique constraint if missing
-    try:
-        with db.engine.connect() as conn:
-            conn.execute(text(
-                "ALTER TABLE teacher_assignments "
-                "ADD CONSTRAINT uq_teacher_assignment "
-                "UNIQUE (instructor_id, subject_id, section_id)"
-            ))
-            conn.commit()
-            print("✅ uq_teacher_assignment constraint added")
-    except Exception:
-        pass  # Already exists
-
-    # Step 5: drop stale visible_to_blocks column from problems if it still exists
-    try:
-        with db.engine.connect() as conn:
-            result = conn.execute(text(
-                "SELECT COUNT(*) FROM information_schema.COLUMNS "
-                "WHERE TABLE_NAME='problems' AND COLUMN_NAME='visible_to_blocks' "
-                "AND TABLE_SCHEMA=DATABASE()"
-            ))
-            if result.scalar() > 0:
-                conn.execute(text("ALTER TABLE problems DROP COLUMN `visible_to_blocks`"))
-                conn.commit()
-                print("✅ problems.visible_to_blocks stale column removed")
-    except Exception as e:
-        print(f"⚠️ visible_to_blocks removal skipped: {e}")
-
-    # db.create_all() used to be called right here — moved to the top of
-    # this same `with app.app_context():` block, see the comment up there.
-
-    # Auto-migration for users table
-    try:
-        inspector = inspect(db.engine)
-        user_columns = [col['name'] for col in inspector.get_columns('users')]
-        if 'full_name' not in user_columns:
+        # Step 5: drop stale visible_to_blocks column from problems if it still exists
+        try:
             with db.engine.connect() as conn:
-                conn.execute(text("ALTER TABLE users ADD COLUMN full_name VARCHAR(200) DEFAULT NULL"))
-                conn.commit()
-                print("✅ Added column 'full_name' to users table")
-    except Exception as e:
-        print(f"⚠️ Users migration check skipped: {e}")
-
-    # Auto-migration for Problem table
-    try:
-        inspector = inspect(db.engine)
-        problem_columns = [col['name'] for col in inspector.get_columns('problems')]
-
-        def add_col_if_missing(col_name, col_def):
-            if col_name not in problem_columns:
-                with db.engine.connect() as conn:
-                    conn.execute(text(f"ALTER TABLE problems ADD COLUMN {col_name} {col_def}"))
+                result = conn.execute(text(
+                    "SELECT COUNT(*) FROM information_schema.COLUMNS "
+                    "WHERE TABLE_NAME='problems' AND COLUMN_NAME='visible_to_blocks' "
+                    "AND TABLE_SCHEMA=DATABASE()"
+                ))
+                if result.scalar() > 0:
+                    conn.execute(text("ALTER TABLE problems DROP COLUMN `visible_to_blocks`"))
                     conn.commit()
-                    print(f"✅ Added column '{col_name}' to problems table")
+                    print("✅ problems.visible_to_blocks stale column removed")
+        except Exception as e:
+            print(f"⚠️ visible_to_blocks removal skipped: {e}")
 
-        add_col_if_missing('problem_type', "ENUM('coding', 'debugging') DEFAULT 'coding'")
-        add_col_if_missing('languages', "JSON DEFAULT ('[\"python\"]')")
-        add_col_if_missing('is_event_quest', "BOOLEAN DEFAULT 0")
-        add_col_if_missing('visible_to_sections', "JSON DEFAULT ('[]')")
-        add_col_if_missing('hints', "JSON DEFAULT ('[]')")
-        add_col_if_missing('tags', "JSON DEFAULT ('[]')")
-        add_col_if_missing('prerequisites', "JSON DEFAULT ('[]')")
-        add_col_if_missing('estimated_time', "VARCHAR(50)")
-        add_col_if_missing('partial_credit', "INTEGER DEFAULT 100")
-        add_col_if_missing('auto_grade', "BOOLEAN DEFAULT 1")
-        add_col_if_missing('plagiarism_threshold', "FLOAT DEFAULT 0.85")
-        add_col_if_missing('due_date', "DATETIME DEFAULT NULL")
-        add_col_if_missing('login_attempts', "INT DEFAULT 0")
-        add_col_if_missing('locked_until', "DATETIME DEFAULT NULL")
-    except Exception as e:
-        print(f"⚠️ Migration check skipped: {e}")
+        # db.create_all() used to be called right here — moved to the top of
+        # this same `with app.app_context():` block, see the comment up there.
 
-    # Seed default config
-    if not SystemConfig.query.first():
-        for k,v in {'execution_timeout':'5','enabled_languages':'python,java,csharp','xp_multiplier':'1.0','plagiarism_threshold':'0.85','maintenance_mode':'false'}.items():
-            db.session.add(SystemConfig(key=k, value=v))
-        db.session.commit()
+        # Auto-migration for users table
+        try:
+            inspector = inspect(db.engine)
+            user_columns = [col['name'] for col in inspector.get_columns('users')]
+            if 'full_name' not in user_columns:
+                with db.engine.connect() as conn:
+                    conn.execute(text("ALTER TABLE users ADD COLUMN full_name VARCHAR(200) DEFAULT NULL"))
+                    conn.commit()
+                    print("✅ Added column 'full_name' to users table")
+            # password-change support: additive, existing rows get the harmless defaults
+            # (nobody is flagged and no session is invalidated by the upgrade itself)
+            for col, ddl in (('must_change_password', "BOOLEAN NOT NULL DEFAULT 0"),
+                             ('token_version', "INT NOT NULL DEFAULT 0"),
+                             ('password_changed_at', "DATETIME NULL"),
+                             ('last_login_at', "DATETIME NULL")):
+                if col not in user_columns:
+                    with db.engine.connect() as conn:
+                        conn.execute(text(f"ALTER TABLE users ADD COLUMN {col} {ddl}"))
+                        conn.commit()
+                        print(f"✅ Added column '{col}' to users table")
+        except Exception as e:
+            print(f"⚠️ Users migration check skipped: {e}")
 
-    print("✅ DB Initialized | 🔐 JWT | 🎮 Gamification | 📚 Sections | 🛡️ Admin System")
+        # recorded per-test results on submissions (additive; older rows stay NULL)
+        try:
+            _sub_cols = [col['name'] for col in inspect(db.engine).get_columns('submissions')]
+            if 'result_details' not in _sub_cols:
+                with db.engine.connect() as conn:
+                    conn.execute(text("ALTER TABLE submissions ADD COLUMN result_details JSON NULL"))
+                    conn.commit()
+                    print("✅ Added column 'result_details' to submissions table")
+        except Exception as e:
+            print(f"⚠️ Submissions migration check skipped: {e}")
+
+        # ownership token on a graded-attempt reservation (additive; older rows
+        # stay NULL -- they were never owned by a token-based claim anyway)
+        try:
+            _slot_cols = [col['name'] for col in inspect(db.engine).get_columns('submission_slots')]
+            if 'owner_token' not in _slot_cols:
+                with db.engine.connect() as conn:
+                    conn.execute(text("ALTER TABLE submission_slots ADD COLUMN owner_token VARCHAR(36) NULL"))
+                    conn.commit()
+                    print("✅ Added column 'owner_token' to submission_slots table")
+        except Exception as e:
+            print(f"⚠️ Submission_slots migration check skipped: {e}")
+
+        # Auto-migration for Problem table
+        try:
+            inspector = inspect(db.engine)
+            problem_columns = [col['name'] for col in inspector.get_columns('problems')]
+
+            def add_col_if_missing(col_name, col_def):
+                if col_name not in problem_columns:
+                    with db.engine.connect() as conn:
+                        conn.execute(text(f"ALTER TABLE problems ADD COLUMN {col_name} {col_def}"))
+                        conn.commit()
+                        print(f"✅ Added column '{col_name}' to problems table")
+
+            add_col_if_missing('problem_type', "ENUM('coding', 'debugging') DEFAULT 'coding'")
+            add_col_if_missing('languages', "JSON DEFAULT ('[\"python\"]')")
+            add_col_if_missing('is_event_quest', "BOOLEAN DEFAULT 0")
+            add_col_if_missing('visible_to_sections', "JSON DEFAULT ('[]')")
+            add_col_if_missing('hints', "JSON DEFAULT ('[]')")
+            add_col_if_missing('tags', "JSON DEFAULT ('[]')")
+            add_col_if_missing('prerequisites', "JSON DEFAULT ('[]')")
+            add_col_if_missing('estimated_time', "VARCHAR(50)")
+            add_col_if_missing('partial_credit', "INTEGER DEFAULT 100")
+            add_col_if_missing('auto_grade', "BOOLEAN DEFAULT 1")
+            add_col_if_missing('plagiarism_threshold', "FLOAT DEFAULT 0.85")
+            add_col_if_missing('due_date', "DATETIME DEFAULT NULL")
+            add_col_if_missing('login_attempts', "INT DEFAULT 0")
+            add_col_if_missing('locked_until', "DATETIME DEFAULT NULL")
+        except Exception as e:
+            print(f"⚠️ Migration check skipped: {e}")
+
+        # Seed default config
+        if not SystemConfig.query.first():
+            for k,v in {'execution_timeout':'5','enabled_languages':'python,java,csharp','xp_multiplier':'1.0','plagiarism_threshold':'0.85','maintenance_mode':'false'}.items():
+                db.session.add(SystemConfig(key=k, value=v))
+            db.session.commit()
+
+        ensure_award_pair_unique()
+
+        print("✅ DB Initialized | 🔐 JWT | 🎮 Gamification | 📚 Sections | 🛡️ Admin System")
+
+
+AWARD_PAIR = ('user_id', 'achievement_id')
+
+
+def award_pair_unique_present(insp):
+    """True only when the table really enforces uniqueness of exactly (user_id, achievement_id): a unique
+    constraint, unique index or primary key over exactly those two columns, whatever it is called, and with no
+    column prefix / filter condition. Two separate unique columns, a 3-column unique index, or a plain
+    index do NOT count."""
+    want = set(AWARD_PAIR)
+    try:
+        if set((insp.get_pk_constraint('user_achievements') or {}).get('constrained_columns') or []) == want:
+            return True
+        for uc in insp.get_unique_constraints('user_achievements'):
+            if set(uc.get('column_names') or []) == want and len(uc['column_names']) == 2:
+                return True
+        for ix in insp.get_indexes('user_achievements'):
+            cols = ix.get('column_names') or []
+            opts = ix.get('dialect_options') or {}
+            if (ix.get('unique') and len(cols) == 2 and set(cols) == want
+                    and not opts.get('sqlite_where') and not opts.get('postgresql_where')
+                    and not opts.get('mysql_length')):
+                return True
+    except Exception:
+        return False
+    return False
+
+
+def award_pair_duplicate_summary():
+    """READ-ONLY, aggregate counts only (no user ids): duplicate (user, achievement) pairs in user_achievements."""
+    with app.app_context():
+        r = db.session.execute(text(
+            "SELECT COUNT(*), COALESCE(SUM(c - 1), 0) FROM ("
+            "SELECT COUNT(*) AS c FROM user_achievements GROUP BY user_id, achievement_id HAVING COUNT(*) > 1) d")).fetchone()
+        db.session.rollback()
+        return {"duplicate_pairs": int(r[0] or 0), "excess_rows": int(r[1] or 0)}
+
+
+def ensure_award_pair_unique():
+    """Part of the EXPLICIT upgrade only. Adds UNIQUE(user_id, achievement_id) when it is safe: never deletes,
+    merges or rewrites a row. If duplicate pairs exist it changes nothing and returns 'blocked_duplicates'
+    (the reviewed preservation design in docs/ACHIEVEMENT_PRESERVATION_DESIGN.md is required first).
+    DDL commits by itself on MySQL; it is a single statement, so it either exists afterwards or not at all."""
+    with app.app_context():
+        if award_pair_unique_present(inspect(db.engine)):
+            return 'present'
+        dup = award_pair_duplicate_summary()
+        if dup["duplicate_pairs"]:
+            print(f"⛔ user_achievements has {dup['duplicate_pairs']} duplicate (user, achievement) pair(s) "
+                  f"({dup['excess_rows']} extra rows). The uniqueness constraint was NOT added and no row was touched. "
+                  "See docs/ACHIEVEMENT_PRESERVATION_DESIGN.md.")
+            return 'blocked_duplicates'
+        with db.engine.connect() as conn:
+            if db.engine.dialect.name == 'sqlite':
+                conn.execute(text("CREATE UNIQUE INDEX uq_user_achievement ON user_achievements (user_id, achievement_id)"))
+            else:
+                conn.execute(text("ALTER TABLE user_achievements ADD CONSTRAINT uq_user_achievement "
+                                  "UNIQUE (user_id, achievement_id)"))
+            conn.commit()
+        print("✅ user_achievements: UNIQUE(user_id, achievement_id) added")
+        return 'added'
+
+
+def schema_status():
+    """READ-ONLY: what the database is missing compared with the models. Never writes."""
+    from sqlalchemy import inspect as _inspect
+    missing_tables, missing_columns, missing_constraints = [], {}, {}
+    with app.app_context():
+        insp = _inspect(db.engine)
+        existing = set(insp.get_table_names())
+        for name, table in db.metadata.tables.items():
+            if name not in existing:
+                missing_tables.append(name)
+                continue
+            have = {c['name'] for c in insp.get_columns(name)}
+            lacking = [c.name for c in table.columns if c.name not in have]
+            if lacking:
+                missing_columns[name] = lacking
+        if 'user_achievements' in existing and not award_pair_unique_present(insp):
+            missing_constraints['user_achievements'] = ['UNIQUE(user_id, achievement_id)']
+    return {"up_to_date": not missing_tables and not missing_columns and not missing_constraints,
+            "missing_tables": missing_tables, "missing_columns": missing_columns,
+            "missing_constraints": missing_constraints}
+
+
+def describe_database_target():
+    """host/database of the configured database, without credentials."""
+    from sqlalchemy.engine import make_url
+    u = make_url(app.config['SQLALCHEMY_DATABASE_URI'])
+    return f"{u.drivername}://{u.host or ''}{':' + str(u.port) if u.port else ''}/{u.database or ''}"
+
+
+SCHEMA_AUTO = os.environ.get('FORGE_AUTO_SCHEMA', '').strip().lower() in ('1', 'true', 'yes')
+SCHEMA_STATE = {"checked": False, "up_to_date": None, "detail": None}
+
+if SCHEMA_AUTO:
+    # explicit opt-in (test/demo databases): the old behaviour
+    apply_schema_and_seed()
+    SCHEMA_STATE.update(checked=True, up_to_date=True)
+else:
+    try:
+        _st = schema_status()
+        SCHEMA_STATE.update(checked=True, up_to_date=_st["up_to_date"], detail=_st)
+        if _st["up_to_date"]:
+            print("DB schema is up to date (read-only check; nothing was changed).")
+        else:
+            print("DATABASE SCHEMA IS OUT OF DATE. The app did NOT change it. Missing: "
+                  f"tables={_st['missing_tables']} columns={_st['missing_columns']} constraints={_st['missing_constraints']}. "
+                  "Back up, then run: python manage_schema.py upgrade")
+    except Exception as _e:
+        SCHEMA_STATE.update(checked=False, up_to_date=None, detail={"error": type(_e).__name__})
+        print(f"Could not check the database schema (read-only): {type(_e).__name__}")
+
+
+@app.before_request
+def _block_while_schema_outdated():
+    # a stale schema would make queries fail halfway; answer clearly instead
+    if SCHEMA_STATE.get("up_to_date") is False and request.path.startswith('/api/') and request.path != '/api/health':
+        return jsonify({"error": "schema_upgrade_required",
+                        "message": "The database needs an administrator-run upgrade before the app can be used."}), 503
+    return None
+
 
 if __name__ == '__main__':
     print("🚀 Forge.dev Backend | 📊 System-Ready | 🧪 Sandbox Active")
@@ -6020,5 +7235,5 @@ if __name__ == '__main__':
     # 'false' explicitly (the Werkzeug debugger lets anyone who can reach it run
     # arbitrary code, so it must never be on for something exposed publicly) and
     # runs behind gunicorn instead of this dev server anyway — see docker-compose.
-    debug_mode = os.environ.get('FLASK_DEBUG', 'true').lower() == 'true'
+    debug_mode = os.environ.get('FLASK_DEBUG', 'true').lower() == 'true' and not IS_PRODUCTION
     app.run(debug=debug_mode, host='0.0.0.0', port=5000)
