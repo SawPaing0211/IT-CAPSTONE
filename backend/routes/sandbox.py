@@ -5,6 +5,9 @@ from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 import docker
 import tempfile
+import shutil
+import functools
+import contextlib
 import os
 import re
 import time
@@ -56,11 +59,13 @@ CAP_DROP = {
     'csharp': ['ALL'],
 }
 
-SECURITY_OPTS = {
-    'python': ['no-new-privileges:true', 'seccomp=unconfined'],
-    'java':   ['no-new-privileges:true', 'seccomp=unconfined'],
-    'csharp': ['no-new-privileges:true', 'seccomp=unconfined'],
-}
+# Docker's default seccomp profile is used. If a runtime (.NET/JVM on an old
+# kernel or Docker build) fails with permission/syscall errors, set
+# SANDBOX_SECCOMP_UNCONFINED=true in backend/.env as a temporary escape hatch.
+_SECCOMP_UNCONFINED = os.environ.get('SANDBOX_SECCOMP_UNCONFINED', 'false').strip().lower() == 'true'
+_BASE_SECURITY_OPTS = ['no-new-privileges:true'] + (['seccomp=unconfined'] if _SECCOMP_UNCONFINED else [])
+
+SECURITY_OPTS = {lang: list(_BASE_SECURITY_OPTS) for lang in ('python', 'java', 'csharp')}
 
 # ─── Compiler line-number offsets ─────────────────────────────────────────
 # How many lines does each language's wrapper inject BEFORE the student code?
@@ -268,31 +273,67 @@ public class Program {
 #  Source-file writer  (unchanged from original)
 # =============================================================================
 
+def _rename_entry_class(code: str, new_name: str, main_pattern: str) -> str:
+    """
+    Rename whichever top-level class is the program's entry point to `new_name`,
+    regardless of what the student called it or whether they marked it `public`.
+
+    The sandbox wrapper (Main.java / Program.cs) calls a hardcoded class name
+    (`Solution`). The old implementation only renamed a class if its name was
+    an exact match against a short hardcoded list AND it was declared with the
+    literal text "public class <name>". That missed two real cases: a class
+    declared without `public` (valid, idiomatic Java/C#), and a class whose
+    name simply wasn't on the list. Either one left the student's class
+    unrenamed, causing it to collide with (or go unreferenced by) the
+    wrapper's own `Solution` call -- a compile failure scored as a wrong
+    answer rather than recognized as a grading-infrastructure issue.
+    """
+    class_re = re.compile(r'(?:public\s+)?class\s+(\w+)')
+    matches = list(class_re.finditer(code))
+    if not matches:
+        return code  # nothing we recognize as a class declaration; leave as-is
+
+    target = matches[0]
+    if len(matches) > 1:
+        # multiple top-level classes: rename whichever one actually contains
+        # the entry point, not just the first one in the file
+        for i, m in enumerate(matches):
+            start = m.end()
+            end = matches[i + 1].start() if i + 1 < len(matches) else len(code)
+            if re.search(main_pattern, code[start:end]):
+                target = m
+                break
+
+    old_name = target.group(1)
+    if old_name == new_name:
+        return code
+
+    before = code[:target.start()]
+    decl = target.group(0).replace(old_name, new_name, 1)
+    after = code[target.end():]
+    code = before + decl + after
+    # also rename other uses of the old class name as a standalone identifier
+    # (e.g. constructors, static self-references) so the file stays consistent
+    code = re.sub(r'\b' + re.escape(old_name) + r'\b', new_name, code)
+    return code
+
+
 def _write_source(tmpdir: str, code: str, language: str) -> str:
     if language == 'java':
         filename = 'Solution.java'
-        for common in ('Main', 'Program', 'HelloWorld', 'App', 'MyClass'):
-            if f'public class {common}' in code:
-                code = code.replace(f'public class {common}', 'public class Solution', 1)
-                break
+        code = _rename_entry_class(code, 'Solution', main_pattern=r'\bvoid\s+main\s*\(')
     elif language == 'csharp':
         filename = 'Solution.cs'
-        for common in ('Program', 'Main', 'HelloWorld', 'App', 'MyClass',
-                        'Solution', 'MyProgram', 'Code', 'Submission'):
-            if f'public class {common}' in code:
-                code = code.replace(f'public class {common}', 'public class Solution', 1)
-                break
-        for sig in (
-            'public static void Main(string[] args)',
-            'public static void Main()',
-            'static void Main(string[] args)',
-            'static void Main()',
-            'private static void Main(string[] args)',
-            'private static void Main()',
-        ):
-            if sig in code:
-                code = code.replace(sig, 'public static void Run()', 1)
-                break
+        code = _rename_entry_class(code, 'Solution', main_pattern=r'\bvoid\s+Main\s*\(')
+        # Normalize whatever Main method the student wrote (public/private,
+        # with/without args) into the Run() the wrapper calls.
+        code = re.sub(
+            r'(?:public\s+|private\s+|protected\s+|internal\s+|static\s+|async\s+)*'
+            r'(?:void|int|Task(?:<int>)?)\s+Main\s*\([^)]*\)',
+            'public static void Run()',
+            code,
+            count=1,
+        )
     else:
         filename = 'solution.py'
 
@@ -302,11 +343,126 @@ def _write_source(tmpdir: str, code: str, language: str) -> str:
     return filepath
 
 
+# ─── Sandbox working directory ─────────────────────────────────────────────
+# The backend talks to the HOST's Docker daemon (via /var/run/docker.sock),
+# so a bind-mount source path is resolved on the host, not inside the backend
+# container. A plain tempfile dir therefore shows up empty in the sandbox.
+# Fix: SANDBOX_TMP_DIR points at a directory that is bind-mounted at the SAME
+# absolute path on the host and in the backend container (see docker-compose.yml).
+# When it is unset (local dev, backend running directly on the host) we fall
+# back to the system temp dir, which is fine in that setup.
+SANDBOX_TMP_DIR     = os.environ.get('SANDBOX_TMP_DIR', '').strip()
+_WORKDIR_PREFIX     = 'forge-sbx-'
+_STALE_AFTER_SECS   = 3600   # leftovers from a crashed worker older than this get swept
+_sweep_lock         = threading.Lock()
+_swept              = False
+
+
+class SandboxSetupError(RuntimeError):
+    """The sandbox work dir could not be prepared (misconfigured or unwritable)."""
+
+
+def _sweep_stale_workdirs(base: str) -> None:
+    """Remove forge-sbx-* dirs left behind by a crashed/killed worker (once per process)."""
+    global _swept
+    with _sweep_lock:
+        if _swept:
+            return
+        _swept = True
+    cutoff = time.time() - _STALE_AFTER_SECS
+    try:
+        for name in os.listdir(base):
+            if not name.startswith(_WORKDIR_PREFIX):
+                continue
+            path = os.path.join(base, name)
+            try:
+                if os.path.isdir(path) and not os.path.islink(path) and os.path.getmtime(path) < cutoff:
+                    shutil.rmtree(path, ignore_errors=True)
+                    logger.info('Swept stale sandbox dir %s', path)
+            except OSError:
+                continue
+    except OSError as e:
+        logger.warning('Could not sweep sandbox tmp dir %s: %s', base, e)
+
+
+def _prepare_workdir_base() -> str:
+    """Return the directory sandbox work dirs are created in, creating it if needed."""
+    if not SANDBOX_TMP_DIR:
+        if os.path.exists('/.dockerenv'):
+            logger.warning(
+                'SANDBOX_TMP_DIR is not set but the backend is running in a container: '
+                'sandbox containers will see an empty /tmp/sandbox. Mount a shared '
+                'directory at the same path on host and container and set SANDBOX_TMP_DIR.'
+            )
+        return tempfile.gettempdir()
+
+    base = os.path.abspath(SANDBOX_TMP_DIR)
+    try:
+        os.makedirs(base, exist_ok=True)
+    except OSError as e:
+        raise SandboxSetupError(f'Cannot create SANDBOX_TMP_DIR {base}: {e}') from e
+    if not os.access(base, os.W_OK | os.X_OK):
+        raise SandboxSetupError(f'SANDBOX_TMP_DIR {base} is not writable by the backend')
+    _sweep_stale_workdirs(base)
+    return base
+
+
+@contextlib.contextmanager
+def sandbox_workdir():
+    """
+    Yield a fresh, world-readable directory for one sandbox run and always
+    remove it afterwards. mkdtemp() creates it 0700, but the sandbox images run
+    as an unprivileged user, so it is opened up to 0755 (the mount is read-only
+    inside the container, so this does not let the code modify it).
+    """
+    base = _prepare_workdir_base()
+    try:
+        path = tempfile.mkdtemp(prefix=_WORKDIR_PREFIX, dir=base)
+        os.chmod(path, 0o755)
+    except OSError as e:
+        raise SandboxSetupError(f'Cannot create sandbox dir in {base}: {e}') from e
+    try:
+        yield path
+    finally:
+        shutil.rmtree(path, ignore_errors=True)
+        if os.path.exists(path):
+            logger.warning('Sandbox dir %s could not be fully removed', path)
+
+
+def make_workdir_readable(path: str) -> None:
+    """Make every file in the work dir readable by the sandbox's non-root user."""
+    for name in os.listdir(path):
+        os.chmod(os.path.join(path, name), 0o644)
+
+
+def handles_setup_errors(fn):
+    """
+    Turn a SandboxSetupError into the normal error-result dict, so callers
+    (grading, /api/sandbox/run) never see an exception for an infra problem.
+    """
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        started = time.time()
+        try:
+            return fn(*args, **kwargs)
+        except SandboxSetupError as e:
+            logger.error('Sandbox setup failed: %s', e)
+            return {
+                'stdout': '', 'stderr': '',
+                'error': '💥 Code runner is temporarily unavailable. Please tell your instructor.',
+                'returncode': -1,
+                'elapsed': int((time.time() - started) * 1000),
+                'timed_out': False,
+            }
+    return wrapper
+
+
 # =============================================================================
 #  Core execution function  (unchanged from original except compile-error check
 #  is now handled at the call sites in app.py and run_sandbox below)
 # =============================================================================
 
+@handles_setup_errors
 def _run_in_docker(code: str, language: str) -> dict:
     """
     Spin up a fresh container, inject the code, collect output, destroy it.
@@ -319,7 +475,7 @@ def _run_in_docker(code: str, language: str) -> dict:
     image   = DOCKER_IMAGES[language]
     started = time.time()
 
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with sandbox_workdir() as tmpdir:
         src_path = _write_source(tmpdir, code, language)
         filename = os.path.basename(src_path)
 
@@ -330,6 +486,7 @@ def _run_in_docker(code: str, language: str) -> dict:
             with open(os.path.join(tmpdir, 'Program.cs'), 'w', encoding='utf-8') as f:
                 f.write(_generate_csharp_wrapper())
 
+        make_workdir_readable(tmpdir)
         container_src = f'/tmp/sandbox/{filename}'
 
         try:
