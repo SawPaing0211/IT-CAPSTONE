@@ -913,45 +913,57 @@ export default function StudentDashboard({ user, onLogout }) {
       </div>
 
       {/* ── Header ── */}
-      <header className="relative z-20 bg-slate-900/90 backdrop-blur border-b border-purple-600/40 px-4 sm:px-6 py-3 sm:py-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 sticky top-0">
+      <header className="relative z-20 bg-gradient-to-b from-[#0e1733]/95 to-[#0a1024]/95 backdrop-blur border-b border-amber-300/20 px-4 sm:px-6 py-3 sm:py-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-5 sticky top-0">
         {/* Logo — below 1024px only; from 1024px the sidebar carries the brand */}
         <div className="flex items-center gap-2.5 lg:hidden">
           <img src={crystalLogo} alt="" className="h-11 w-auto shrink-0 select-none" draggable="false" />
           <span className="font-cinzel font-bold text-lg tracking-wide text-white">FORGE.DEV</span>
         </div>
 
-        {/* Hero stats */}
-        {heroStats && (
-          <div className="flex items-center gap-3 sm:gap-4 bg-gradient-to-r from-slate-800/90 to-purple-900/40 px-4 sm:px-5 py-2.5 sm:py-3 rounded-xl border border-purple-600/50 shadow-lg">
-            <div className="text-center">
-              <p className="text-[9px] sm:text-[10px] uppercase tracking-wider text-slate-400 font-medium">Level</p>
-              <p className="font-black text-purple-300 text-lg sm:text-xl drop-shadow">{heroStats.level}</p>
-            </div>
-            <div className="w-px h-10 sm:h-12 bg-gradient-to-b from-transparent via-purple-600/60 to-transparent" />
-            <div className="text-center">
-              <p className="text-[9px] sm:text-[10px] uppercase tracking-wider text-slate-400 font-medium">XP</p>
-              <p className="font-black text-yellow-300 text-lg sm:text-xl drop-shadow">{heroStats.total_xp}</p>
-            </div>
-            <div className="w-px h-10 sm:h-12 bg-gradient-to-b from-transparent via-purple-600/60 to-transparent" />
-            <div className="text-center">
-              <p className="text-[9px] sm:text-[10px] uppercase tracking-wider text-slate-400 font-medium">Streak</p>
-              <p className="font-black text-orange-300 text-lg sm:text-xl flex items-center gap-1 drop-shadow">🔥 {heroStats.streak}</p>
-            </div>
-            <div className="hidden md:block w-32">
-              <div className="w-full bg-slate-700 h-2 rounded-full overflow-hidden">
-                <div className="h-full bg-gradient-to-r from-purple-600 to-pink-600 transition-all duration-500" style={{ width: `${heroStats.total_xp % 100}%` }} />
+        {/* Hero stats: level medallion, XP bar, streak pill */}
+        {heroStats && (() => {
+          const xpInLevel = (heroStats.total_xp || 0) % 100
+          return (
+            <div className="flex items-center gap-3 sm:gap-4 w-full sm:flex-1 sm:min-w-0 lg:justify-center">
+              <div
+                className="relative shrink-0 w-12 h-12 sm:w-[52px] sm:h-[52px] rounded-full p-[3px] bg-gradient-to-br from-amber-200 via-amber-400 to-amber-600 shadow-lg shadow-amber-500/20"
+                role="img"
+                aria-label={`Level ${heroStats.level}`}
+              >
+                <div className="w-full h-full rounded-full bg-[#0b1224] border border-violet-500/40 flex flex-col items-center justify-center leading-none">
+                  <span className="text-[7px] font-bold tracking-widest text-amber-200">LV</span>
+                  <span className="text-lg sm:text-xl font-black text-white">{heroStats.level}</span>
+                </div>
               </div>
-              <p className="text-[9px] text-slate-400 text-center mt-1">{100 - (heroStats.total_xp % 100)} XP to next</p>
+              <div className="flex-1 min-w-[120px] max-w-[300px]">
+                <p className="text-[10px] font-bold tracking-[0.18em] uppercase text-amber-200 mb-1">{heroStats.total_xp} XP</p>
+                <div
+                  className="relative h-2.5 rounded-full bg-[#070b18] border border-slate-700/70 overflow-hidden"
+                  role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={xpInLevel} aria-label="Progress to next level"
+                >
+                  <div className="h-full rounded-full bg-gradient-to-r from-amber-300 to-amber-500 transition-all duration-500" style={{ width: `${Math.max(xpInLevel, 3)}%` }} />
+                  <div className="absolute inset-0 pointer-events-none" style={{ backgroundImage: 'linear-gradient(to right, transparent calc(10% - 1px), rgba(0,0,0,0.55) calc(10% - 1px), rgba(0,0,0,0.55) 10%)', backgroundSize: '10% 100%' }} />
+                </div>
+                <div className="flex justify-between mt-1 text-[10px] text-slate-400">
+                  <span>{xpInLevel} / 100 XP</span>
+                  <span className="text-slate-500">{100 - xpInLevel} to next level</span>
+                </div>
+              </div>
+              <div className="shrink-0 flex items-center gap-2 h-[38px] px-3.5 rounded-full bg-[#0b1326] border border-slate-700/70" aria-label={`Streak: ${heroStats.streak}`}>
+                <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 2c1 4-3 5.5-3 9.5a3 3 0 0 0 6 0c0-1-.4-1.800-1-2.500 3 1.500 5 4 5 7A7 7 0 0 1 5 16c0-3 1.500-5 3-6.500C9 8 11 5.500 12 2z" fill="#fb923c" /></svg>
+                <span className="text-base font-bold text-slate-100 leading-none">{heroStats.streak}</span>
+                <span className="text-[8px] font-bold tracking-[0.2em] text-slate-500 uppercase">Streak</span>
+              </div>
             </div>
-          </div>
-        )}
+          )
+        })()}
 
         {/* Notifications + Profile — pinned to the top-right corner on mobile so it sits
             next to the logo instead of stacking under the stats badge full-width */}
         <div className="absolute top-3 right-4 sm:static sm:top-auto sm:right-auto flex items-center gap-3">
           <div ref={notificationRef}>
-            <button onClick={() => setShowNotifications(!showNotifications)} className="relative p-2 hover:bg-slate-800/80 rounded-lg transition group min-w-[44px] min-h-[44px] flex items-center justify-center">
-              <span className="text-xl group-hover:scale-110 transition-transform">🔔</span>
+            <button onClick={() => setShowNotifications(!showNotifications)} className="relative rounded-full bg-[#0b1326] border border-slate-700/70 hover:border-amber-300/50 hover:bg-slate-800/80 transition group w-[44px] h-[44px] flex items-center justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-300" aria-label="Notifications">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="text-slate-300 group-hover:text-amber-200 transition"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.500 2H4.500zM10 21h4" /></svg>
               {unreadCount > 0 && (
                 <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-600 text-white text-[10px] font-bold rounded-full flex items-center justify-center animate-pulse border-2 border-slate-900">{unreadCount}</span>
               )}
@@ -1022,8 +1034,8 @@ export default function StudentDashboard({ user, onLogout }) {
           </div>
 
           <div ref={profileRef}>
-            <button onClick={() => setShowProfileMenu(!showProfileMenu)} className="flex items-center gap-3 px-3 py-2 bg-slate-800/80 hover:bg-slate-700/80 border border-purple-600/40 rounded-xl transition group">
-              <div className="w-9 h-9 bg-gradient-to-br from-purple-600 to-pink-600 rounded-lg flex items-center justify-center font-bold text-sm shadow-lg">{(user.full_name || user.username)?.[0]?.toUpperCase() || 'U'}</div>
+            <button onClick={() => setShowProfileMenu(!showProfileMenu)} className="flex items-center gap-2.5 pl-1.5 pr-3.5 py-1.5 bg-[#0b1326] hover:bg-slate-800/80 border border-slate-700/70 hover:border-amber-300/50 rounded-full transition group focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-300">
+              <div className="w-8 h-8 bg-gradient-to-br from-violet-500 to-fuchsia-600 rounded-full flex items-center justify-center font-bold text-sm text-white shadow-lg">{(user.full_name || user.username)?.[0]?.toUpperCase() || 'U'}</div>
               <div className="hidden sm:block text-left">
                 <p className="font-semibold text-sm text-white">{user.full_name || user.username}</p>
                 <p className="text-[10px] text-slate-400">{user.username}</p>
