@@ -916,7 +916,7 @@ export default function StudentDashboard({ user, onLogout }) {
       </div>
 
       {/* ── Header ── */}
-      <header className="relative z-20 bg-gradient-to-b from-[#0e1733]/95 to-[#0a1024]/95 backdrop-blur border-b border-amber-300/20 px-4 sm:px-6 py-3 sm:py-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-5 sticky top-0">
+      <header className="relative z-20 bg-gradient-to-b from-[#0e1733]/95 to-[#0a1024]/95 backdrop-blur border-b border-amber-300/20 px-4 sm:px-6 py-3 sm:py-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-5 sm:sticky sm:top-0">
         {/* Logo — below 1024px only; from 1024px the sidebar carries the brand */}
         <div className="flex items-center gap-2.5 lg:hidden">
           <img src={crystalLogo} alt="" className="h-11 w-auto shrink-0 select-none" draggable="false" />

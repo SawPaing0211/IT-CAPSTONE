@@ -10,7 +10,7 @@ import SectionTitle from './SectionTitle'
 
 const MAX_CARDS = 4
 
-function CourseCard({ subject, onOpen }) {
+export function CourseCard({ subject, onOpen }) {
   const total = subject.quests_total || 0
   const done = subject.quests_done || 0
   const pct = total > 0 ? Math.round((done / total) * 100) : 0

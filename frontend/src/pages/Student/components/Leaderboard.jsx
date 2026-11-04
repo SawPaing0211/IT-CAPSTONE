@@ -127,7 +127,7 @@ export default function Leaderboard({ currentUsername }) {
     <div className="space-y-6">
       {/* Header */}
       <div className={`text-center mb-8 transition-all duration-700 ${animated ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4'}`}>
-        <h2 className="text-3xl font-bold bg-gradient-to-r from-pink-400 to-purple-400 bg-clip-text text-transparent mb-2 animate-pulse">
+        <h2 className="text-3xl font-cinzel font-bold bg-gradient-to-r from-amber-200 to-amber-400 bg-clip-text text-transparent mb-2">
           👑 Hall of Champions
         </h2>
         <p className="text-slate-400">The mightiest coders of the realm</p>

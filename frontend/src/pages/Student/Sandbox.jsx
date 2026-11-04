@@ -612,8 +612,8 @@ export default function Sandbox({ onClose, initialCode = null, initialLanguage =
 
           {/* Overlay hint when output is empty */}
           {!output && !isRunning && runCount === 0 && (
-            <div className="absolute bottom-6 left-1/2 -translate-x-1/2 pointer-events-none">
-              <div className="flex items-center gap-2 px-4 py-2 bg-slate-900/80 border border-emerald-600/20 rounded-full text-xs text-slate-400 backdrop-blur">
+            <div className="hidden sm:block absolute bottom-6 left-1/2 -translate-x-1/2 pointer-events-none">
+              <div className="flex items-center gap-2 whitespace-nowrap px-4 py-2 bg-slate-900/80 border border-emerald-600/20 rounded-full text-xs text-slate-400 backdrop-blur">
                 <span className="text-emerald-400">▶</span> Press Ctrl+Enter to cast your spell
               </div>
             </div>
