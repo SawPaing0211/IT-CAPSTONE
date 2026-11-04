@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import MobileSheet from '../../../components/MobileSheet'
-import { API_BASE } from '../../../api/client'
+import { API_BASE, authFetch } from '../../../api/client'
 
 const AVATAR_GRADIENTS = [
   'from-purple-600 to-blue-600',
@@ -52,7 +52,7 @@ export default function Leaderboard({ currentUsername }) {
     const loadSubjects = async () => {
       try {
         const token = localStorage.getItem('token')
-        const res = await fetch(`${API_BASE}/api/student/subjects`, {
+        const res = await authFetch(`${API_BASE}/api/student/subjects`, {
           headers: { 'Authorization': `Bearer ${token}` }
         })
         if (res.ok) {
@@ -96,7 +96,7 @@ export default function Leaderboard({ currentUsername }) {
         url += `?section_id=${selectedSectionId}`
       }
 
-      const res = await fetch(url, {
+      const res = await authFetch(url, {
         headers: { 'Authorization': `Bearer ${token}` }
       })
 

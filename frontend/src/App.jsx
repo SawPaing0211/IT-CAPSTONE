@@ -25,7 +25,7 @@ import Analytics from './pages/Instructor/Analytics'
 import CourseMaterials from './pages/Instructor/CourseMaterials'
 import ProblemSubmissions from './pages/Instructor/ProblemSubmissions'
 import InstructorAchievements from './pages/Instructor/InstructorAchievements'
-import { API_BASE } from './api/client'
+import { API_BASE, authFetch } from './api/client'
 import ChangePasswordModal from './components/ChangePasswordModal'
 import { CHANGE_PASSWORD_EVENT } from './utils/accountEvents'
 import { achievementStore } from './utils/achievementStore'
@@ -55,7 +55,7 @@ function AppContent() {
   useEffect(() => {
     const token = localStorage.getItem('token')
     if (token) {
-      fetch(`${API_BASE}/api/auth/me`, {
+      authFetch(`${API_BASE}/api/auth/me`, {
         headers: { 'Authorization': `Bearer ${token}` }
       })
         .then(res => res.json())

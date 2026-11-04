@@ -4,7 +4,7 @@ import AchievementModal from "../../../components/AchievementModal"
 import useAchievements from '../../../hooks/useAchievements'
 import { splitAchievements } from '../../../utils/achievementView'
 import MobileSheet from '../../../components/MobileSheet'
-import { API_BASE } from '../../../api/client'
+import { API_BASE, authFetch } from '../../../api/client'
 
 export default function ProgressStats({ stats, username, fullName }) {
   const [animated, setAnimated] = useState(false)
@@ -30,7 +30,7 @@ export default function ProgressStats({ stats, username, fullName }) {
     const fetchSubjects = async () => {
       try {
         const token = localStorage.getItem('token')
-        const res = await fetch(`${API_BASE}/api/student/subjects`, { headers: { 'Authorization': `Bearer ${token}` } })
+        const res = await authFetch(`${API_BASE}/api/student/subjects`, { headers: { 'Authorization': `Bearer ${token}` } })
         if (res.ok) setSubjectsList(await res.json())
       } catch (err) {
         console.error('Failed to fetch subjects list:', err)
@@ -46,8 +46,8 @@ export default function ProgressStats({ stats, username, fullName }) {
         const token = localStorage.getItem('token')
         const subjectParam = subjectId !== 'all' ? `&subject_id=${subjectId}` : ''
         const [statsRes, subsRes] = await Promise.all([
-          fetch(`${API_BASE}/api/student/stats${subjectId !== 'all' ? `?subject_id=${subjectId}` : ''}`, { headers: { 'Authorization': `Bearer ${token}` } }),
-          fetch(`${API_BASE}/api/student/submissions?limit=50${subjectParam}`, { headers: { 'Authorization': `Bearer ${token}` } })
+          authFetch(`${API_BASE}/api/student/stats${subjectId !== 'all' ? `?subject_id=${subjectId}` : ''}`, { headers: { 'Authorization': `Bearer ${token}` } }),
+          authFetch(`${API_BASE}/api/student/submissions?limit=50${subjectParam}`, { headers: { 'Authorization': `Bearer ${token}` } })
         ])
         if (statsRes.ok) setRealStats(await statsRes.json())
         if (subsRes.ok) {

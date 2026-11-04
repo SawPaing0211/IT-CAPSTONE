@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { API_BASE } from '../../api/client'
+import { API_BASE, authFetch } from '../../api/client'
 
 export default function ProblemList({ onSelectQuest, currentLevel, sectionId, subjectId }) {
   const [quests, setQuests] = useState([])
@@ -33,13 +33,13 @@ export default function ProblemList({ onSelectQuest, currentLevel, sectionId, su
         url += '?' + params.join('&')
       }
       
-            const res = await fetch(url, {
+            const res = await authFetch(url, {
         headers: { 'Authorization': `Bearer ${token}` }
       })
 
       // which languages this student already submitted, per quest (for the card progress)
       try {
-        const pr = await fetch(`${API_BASE}/api/student/quest-progress`, { headers: { 'Authorization': `Bearer ${token}` } })
+        const pr = await authFetch(`${API_BASE}/api/student/quest-progress`, { headers: { 'Authorization': `Bearer ${token}` } })
         if (pr.ok) setProgress(await pr.json())
       } catch { /* cards just show no progress */ }
 

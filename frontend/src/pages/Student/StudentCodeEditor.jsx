@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import Editor from '@monaco-editor/react'
-import { api, API_BASE} from '../../api/client'
+import { api, API_BASE, authFetch } from '../../api/client'
 import DownloadIcon from '../../components/DownloadIcon'
 import { achievementStore } from '../../utils/achievementStore'
 
@@ -310,7 +310,7 @@ useEffect(() => {
     const checkSubmission = async () => {
       try {
         const token = localStorage.getItem('token')
-        const subRes = await fetch(`${API_BASE}/api/problems/${quest.id}/my-submission`, {
+        const subRes = await authFetch(`${API_BASE}/api/problems/${quest.id}/my-submission`, {
           headers: { 'Authorization': `Bearer ${token}` }
         })
         if (subRes.ok) {
@@ -436,7 +436,7 @@ useEffect(() => {
         ? `${API_BASE}/api/problems/${quest.id}/test`
         : `${API_BASE}/api/problems/${quest.id}/run`
 
-      const res = await fetch(endpoint, {
+      const res = await authFetch(endpoint, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -478,7 +478,7 @@ useEffect(() => {
 
     try {
       const token = localStorage.getItem('token')
-      const res = await fetch(`${API_BASE}/api/problems/${quest.id}/test`, {
+      const res = await authFetch(`${API_BASE}/api/problems/${quest.id}/test`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,

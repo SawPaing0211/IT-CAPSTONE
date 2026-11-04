@@ -7,13 +7,13 @@ import Leaderboard from './components/Leaderboard'
 import ProgressStats from './components/ProgressStats'
 import QuestLog from './QuestLog'
 import MySubjects from './MySubjects'
-import CourseGrid from './components/CourseGrid'
+import CourseGrid, { CourseEmblem } from './components/CourseGrid'
 import BountyPreview from './components/BountyPreview'
 import HeroPanel from './components/HeroPanel'
 import BountyBoard from './BountyBoard'
 import QuestSpotlight from './components/QuestSpotlight'
 import StudentSidebar from './components/StudentSidebar'
-import { api, API_BASE} from '../../api/client'
+import { api, API_BASE, authFetch } from '../../api/client'
 import MobileSheet from '../../components/MobileSheet'
 import BottomNav from '../../components/BottomNav'
 import StudentLessons from './StudentLessons'
@@ -656,7 +656,7 @@ export default function StudentDashboard({ user, onLogout }) {
     const fetch_ = async () => {
       try {
         const token = localStorage.getItem('token')
-        const res = await fetch(`${API_BASE}/api/student/stats`, {
+        const res = await authFetch(`${API_BASE}/api/student/stats`, {
           headers: { 'Authorization': `Bearer ${token}` }
         })
         if (res.ok) {
@@ -743,7 +743,9 @@ export default function StudentDashboard({ user, onLogout }) {
       name: subject.name,
       semester: subject.semester,
       instructor: subject.instructor,
-      subject_id: subject.id
+      subject_id: subject.id,
+      quests_total: subject.quests_total,
+      quests_done: subject.quests_done,
     })
   setCourseTab('lessons')
 }
@@ -886,11 +888,11 @@ export default function StudentDashboard({ user, onLogout }) {
   ]
 
   const courseTabs = [
-    { id: 'lessons',       label: '📚 Lessons',        icon: '📚', shortLabel: 'Lessons' },
-    { id: 'announcements', label: '📢 Announcements',  icon: '📢', shortLabel: 'News' },
-    { id: 'board',         label: '🗺️ Quest Board',    icon: '🗺️', shortLabel: 'Quests' },
-    { id: 'log',           label: '📜 Quest Log',      icon: '📜', shortLabel: 'Log' },
-    { id: 'sandbox',       label: '🧪 Sandbox',        icon: '🧪', shortLabel: 'Sandbox' },
+    { id: 'lessons',       label: 'Lessons',        icon: '📚', shortLabel: 'Lessons' },
+    { id: 'announcements', label: 'Announcements',  icon: '📢', shortLabel: 'News' },
+    { id: 'board',         label: 'Quest Board',    icon: '🗺️', shortLabel: 'Quests' },
+    { id: 'log',           label: 'Quest Log',      icon: '📜', shortLabel: 'Log' },
+    { id: 'sandbox',       label: 'Sandbox',        icon: '🧪', shortLabel: 'Sandbox' },
   ]
 
   return (
@@ -1140,37 +1142,61 @@ export default function StudentDashboard({ user, onLogout }) {
             {/* ================= MODE 2: COURSE VIEW (Subject Selected) ================= */}
             <div className="animate-fade-in space-y-6">
 
-            {/* Course Header */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-900/50 p-4 rounded-xl border border-purple-600/30">
-              <div className="flex items-center gap-4">
-                <button
-                  onClick={handleExitSubject}
-                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-sm font-bold transition flex items-center gap-2 shrink-0"
-                >
-                  ← <span className="hidden sm:inline">Back to Subjects</span>
-                </button>
+            {/* Course header: back link + hero panel with class details and quest progress */}
+            <button
+              onClick={handleExitSubject}
+              className="flex items-center gap-2 min-h-[44px] sm:min-h-0 text-[11px] font-bold uppercase tracking-[0.2em] text-amber-300 hover:text-amber-100 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-300 rounded"
+            >
+              <span aria-hidden="true">&lsaquo;</span> Back to My Subjects
+            </button>
+
+            <section aria-label={selectedSection.name} className="flex flex-col lg:flex-row lg:items-center gap-5 lg:gap-8 rounded-xl border border-amber-300/30 bg-gradient-to-br from-[#0f1836] to-[#0a1024] p-4 sm:p-6">
+              <div className="flex items-start gap-4 min-w-0 flex-1">
+                <div className="shrink-0 w-16 h-16 sm:w-[84px] sm:h-[84px] rounded-2xl border border-amber-300/60 bg-gradient-to-br from-violet-500 to-fuchsia-700 flex items-center justify-center shadow-[0_0_24px_-6px_rgba(168,85,247,0.7)]" aria-hidden="true">
+                  <CourseEmblem name={selectedSection.name} className="w-9 h-9 sm:w-12 sm:h-12" />
+                </div>
                 <div className="min-w-0">
-                  <h2 className="text-xl font-bold text-white truncate">{selectedSection.name}</h2>
-                  <p className="text-sm text-slate-400 truncate">{selectedSection.section_code}</p>
+                  <h2 className="font-cinzel font-bold uppercase tracking-wide text-xl sm:text-3xl text-white leading-tight break-words">{selectedSection.name}</h2>
+                  <div className="mt-2 flex flex-wrap gap-2 text-[10px] font-bold uppercase tracking-[0.14em]">
+                    {selectedSection.section_code && <span className="px-2.5 py-1 rounded-full border border-amber-300/60 text-amber-200 bg-amber-300/5">Class code &middot; {selectedSection.section_code}</span>}
+                    {selectedSection.semester && <span className="px-2.5 py-1 rounded-full border border-slate-600 text-slate-300">{selectedSection.semester}</span>}
+                    <span className="px-2.5 py-1 rounded-full border border-slate-600 text-slate-300 max-w-full truncate">Instructor &middot; {selectedSection.instructor || 'TBA'}</span>
+                  </div>
+                  <p className="mt-2.5 text-sm text-slate-400">Read lessons, clear quests, and climb the class standing.</p>
                 </div>
               </div>
-              <div className="sm:text-right">
-                <span className="px-3 py-1 bg-purple-600/20 text-purple-300 rounded-full text-xs font-bold border border-purple-600/40">
-                  {selectedSection.semester}
-                </span>
-              </div>
-            </div>
 
-            {/* Course Navigation Tabs — desktop only, mobile gets the fixed BottomNav below */}
-            <div className="hidden lg:flex gap-2 border-b border-purple-600/40 pb-2 overflow-x-auto">
+              {typeof selectedSection.quests_total === 'number' && (() => {
+                const total = selectedSection.quests_total || 0
+                const done = selectedSection.quests_done || 0
+                const pct = total > 0 ? Math.round((done / total) * 100) : 0
+                return (
+                  <div className="lg:w-[320px] shrink-0 lg:border-l lg:border-slate-700/60 lg:pl-8">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">Subject progress</p>
+                    <p className="mt-1 flex items-baseline gap-3">
+                      <span className="font-cinzel text-3xl font-bold text-amber-200">{done} / {total}</span>
+                      <span className="text-sm text-slate-400">{total === 1 ? 'quest' : 'quests'} cleared</span>
+                    </p>
+                    <div className="mt-2 h-2 rounded-full bg-[#070b18] border border-slate-700/60 overflow-hidden" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct} aria-label={`${done} of ${total} quests cleared`}>
+                      <div className="h-full rounded-full bg-gradient-to-r from-amber-300 to-amber-500" style={{ width: `${pct}%` }} />
+                    </div>
+                  </div>
+                )
+              })()}
+            </section>
+
+            {/* Course Navigation Tabs: desktop only, mobile gets the fixed BottomNav below */}
+            <div role="tablist" aria-label="Course sections" className="hidden lg:flex gap-1 border-b border-slate-700/60 overflow-x-auto">
               {courseTabs.map(tab => (
                 <button
                   key={tab.id}
+                  role="tab"
+                  aria-selected={courseTab === tab.id}
                   onClick={() => setCourseTab(tab.id)}
-                  className={`px-4 py-2 rounded-lg font-semibold transition whitespace-nowrap ${
+                  className={`px-6 py-3 text-[12px] font-bold uppercase tracking-[0.18em] whitespace-nowrap border-b-2 -mb-px transition focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-300 ${
                     courseTab === tab.id
-                      ? 'bg-purple-600 text-white shadow-lg shadow-purple-600/50'
-                      : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                      ? 'text-amber-200 border-amber-300 bg-gradient-to-b from-transparent to-amber-300/10'
+                      : 'text-slate-400 border-transparent hover:text-white'
                   }`}
                 >
                   {tab.label}
@@ -1184,7 +1210,7 @@ export default function StudentDashboard({ user, onLogout }) {
             <div className="min-h-[500px]">
               {/* Lessons Tab Content */}
               {courseTab === 'lessons' && (
-                <StudentLessons subjectId={selectedSection.subject_id} sectionId={selectedSection.id} sectionName={selectedSection.name} />
+                <StudentLessons subjectId={selectedSection.subject_id} sectionId={selectedSection.id} sectionName={selectedSection.name} info={selectedSection} />
               )}
 
               {courseTab === 'announcements' && (

@@ -9,9 +9,9 @@
 // accepting user + stats as props instead of re-fetching. only fetch left
 // here is /api/student/subjects since nothing else already has that.
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { API_BASE } from '../../api/client'
+import { API_BASE, authFetch } from '../../api/client'
 import { CourseCard } from './components/CourseGrid'
 
 export default function MySubjects({ onSelectSubject, user, stats }) {
@@ -20,6 +20,7 @@ export default function MySubjects({ onSelectSubject, user, stats }) {
   const [loading, setLoading] = useState(true)
 
   const [failed, setFailed] = useState(false)
+  const [semester, setSemester] = useState('all')
 
   // Fetch the student's enrolled subjects. A failed request shows a retry
   // card instead of the "not enrolled" message, which would be wrong.
@@ -28,7 +29,7 @@ export default function MySubjects({ onSelectSubject, user, stats }) {
     setFailed(false)
     try {
       const token = localStorage.getItem('token')
-      const subjectsRes = await fetch(`${API_BASE}/api/student/subjects`, {
+      const subjectsRes = await authFetch(`${API_BASE}/api/student/subjects`, {
         headers: { 'Authorization': `Bearer ${token}` }
       })
       if (!subjectsRes.ok) throw new Error(`HTTP ${subjectsRes.status}`)
@@ -44,6 +45,10 @@ export default function MySubjects({ onSelectSubject, user, stats }) {
 
   useEffect(() => { fetchSubjects() }, [])
 
+  // semester filter pills, only when the student has courses in 2+ semesters
+  const semesters = useMemo(() => [...new Set(subjects.map(s => s.semester).filter(Boolean))], [subjects])
+  const visible = semester === 'all' ? subjects : subjects.filter(s => s.semester === semester)
+
   const openSubject = (subject) => {
     // Build the subject payload and hand it up to the dashboard
     const subjectData = {
@@ -53,6 +58,8 @@ export default function MySubjects({ onSelectSubject, user, stats }) {
       section_no: subject.section_no,
       semester: subject.semester,
       instructor: subject.instructor,
+      quests_total: subject.quests_total,
+      quests_done: subject.quests_done,
     }
     if (onSelectSubject) {
       onSelectSubject(subjectData)
@@ -123,9 +130,26 @@ export default function MySubjects({ onSelectSubject, user, stats }) {
         </div>
       </div>
 
+      {semesters.length > 1 && (
+        <div className="flex flex-wrap gap-2" role="group" aria-label="Filter by semester">
+          {['all', ...semesters].map(key => (
+            <button
+              key={key}
+              onClick={() => setSemester(key)}
+              aria-pressed={semester === key}
+              className={`min-h-[44px] sm:min-h-0 px-4 py-2 rounded-full border text-xs font-bold tracking-wide transition focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-300 ${
+                semester === key
+                  ? 'bg-gradient-to-b from-violet-500 to-violet-700 border-violet-300/60 text-white shadow-[0_0_18px_-4px_rgba(139,92,246,0.7)]'
+                  : 'bg-[#0b1224] border-slate-700 text-slate-300 hover:border-amber-300/40'
+              }`}
+            >{key === 'all' ? 'All Courses' : key}</button>
+          ))}
+        </div>
+      )}
+
       {/* Subjects Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-        {subjects.map((subject) => (
+        {visible.map((subject) => (
           <CourseCard key={subject.id} subject={subject} onOpen={openSubject} />
         ))}
       </div>

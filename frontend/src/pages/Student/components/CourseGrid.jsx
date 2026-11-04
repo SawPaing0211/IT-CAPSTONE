@@ -22,7 +22,7 @@ function Shard() {
   )
 }
 
-export function CourseEmblem({ name }) {
+export function CourseEmblem({ name, className = 'w-[34px] h-[34px]' }) {
   const [broken, setBroken] = useState(false)
   if (broken) return <Shard />
   return (
@@ -31,7 +31,7 @@ export function CourseEmblem({ name }) {
       alt=""
       draggable="false"
       onError={() => setBroken(true)}
-      className="w-[34px] h-[34px] object-contain select-none"
+      className={`${className} object-contain select-none`}
     />
   )
 }
@@ -44,7 +44,7 @@ export function CourseCard({ subject, onOpen }) {
     <button
       onClick={() => onOpen(subject)}
       aria-label={`Enter course: ${subject.name}`}
-      className="group text-left rounded-xl border border-amber-300/25 bg-gradient-to-br from-[#0f1836] to-[#0a1024] p-4 hover:border-amber-300/60 hover:shadow-lg hover:shadow-violet-900/30 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-300"
+      className="group flex h-full flex-col self-stretch text-left rounded-xl border border-amber-300/25 bg-gradient-to-br from-[#0f1836] to-[#0a1024] p-4 hover:border-amber-300/60 hover:shadow-lg hover:shadow-violet-900/30 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-300"
     >
       <div className="flex items-start gap-3">
         <div className="shrink-0 w-11 h-11 rounded-full border-2 border-amber-300/70 bg-[#0b1224] flex items-center justify-center" aria-hidden="true">
@@ -61,7 +61,7 @@ export function CourseCard({ subject, onOpen }) {
         </div>
       </div>
 
-      <div className="mt-4 flex items-center justify-between text-[10px] font-bold tracking-[0.18em] uppercase">
+      <div className="mt-auto pt-4 flex items-center justify-between text-[10px] font-bold tracking-[0.18em] uppercase">
         <span className="text-slate-500">Mastery</span>
         <span className="text-amber-200">{pct}%</span>
       </div>
@@ -107,6 +107,8 @@ export default function CourseGrid({ onSelectSubject, onViewAll }) {
     section_no: s.section_no,
     semester: s.semester,
     instructor: s.instructor,
+    quests_total: s.quests_total,
+    quests_done: s.quests_done,
   })
 
   return (
