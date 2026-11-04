@@ -22,7 +22,7 @@ function Shard() {
   )
 }
 
-function CourseEmblem({ name }) {
+export function CourseEmblem({ name }) {
   const [broken, setBroken] = useState(false)
   if (broken) return <Shard />
   return (
