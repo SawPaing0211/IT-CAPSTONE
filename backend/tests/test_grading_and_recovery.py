@@ -217,3 +217,11 @@ def test_java_compile_error_message_is_clean(world, monkeypatch):
                         lambda c, l, s: {'stdout': '', 'stderr': err, 'returncode': 1, 'timed_out': False, 'elapsed': 5})
     res = A.evaluate_code('c', [{'input': '1', 'expected': '1'}], 'java')
     assert res[0]['kind'] == 'runtime_error' and res[0]['output'] == 'Line 6: cannot find symbol'
+
+
+def test_compile_warnings_are_hidden_when_there_is_a_real_error():
+    from routes import sandbox as sb
+    out = ("/tmp/work/build/Solution.cs(4,27): warning CS8602: Dereference of a possibly null reference.\n"
+           "/tmp/work/build/Solution.cs(5,17): error CS0103: The name 'x' does not exist in the current context\n")
+    msg = sb.get_compile_error_message({'stderr': '__COMPILE_ERROR__\n', 'stdout': out}, 'csharp')
+    assert msg == "Line 5, Col 17: The name 'x' does not exist in the current context (CS0103)"

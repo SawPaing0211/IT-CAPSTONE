@@ -164,14 +164,16 @@ def _parse_java_compile_error(stderr: str) -> str:
     injected into it), the line numbers are already correct.
     """
     errors = []
+    warnings = []
     seen   = set()
 
     pattern = re.compile(
-        r'(\w[\w.]*\.java):(\d+):\s*(?:error|warning):\s*(.+)'
+        r'(\w[\w.]*\.java):(\d+):\s*(error|warning):\s*(.+)'
     )
     for match in pattern.finditer(stderr):
         line_no = int(match.group(2))
-        msg     = match.group(3).strip()
+        kind    = match.group(3)
+        msg     = match.group(4).strip()
 
         if msg.startswith('note:'):
             continue
@@ -179,10 +181,11 @@ def _parse_java_compile_error(stderr: str) -> str:
         friendly = f"Line {line_no}: {msg}"
         if friendly not in seen:
             seen.add(friendly)
-            errors.append(friendly)
+            (errors if kind == 'error' else warnings).append(friendly)
 
-    if errors:
-        return '\n'.join(errors)
+    # warnings only matter when there is no real error to show
+    if errors or warnings:
+        return '\n'.join(errors or warnings)
 
     # Fallback: strip /tmp paths and return cleaned text
     cleaned = re.sub(r'/tmp/\S+', '', stderr)
@@ -197,24 +200,27 @@ def _parse_csharp_compile_error(stderr: str, offset: int = 7) -> str:
     Subtracts `offset` from raw line numbers to get student-visible lines.
     """
     errors = []
+    warnings = []
     seen   = set()
 
     pattern = re.compile(
-        r'(?:Program|Solution)\.cs\((\d+),(\d+)\):\s*(?:error|warning)\s+(\w+):\s*(.+?)(?:\s*\[.*?\])?$',
+        r'(?:Program|Solution)\.cs\((\d+),(\d+)\):\s*(error|warning)\s+(\w+):\s*(.+?)(?:\s*\[.*?\])?$',
         re.MULTILINE
     )
     for match in pattern.finditer(stderr):
         raw_line = int(match.group(1))
         col      = int(match.group(2))
-        code     = match.group(3)
-        msg      = match.group(4).strip()
+        kind     = match.group(3)
+        code     = match.group(4)
+        msg      = match.group(5).strip()
         student_line = max(1, raw_line - offset)
         friendly = f"Line {student_line}, Col {col}: {msg} ({code})"
         if friendly not in seen:
             seen.add(friendly)
-            errors.append(friendly)
+            (errors if kind == 'error' else warnings).append(friendly)
 
-    return '\n'.join(errors) if errors else stderr.strip()
+    shown = errors or warnings
+    return '\n'.join(shown) if shown else stderr.strip()
 
 
 def is_compile_error(result: dict, language: str) -> bool:
