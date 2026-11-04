@@ -53,6 +53,7 @@ dotnet build "$BUILD_DIR/sandbox.csproj" \
     --no-restore \
     --output "$BUILD_DIR/out" \
     -p:StartupObject=Program \
+    -p:Optimize=false \
     -v quiet > /dev/null 2>&1
 
 BUILD_EXIT=$?
@@ -65,6 +66,7 @@ if [ $BUILD_EXIT -ne 0 ]; then
         --no-restore \
         --output "$BUILD_DIR/out" \
         -p:StartupObject=Program \
+        -p:Optimize=false \
         -v quiet 2>&1
     exit $BUILD_EXIT
 fi
