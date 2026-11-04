@@ -339,3 +339,25 @@ def test_stats_count_each_quest_once_and_sum_xp_per_language(world, monkeypatch)
         sid = A.db.session.get(A.Problem, pid).subject_id
     s = world['c'].get(f'/api/student/stats?subject_id={sid}', headers=world['h']).get_json()
     assert s['quests_done'] == 1 and s['total_xp'] > 100 - 1
+
+
+def _open_ids(w):
+    groups = w['c'].get('/api/student/open-quests', headers=w['h']).get_json()
+    return {q['id'] for g in groups for q in g['quests']}
+
+
+def test_required_quest_stays_open_until_every_language_is_in(world, monkeypatch):
+    monkeypatch.setattr(A, 'evaluate_code', _ok)
+    pid = _multi(world, 'required', langs=('python', 'java'))
+    assert pid in _open_ids(world)
+    _post_lang(world, pid, 'python')
+    assert pid in _open_ids(world)            # Java still to do
+    _post_lang(world, pid, 'java')
+    assert pid not in _open_ids(world)
+
+
+def test_optional_quest_leaves_open_list_after_first_language(world, monkeypatch):
+    monkeypatch.setattr(A, 'evaluate_code', _ok)
+    pid = _multi(world, 'optional', langs=('python', 'java'))
+    _post_lang(world, pid, 'python')
+    assert pid not in _open_ids(world)

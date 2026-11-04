@@ -3029,9 +3029,19 @@ def get_student_open_quests():
     if not section_ids:
         return jsonify([]), 200
 
-    submitted_ids = {
-        s.problem_id for s in Submission.query.filter_by(user_id=user_id).all()
-    }
+    langs_by_problem = {}
+    for s in Submission.query.filter_by(user_id=user_id).all():
+        langs_by_problem.setdefault(s.problem_id, set()).add(s.language)
+
+    def _still_open(p):
+        # never submitted -> open. A REQUIRED multi-language quest stays open until every
+        # ticked language has its submission; any other quest closes on the first submit.
+        done = langs_by_problem.get(p.id)
+        if not done:
+            return True
+        langs = p.languages or ['python']
+        return (len(langs) > 1 and (p.language_rule or 'optional') == 'required'
+                and not set(langs) <= done)
 
     groups = {}
     for section in SubjectSection.query.filter(SubjectSection.id.in_(section_ids)).all():
@@ -3047,7 +3057,7 @@ def get_student_open_quests():
 
         open_quests = []
         for p in problems:
-            if p.id in submitted_ids:
+            if not _still_open(p):
                 continue
             if p.visible_to_sections and section.id not in p.visible_to_sections:
                 continue
