@@ -9,6 +9,7 @@ import QuestLog from './QuestLog'
 import MySubjects from './MySubjects'
 import CourseGrid from './components/CourseGrid'
 import BountyPreview from './components/BountyPreview'
+import HeroPanel from './components/HeroPanel'
 import BountyBoard from './BountyBoard'
 import QuestSpotlight from './components/QuestSpotlight'
 import StudentSidebar from './components/StudentSidebar'
@@ -1103,8 +1104,13 @@ export default function StudentDashboard({ user, onLogout }) {
               <>
                 <div className="px-4 sm:px-6 pt-4 sm:pt-6 max-w-6xl mx-auto">
                   <QuestSpotlight onSelectQuest={handleBountyQuestSelect} onBrowse={() => setActiveTab('bounty')} />
-                  <CourseGrid onSelectSubject={handleEnterSubject} onViewAll={() => setActiveTab('subjects')} />
-                  <BountyPreview onSelectQuest={handleBountyQuestSelect} onBrowseBoard={() => setActiveTab('bounty')} onBrowseCourses={() => setActiveTab('subjects')} />
+                  <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_300px] gap-x-8 items-start">
+                    <div className="min-w-0">
+                      <CourseGrid onSelectSubject={handleEnterSubject} onViewAll={() => setActiveTab('subjects')} />
+                      <BountyPreview onSelectQuest={handleBountyQuestSelect} onBrowseBoard={() => setActiveTab('bounty')} onBrowseCourses={() => setActiveTab('subjects')} />
+                    </div>
+                    <HeroPanel stats={heroStats} user={user} onOpenHeroSheet={() => setActiveTab('hero')} />
+                  </div>
                 </div>
               </>
             )}
