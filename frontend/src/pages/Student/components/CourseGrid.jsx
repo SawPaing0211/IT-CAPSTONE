@@ -6,26 +6,9 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '../../../api/client'
+import SectionTitle from './SectionTitle'
 
 const MAX_CARDS = 4
-
-function SectionTitle({ onViewAll, showLink }) {
-  return (
-    <div className="flex items-center gap-3 mb-4">
-      <span className="w-2 h-2 rotate-45 bg-amber-300 shrink-0" aria-hidden="true" />
-      <h2 className="font-cinzel text-xl font-bold tracking-wide text-white">Courses</h2>
-      <span className="flex-1 h-px bg-gradient-to-r from-amber-300/30 to-transparent" aria-hidden="true" />
-      {showLink && (
-        <button
-          onClick={onViewAll}
-          className="text-xs font-bold text-amber-200 hover:text-white transition focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-300 rounded"
-        >
-          View all courses →
-        </button>
-      )}
-    </div>
-  )
-}
 
 function CourseCard({ subject, onOpen }) {
   const total = subject.quests_total || 0
@@ -103,7 +86,7 @@ export default function CourseGrid({ onSelectSubject, onViewAll }) {
   return (
     <section aria-labelledby="courses-heading" className="mb-8">
       <h2 id="courses-heading" className="sr-only">Courses</h2>
-      <SectionTitle onViewAll={onViewAll} showLink={state === 'ready' && subjects.length > MAX_CARDS} />
+      <SectionTitle actionLabel={state === 'ready' && subjects.length > MAX_CARDS ? 'View all courses →' : null} onAction={onViewAll}>Courses</SectionTitle>
 
       {state === 'loading' && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 animate-pulse" aria-busy="true">

@@ -8,6 +8,7 @@ import ProgressStats from './components/ProgressStats'
 import QuestLog from './QuestLog'
 import MySubjects from './MySubjects'
 import CourseGrid from './components/CourseGrid'
+import BountyPreview from './components/BountyPreview'
 import BountyBoard from './BountyBoard'
 import QuestSpotlight from './components/QuestSpotlight'
 import StudentSidebar from './components/StudentSidebar'
@@ -1103,6 +1104,7 @@ export default function StudentDashboard({ user, onLogout }) {
                 <div className="px-4 sm:px-6 pt-4 sm:pt-6 max-w-6xl mx-auto">
                   <QuestSpotlight onSelectQuest={handleBountyQuestSelect} onBrowse={() => setActiveTab('bounty')} />
                   <CourseGrid onSelectSubject={handleEnterSubject} onViewAll={() => setActiveTab('subjects')} />
+                  <BountyPreview onSelectQuest={handleBountyQuestSelect} onBrowseBoard={() => setActiveTab('bounty')} onBrowseCourses={() => setActiveTab('subjects')} />
                 </div>
               </>
             )}
