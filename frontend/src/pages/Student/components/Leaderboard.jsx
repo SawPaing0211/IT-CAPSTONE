@@ -167,7 +167,7 @@ export default function Leaderboard({ currentUsername }) {
           <div ref={subjectPickerAnchorRef}>
             <button
               onClick={() => setShowSubjectPicker(!showSubjectPicker)}
-              className="flex items-center gap-2 px-3 py-1.5 bg-slate-900 border border-purple-600/40 rounded-lg text-white text-xs transition hover:border-purple-500 max-w-full"
+              className="max-sm:min-h-[44px] flex items-center gap-2 px-3 py-1.5 bg-slate-900 border border-purple-600/40 rounded-lg text-white text-xs transition hover:border-purple-500 max-w-full"
             >
               <span className="truncate">
                 {subjects.find(s => s.section_id === selectedSectionId)?.section_no} - {subjects.find(s => s.section_id === selectedSectionId)?.name}

@@ -414,7 +414,7 @@ export default function ProgressStats({ stats, username, fullName }) {
               </h3>
               <button
                 onClick={() => setShowAllBadges(true)}
-                className="text-xs text-purple-400 hover:text-purple-300 transition flex items-center gap-1"
+                className="max-sm:min-h-[44px] max-sm:px-2 text-xs text-purple-400 hover:text-purple-300 transition flex items-center gap-1"
               >
                 View All →
               </button>

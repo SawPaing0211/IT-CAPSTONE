@@ -7,8 +7,34 @@
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '../../../api/client'
 import SectionTitle from './SectionTitle'
+import bookArt from '../../../assets/courses/course-book.webp'
+import runeArt from '../../../assets/courses/course-rune.webp'
 
 const MAX_CARDS = 4
+
+// Course emblem: coding rune for programming-type courses, enchanted book for everything else.
+// If the image fails to load, the old violet shard is shown instead.
+const CODE_COURSE = /program|coding|\bcode\b|software|web dev|algorithm|data struct/i
+
+function Shard() {
+  return (
+    <svg viewBox="0 0 24 24" width="20" height="20"><path d="M12 2.500 18 12l-6 9.500L6 12z" fill="#a78bfa" /><path d="M12 2.500 18 12h-6z" fill="#c4b5fd" /></svg>
+  )
+}
+
+function CourseEmblem({ name }) {
+  const [broken, setBroken] = useState(false)
+  if (broken) return <Shard />
+  return (
+    <img
+      src={CODE_COURSE.test(name || '') ? runeArt : bookArt}
+      alt=""
+      draggable="false"
+      onError={() => setBroken(true)}
+      className="w-[34px] h-[34px] object-contain select-none"
+    />
+  )
+}
 
 export function CourseCard({ subject, onOpen }) {
   const total = subject.quests_total || 0
@@ -22,7 +48,7 @@ export function CourseCard({ subject, onOpen }) {
     >
       <div className="flex items-start gap-3">
         <div className="shrink-0 w-11 h-11 rounded-full border-2 border-amber-300/70 bg-[#0b1224] flex items-center justify-center" aria-hidden="true">
-          <svg viewBox="0 0 24 24" width="20" height="20"><path d="M12 2.500 18 12l-6 9.500L6 12z" fill="#a78bfa" /><path d="M12 2.500 18 12h-6z" fill="#c4b5fd" /></svg>
+          <CourseEmblem name={subject.name} />
         </div>
         <div className="min-w-0 flex-1">
           <h3 className="font-cinzel font-bold text-[15px] leading-snug text-white group-hover:text-amber-100 transition line-clamp-2 break-words">{subject.name}</h3>

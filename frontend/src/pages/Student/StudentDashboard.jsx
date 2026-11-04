@@ -344,7 +344,7 @@ function ArcaneSandbox({ seedCode = null, seedLanguage = 'python', sandboxHealth
               : (sandboxHealth.images?.[key] !== false)
             return (
               <button key={key} onClick={() => { setLang(key); setOutput(null) }}
-                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 border relative ${
+                className={`max-sm:min-h-[44px] px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 border relative ${
                   lang === key
                     ? 'bg-emerald-600/30 border-emerald-500/60 text-emerald-300 shadow shadow-emerald-600/20'
                     : 'border-slate-700 text-slate-400 hover:text-white hover:border-slate-600'
@@ -365,7 +365,7 @@ function ArcaneSandbox({ seedCode = null, seedLanguage = 'python', sandboxHealth
           {/* Templates */}
           <div ref={templatesAnchorRef}>
             <button onClick={() => { setShowTemplates(!showTemplates); setShowSaved(false); setShowSettings(false) }}
-              className="px-2 py-1.5 text-xs text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition flex items-center gap-1 border border-transparent hover:border-slate-700">
+              className="max-sm:min-h-[44px] max-sm:min-w-[44px] max-sm:justify-center px-2 py-1.5 text-xs text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition flex items-center gap-1 border border-transparent hover:border-slate-700">
               📜 <span className="hidden md:inline">Scrolls</span>
             </button>
             <MobileSheet show={showTemplates} onClose={() => setShowTemplates(false)} widthClass="sm:w-52" anchorRef={templatesAnchorRef}>
@@ -382,7 +382,7 @@ function ArcaneSandbox({ seedCode = null, seedLanguage = 'python', sandboxHealth
           {/* Saved */}
           <div ref={savedAnchorRef}>
             <button onClick={() => { setShowSaved(!showSaved); setShowTemplates(false); setShowSettings(false) }}
-              className="px-2 py-1.5 text-xs text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition flex items-center gap-1 border border-transparent hover:border-slate-700">
+              className="max-sm:min-h-[44px] max-sm:min-w-[44px] max-sm:justify-center px-2 py-1.5 text-xs text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition flex items-center gap-1 border border-transparent hover:border-slate-700">
               🗂️
               {savedScrolls.length > 0 && (
                 <span className="w-3.5 h-3.5 bg-emerald-600 text-white text-[7px] rounded-full flex items-center justify-center font-bold">
@@ -432,7 +432,7 @@ function ArcaneSandbox({ seedCode = null, seedLanguage = 'python', sandboxHealth
 
           {/* Run */}
           <button onClick={handleRun} disabled={isRunning}
-            className={`ml-1 px-4 py-1.5 rounded-lg text-xs font-black transition flex items-center gap-1.5 border ${
+            className={`ml-1 max-sm:min-h-[44px] px-4 py-1.5 rounded-lg text-xs font-black transition flex items-center gap-1.5 border ${
               isRunning
                 ? 'bg-slate-700 border-slate-600 text-slate-400 cursor-not-allowed'
                 : 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 border-emerald-400/30 text-white shadow shadow-emerald-600/20'
@@ -505,8 +505,8 @@ function ArcaneSandbox({ seedCode = null, seedLanguage = 'python', sandboxHealth
             }}
           />
           {!output && !isRunning && runCount === 0 && (
-            <div className="absolute bottom-6 left-1/2 -translate-x-1/2 pointer-events-none">
-              <div className="flex items-center gap-2 px-4 py-2 bg-slate-900/90 border border-emerald-600/20 rounded-full text-xs text-slate-400 backdrop-blur shadow">
+            <div className="hidden sm:block absolute bottom-6 left-1/2 -translate-x-1/2 pointer-events-none">
+              <div className="flex items-center gap-2 whitespace-nowrap px-4 py-2 bg-slate-900/90 border border-emerald-600/20 rounded-full text-xs text-slate-400 backdrop-blur shadow">
                 <span className="text-emerald-400">▶</span>
                 Press <kbd className="px-1.5 py-0.5 bg-slate-800 rounded text-[10px] text-emerald-300 border border-slate-700 mx-1">Ctrl+Enter</kbd> to cast your spell
               </div>
