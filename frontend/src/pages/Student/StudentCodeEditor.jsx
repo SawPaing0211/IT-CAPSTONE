@@ -4,6 +4,12 @@ import { api, API_BASE} from '../../api/client'
 import DownloadIcon from '../../components/DownloadIcon'
 import { achievementStore } from '../../utils/achievementStore'
 
+const LANG_CHIP = {
+  python: 'border-sky-400/60 text-sky-300',
+  java: 'border-orange-400/60 text-orange-300',
+  csharp: 'border-pink-400/55 text-pink-300',
+}
+
 export default function StudentCodeEditor({
   quest,
   onVictory,
@@ -646,29 +652,29 @@ useEffect(() => {
   return (
     // Root: locked to 100vh, flex column, no overflow
     <div
-      className="flex flex-col bg-slate-950 text-slate-100 overflow-hidden"
+      className="flex flex-col bg-[#070b18] text-slate-100 overflow-hidden"
       style={{ height: '100vh' }}
     >
 
       {/* Success Animation Overlay */}
       {showSuccessAnim && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center animate-in fade-in duration-300 pointer-events-auto">
-          <div className="bg-slate-900 border-2 border-green-500/50 rounded-2xl p-8 text-center shadow-2xl shadow-green-500/20 max-w-sm mx-4">
-            <div className="text-6xl mb-4 animate-[bounce_0.5s_ease-in-out_3]">🎉</div>
-            <h2 className="text-2xl font-bold text-green-400 mb-2">Quest Complete!</h2>
+          <div className="bg-gradient-to-br from-[#0f1836] to-[#0a1024] border border-amber-300/60 rounded-2xl p-8 text-center shadow-2xl shadow-amber-300/10 max-w-sm mx-4">
+            <svg viewBox="0 0 24 24" width="56" height="56" className="mx-auto mb-4 animate-[bounce_0.5s_ease-in-out_3]" aria-hidden="true"><path d="M12 2.500 18 12l-6 9.500L6 12z" fill="#a78bfa" /><path d="M12 2.500 18 12h-6z" fill="#c4b5fd" /></svg>
+            <h2 className="font-cinzel text-2xl font-bold tracking-wide text-amber-200 mb-2">Quest Complete!</h2>
             <p className="text-slate-400 mb-4">All tests passed, hero!</p>
             {combo > 1 && (
               <div className="mb-4 px-4 py-2 bg-orange-600/20 border border-orange-600/40 rounded-lg">
                 <p className="text-orange-400 font-bold">🔥 {combo}x Combo!</p>
               </div>
             )}
-            <div className="bg-green-600/20 border border-green-600/30 rounded-xl p-4 mb-4">
-              <p className="text-green-300 font-bold text-xl">+{xpGained} XP</p>
+            <div className="bg-amber-300/10 border border-amber-300/35 rounded-xl p-4 mb-4">
+              <p className="font-cinzel text-amber-200 font-bold text-xl">+{xpGained} XP</p>
               <p className="text-slate-400 text-sm mt-1">Forge your legend!</p>
             </div>
             <button
               onClick={onReturn}
-              className="px-6 py-2 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-lg font-bold transition shadow-lg"
+              className="px-6 py-2.5 bg-gradient-to-b from-[#f6dc92] via-[#e0b84f] to-[#b8862b] text-[#2a1a05] border border-amber-200/70 shadow-[0_4px_16px_-4px_rgba(224,184,79,0.55)] hover:brightness-110 rounded-lg font-bold uppercase tracking-[0.16em] text-xs transition max-sm:min-h-[44px]"
             >
               Continue Adventure
             </button>
@@ -679,8 +685,8 @@ useEffect(() => {
       {/* Final-submission confirmation: Submit is graded once and cannot be repeated */}
       {showSubmitConfirm && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[9999] flex items-center justify-center px-4" role="dialog" aria-modal="true">
-          <div className="bg-slate-900 border-2 border-green-600/50 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
-            <h3 className="font-bold text-white mb-2">⚔️ Submit your final answer?</h3>
+          <div className="bg-[#12183a] border border-amber-300/60 rounded-xl p-6 w-full max-w-sm shadow-2xl shadow-violet-950/60">
+            <h3 className="text-[13px] font-bold uppercase tracking-[0.2em] text-amber-300 mb-2">⚔ Submit your final answer?</h3>
             <p className="text-sm text-slate-400 mb-4">
               This is graded once for <b>{language}</b> and cannot be submitted again in that language
               {(quest.languages?.length || 0) > 1 ? ' (your other languages stay open)' : ''}. Use <b>Run</b> as many times as you like to test
@@ -694,7 +700,7 @@ useEffect(() => {
             )}
             <div className="flex gap-2">
               <button onClick={() => setShowSubmitConfirm(false)}
-                className="flex-1 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 text-sm transition">Keep editing</button>
+                className="flex-1 py-2 bg-[#0b1224] hover:bg-slate-900 border border-amber-300/50 rounded-lg text-amber-200 text-xs font-bold uppercase tracking-[0.14em] transition max-sm:min-h-[44px]">Keep editing</button>
               <button
                 onClick={async () => {
                   setShowSubmitConfirm(false)
@@ -702,7 +708,7 @@ useEffect(() => {
                   try { await api.put(`/api/problems/${quest.id}/draft`, { code, language }) } catch { /* the submission still stores the code */ }
                   handleSubmit()
                 }}
-                className="flex-1 py-2 bg-green-600 hover:bg-green-500 rounded-lg text-white font-bold text-sm transition">Submit final answer</button>
+                className="flex-1 py-2 bg-gradient-to-b from-[#f6dc92] via-[#e0b84f] to-[#b8862b] text-[#2a1a05] border border-amber-200/70 shadow-[0_4px_16px_-4px_rgba(224,184,79,0.55)] hover:brightness-110 rounded-lg font-bold text-xs uppercase tracking-[0.14em] transition max-sm:min-h-[44px]">Submit final answer</button>
             </div>
           </div>
         </div>
@@ -712,8 +718,8 @@ useEffect(() => {
           replaces the plain browser confirm() popup */}
       {showResetConfirm && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[9999] flex items-center justify-center px-4">
-          <div className="bg-slate-900 border-2 border-purple-600/50 rounded-2xl p-6 w-full max-w-xs shadow-2xl">
-            <h3 className="font-bold text-white mb-2">🔄 Reset code?</h3>
+          <div className="bg-gradient-to-br from-[#0f1836] to-[#0a1024] border border-amber-300/40 rounded-2xl p-6 w-full max-w-xs shadow-2xl">
+            <h3 className="text-[13px] font-bold uppercase tracking-[0.2em] text-amber-300 mb-2">Reset code?</h3>
             <p className="text-sm text-slate-400 mb-4">This swaps your code back to the starter template. What you've written will be lost.</p>
             <div className="flex gap-2">
               <button onClick={() => setShowResetConfirm(false)}
@@ -729,27 +735,27 @@ useEffect(() => {
           they can't wrap and collide with the back button or fullscreen icon
           on a narrow phone screen; badge + save indicator moved down into the
           meta row for the same reason ── */}
-      <header className="min-h-14 bg-slate-900/90 border-b border-purple-600/40 flex items-center justify-between gap-2 px-3 sm:px-4 py-2 shrink-0 z-10">
+      <header className="min-h-14 bg-[#0a1024]/95 border-b border-amber-300/25 flex items-center justify-between gap-2 px-3 sm:px-4 py-2 shrink-0 z-10">
         <div className="flex items-center gap-2 sm:gap-4 min-w-0">
           <button
             onClick={onReturn}
-            className="flex items-center gap-1 text-slate-400 hover:text-white transition text-sm shrink-0 min-w-[32px]"
+            className="flex items-center gap-1.5 rounded-lg border border-amber-300/35 px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.16em] text-amber-200 hover:border-amber-300/70 hover:text-amber-100 transition shrink-0 min-w-[32px] max-sm:min-h-[44px]"
           >
             <span aria-hidden="true">←</span>
             <span className="hidden sm:inline">Back to Quests</span>
           </button>
           <div className="h-6 w-px bg-slate-700 hidden sm:block shrink-0"></div>
           <div className="min-w-0">
-            <h1 className="font-bold text-white text-sm sm:text-base truncate">{quest.title}</h1>
+            <h1 className="font-cinzel font-bold tracking-wide text-[#f3e3b0] text-sm sm:text-base truncate">{quest.title}</h1>
             <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-slate-400 mt-0.5">
               <span className={`px-2 py-0.5 rounded border shrink-0 ${
-                quest.difficulty === 'Easy'   ? 'bg-green-600/20 text-green-400' :
-                quest.difficulty === 'Medium' ? 'bg-yellow-600/20 text-yellow-400' :
-                                                'bg-red-600/20 text-red-400'
+                quest.difficulty === 'Easy'   ? 'border-emerald-400/40 bg-emerald-500/10 text-emerald-300' :
+                quest.difficulty === 'Medium' ? 'border-amber-300/40 bg-amber-400/10 text-amber-200' :
+                                                'border-rose-400/40 bg-rose-500/10 text-rose-300'
               }`}>
                 {quest.difficulty}
               </span>
-              <span className="shrink-0">🎯 {quest.xp_reward} XP</span>
+              <span className="shrink-0 font-bold text-amber-200">+{quest.xp_reward} XP</span>
               <span className="hidden sm:inline">•</span>
               <span className="hidden sm:inline">{quest.problem_type || 'coding'}</span>
               {quest.is_event_quest && (
@@ -763,19 +769,19 @@ useEffect(() => {
         </div>
 
         <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-          <div className="hidden sm:flex items-center gap-1 bg-slate-800/80 px-3 py-1.5 rounded-lg border border-purple-600/30">
-            <span className="text-purple-400 font-bold text-xs">Lvl {heroLevel}</span>
+          <div className="hidden sm:flex items-center gap-1 bg-violet-600/20 px-4 py-1.5 rounded-full border border-amber-300/50">
+            <span className="text-amber-200 font-bold text-[11px] uppercase tracking-[0.2em]">Lvl {heroLevel}</span>
           </div>
         </div>
       </header>
 
       {/* ── MOBILE PANEL SWITCHER (below md, only one panel fits) ── */}
-      <div className="md:hidden flex border-b border-purple-600/20 bg-slate-900/50 shrink-0">
+      <div className="md:hidden flex border-b border-amber-300/15 bg-[#0a1024]/80 shrink-0">
         <button
           onClick={() => setMobilePanel('problem')}
-          className={`flex-1 px-4 py-2.5 text-sm font-bold transition ${
+          className={`flex-1 px-4 py-2.5 min-h-[44px] text-[11px] font-bold uppercase tracking-[0.2em] transition ${
             mobilePanel === 'problem'
-              ? 'bg-purple-600/20 text-purple-400 border-b-2 border-purple-600'
+              ? 'bg-violet-600/15 text-amber-300 border-b-2 border-amber-300'
               : 'text-slate-400'
           }`}
         >
@@ -783,9 +789,9 @@ useEffect(() => {
         </button>
         <button
           onClick={() => setMobilePanel('code')}
-          className={`flex-1 px-4 py-2.5 text-sm font-bold transition ${
+          className={`flex-1 px-4 py-2.5 min-h-[44px] text-[11px] font-bold uppercase tracking-[0.2em] transition ${
             mobilePanel === 'code'
-              ? 'bg-purple-600/20 text-purple-400 border-b-2 border-purple-600'
+              ? 'bg-violet-600/15 text-amber-300 border-b-2 border-amber-300'
               : 'text-slate-400'
           }`}
         >
@@ -802,36 +808,36 @@ useEffect(() => {
       >
 
         {/* ── LEFT PANEL ── */}
-        <div className={`${mobilePanel === 'problem' ? 'flex' : 'hidden'} md:flex border-r-0 md:border-r border-purple-600/20 flex-col bg-slate-950 overflow-hidden md:min-w-[300px]`}>
+        <div className={`${mobilePanel === 'problem' ? 'flex' : 'hidden'} md:flex border-r-0 md:border-r border-amber-300/15 flex-col bg-[#070b18] overflow-hidden md:min-w-[300px]`}>
 
           {/* Tabs */}
-          <div className="flex border-b border-purple-600/20 bg-slate-900/50 shrink-0">
+          <div className="flex border-b border-amber-300/15 bg-[#0a1024]/80 shrink-0">
             <button
               onClick={() => setActiveTab('problem')}
-              className={`flex-1 px-4 py-2 text-sm font-medium transition ${
+              className={`flex-1 px-4 py-2 text-[11px] font-bold uppercase tracking-[0.2em] transition ${
                 activeTab === 'problem'
-                  ? 'bg-purple-600/20 text-purple-400 border-b-2 border-purple-600'
-                  : 'text-slate-400 hover:text-white'
+                  ? 'bg-violet-600/15 text-amber-300 border-b-2 border-amber-300'
+                  : 'text-slate-400 hover:text-amber-100'
               }`}
             >
               📜 Problem
             </button>
             <button
               onClick={() => setActiveTab('testcases')}
-              className={`flex-1 px-4 py-2 text-sm font-medium transition ${
+              className={`flex-1 px-4 py-2 text-[11px] font-bold uppercase tracking-[0.2em] transition ${
                 activeTab === 'testcases'
-                  ? 'bg-purple-600/20 text-purple-400 border-b-2 border-purple-600'
-                  : 'text-slate-400 hover:text-white'
+                  ? 'bg-violet-600/15 text-amber-300 border-b-2 border-amber-300'
+                  : 'text-slate-400 hover:text-amber-100'
               }`}
             >
               📋 Test Cases
             </button>
             <button
               onClick={() => setActiveTab('hints')}
-              className={`flex-1 px-4 py-2 text-sm font-medium transition relative ${
+              className={`flex-1 px-4 py-2 text-[11px] font-bold uppercase tracking-[0.2em] transition relative ${
                 activeTab === 'hints'
-                  ? 'bg-purple-600/20 text-purple-400 border-b-2 border-purple-600'
-                  : 'text-slate-400 hover:text-white'
+                  ? 'bg-violet-600/15 text-amber-300 border-b-2 border-amber-300'
+                  : 'text-slate-400 hover:text-amber-100'
               }`}
             >
               💡 Hints
@@ -848,14 +854,14 @@ useEffect(() => {
             {activeTab === 'problem' && (
               <div className="space-y-6">
                 <div>
-                  <h2 className="text-lg font-bold text-white mb-3 flex items-center gap-2">📜 Quest Details</h2>
+                  <h2 className="text-[11px] font-bold uppercase tracking-[0.22em] text-amber-300 mb-3">Quest Details</h2>
                   <div className="text-slate-300 leading-relaxed whitespace-pre-line text-sm">{quest.description}</div>
                 </div>
                 <div>
-                  <h3 className="text-sm font-bold text-slate-400 mb-2">Examples</h3>
+                  <h3 className="text-[11px] font-bold uppercase tracking-[0.22em] text-amber-300 mb-2">Examples</h3>
                   <div className="space-y-3">
                     {quest.test_cases?.filter(tc => tc.visible !== false).slice(0, 3).map((tc, idx) => (
-                      <div key={idx} className="bg-slate-900/60 rounded-lg p-3 border border-slate-700/50">
+                      <div key={idx} className="bg-[#0a1024] rounded-xl p-3 border border-indigo-300/25">
                         <p className="text-[10px] text-slate-500 mb-1 uppercase tracking-wider">Input</p>
                         <code className="text-green-400 text-xs font-mono block mb-2 break-all whitespace-pre-wrap">{tc.input}</code>
                         <p className="text-[10px] text-slate-500 mb-1 uppercase tracking-wider">Expected Output</p>
@@ -864,7 +870,7 @@ useEffect(() => {
                     ))}
                   </div>
                 </div>
-                <div className="pt-4 border-t border-slate-700">
+                <div className="pt-4 border-t border-amber-300/15">
                   <div className="flex items-center justify-between text-xs text-slate-400">
                     <span>Time Limit:</span><span className="text-slate-300">5 seconds</span>
                   </div>
@@ -877,11 +883,11 @@ useEffect(() => {
 
             {activeTab === 'testcases' && (
               <div className="space-y-3">
-                <h3 className="text-sm font-bold text-slate-400 mb-3">All Test Cases</h3>
+                <h3 className="text-[11px] font-bold uppercase tracking-[0.22em] text-amber-300 mb-3">All Test Cases</h3>
                 {quest.test_cases?.map((tc, idx) => (
-                  <div key={idx} className="bg-slate-900/60 rounded-lg p-3 border border-slate-700/50">
+                  <div key={idx} className="bg-[#0a1024] rounded-xl p-3 border border-indigo-300/25">
                     <div className="flex items-center justify-between mb-2">
-                      <span className="text-xs font-bold text-purple-400">Test Case {idx + 1}</span>
+                      <span className="text-xs font-bold text-violet-300">Test Case {idx + 1}</span>
                       {output?.test_results?.[idx] && (
                         <span className={`text-[10px] px-2 py-0.5 rounded ${
                           output.test_results[idx].passed
@@ -917,7 +923,7 @@ useEffect(() => {
 
             {activeTab === 'hints' && (
               <div className="space-y-3">
-                <h3 className="text-sm font-bold text-slate-400 mb-3">Ancient Scrolls (Hints)</h3>
+                <h3 className="text-[11px] font-bold uppercase tracking-[0.22em] text-amber-300 mb-3">Ancient Scrolls (Hints)</h3>
                 {quest.hints?.map((hint, idx) => {
                   const isUsed = usedHints.includes(idx)
                   return (
@@ -958,24 +964,24 @@ useEffect(() => {
         </div>
 
         {/* ── RIGHT PANEL ── */}
-        <div className={`${mobilePanel === 'code' ? 'flex' : 'hidden'} md:flex flex-col bg-slate-950 overflow-hidden`}>
+        <div className={`${mobilePanel === 'code' ? 'flex' : 'hidden'} md:flex flex-col bg-[#070b18] overflow-hidden`}>
 
           {/* Toolbar (~48px, shrink-0) — icon-only below sm, full labels sm+
               (side by side, this row has 3+ buttons plus a filename label;
               at phone width that overflows unless text collapses to icons) */}
-          <div className="flex items-center justify-between px-2 sm:px-4 py-2 bg-slate-900/80 border-b border-purple-600/20 shrink-0 gap-1 overflow-x-auto">
+          <div className="flex items-center justify-between px-2 sm:px-4 py-2 bg-[#0a1024] border-b border-amber-300/15 shrink-0 gap-1 overflow-x-auto">
             <div className="flex gap-1 shrink-0">
               {quest.languages?.map(lang => (
                 <button
                   key={lang}
                   onClick={() => setLanguage(lang)}
-                  className={`px-2 sm:px-3 py-1.5 rounded-md text-xs font-medium transition flex items-center gap-1.5 ${
+                  className={`px-3 sm:px-4 py-1.5 rounded-lg border text-[11px] font-bold uppercase tracking-[0.16em] transition flex items-center gap-1.5 max-sm:min-h-[44px] ${
                     language === lang
-                      ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white border border-purple-400 shadow-lg'
-                      : 'text-slate-400 hover:text-white hover:bg-slate-800/60 border border-transparent'
+                      ? `${LANG_CHIP[lang]} bg-white/5 shadow-[0_0_14px_-3px_currentColor]`
+                      : `${LANG_CHIP[lang]} opacity-75 hover:opacity-100`
                   }`}
                 >
-                  {submissionsByLang[lang] ? '✓' : (lang === 'python' ? '🐍' : lang === 'java' ? '☕' : '🔷')} <span className="hidden sm:inline">{lang}</span>
+                  {submissionsByLang[lang] && '✓'} <span>{lang === 'csharp' ? 'C#' : lang}</span>
                 </button>
               ))}
               {(quest.languages?.length || 0) > 1 && (
@@ -991,7 +997,7 @@ useEffect(() => {
               {onOpenSandbox && (
                 <button
                   onClick={() => onOpenSandbox(code, language)}
-                  className="px-2 sm:px-3 py-1.5 text-xs text-emerald-400 hover:text-emerald-300 hover:bg-emerald-900/30 border border-emerald-600/30 rounded-lg transition flex items-center gap-1"
+                  className="rounded-xl border border-amber-300/30 bg-[#0b1224] hover:border-amber-300/60 text-[11px] font-bold uppercase tracking-[0.14em] text-amber-200 hover:text-amber-100 transition flex items-center gap-1 px-2 sm:px-3 py-1.5 max-sm:min-h-[44px] max-sm:min-w-[44px] max-sm:justify-center"
                   title="Take your current code to the sandbox to experiment"
                 >
                   🧪 <span className="hidden sm:inline">Try in Sandbox</span>
@@ -1000,13 +1006,13 @@ useEffect(() => {
 
               <button
                 onClick={handleReset}
-                className="px-2 sm:px-3 py-1.5 text-xs text-slate-400 hover:text-white transition flex items-center gap-1"
+                className="rounded-xl border border-amber-300/30 bg-[#0b1224] hover:border-amber-300/60 text-[11px] font-bold uppercase tracking-[0.14em] text-amber-200 hover:text-amber-100 transition flex items-center gap-1 px-2 sm:px-3 py-1.5 max-sm:min-h-[44px] max-sm:min-w-[44px] max-sm:justify-center"
               >
                 🔄 <span className="hidden sm:inline">Reset</span>
               </button>
               <button
                 onClick={handleDownload}
-                className="px-2 sm:px-3 py-1.5 text-xs text-slate-400 hover:text-white transition flex items-center gap-1"
+                className="rounded-xl border border-amber-300/30 bg-[#0b1224] hover:border-amber-300/60 text-[11px] font-bold uppercase tracking-[0.14em] text-amber-200 hover:text-amber-100 transition flex items-center gap-1 px-2 sm:px-3 py-1.5 max-sm:min-h-[44px] max-sm:min-w-[44px] max-sm:justify-center"
               >
                 <DownloadIcon size={13} /> <span className="hidden sm:inline">Download</span>
               </button>
@@ -1020,6 +1026,7 @@ useEffect(() => {
           <div
             id="editor-wrapper"
             ref={editorContainerRef}
+            className="mx-3 mt-3 rounded-xl border border-indigo-300/25"
             style={{ flex: '1 1 0', minHeight: 0, overflow: 'hidden', position: 'relative' }}
           >
             <Editor
@@ -1028,7 +1035,8 @@ useEffect(() => {
               language={language}
               value={code}
               onChange={(value) => setCode(value || '')}
-              theme="vs-dark"
+              theme="forge-citadel"
+              beforeMount={(monaco) => monaco.editor.defineTheme('forge-citadel', { base: 'vs-dark', inherit: true, rules: [], colors: { 'editor.background': '#070b18', 'editorGutter.background': '#070b18', 'editor.lineHighlightBackground': '#0f1836', 'editorLineNumber.foreground': '#475072', 'editorLineNumber.activeForeground': '#f3d78a' } })}
               // Submit (graded, one-shot) stays locked by its own disabled=hasSubmitted
               // below -- the editor itself used to go readOnly on hasSubmitted too, which
               // blocked Run (ungraded, no XP, no lock) on every language once ANY language
@@ -1048,8 +1056,8 @@ useEffect(() => {
           {/* Console */}
           <div
             id="console-wrapper"
-            className="flex flex-col bg-slate-900/80 border-t border-purple-600/20"
-            style={{ height: '192px', minHeight: '192px', flexShrink: 0, overflow: 'hidden' }}
+            className="flex flex-col bg-[#0a1024] border border-amber-300/40 rounded-xl m-3"
+            style={{ height: 'clamp(192px, 32vh, 320px)', minHeight: '192px', flexShrink: 0, overflow: 'hidden' }}
           >
             {/* Instructor mode banner */}
             {(userRole === 'instructor' || userRole === 'administrator') && (
@@ -1058,8 +1066,8 @@ useEffect(() => {
               </div>
             )}
             {/* Console header */}
-            <div className="flex items-center justify-between px-4 py-2 border-b border-purple-600/20 bg-slate-800/40 shrink-0">
-              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
+            <div className="flex items-center justify-between px-4 py-2 border-b border-amber-300/15 bg-[#0b1224] shrink-0">
+              <span className="text-[11px] font-bold text-amber-300 uppercase tracking-[0.2em] flex items-center gap-2">
                 🔮 Crystal Ball (Console)
                 {isLoading && <span className="text-blue-400 animate-pulse">• Casting spell...</span>}
               </span>
@@ -1067,7 +1075,7 @@ useEffect(() => {
                 <button
                   onClick={handleRunCode}
                   disabled={isLoading}
-                  className="px-4 py-1.5 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed rounded-md text-xs font-bold text-white transition flex items-center gap-1.5 border border-slate-600 hover:border-slate-500"
+                  className="px-4 py-1.5 bg-slate-950/50 hover:bg-slate-900 disabled:opacity-50 disabled:cursor-not-allowed rounded-md text-xs font-bold text-amber-100 transition flex items-center gap-1.5 border border-amber-300/40 hover:border-amber-300/70 max-sm:min-h-[44px]"
                 >
                   {isLoading ? '⏳' : '▶'} Run <span className="hidden sm:inline">(Ctrl+Enter)</span>
                 </button>
@@ -1084,10 +1092,10 @@ useEffect(() => {
                   <button
                     onClick={() => setShowSubmitConfirm(true)}
                     disabled={isLoading || hasSubmitted}
-                    className={`px-4 py-1.5 rounded-md text-xs font-bold transition flex items-center gap-1.5 ${
+                    className={`px-4 py-1.5 rounded-md text-[11px] font-bold uppercase tracking-[0.14em] transition flex items-center gap-1.5 max-sm:min-h-[44px] ${
                       hasSubmitted
-                        ? 'bg-slate-700 text-slate-500 cursor-not-allowed border border-slate-600'
-                        : 'bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 text-white shadow-lg shadow-green-600/20 border border-green-500/50'
+                        ? 'bg-[#0b1224] text-emerald-300 cursor-not-allowed border border-amber-300/40'
+                        : 'bg-gradient-to-b from-[#f6dc92] via-[#e0b84f] to-[#b8862b] text-[#2a1a05] border border-amber-200/70 shadow-[0_4px_16px_-4px_rgba(224,184,79,0.55)] hover:brightness-110'
                     }`}
                   >
                     {isLoading ? '⏳' : '⚔️'} {hasSubmitted
@@ -1146,7 +1154,7 @@ useEffect(() => {
                     </div>
                     {output.status === 'accepted' && (
                       <div className="ml-auto text-right">
-                        <p className="text-yellow-400 font-bold text-lg">+{xpGained} XP</p>
+                        <p className="font-cinzel text-amber-300 font-bold text-xl">+{xpGained} XP</p>
                         {combo > 1 && <p className="text-orange-400 text-xs">🔥 {combo}x Combo!</p>}
                       </div>
                     )}
