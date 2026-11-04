@@ -5,6 +5,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '../../../api/client'
+import QuestButton from './QuestButton'
 import SectionTitle from './SectionTitle'
 
 const MAX_ROWS = 3
@@ -101,13 +102,11 @@ export default function BountyPreview({ onSelectQuest, onBrowseBoard, onBrowseCo
                     {due && <span className="px-2.5 py-0.5 rounded-full border border-slate-700 text-slate-300">{due}</span>}
                   </div>
                 </div>
-                <button
+                <QuestButton
                   onClick={() => onSelectQuest && onSelectQuest(quest, group)}
-                  aria-label={`Take quest: ${quest.title}`}
-                  className="shrink-0 w-full sm:w-auto px-5 py-2.5 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-sm font-bold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-300"
-                >
-                  Take Quest
-                </button>
+                  ariaLabel={`Take quest: ${quest.title}`}
+                  className="shrink-0 w-full sm:w-auto"
+                />
               </li>
             )
           })}

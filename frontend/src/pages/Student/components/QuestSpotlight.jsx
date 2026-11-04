@@ -8,6 +8,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '../../../api/client'
+import QuestButton from './QuestButton'
 import bannerArt from '../../../assets/landing/dashboard-spotlight-banner.webp'
 
 const LANG_LABEL = { python: 'Python', java: 'Java', csharp: 'C#' }
@@ -143,16 +144,14 @@ export default function QuestSpotlight({ onSelectQuest, onBrowse }) {
         ))}
       </ul>
       <div className="flex flex-col sm:flex-row gap-3">
-        <button
+        <QuestButton
           onClick={() => onSelectQuest && onSelectQuest(quest, group)}
-          aria-label={`Take quest: ${quest.title}`}
-          className="w-full sm:w-auto px-7 py-3 rounded-lg bg-violet-600 hover:bg-violet-500 text-white font-bold text-sm tracking-wide shadow-lg shadow-violet-700/30 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-300 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
-        >
-          Take Quest
-        </button>
+          ariaLabel={`Take quest: ${quest.title}`}
+          className="w-full sm:w-auto"
+        />
         <button
           onClick={onBrowse}
-          className="w-full sm:w-auto px-6 py-3 rounded-lg border border-amber-300/30 bg-slate-950/40 hover:bg-slate-900/70 text-slate-100 font-bold text-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-300"
+          className="w-full sm:w-auto px-6 py-3 rounded-lg border border-amber-300/40 bg-slate-950/50 hover:bg-slate-900/70 hover:border-amber-300/70 text-amber-100 font-cinzel font-bold text-sm uppercase tracking-[0.14em] transition focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-300"
         >
           Bounty Board
         </button>
