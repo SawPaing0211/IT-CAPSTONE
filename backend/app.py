@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 from functools import wraps
 import subprocess, sys, time, csv, json, io, unicodedata, re, base64, secrets, string
 from io import StringIO
-from sqlalchemy import text, inspect, distinct
+from sqlalchemy import text, inspect, distinct, func
 from sqlalchemy.exc import IntegrityError, OperationalError
 import logging
 import uuid as _uuid
@@ -267,6 +267,9 @@ class Problem(db.Model):
     prerequisites = db.Column(db.JSON, default=[])
     estimated_time = db.Column(db.String(50))
     partial_credit = db.Column(db.Integer, default=100)
+    # multi-language quests: 'optional' = student answers 1..n of the ticked languages (extra languages earn bonus XP),
+    # 'required' = every ticked language must be submitted. Ignored when only one language is ticked.
+    language_rule = db.Column(db.String(10), nullable=False, default='optional', server_default='optional')
     auto_grade = db.Column(db.Boolean, default=True)
     plagiarism_threshold = db.Column(db.Float, default=0.85)
     due_date = db.Column(db.DateTime, nullable=True)  # for quest deadlines
@@ -300,17 +303,19 @@ class Submission(db.Model):
 
 class SubmissionSlot(db.Model):
     """
-    Reservation of the single graded attempt for (student, problem).
-    UNIQUE(user_id, problem_id) is what makes simultaneous requests safe.
+    Reservation of the single graded attempt for (student, problem, language).
+    UNIQUE(user_id, problem_id, language) is what makes simultaneous requests safe.
+    `language` is NULL on rows made before multi-language quests existed.
     status: pending (being graded) | done (graded, result saved) | failed (runner broke; retry allowed)
     """
     __tablename__ = 'submission_slots'
     __table_args__ = (
-        db.UniqueConstraint('user_id', 'problem_id', name='uq_submission_slot_user_problem'),
+        db.UniqueConstraint('user_id', 'problem_id', 'language', name='uq_submission_slot_user_problem_lang'),
     )
     id          = db.Column(db.Integer, primary_key=True)
     user_id     = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     problem_id  = db.Column(db.Integer, db.ForeignKey('problems.id'), nullable=False)
+    language    = db.Column(db.String(10), nullable=True)
     status      = db.Column(db.String(10), nullable=False, default='pending')
     claimed_at  = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     finished_at = db.Column(db.DateTime, nullable=True)
@@ -1425,6 +1430,7 @@ def create_problem():
         prerequisites=data.get('prerequisites', []),
         estimated_time=data.get('estimated_time'),
         partial_credit=data.get('partial_credit', 100),
+        language_rule=('required' if data.get('language_rule') == 'required' else 'optional'),
         auto_grade=data.get('auto_grade', True),
         plagiarism_threshold=data.get('plagiarism_threshold', 0.85)
     )
@@ -1520,6 +1526,7 @@ def serialize_problem_for_viewer(p, user):
         "tags": p.tags or [], "starter_code": starter,
         "test_cases": sanitize_test_cases_for_student(p.test_cases),
         "estimated_time": p.estimated_time, "partial_credit": p.partial_credit,
+        "language_rule": p.language_rule or 'optional',
         "auto_grade": p.auto_grade,
         "due_date": p.due_date.isoformat() if p.due_date else None,
         "instructor_name": instructor_name, "section_names": section_names,
@@ -1647,6 +1654,8 @@ def update_problem(problem_id):
     problem.prerequisites = data.get('prerequisites', problem.prerequisites)
     problem.estimated_time = data.get('estimated_time', problem.estimated_time)
     problem.partial_credit = data.get('partial_credit', problem.partial_credit)
+    if data.get('language_rule') in ('required', 'optional'):
+        problem.language_rule = data['language_rule']
     problem.auto_grade = data.get('auto_grade', problem.auto_grade)
     problem.plagiarism_threshold = data.get('plagiarism_threshold', problem.plagiarism_threshold)
 
@@ -2127,6 +2136,8 @@ def reveal_hint(problem_id, hint_index):
 # own timeout, ...) consumes the single graded attempt. A slot left "pending"
 # by a crash becomes claimable again after PENDING_SLOT_STALE_SECONDS.
 PENDING_SLOT_STALE_SECONDS = 15 * 60
+# optional multi-language quests: each extra language adds this share of the quest's XP
+LANGUAGE_BONUS_PCT = 0.25
 
 
 class SubmissionConflict(Exception):
@@ -2137,7 +2148,7 @@ class SubmissionConflict(Exception):
         self.existing = existing
 
 
-def claim_submission_slot(user_id, problem_id):
+def claim_submission_slot(user_id, problem_id, language):
     """
     Reserve the one graded attempt (short transaction, committed before running).
     Raises SubmissionConflict if it is taken. The UNIQUE key makes two
@@ -2145,16 +2156,16 @@ def claim_submission_slot(user_id, problem_id):
     stale slot) can succeed.
     """
     # a legitimately graded submission from before slots existed
-    prior = Submission.query.filter_by(user_id=user_id, problem_id=problem_id).first()
+    prior = Submission.query.filter_by(user_id=user_id, problem_id=problem_id, language=language).first()
     if prior:
-        raise SubmissionConflict("You have already submitted this problem. Use Run to test your code.", prior)
+        raise SubmissionConflict(f"You have already submitted this problem in {language}. Use Run to test your code.", prior)
 
     now = datetime.utcnow()
     token = str(_uuid.uuid4())
     stale_before = now - timedelta(seconds=PENDING_SLOT_STALE_SECONDS)
-    slot = SubmissionSlot.query.filter_by(user_id=user_id, problem_id=problem_id).first()
+    slot = SubmissionSlot.query.filter_by(user_id=user_id, problem_id=problem_id, language=language).first()
     if slot is None:
-        db.session.add(SubmissionSlot(user_id=user_id, problem_id=problem_id,
+        db.session.add(SubmissionSlot(user_id=user_id, problem_id=problem_id, language=language,
                                       status='pending', claimed_at=now, owner_token=token))
         try:
             db.session.commit()
@@ -2163,7 +2174,7 @@ def claim_submission_slot(user_id, problem_id):
             raise SubmissionConflict("Your submission for this problem is already being processed.")
         return token
     if slot.status == 'done':
-        raise SubmissionConflict("You have already submitted this problem. Use Run to test your code.")
+        raise SubmissionConflict(f"You have already submitted this problem in {language}. Use Run to test your code.")
     # 'failed' (runner broke last time) or a 'pending' slot abandoned by a crash:
     # take it over with a single conditional UPDATE so only one request wins
     won = SubmissionSlot.query.filter(
@@ -2178,10 +2189,10 @@ def claim_submission_slot(user_id, problem_id):
     return token
 
 
-def release_submission_slot(user_id, problem_id, error_text, token=None):
+def release_submission_slot(user_id, problem_id, error_text, token=None, language=None):
     """The runner failed: free the attempt so the student can try again."""
     try:
-        q = SubmissionSlot.query.filter_by(user_id=user_id, problem_id=problem_id, status='pending')
+        q = SubmissionSlot.query.filter_by(user_id=user_id, problem_id=problem_id, language=language, status='pending')
         if token is not None:
             q = q.filter_by(owner_token=token)       # only the current owner may release
         q.update(
@@ -2229,9 +2240,20 @@ def create_submission():
     partial_pc = prob.partial_credit or 100
     hints      = list(prob.hints or [])
     code, language = data['code'], data['language']
+    allowed_langs = [l for l in (prob.languages or ['python'])]
+    if language not in allowed_langs:
+        return jsonify({"error": "Language not allowed",
+                        "message": f"This quest accepts: {', '.join(allowed_langs)}."}), 400
+    multi_lang = len(allowed_langs) > 1
+    lang_rule  = prob.language_rule or 'optional'
+    # Required multi-language quest: the quest's XP is shared evenly between the ticked languages,
+    # so clearing all of them earns the quest's normal XP.
+    if multi_lang and lang_rule == 'required':
+        _share, _rest = divmod(xp_reward, len(allowed_langs))
+        xp_reward = _share + (_rest if language == allowed_langs[0] else 0)
 
     try:
-        slot_token = claim_submission_slot(user_id, problem_id)
+        slot_token = claim_submission_slot(user_id, problem_id, language)
     except SubmissionConflict as c:
         body = {"error": "Already submitted", "message": c.message}
         if c.existing is not None:
@@ -2246,7 +2268,7 @@ def create_submission():
         results = evaluate_code(code, test_cases, language, raise_on_infra=True)
     except ExecutionInfrastructureError as e:
         logger.error("grading runner failure (user=%s problem=%s): %s", user_id, problem_id, e)
-        release_submission_slot(user_id, problem_id, str(e), slot_token)
+        release_submission_slot(user_id, problem_id, str(e), slot_token, language)
         return jsonify({
             "error": "The code runner is temporarily unavailable.",
             "message": "Your attempt was not counted. Please try again in a moment.",
@@ -2254,7 +2276,7 @@ def create_submission():
         }), 503
     except Exception as e:
         logger.exception("unexpected grading failure (user=%s problem=%s)", user_id, problem_id)
-        release_submission_slot(user_id, problem_id, str(e), slot_token)
+        release_submission_slot(user_id, problem_id, str(e), slot_token, language)
         return jsonify({
             "error": "Grading could not be completed.",
             "message": "Your attempt was not counted. Please try again in a moment.",
@@ -2284,15 +2306,25 @@ def create_submission():
     # ── write the result and the XP in ONE short transaction ──────────────
     try:
         # each hint's xp_penalty is subtracted once per revealed hint, floored at 0
-        hint_penalty = 0
-        for r in HintReveal.query.filter_by(user_id=user_id, problem_id=problem_id).all():
-            if 0 <= r.hint_index < len(hints):
-                hint_penalty += hints[r.hint_index].get('xp_penalty', 0)
-        score = max(0, score - hint_penalty)
+        # Optional multi-language quest: the first language earns the normal result; every further
+        # language earns a bonus of LANGUAGE_BONUS_PCT of the quest XP, scaled by the tests it passed
+        # (and partial credit). Hint penalties are charged once, on the first language only.
+        other_langs_done = Submission.query.filter(
+            Submission.user_id == user_id, Submission.problem_id == problem_id,
+            Submission.language != language).count()
+        is_bonus_language = multi_lang and lang_rule == 'optional' and other_langs_done >= 1
+        if is_bonus_language:
+            score = int(xp_reward * LANGUAGE_BONUS_PCT * (passed / total) * (partial_pc / 100.0)) if total else 0
+        else:
+            hint_penalty = 0
+            for r in HintReveal.query.filter_by(user_id=user_id, problem_id=problem_id).all():
+                if 0 <= r.hint_index < len(hints):
+                    hint_penalty += hints[r.hint_index].get('xp_penalty', 0)
+            score = max(0, score - hint_penalty)
 
         # XP only for improvement over an earlier graded result (none exist under
         # the current one-attempt policy, kept for submissions from older versions)
-        best_prev = (Submission.query.filter_by(user_id=user_id, problem_id=problem_id)
+        best_prev = (Submission.query.filter_by(user_id=user_id, problem_id=problem_id, language=language)
                      .order_by(Submission.score.desc()).first())
         xp_delta = max(0, score - (best_prev.score if best_prev else 0))
 
@@ -2311,7 +2343,7 @@ def create_submission():
                     User.query.filter_by(id=user_id).update(
                         {User.level: 1 + (User.xp // 100)}, synchronize_session=False)
                 slot_done = SubmissionSlot.query.filter_by(
-                    user_id=user_id, problem_id=problem_id, status='pending', owner_token=slot_token
+                    user_id=user_id, problem_id=problem_id, language=language, status='pending', owner_token=slot_token
                 ).update({'status': 'done', 'finished_at': datetime.utcnow()}, synchronize_session=False)
                 if slot_done != 1:
                     # someone else took over a slot we held too long: do not grade twice
@@ -2335,7 +2367,7 @@ def create_submission():
         db.session.rollback()
         logger.exception("could not save the result (user=%s problem=%s)", user_id, problem_id)
         # nothing was written; free the attempt so the student is not penalised
-        release_submission_slot(user_id, problem_id, 'result could not be saved', slot_token)
+        release_submission_slot(user_id, problem_id, 'result could not be saved', slot_token, language)
         return jsonify({
             "error": "Your result could not be saved.",
             "message": "Your attempt was not counted. Please try again in a moment.",
@@ -2353,8 +2385,13 @@ def create_submission():
         "test_results":  results,
         "user_xp":       user.xp,
         "user_level":    user.level,
+        "language":      language,
+        "language_rule": lang_rule if multi_lang else None,
+        "bonus_language": bool(is_bonus_language),
+        "languages_done": sorted({r.language for r in Submission.query.filter_by(user_id=user_id, problem_id=problem_id).all()}),
         "scoring_note": (
-            f"All {total} test cases passed. Full XP awarded." if status == 'accepted'
+            f"Language bonus: {passed}/{total} test cases passed in {language}. {score} bonus XP awarded." if is_bonus_language
+            else f"All {total} test cases passed. Full XP awarded." if status == 'accepted'
             else f"{passed}/{total} test cases passed. {score} XP awarded." if status == 'partial'
             else f"Participation credit awarded: {score} XP."
         )
@@ -2363,29 +2400,68 @@ def create_submission():
 @app.route('/api/problems/<int:problem_id>/my-submission', methods=['GET'])
 @jwt_required()
 def get_my_submission(problem_id):
-    """Check if current student has already submitted this problem"""
+    """This student's graded submissions for a quest, one per language."""
     user_id = int(get_jwt_identity())
     user = User.query.get(user_id)
     if user.role != 'student':
         return jsonify({"has_submitted": False}), 200
 
-    sub = Submission.query.filter_by(
-        user_id=user_id,
-        problem_id=problem_id
-    ).order_by(Submission.submitted_at.desc()).first()
+    subs = Submission.query.filter_by(user_id=user_id, problem_id=problem_id) \
+        .order_by(Submission.submitted_at.desc()).all()
+    prob = db.session.get(Problem, problem_id)
+    allowed = (prob.languages or ['python']) if prob else ['python']
+    rule = (prob.language_rule or 'optional') if prob and len(allowed) > 1 else None
 
-    if not sub:
-        return jsonify({"has_submitted": False}), 200
+    if not subs:
+        return jsonify({"has_submitted": False, "submissions": [], "languages_done": [],
+                        "language_rule": rule, "quest_complete": False}), 200
 
+    done = {}
+    for sub in subs:                     # newest first: keep the latest per language
+        done.setdefault(sub.language, sub)
+    if rule == 'required':
+        complete = all(l in done for l in allowed)
+    else:
+        complete = True
+    latest = subs[0]
     return jsonify({
+        # kept for older clients: the most recent submission
         "has_submitted": True,
-        "status": sub.status,
-        "score": sub.score,
-        "passed_cases": sub.passed_cases,
-        "total_cases": sub.total_cases,
-        "submitted_at": sub.submitted_at.isoformat(),
-        "language": sub.language
+        "status": latest.status,
+        "score": latest.score,
+        "passed_cases": latest.passed_cases,
+        "total_cases": latest.total_cases,
+        "submitted_at": latest.submitted_at.isoformat(),
+        "language": latest.language,
+        # per-language state
+        "language_rule": rule,
+        "languages_done": sorted(done.keys()),
+        "quest_complete": complete,
+        "xp_total": sum(x.score or 0 for x in done.values()),
+        "submissions": [{
+            "language": x.language, "status": x.status, "score": x.score,
+            "passed_cases": x.passed_cases, "total_cases": x.total_cases,
+            "submitted_at": x.submitted_at.isoformat(),
+        } for x in done.values()],
     }), 200
+
+@app.route('/api/student/quest-progress', methods=['GET'])
+@jwt_required()
+def my_quest_progress():
+    """Per quest: which languages this student has submitted (read only; used for the quest cards)."""
+    user_id = int(get_jwt_identity())
+    user = db.session.get(User, user_id)
+    if not user or user.role != 'student':
+        return jsonify({}), 200
+    out = {}
+    for sub in Submission.query.filter_by(user_id=user_id).all():
+        e = out.setdefault(str(sub.problem_id), {"languages_done": [], "xp": 0, "accepted": False})
+        if sub.language not in e["languages_done"]:
+            e["languages_done"].append(sub.language)
+        e["xp"] += sub.score or 0
+        e["accepted"] = e["accepted"] or sub.status == 'accepted'
+    return jsonify(out), 200
+
 
 @app.route('/api/problems/<int:problem_id>/draft', methods=['GET'])
 @jwt_required()
@@ -2613,12 +2689,15 @@ def get_student_stats():
         subs = Submission.query.join(Problem)\
             .filter(Submission.user_id == user.id, Problem.subject_id == subject_id).all()
         accepted = len([s for s in subs if s.status == 'accepted'])
+        quests_done = len({s.problem_id for s in subs if s.status == 'accepted'})
         streak = calculate_streak(subs)
 
+        # best score per quest AND language: each language is graded once, and its XP is its own
         best_by_problem = {}
         for s in subs:
-            if s.problem_id not in best_by_problem or s.score > best_by_problem[s.problem_id]:
-                best_by_problem[s.problem_id] = s.score
+            k = (s.problem_id, s.language)
+            if k not in best_by_problem or s.score > best_by_problem[k]:
+                best_by_problem[k] = s.score
         subject_xp = sum(best_by_problem.values())
 
         return jsonify({
@@ -2626,6 +2705,7 @@ def get_student_stats():
             "level": 1 + (subject_xp // 100),
             "total_submissions": len(subs),
             "accepted_submissions": accepted,
+            "quests_done": quests_done,
             "success_rate": round((accepted/len(subs)*100), 1) if subs else 0.0,
             "streak": streak,
             "last_submission": subs[0].submitted_at.isoformat() if subs else None,
@@ -2634,6 +2714,7 @@ def get_student_stats():
 
     subs = Submission.query.filter_by(user_id=user.id).all()
     accepted = len([s for s in subs if s.status == 'accepted'])
+    quests_done = len({s.problem_id for s in subs if s.status == 'accepted'})
     streak = calculate_streak(subs)
 
     return jsonify({
@@ -2641,6 +2722,7 @@ def get_student_stats():
         "level": user.level,
         "total_submissions": len(subs),
         "accepted_submissions": accepted,
+        "quests_done": quests_done,
         "success_rate": round((accepted/len(subs)*100), 1) if subs else 0.0,
         "streak": streak,
         "last_submission": subs[0].submitted_at.isoformat() if subs else None,
@@ -2801,12 +2883,12 @@ def get_student_achievements():
         return jsonify({"error": "Students only"}), 403
 
     # Calculate current user stats for progress tracking
-    total_quests = Submission.query.filter_by(user_id=user_id, status='accepted').count()
+    total_quests = db.session.query(func.count(distinct(Submission.problem_id))).filter(Submission.user_id == user_id, Submission.status == 'accepted').scalar() or 0
     python_quests = Submission.query.filter_by(user_id=user_id, status='accepted', language='python').count()
     java_quests = Submission.query.filter_by(user_id=user_id, status='accepted', language='java').count()
     csharp_quests = Submission.query.filter_by(user_id=user_id, status='accepted', language='csharp').count()
-    hard_quests = Submission.query.filter_by(user_id=user_id, status='accepted').join(Problem).filter(Problem.difficulty == 'Hard').count()
-    debug_quests = Submission.query.filter_by(user_id=user_id, status='accepted').join(Problem).filter(Problem.problem_type == 'debugging').count()
+    hard_quests = db.session.query(func.count(distinct(Submission.problem_id))).join(Problem, Problem.id == Submission.problem_id).filter(Submission.user_id == user_id, Submission.status == 'accepted', Problem.difficulty == 'Hard').scalar() or 0
+    debug_quests = db.session.query(func.count(distinct(Submission.problem_id))).join(Problem, Problem.id == Submission.problem_id).filter(Submission.user_id == user_id, Submission.status == 'accepted', Problem.problem_type == 'debugging').scalar() or 0
 
     # need EVERY submission here (not just accepted ones) to work out
     # the real day-streak below — same rule /api/student/stats uses
@@ -3179,6 +3261,7 @@ def get_instructor_problem_detail(problem_id):
         "prerequisites": problem.prerequisites,
         "estimated_time": problem.estimated_time,
         "partial_credit": problem.partial_credit,
+        "language_rule": problem.language_rule or 'optional',
         "auto_grade": problem.auto_grade,
         "plagiarism_threshold": problem.plagiarism_threshold,
         "due_date": problem.due_date.isoformat() if problem.due_date else None,
@@ -3325,7 +3408,7 @@ def get_class_analytics(class_id):
         "id": s.id, "username": s.username,
         "full_name": s.full_name or s.username,
         "xp": s.xp, "level": s.level,
-        "solved": Submission.query.filter_by(user_id=s.id, status='accepted').count(),
+        "solved": db.session.query(func.count(distinct(Submission.problem_id))).filter(Submission.user_id == s.id, Submission.status == 'accepted').scalar() or 0,
     } for s in top_students]
 
     all_students = User.query.filter(User.id.in_(student_ids)).all()
@@ -3719,9 +3802,16 @@ def get_problem_submissions(problem_id):
         enrolled_student_ids = [r[0] for r in rows]
 
     sub_map = {}
+    lang_map = {}          # user -> {language: newest submission}: one graded submission per language
     for s in submissions:
         if s.user_id not in sub_map:
             sub_map[s.user_id] = s
+        lang_map.setdefault(s.user_id, {}).setdefault(s.language, s)
+
+    def per_language(uid):
+        rows = sorted(lang_map.get(uid, {}).values(), key=lambda x: x.submitted_at)
+        return [{"submission_id": x.id, "language": x.language, "status": x.status, "score": x.score,
+                 "submitted_at": x.submitted_at.isoformat()} for x in rows]
 
     result_students = []
     for student_id in enrolled_student_ids:
@@ -3735,7 +3825,10 @@ def get_problem_submissions(problem_id):
             "full_name": student.full_name or student.username,
             "email": student.email,
             "submitted": sub is not None,
-            "score": sub.score if sub else 0,
+            # score = total over every language the student submitted; the newest one stays in
+            # status/language/submission_id for older clients
+            "score": sum(r["score"] or 0 for r in per_language(student.id)) if sub else 0,
+            "submissions": per_language(student.id),
             "status": sub.status if sub else "Not Submitted",
             "submitted_at": sub.submitted_at.isoformat() if sub else None,
             "submission_id": sub.id if sub else None,
@@ -3752,7 +3845,8 @@ def get_problem_submissions(problem_id):
                     "full_name": student.full_name or student.username,
                     "email": student.email,
                     "submitted": True,
-                    "score": sub.score,
+                    "score": sum(r["score"] or 0 for r in per_language(student_id)),
+                    "submissions": per_language(student_id),
                     "status": sub.status,
                     "submitted_at": sub.submitted_at.isoformat(),
                     "submission_id": sub.id,
@@ -7091,6 +7185,19 @@ def apply_schema_and_seed():
         except Exception as e:
             print(f"⚠️ Submission_slots migration check skipped: {e}")
 
+        # one graded attempt PER LANGUAGE: add the language column, then swap the unique key
+        # (new key first, old key second, so the user_id foreign key always has an index)
+        try:
+            _slot_cols = [col['name'] for col in inspect(db.engine).get_columns('submission_slots')]
+            if 'language' not in _slot_cols:
+                with db.engine.connect() as conn:
+                    conn.execute(text("ALTER TABLE submission_slots ADD COLUMN language VARCHAR(10) NULL"))
+                    conn.commit()
+                    print("✅ Added column 'language' to submission_slots table")
+            ensure_slot_language_unique()
+        except Exception as e:
+            print(f"⚠️ Submission_slots language migration skipped: {e}")
+
         # Auto-migration for Problem table
         try:
             inspector = inspect(db.engine)
@@ -7112,6 +7219,7 @@ def apply_schema_and_seed():
             add_col_if_missing('prerequisites', "JSON DEFAULT ('[]')")
             add_col_if_missing('estimated_time', "VARCHAR(50)")
             add_col_if_missing('partial_credit', "INTEGER DEFAULT 100")
+            add_col_if_missing('language_rule', "VARCHAR(10) NOT NULL DEFAULT 'optional'")
             add_col_if_missing('auto_grade', "BOOLEAN DEFAULT 1")
             add_col_if_missing('plagiarism_threshold', "FLOAT DEFAULT 0.85")
             add_col_if_missing('due_date', "DATETIME DEFAULT NULL")
@@ -7132,6 +7240,36 @@ def apply_schema_and_seed():
 
 
 AWARD_PAIR = ('user_id', 'achievement_id')
+
+
+SLOT_OLD_UNIQUE = 'uq_submission_slot_user_problem'
+SLOT_NEW_UNIQUE = 'uq_submission_slot_user_problem_lang'
+
+
+def _slot_unique_names(insp):
+    names = {u['name'] for u in insp.get_unique_constraints('submission_slots')}
+    names |= {i['name'] for i in insp.get_indexes('submission_slots') if i.get('unique')}
+    return names
+
+
+def slot_language_unique_present(insp):
+    """True when the per-language unique key exists and the old one-per-quest key is gone."""
+    names = _slot_unique_names(insp)
+    # sqlite cannot drop a table-level unique key in place; only MySQL (the real database) is held to this
+    return SLOT_NEW_UNIQUE in names and (SLOT_OLD_UNIQUE not in names or db.engine.dialect.name != 'mysql')
+
+
+def ensure_slot_language_unique():
+    """Part of the EXPLICIT upgrade. Only touches submission_slots keys; no row is changed or deleted."""
+    insp = inspect(db.engine)
+    names = _slot_unique_names(insp)
+    with db.engine.connect() as conn:
+        if SLOT_NEW_UNIQUE not in names:
+            conn.execute(text(f"CREATE UNIQUE INDEX {SLOT_NEW_UNIQUE} ON submission_slots (user_id, problem_id, language)"))
+        if SLOT_OLD_UNIQUE in names and db.engine.dialect.name == 'mysql':
+            conn.execute(text(f"ALTER TABLE submission_slots DROP INDEX {SLOT_OLD_UNIQUE}"))
+        conn.commit()
+    print("✅ submission_slots: UNIQUE(user_id, problem_id, language) in place")
 
 
 def award_pair_unique_present(insp):
@@ -7208,6 +7346,8 @@ def schema_status():
             lacking = [c.name for c in table.columns if c.name not in have]
             if lacking:
                 missing_columns[name] = lacking
+        if 'submission_slots' in existing and not slot_language_unique_present(insp):
+            missing_constraints['submission_slots'] = ['UNIQUE(user_id, problem_id, language)']
         if 'user_achievements' in existing and not award_pair_unique_present(insp):
             missing_constraints['user_achievements'] = ['UNIQUE(user_id, achievement_id)']
     return {"up_to_date": not missing_tables and not missing_columns and not missing_constraints,

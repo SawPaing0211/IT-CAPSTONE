@@ -143,27 +143,27 @@ def test_late_worker_cannot_finalize_after_takeover(world, monkeypatch):
 
 def test_late_worker_cannot_release_the_new_owners_reservation(world):
     with A.app.app_context():
-        t1 = A.claim_submission_slot(world['uid'], world['pid'])
+        t1 = A.claim_submission_slot(world['uid'], world['pid'], 'python')
         A.SubmissionSlot.query.filter_by(user_id=world['uid']).update(
             {'claimed_at': datetime.utcnow() - timedelta(seconds=A.PENDING_SLOT_STALE_SECONDS + 5)})
         A.db.session.commit()
-        t2 = A.claim_submission_slot(world['uid'], world['pid'])
+        t2 = A.claim_submission_slot(world['uid'], world['pid'], 'python')
         assert t1 != t2
-        A.release_submission_slot(world['uid'], world['pid'], 'late failure', t1)      # ignored
+        A.release_submission_slot(world['uid'], world['pid'], 'late failure', t1, 'python')      # ignored
         assert A.SubmissionSlot.query.filter_by(user_id=world['uid']).first().status == 'pending'
-        A.release_submission_slot(world['uid'], world['pid'], 'real failure', t2)
+        A.release_submission_slot(world['uid'], world['pid'], 'real failure', t2, 'python')
         assert A.SubmissionSlot.query.filter_by(user_id=world['uid']).first().status == 'failed'
 
 
 def test_fresh_pending_slot_is_not_claimable_and_expired_one_is(world):
     with A.app.app_context():
-        A.claim_submission_slot(world['uid'], world['pid'])
+        A.claim_submission_slot(world['uid'], world['pid'], 'python')
         with pytest.raises(A.SubmissionConflict):
-            A.claim_submission_slot(world['uid'], world['pid'])
+            A.claim_submission_slot(world['uid'], world['pid'], 'python')
         A.SubmissionSlot.query.filter_by(user_id=world['uid']).update(
             {'claimed_at': datetime.utcnow() - timedelta(seconds=A.PENDING_SLOT_STALE_SECONDS + 5)})
         A.db.session.commit()
-        assert A.claim_submission_slot(world['uid'], world['pid'])
+        assert A.claim_submission_slot(world['uid'], world['pid'], 'python')
 
 
 # ── drafts ──────────────────────────────────────────────────────────────────

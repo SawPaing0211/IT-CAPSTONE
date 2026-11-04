@@ -176,7 +176,7 @@ def test_stale_pending_slot_can_be_taken_over_but_fresh_one_cannot(world, monkey
     monkeypatch.setattr(A, 'evaluate_code', _ok)
     pid = world['pids'][0]
     with A.app.app_context():
-        A.db.session.add(A.SubmissionSlot(user_id=world['uid'], problem_id=pid, status='pending',
+        A.db.session.add(A.SubmissionSlot(user_id=world['uid'], problem_id=pid, language='python', status='pending',
                                           claimed_at=datetime.utcnow()))
         A.db.session.commit()
     assert _post(world).status_code == 409           # someone is grading right now
@@ -190,9 +190,9 @@ def test_stale_pending_slot_can_be_taken_over_but_fresh_one_cannot(world, monkey
 def test_unique_key_rejects_a_second_slot_for_the_same_attempt(world):
     from sqlalchemy.exc import IntegrityError
     with A.app.app_context():
-        A.db.session.add(A.SubmissionSlot(user_id=world['uid'], problem_id=world['pids'][0], status='pending'))
+        A.db.session.add(A.SubmissionSlot(user_id=world['uid'], problem_id=world['pids'][0], language='python', status='pending'))
         A.db.session.commit()
-        A.db.session.add(A.SubmissionSlot(user_id=world['uid'], problem_id=world['pids'][0], status='pending'))
+        A.db.session.add(A.SubmissionSlot(user_id=world['uid'], problem_id=world['pids'][0], language='python', status='pending'))
         with pytest.raises(IntegrityError):
             A.db.session.commit()
         A.db.session.rollback()
@@ -223,3 +223,119 @@ def test_unfinished_attempts_never_reach_scores_analytics_or_plagiarism(world, m
         # failed and pending attempts live only in submission_slots
         assert A.Submission.query.filter_by(user_id=world['uid']).count() == 0
         assert A.db.session.get(A.User, world['uid']).xp == 0
+
+
+# ---- multi-language quests: one graded attempt PER LANGUAGE ----------------------------------
+
+def _multi(w, rule, langs=('python', 'java', 'csharp'), pid=None):
+    pid = pid or w['pids'][1]
+    with A.app.app_context():
+        p = A.db.session.get(A.Problem, pid)
+        p.languages = list(langs)
+        p.language_rule = rule
+        A.db.session.commit()
+    return pid
+
+
+def _post_lang(w, pid, lang):
+    return w['c'].post('/api/submissions', headers=w['h'],
+                       json={'problem_id': pid, 'code': 'x', 'language': lang})
+
+
+def test_each_language_locks_on_its_own(world, monkeypatch):
+    monkeypatch.setattr(A, 'evaluate_code', _ok)
+    pid = _multi(world, 'optional')
+    assert _post_lang(world, pid, 'python').status_code == 201
+    assert _post_lang(world, pid, 'python').status_code == 409       # same language is locked
+    assert _post_lang(world, pid, 'java').status_code == 201         # another language is still open
+
+
+def test_optional_bonus_is_25_percent_per_extra_language(world, monkeypatch):
+    monkeypatch.setattr(A, 'evaluate_code', _ok)
+    pid = _multi(world, 'optional')
+    scores = [_post_lang(world, pid, l).get_json()['xp_earned'] for l in ('python', 'java', 'csharp')]
+    assert scores == [100, 25, 25]                                    # 100 / 125 / 150 in total
+    with A.app.app_context():
+        assert A.db.session.get(A.User, world['uid']).xp == 150
+
+
+def test_required_splits_the_quest_xp_between_languages(world, monkeypatch):
+    monkeypatch.setattr(A, 'evaluate_code', _ok)
+    pid = _multi(world, 'required', langs=('python', 'java'))
+    assert [_post_lang(world, pid, l).get_json()['xp_earned'] for l in ('python', 'java')] == [50, 50]
+    r = world['c'].get(f'/api/problems/{pid}/my-submission', headers=world['h']).get_json()
+    assert r['quest_complete'] is True and r['languages_done'] == ['java', 'python']
+
+
+def test_required_not_complete_until_every_language_is_in(world, monkeypatch):
+    monkeypatch.setattr(A, 'evaluate_code', _ok)
+    pid = _multi(world, 'required', langs=('python', 'java'))
+    _post_lang(world, pid, 'python')
+    r = world['c'].get(f'/api/problems/{pid}/my-submission', headers=world['h']).get_json()
+    assert r['quest_complete'] is False and r['language_rule'] == 'required'
+
+
+def test_language_not_ticked_is_refused(world, monkeypatch):
+    monkeypatch.setattr(A, 'evaluate_code', _ok)
+    r = _post_lang(world, world['pids'][2], 'java')                  # this quest only allows python
+    assert r.status_code == 400
+
+
+def test_quest_progress_lists_the_languages_a_student_submitted(world, monkeypatch):
+    monkeypatch.setattr(A, 'evaluate_code', _ok)
+    pid = _multi(world, 'optional')
+    assert world['c'].get('/api/student/quest-progress', headers=world['h']).get_json().get(str(pid)) is None
+    _post_lang(world, pid, 'python')
+    _post_lang(world, pid, 'java')
+    got = world['c'].get('/api/student/quest-progress', headers=world['h']).get_json()[str(pid)]
+    assert sorted(got['languages_done']) == ['java', 'python'] and got['accepted'] is True
+    assert _post_lang(world, pid, 'java').status_code == 409          # a second Java submit stays locked
+
+
+def test_instructor_list_shows_every_language_a_student_submitted(world, monkeypatch):
+    monkeypatch.setattr(A, 'evaluate_code', _ok)
+    pid = _multi(world, 'optional')
+    _post_lang(world, pid, 'python')
+    _post_lang(world, pid, 'java')
+    with A.app.app_context():
+        ins = A.db.session.get(A.Problem, pid).created_by
+        ih = {'Authorization': f'Bearer {A.create_access_token(identity=str(ins)) if hasattr(A, "create_access_token") else create_access_token(identity=str(ins))}'}
+    r = world['c'].get(f'/api/instructor/problems/{pid}/submissions', headers=ih)
+    assert r.status_code == 200
+    row = [s for s in r.get_json()['students'] if s['id'] == world['uid']][0]
+    assert sorted(x['language'] for x in row['submissions']) == ['java', 'python']
+    assert row['score'] == 125
+
+
+def test_required_split_gives_leftover_points_to_first_language(world, monkeypatch):
+    monkeypatch.setattr(A, 'evaluate_code', _ok)
+    pid = _multi(world, 'required', langs=('python', 'java', 'csharp'))
+    with A.app.app_context():
+        total = A.db.session.get(A.Problem, pid).xp_reward
+    got = [_post_lang(world, pid, l).get_json()['xp_earned'] for l in ('python', 'java', 'csharp')]
+    assert sum(got) == total
+
+
+def test_achievement_counts_count_each_quest_once(world, monkeypatch):
+    monkeypatch.setattr(A, 'evaluate_code', _ok)
+    pid = _multi(world, 'optional', langs=('python', 'java'))
+    _post_lang(world, pid, 'python')
+    _post_lang(world, pid, 'java')
+    with A.app.app_context():
+        uid = A.Submission.query.filter_by(problem_id=pid).first().user_id
+        n = A.db.session.query(A.func.count(A.distinct(A.Submission.problem_id))).filter(
+            A.Submission.user_id == uid, A.Submission.status == 'accepted').scalar()
+    assert n == 1
+
+
+def test_stats_count_each_quest_once_and_sum_xp_per_language(world, monkeypatch):
+    monkeypatch.setattr(A, 'evaluate_code', _ok)
+    pid = _multi(world, 'optional', langs=('python', 'java'))
+    _post_lang(world, pid, 'python')
+    _post_lang(world, pid, 'java')
+    g = world['c'].get('/api/student/stats', headers=world['h']).get_json()
+    assert g['accepted_submissions'] == 2 and g['quests_done'] == 1
+    with A.app.app_context():
+        sid = A.db.session.get(A.Problem, pid).subject_id
+    s = world['c'].get(f'/api/student/stats?subject_id={sid}', headers=world['h']).get_json()
+    assert s['quests_done'] == 1 and s['total_xp'] > 100 - 1
