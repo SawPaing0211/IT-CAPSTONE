@@ -1,7 +1,9 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import Editor from '@monaco-editor/react'
 import { api, API_BASE, authFetch } from '../../api/client'
 import DownloadIcon from '../../components/DownloadIcon'
+import QuestResultSummary from './components/QuestResultSummary'
+import submitSeal from '../../assets/results/submit-seal.webp'
 import { achievementStore } from '../../utils/achievementStore'
 
 const LANG_CHIP = {
@@ -9,15 +11,6 @@ const LANG_CHIP = {
   java: 'border-orange-400/60 text-orange-300',
   csharp: 'border-pink-400/55 text-pink-300',
 }
-
-export default function StudentCodeEditor({
-  quest,
-  onVictory,
-  onReturn,
-  heroLevel,
-  onOpenSandbox
-}) {
-  const LANG_LINE_OFFSET = { python: 0, java: 0, csharp: 0 }
 
   // Draft code is cached in localStorage, which is shared by the whole
   // browser -- without the student's own id in the key, whoever coded
@@ -37,6 +30,15 @@ export default function StudentCodeEditor({
     }
     return `forge_code_${uid}_${questId}_${lang}`
   }
+
+export default function StudentCodeEditor({
+  quest,
+  onVictory,
+  onReturn,
+  heroLevel,
+  onOpenSandbox
+}) {
+  const LANG_LINE_OFFSET = { python: 0, java: 0, csharp: 0 }
 
   const [code, setCode] = useState('')
   const [language, setLanguage] = useState('python')
@@ -77,9 +79,10 @@ export default function StudentCodeEditor({
   const [savedCode, setSavedCode] = useState('')
   const [showSuccessAnim, setShowSuccessAnim] = useState(false)
   const [combo, setCombo] = useState(0)
-  const [autoSaveTimer, setAutoSaveTimer] = useState(null)
   const [showResetConfirm, setShowResetConfirm] = useState(false)
   const [showSubmitConfirm, setShowSubmitConfirm] = useState(false)
+  const [draftRecord, setDraftRecord] = useState(null)
+  const draftRequestRef = useRef(0)
   const editorRef = useRef(null)
   const editorContainerRef = useRef(null)
   const monacoRef = useRef(null)
@@ -352,27 +355,32 @@ useEffect(() => {
     loadRevealedHints()
   }, [quest?.id])
 
+  // Report server confirmation, not merely a local write. Late responses from
+  // another quest/language/code snapshot cannot claim this version is saved.
+  const persistDraft = useCallback(async () => {
+    if (!quest?.id || hasSubmitted) return
+    const requestId = ++draftRequestRef.current
+    const record = { questId: quest.id, language, code }
+    setDraftRecord({ ...record, status: 'saving' })
+    try {
+      localStorage.setItem(getStorageKey(quest.id, language), code)
+      await api.put(`/api/problems/${quest.id}/draft`, { code, language })
+      if (requestId === draftRequestRef.current) setDraftRecord({ ...record, status: 'saved' })
+    } catch (err) {
+      console.error('Failed to save draft:', err)
+      if (requestId === draftRequestRef.current) setDraftRecord({ ...record, status: 'failed' })
+    }
+  }, [quest?.id, language, code, hasSubmitted])
+
   // Auto-save every 5 seconds
   useEffect(() => {
-    if (autoSaveTimer) clearTimeout(autoSaveTimer)
     const timer = setTimeout(() => {
       if (quest?.id && code && !hasSubmitted) {
-        localStorage.setItem(getStorageKey(quest.id, language), code)
-        // Also push to the backend so the draft survives a wiped browser,
-        // a crashed machine, or logging in from somewhere else --
-        // localStorage alone only protects the current browser profile.
-        api.put(`/api/problems/${quest.id}/draft`, { code, language })
-          .catch(err => console.error('Failed to save draft to server:', err))
-        const saveIndicator = document.getElementById('save-indicator')
-        if (saveIndicator) {
-          saveIndicator.textContent = 'Saved'
-          setTimeout(() => saveIndicator.textContent = '', 2000)
-        }
+        persistDraft()
       }
     }, 5000)
-    setAutoSaveTimer(timer)
     return () => clearTimeout(timer)
-  }, [code, quest, language, hasSubmitted])
+  }, [code, quest?.id, hasSubmitted, persistDraft])
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -384,21 +392,12 @@ useEffect(() => {
       if ((e.ctrlKey || e.metaKey) && e.key === 's') {
         e.preventDefault()
         if (hasSubmitted) return
-        localStorage.setItem(getStorageKey(quest?.id, language), code)
-        if (quest?.id) {
-          api.put(`/api/problems/${quest.id}/draft`, { code, language })
-            .catch(err => console.error('Failed to save draft to server:', err))
-        }
-        const saveIndicator = document.getElementById('save-indicator')
-        if (saveIndicator) {
-          saveIndicator.textContent = 'Saved!'
-          setTimeout(() => saveIndicator.textContent = '', 2000)
-        }
+        persistDraft()
       }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [code, language, quest])
+  }, [code, language, quest, hasSubmitted, persistDraft])
 
   // Monaco ResizeObserver
   useEffect(() => {
@@ -445,10 +444,11 @@ useEffect(() => {
         body: JSON.stringify({ code, language })
       })
       const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Execution is unavailable. Please try again.')
       // Normalize to same shape as submission result for display
       setOutput({
         ...data,
-        status: data.passed === data.total ? 'accepted' : 'wrong_answer',
+        status: Number(data.total) > 0 && data.passed === data.total ? 'accepted' : 'wrong_answer',
         score: null,
         xp_earned: 0,
         is_run_mode: true  // flag so UI can show "Run result, not submitted"
@@ -688,9 +688,9 @@ useEffect(() => {
 
       {/* Final-submission confirmation: Submit is graded once and cannot be repeated */}
       {showSubmitConfirm && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[9999] flex items-center justify-center px-4" role="dialog" aria-modal="true">
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[9999] flex items-center justify-center px-4" role="dialog" aria-modal="true" aria-labelledby="submit-confirm-title">
           <div className="bg-[#12183a] border border-amber-300/60 rounded-xl p-6 w-full max-w-sm shadow-2xl shadow-violet-950/60">
-            <h3 className="text-[13px] font-bold uppercase tracking-[0.2em] text-amber-300 mb-2">⚔ Submit your final answer?</h3>
+            <div className="mb-3 flex items-center gap-3"><img src={submitSeal} width="48" height="48" alt="" aria-hidden="true" className="h-12 w-12 shrink-0 object-contain" /><h3 id="submit-confirm-title" className="text-[13px] font-bold uppercase leading-relaxed tracking-[0.16em] text-amber-200">Submit your final answer?</h3></div>
             <p className="text-sm text-slate-400 mb-4">
               This is graded once for <b>{language}</b> and cannot be submitted again in that language
               {(quest.languages?.length || 0) > 1 ? ' (your other languages stay open)' : ''}. Use <b>Run</b> as many times as you like to test
@@ -767,7 +767,12 @@ useEffect(() => {
                   🎉 EVENT
                 </span>
               )}
-              <span id="save-indicator" className="shrink-0 text-slate-500"></span>
+              <span role="status" className={`text-[11px] ${draftRecord?.status === 'failed' ? 'text-rose-300' : 'text-slate-400'}`}>
+                {hasSubmitted ? 'Final answer stored · Run remains available'
+                  : draftRecord?.questId === quest.id && draftRecord?.language === language && draftRecord?.code === code
+                    ? draftRecord.status === 'saved' ? 'Draft saved' : draftRecord.status === 'failed' ? 'Draft not saved to server · Ctrl+S to retry' : 'Saving draft…'
+                    : 'Changes save automatically'}
+              </span>
             </div>
           </div>
         </div>
@@ -1120,7 +1125,7 @@ useEffect(() => {
                 <div className="text-center py-4 text-slate-500">
                   <p className="mb-2 text-amber-300/70" aria-hidden="true">◆</p>
                   <p>Cast your spell to see the results...</p>
-                  <p className="text-xs mt-2">Press Ctrl+Enter to run your code</p>
+                  <p className="text-xs mt-2">Press Ctrl+Enter to run your code. Run is a preview and gives no XP.</p>
                 </div>
               )}
               {isLoading && (
@@ -1133,36 +1138,8 @@ useEffect(() => {
               )}
               {output && (
                 <div className="space-y-3">
-                  <div className={`flex items-center gap-3 rounded-xl border p-3.5 ${
-                    output.status === 'accepted' ? 'text-green-400 border-emerald-400/30 bg-emerald-400/5' :
-                    output.status === 'error'    ? 'text-red-400 border-rose-400/30 bg-rose-400/5'   : 'text-yellow-400 border-amber-300/40 bg-amber-300/5'
-                  }`}>
-                    <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-sm font-bold text-slate-950 ${output.status === 'accepted' ? 'bg-emerald-400' : output.status === 'error' ? 'bg-rose-400' : 'bg-amber-300'}`}>
-                      {output.status === 'accepted' ? '✓' : output.status === 'error' ? '✕' : '!'}
-                    </span>
-                    <div>
-                      <p className="font-bold text-sm">
-                        {output.status === 'accepted'
-                          ? ((!output.is_run_mode && languageRule === 'required' && (quest?.languages?.length || 1) > 1 && Object.keys(submissionsByLang).length < quest.languages.length)
-                              ? `${language} cleared. Answer ${quest.languages.filter(l => !submissionsByLang[l]).join(', ')} to clear the quest.`
-                              : 'Victory! All tests passed!') :
-                         output.status === 'error'    ? 'Runtime Error' : 'Some tests failed'}
-                      </p>
-                      {output.status !== 'error' && (
-                        <p className="text-xs text-slate-400">
-                          {output.is_run_mode
-                            ? `${output.passed ?? output.test_results?.filter(t => t.passed)?.length ?? 0}/${output.total ?? output.test_results?.length ?? 0} test cases passed. Run only, nothing submitted.`
-                            : output.scoring_note || `Score: ${output.score} XP • Passed ${output.passed_cases ?? 0}/${output.total_cases ?? 0} tests`}
-                        </p>
-                      )}
-                    </div>
-                    {!output.is_run_mode && (output.status === 'accepted' || (output.status === 'partial' && (output.xp_earned || 0) > 0)) && (
-                      <div className="ml-auto text-right">
-                        <p className="font-cinzel text-amber-300 font-bold text-xl">+{output.status === 'accepted' ? xpGained : output.xp_earned} XP</p>
-                        {combo > 1 && <p className="text-orange-400 text-xs">🔥 {combo}x Combo!</p>}
-                      </div>
-                    )}
-                  </div>
+                  <QuestResultSummary output={output} xpGained={xpGained} language={language}
+                    remainingLanguages={languageRule === 'required' ? (quest.languages || []).filter(l => !submissionsByLang[l]) : []} />
 
                   <div className="grid grid-cols-1 items-start gap-3 min-[1100px]:grid-cols-2">
                   {output.test_results?.map((tc, idx) => (
@@ -1174,11 +1151,11 @@ useEffect(() => {
                     >
                       <div className="flex justify-between items-start mb-2">
                         <span className={`text-xs font-bold ${tc.passed ? 'text-green-400' : 'text-red-400'}`}>
-                          Test {idx + 1}: {tc.passed ? 'PASSED' : 'FAILED'}
+                          Test {idx + 1}{tc.hidden || tc.is_hidden ? ' (hidden)' : ''}: {tc.passed ? 'PASSED' : 'FAILED'}
                         </span>
                         <span className="text-xs text-slate-500">{tc.runtime}</span>
                       </div>
-                      {!tc.passed && (
+                      {!tc.passed && !tc.hidden && !tc.is_hidden && (
                         <div className="space-y-2 mt-2 text-xs">
                           <div>
                             <p className="text-slate-500 mb-1 text-[10px] uppercase tracking-[0.14em]">Expected</p>

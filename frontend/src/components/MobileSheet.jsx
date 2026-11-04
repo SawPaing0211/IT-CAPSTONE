@@ -13,7 +13,7 @@
 import { useRef, useState, useLayoutEffect } from 'react'
 import { createPortal } from 'react-dom'
 
-export default function MobileSheet({ show, onClose, widthClass = 'sm:w-56', anchorRef, children }) {
+export default function MobileSheet({ show, onClose, widthClass = 'sm:w-56', anchorRef, panelClassName = '', children }) {
   const [dragY, setDragY] = useState(0)
   const draggingRef = useRef(false)
   const startYRef = useRef(0)
@@ -73,7 +73,7 @@ export default function MobileSheet({ show, onClose, widthClass = 'sm:w-56', anc
       />
 
       <div
-        className={`fixed z-50 bg-slate-900 border border-slate-700 shadow-2xl transition-transform duration-150 ease-out overflow-y-auto ${
+        className={`fixed z-50 bg-slate-900 border border-slate-700 shadow-2xl transition-transform duration-150 ease-out overflow-y-auto ${panelClassName} ${
           isDesktop
             ? `rounded-xl max-h-[70vh] ${desktopWidthClass}`
             : 'inset-x-0 bottom-0 rounded-t-2xl w-full max-h-[75vh] pb-[env(safe-area-inset-bottom)]'

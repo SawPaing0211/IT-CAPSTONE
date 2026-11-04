@@ -15,6 +15,7 @@ import QuestSpotlight from './components/QuestSpotlight'
 import StudentSidebar from './components/StudentSidebar'
 import { api, API_BASE, authFetch } from '../../api/client'
 import MobileSheet from '../../components/MobileSheet'
+import NotificationsPanel from './components/NotificationsPanel'
 import BottomNav from '../../components/BottomNav'
 import StudentLessons from './StudentLessons'
 import StudentAnnouncements from './StudentAnnouncements'
@@ -633,8 +634,15 @@ export default function StudentDashboard({ user, onLogout }) {
       if (profileRef.current && !profileRef.current.contains(e.target)) setShowProfileMenu(false)
       if (notificationRef.current && !notificationRef.current.contains(e.target)) setShowNotifications(false)
     }
+    const handleEscape = e => {
+      if (e.key === 'Escape') { setShowNotifications(false); setShowProfileMenu(false) }
+    }
     document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
+    document.addEventListener('keydown', handleEscape)
+    return () => {
+      document.removeEventListener('mousedown', handler)
+      document.removeEventListener('keydown', handleEscape)
+    }
   }, [])
 
   // Parallax
@@ -779,6 +787,9 @@ export default function StudentDashboard({ user, onLogout }) {
   }
 
   const [notifications, setNotifications] = useState([])
+  const [notificationsLoading, setNotificationsLoading] = useState(true)
+  const [notificationsError, setNotificationsError] = useState(null)
+  const [notificationsReload, setNotificationsReload] = useState(0)
 
   // Read state still isn't tracked on the backend, so it's kept client-side
   // in localStorage, per student (by username) — an id in this set stays
@@ -803,6 +814,8 @@ export default function StudentDashboard({ user, onLogout }) {
   // (class_label/date/time/read), so the render JSX didn't need to change
   useEffect(() => {
     const fetchNotifications = async () => {
+      setNotificationsLoading(true)
+      setNotificationsError(null)
       try {
         const data = await api.get('/api/student/announcements')
         const readIds = loadReadIds()
@@ -828,11 +841,14 @@ export default function StudentDashboard({ user, onLogout }) {
         }))
       } catch (err) {
         console.error('Failed to load notifications:', err)
+        setNotificationsError('Could not load announcements. Please try again.')
+      } finally {
+        setNotificationsLoading(false)
       }
     }
     fetchNotifications()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [notificationsReload])
 
   // Mark one notification read (bell badge count drops immediately) and
   // persist it so it stays read next time the dropdown or page reloads.
@@ -854,14 +870,6 @@ export default function StudentDashboard({ user, onLogout }) {
   // matches the real priority values instructors actually pick from
   // (low/medium/high/urgent) — the old urgent/important/info set didn't
   // match 3 of those 4 real values at all
-  const priorityColors = {
-    urgent: 'bg-red-600/20 border-red-600/40 text-red-400',
-    high:   'bg-orange-600/20 border-orange-600/40 text-orange-400',
-    medium: 'bg-blue-600/20 border-blue-600/40 text-blue-400',
-    low:    'bg-slate-600/20 border-slate-600/40 text-slate-400',
-  }
-  const priorityIcons = { urgent: '🔴', high: '🟠', medium: '🔵', low: '⚪' }
-
   // ── Spellforge portal ─────────────────────────────────────────────────────
   if (activeTab === 'spellforge' && selectedQuest) {
     return (
@@ -966,74 +974,25 @@ export default function StudentDashboard({ user, onLogout }) {
             next to the logo instead of stacking under the stats badge full-width */}
         <div className="absolute top-3 right-4 sm:static sm:top-auto sm:right-auto flex items-center gap-3">
           <div ref={notificationRef}>
-            <button onClick={() => setShowNotifications(!showNotifications)} className="relative rounded-full bg-[#0b1326] border border-slate-700/70 hover:border-amber-300/50 hover:bg-slate-800/80 transition group w-[44px] h-[44px] flex items-center justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-300" aria-label="Notifications">
+            <button onClick={() => setShowNotifications(!showNotifications)} className="relative rounded-full bg-[#0b1326] border border-slate-700/70 hover:border-amber-300/50 hover:bg-slate-800/80 transition group w-[44px] h-[44px] flex items-center justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-300" aria-label="Notifications" aria-expanded={showNotifications} aria-controls={showNotifications ? 'student-notifications-panel' : undefined}>
               <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="text-slate-300 group-hover:text-amber-200 transition"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.500 2H4.500zM10 21h4" /></svg>
               {unreadCount > 0 && (
                 <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-600 text-white text-[10px] font-bold rounded-full flex items-center justify-center animate-pulse border-2 border-slate-900">{unreadCount}</span>
               )}
             </button>
-            <MobileSheet show={showNotifications} onClose={() => setShowNotifications(false)} widthClass="sm:w-80" anchorRef={notificationRef}>
-                <div className="p-4 border-b border-purple-600/30 flex justify-between items-center">
-                  <p className="font-bold text-white">Notifications</p>
-                  <div className="flex items-center gap-3">
-                    <span className="text-xs text-slate-400">{unreadCount} unread</span>
-                    {unreadCount > 0 && (
-                      <button onClick={markAllNotificationsRead} className="text-xs text-purple-400 hover:text-purple-300 transition font-medium">
-                        Mark all read
-                      </button>
-                    )}
-                  </div>
-                </div>
-                <div className="max-h-96 overflow-y-auto">
-                  {notifications.map(note => (
-                    <div
-                      key={note.id}
-                      onClick={() => {
-                        markNotificationRead(note.id)
-                        setShowNotifications(false)
-                        // global announcements (no specific class) have
-                        // nowhere to navigate to — only jump when this
-                        // notification actually belongs to one subject
-                        if (note.class_id && note.subject_id) {
-                          handleEnterSubject({
-                            id: note.subject_id,
-                            name: note.subject_name,
-                            section_id: note.class_id,
-                            section_no: note.section_no,
-                            semester: null,
-                            instructor: note.instructor,
-                          })
-                          setCourseTab('announcements')
-                        }
-                      }}
-                      className={`p-4 border-b border-slate-800 hover:bg-slate-800/40 transition cursor-pointer ${!note.read ? 'bg-purple-900/10' : ''}`}
-                    >
-                      <div className="flex items-start gap-3">
-                        <span className="text-lg">{priorityIcons[note.priority]}</span>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold border ${priorityColors[note.priority]}`}>{note.priority.toUpperCase()}</span>
-                            <span className="text-xs text-slate-400">{note.class_label}</span>
-                          </div>
-                          <p className="text-sm font-semibold text-white truncate">{note.title}</p>
-                          <p className="text-xs text-slate-400 mt-1 line-clamp-2">{note.content}</p>
-                          <div className="flex items-center justify-between mt-2 text-[10px] text-slate-500">
-                            <span>👨‍🏫 {note.instructor}</span>
-                            <span>{note.date} • {note.time}</span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                <div className="p-3 border-t border-purple-600/30 text-center">
-                  <button
-                    onClick={() => { setShowNotifications(false); setActiveTab('subjects') }}
-                    className="text-xs text-purple-400 hover:text-purple-300 transition"
-                  >
-                    Browse My Subjects →
-                  </button>
-                </div>
+            <MobileSheet show={showNotifications} onClose={() => setShowNotifications(false)} widthClass="sm:w-[400px]" anchorRef={notificationRef} panelClassName="!border-amber-300/65 shadow-[0_0_24px_rgba(168,85,247,0.2)]">
+              <NotificationsPanel notifications={notifications} unreadCount={unreadCount}
+                loading={notificationsLoading} error={notificationsError}
+                onRetry={() => setNotificationsReload(n => n + 1)} onMarkAllRead={markAllNotificationsRead}
+                onSelect={note => {
+                  markNotificationRead(note.id)
+                  setShowNotifications(false)
+                  if (note.class_id && note.subject_id) {
+                    handleEnterSubject({ id: note.subject_id, name: note.subject_name, section_id: note.class_id, section_no: note.section_no, semester: null, instructor: note.instructor })
+                    setCourseTab('announcements')
+                  }
+                }}
+                onBrowse={() => { setShowNotifications(false); setActiveTab('subjects') }} />
             </MobileSheet>
           </div>
 
@@ -1122,7 +1081,7 @@ export default function StudentDashboard({ user, onLogout }) {
                 <Leaderboard currentUsername={user.username} />
               </div>
             )}
-            {activeTab === 'hero' && heroStats && <ProgressStats stats={heroStats} username={user.username} fullName={user.full_name} />}
+            {activeTab === 'hero' && heroStats && <ProgressStats stats={heroStats} username={user.username} fullName={user.full_name} onOpenQuests={() => setActiveTab('bounty')} />}
             {activeTab === 'sandbox' && (
               <div>
                 <SandboxHealthBanner health={sandboxHealth} />

@@ -7,6 +7,7 @@ import { useState, useEffect, useRef, useMemo } from 'react'
 import AchievementModal from '../../../components/AchievementModal'
 import useAchievements from '../../../hooks/useAchievements'
 import { splitAchievements, isUnavailable } from '../../../utils/achievementView'
+import MedalArt from '../../../components/MedalArt'
 import MobileSheet from '../../../components/MobileSheet'
 import { API_BASE, authFetch } from '../../../api/client'
 
@@ -15,7 +16,6 @@ const BookIcon = () => <svg viewBox="0 0 24 24" width="22" height="22" {...ico} 
 const FlagIcon = () => <svg viewBox="0 0 24 24" width="22" height="22" {...ico} aria-hidden="true"><path d="M6 21V4M6 5h11l-2 4 2 4H6" /></svg>
 const StarIcon = () => <svg viewBox="0 0 24 24" width="22" height="22" {...ico} aria-hidden="true"><path d="m12 3.500 2.600 5.300 5.800.8-4.200 4.100 1 5.800L12 16.800l-5.200 2.700 1-5.800L3.600 9.600l5.800-.8z" /></svg>
 const FlameIcon = () => <svg viewBox="0 0 24 24" width="22" height="22" {...ico} aria-hidden="true"><path d="M12 3c1 4-3.500 5.500-3.500 10a3.500 3.500 0 0 0 7 0c0-1.200-.5-2.200-1.200-3 3 1.500 4.700 3.800 4.700 6.500A7 7 0 0 1 5 16c0-3 1.500-5 3-6.500C9.500 8 11 5.500 12 3z" /></svg>
-const MedalIcon = () => <svg viewBox="0 0 24 24" width="26" height="26" {...ico} aria-hidden="true"><circle cx="12" cy="9" r="5" /><path d="m9 13-2 7 5-3 5 3-2-7" /></svg>
 
 // Panel with the four small gold corner diamonds from the design
 function Panel({ children, className = '', glow = false }) {
@@ -42,11 +42,12 @@ function Head({ children, right }) {
 
 const localKey = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 
-export default function ProgressStats({ stats, username, fullName }) {
+export default function ProgressStats({ stats, username, fullName, onOpenQuests }) {
   const [hoveredDay, setHoveredDay] = useState(null)
   const { achievements, loading: loadingAchievements, error: achError } = useAchievements()
   const ach = splitAchievements(achievements)
   const [showAllBadges, setShowAllBadges] = useState(false)
+  const [selectedAchievementId, setSelectedAchievementId] = useState(null)
   const [realStats, setRealStats] = useState(null)
   const [recentSubmissions, setRecentSubmissions] = useState([])
 
@@ -407,14 +408,12 @@ export default function ProgressStats({ stats, username, fullName }) {
               return (
                 <button
                   key={a.id}
-                  onClick={() => setShowAllBadges(true)}
+                  onClick={() => { setSelectedAchievementId(a.id); setShowAllBadges(true) }}
                   className={`relative flex items-center gap-4 rounded-xl border bg-gradient-to-br from-[#0f1836] to-[#0a1024] p-4 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-300 ${
                     earned ? 'border-amber-300/60 hover:border-amber-200' : unavailable ? 'border-dashed border-slate-700/80 opacity-70' : 'border-slate-700/70 hover:border-amber-300/40'
                   }`}
                 >
-                  <span className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-full border-2 ${
-                    earned ? 'border-amber-300 bg-amber-300/10 text-amber-200' : 'border-slate-600 bg-slate-800/40 text-slate-500'
-                  }`}><MedalIcon /></span>
+                  <MedalArt badge={a} earned={earned} unavailable={unavailable} className="h-16 w-16 shrink-0" />
                   <span className="min-w-0 flex-1">
                     <span className={`block font-cinzel text-sm font-bold uppercase tracking-wide ${earned ? 'text-amber-100' : 'text-slate-400'}`}>{a.name}</span>
                     <span className="mt-1 line-clamp-2 block text-xs text-slate-400">{a.description}</span>
@@ -435,7 +434,7 @@ export default function ProgressStats({ stats, username, fullName }) {
       </section>
 
       {showAllBadges && (
-        <AchievementModal achievements={achievements} onClose={() => setShowAllBadges(false)} />
+        <AchievementModal achievements={achievements} initialSelectedId={selectedAchievementId} onClose={() => { setShowAllBadges(false); setSelectedAchievementId(null) }} onOpenQuests={onOpenQuests} />
       )}
 
       {/* Recent quests */}

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { isUnavailable } from '../utils/achievementView'
+import MedalArt, { hasMedalArt } from './MedalArt'
 
 export default function AchievementBadge({ badge, showTooltip = true, size = 'md' }) {
   const [showTip, setShowTip] = useState(false)
@@ -18,6 +19,7 @@ export default function AchievementBadge({ badge, showTooltip = true, size = 'md
     earned_at 
   } = badge
   const unavailable = isUnavailable(badge)
+  const art = hasMedalArt(badge)
 
   // Prepare the portal to render on the whole page body
   useEffect(() => {
@@ -66,14 +68,13 @@ export default function AchievementBadge({ badge, showTooltip = true, size = 'md
         onMouseEnter={handleMouseEnter}
         onMouseLeave={() => setShowTip(false)}
         className={`
-          relative rounded-xl border-2 p-1 
-          bg-gradient-to-br ${badgeColor}
-          ${textColor} shadow-lg
+          relative ${art ? 'rounded-xl' : `rounded-xl border-2 p-1 bg-gradient-to-br ${badgeColor} shadow-lg`}
+          ${textColor}
           transition-all duration-300 ease-out
           hover:scale-110 hover:shadow-xl hover:border-purple-300
           focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 focus:ring-offset-slate-900
           ${sizes[size]}
-          ${!is_earned && (unavailable ? 'grayscale opacity-60' : 'grayscale hover:grayscale-0')}
+          ${!art && !is_earned ? (unavailable ? 'grayscale opacity-60' : 'grayscale hover:grayscale-0') : ''}
         `}
         title={unavailable ? `${name} — Not available yet` : name}
         aria-label={`${name}${is_earned ? ', earned' : unavailable ? ', not available yet' : ', locked'}`}
@@ -89,7 +90,7 @@ export default function AchievementBadge({ badge, showTooltip = true, size = 'md
               above, so it can still show past the corners even though the
               glyph itself is contained. The button already has its own
               box-shadow for depth. */}
-          <span>{icon || '🔒'}</span>
+          {art ? <MedalArt badge={badge} earned={is_earned} unavailable={unavailable} className="h-full w-full" /> : <span>{icon || '🔒'}</span>}
         </span>
         
         {is_earned && (
@@ -114,7 +115,7 @@ export default function AchievementBadge({ badge, showTooltip = true, size = 'md
           
           <div className="relative">
             <div className="flex items-center gap-2 mb-2">
-              <span className="text-2xl">{icon || '🔒'}</span>
+              {art ? <MedalArt badge={badge} earned={is_earned} unavailable={unavailable} className="h-9 w-9" /> : <span className="text-2xl">{icon || '🔒'}</span>}
               <h4 className={`font-bold ${is_earned ? 'text-white' : 'text-slate-300'}`}>{name}</h4>
             </div>
             

@@ -1,0 +1,43 @@
+.champions-hall { --hall-gold: #f3d78a; }
+.hall-filter { min-height: 44px; padding: 9px 22px; border: 1px solid #d4a94a50; border-radius: 999px; background: #0b1326cc; color: #cbd5e1; font-size: 12px; font-weight: 700; transition: border-color .15s, background .15s; }
+.hall-filter:hover { border-color: #f3d78a; color: white; }
+.hall-filter:focus-visible { outline: 2px solid #f3d78a; outline-offset: 3px; }
+.hall-filter-active { color: white; border-color: #f3d78ab3; background: linear-gradient(#b66cff, #6d28d9); box-shadow: 0 4px 14px #a855f74d; }
+.hall-panel { position: relative; border: 1px solid #d4a94a4d; border-radius: 14px; background: linear-gradient(180deg, #18244aeb, #0b1326f5); box-shadow: 0 10px 24px #0006, inset 0 1px #f3d78a1a; }
+.hall-panel::before { content: ''; pointer-events: none; position: absolute; inset: 4px; border: 1px solid #d4a94a29; border-radius: 10px; }
+.hall-podium { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); align-items: end; gap: 16px; padding-top: 24px; }
+.hall-champion { min-width: 0; min-height: 214px; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 30px 12px 22px; text-align: center; border-color: #cbd5e180; }
+.hall-champion-1 { min-height: 258px; padding-top: 55px; border-color: #f3d78ab3; box-shadow: 0 0 20px #d4a94a26, 0 10px 24px #0008; }
+.hall-champion-3 { border-color: #f69b4999; }
+.hall-avatar-wrap { position: relative; }
+.hall-avatar { width: 68px; height: 68px; border: 2px solid #cbd5e1; border-radius: 50%; background: linear-gradient(#c026d3,#6d28d9); display: flex; align-items: center; justify-content: center; font: 900 30px Cinzel,Georgia,serif; color: white; box-shadow: 0 0 16px #a855f74d; }
+.hall-champion-1 .hall-avatar { width: 88px; height: 88px; border-color: #ffd93d; font-size: 40px; box-shadow: 0 0 20px #d4a94a66; }
+.hall-champion-3 .hall-avatar { border-color: #f69b49; }
+.hall-crown { position: absolute; top: 20px; width: 30px; height: 26px; }
+.hall-rank-medallion { position: absolute; bottom: -10px; left: 50%; transform: translateX(-50%); width: 30px; height: 30px; }
+.hall-rank-medallion img { width: 100%; height: 100%; }
+.hall-rank-medallion span { position: absolute; inset: 0; display: grid; place-items: center; font-weight: 800; color: #111827; font-size: 14px; }
+.hall-corner { position: absolute; width: 11px; height: 11px; }
+.hall-corner-tl { top: -6px; left: -6px; }.hall-corner-tr { top: -6px; right: -6px; }.hall-corner-bl { bottom: -6px; left: -6px; }.hall-corner-br { bottom: -6px; right: -6px; }
+.hall-rank-row { display: grid; grid-template-columns: 46px 36px minmax(120px,1fr) 58px minmax(60px,1.5fr) 100px; gap: 16px; align-items: center; padding: 10px 20px; min-height: 58px; border-radius: 10px; }
+.hall-row-avatar { display: grid; place-items: center; flex-shrink: 0; width: 36px; height: 36px; border: 1px solid #d4a94a99; border-radius: 50%; background: linear-gradient(#c026d3,#6d28d9); font-family: Cinzel,Georgia,serif; font-weight: 800; color: white; }
+.hall-level,.hall-you { border: 1px solid #d4a94a66; border-radius: 999px; background: #0b1326d9; color: #f3d78a; font-size: 9px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; padding: 2px 8px; white-space: nowrap; text-align: center; }
+.hall-you { display: inline-block; background: #d4a94a26; }
+.hall-xp-track { height: 7px; border-radius: 4px; background: #070b18; border: 1px solid #d4a94a40; overflow: hidden; }
+.hall-xp-track span { display: block; height: 100%; background: linear-gradient(90deg,#d4a94a,#f3d78a); border-radius: inherit; }
+.hall-own-row,.hall-standing { border-color: #a855f7e6; background: linear-gradient(90deg,#a855f74d,#0b1326e6); }
+.hall-standing { display: flex; align-items: center; flex-wrap: wrap; gap: 18px; padding: 18px 24px; box-shadow: 0 0 28px #a855f72e; }
+@media (max-width: 767px) {
+  .hall-rank-row { grid-template-columns: 30px 32px minmax(0,1fr) auto; gap: 8px; padding: 12px; }
+  .hall-level,.hall-xp-track { display: none; }
+}
+@media (max-width: 639px) {
+  .hall-podium { gap: 8px; padding-top: 12px; }
+  .hall-champion { min-height: 184px; padding: 22px 5px 16px; }
+  .hall-champion-1 { min-height: 214px; padding-top: 48px; }
+  .hall-avatar { width: 44px; height: 44px; font-size: 21px; }
+  .hall-champion-1 .hall-avatar { width: 56px; height: 56px; font-size: 26px; }
+  .hall-rank-medallion { width: 24px; height: 24px; }
+  .hall-standing { padding: 18px; gap: 12px; }
+  .hall-filter { padding-inline: 16px; }
+}
