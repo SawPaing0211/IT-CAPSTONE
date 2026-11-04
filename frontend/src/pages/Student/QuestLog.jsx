@@ -98,154 +98,92 @@ return {
 
   // Show a loading message while section info resolves
   if (loading) {
-  return (
-    <div className="text-center py-20 text-purple-300 animate-pulse">
-      Loading Quest Log...
-    </div>
-  )
-}
-
-  return (
-    <div className="p-4 sm:p-6 max-w-4xl mx-auto space-y-6">
-      {/* Header — no subject picker here, this page is already scoped to
-          whichever subject's course tabs it was opened from */}
-      <div>
-        <h1 className="text-2xl font-bold text-white">📜 Quest Log</h1>
-        <p className="text-slate-400 text-sm mt-1">Track your progress in this subject</p>
-      </div>
-
-      {/* Current Subject Badge */}
-      {selectedSection && (
-        <div className="bg-gradient-to-r from-purple-900/30 to-pink-900/30 border border-purple-600/30 rounded-xl p-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-gradient-to-br from-purple-600 to-pink-600 rounded-lg flex items-center justify-center text-xl">
-              📚
-            </div>
-            <div>
-              <p className="text-xs text-purple-300 font-bold uppercase tracking-wider">Current Subject</p>
-              <p className="text-white font-bold">{selectedSection.section_code} - {selectedSection.name}</p>
-            </div>
-          </div>
+    return (
+      <div className="space-y-3" aria-busy="true">
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          {[...Array(4)].map((_, i) => <div key={i} className="h-20 animate-pulse rounded-xl border border-amber-300/10 bg-[#0b1224]" />)}
         </div>
-      )}
-
-      {/* Submissions List */}
-      <div className="space-y-3">
-        {loading ? (
-          <div className="space-y-3">
-            {[...Array(4)].map((_, i) => (
-              <div key={i} className="border border-slate-800 rounded-xl p-4 flex items-center justify-between animate-pulse">
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 rounded-lg bg-slate-800" />
-                  <div>
-                    <div className="h-4 bg-slate-800 rounded w-32 mb-2" />
-                    <div className="h-3 bg-slate-800 rounded w-20" />
-                  </div>
-                </div>
-                <div className="h-6 bg-slate-800 rounded-full w-24" />
-              </div>
-            ))}
-          </div>
-        ) : submissions.length === 0 ? (
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-12 text-center">
-            <div className="text-5xl mb-4">⚔️</div>
-            <h3 className="text-lg font-bold text-white mb-2">No Quests Attempted</h3>
-            <p className="text-slate-400 text-sm">
-              You haven't attempted any quests in <span className="text-purple-400 font-semibold">{selectedSection?.name}</span> yet.
-            </p>
-            <p className="text-slate-500 text-xs mt-2">Go to the Quest Board to start your adventure!</p>
-          </div>
-        ) : (
-          <>
-            <div className="flex items-center justify-between text-sm text-slate-400 mb-2">
-              <span>
-                {submissions.filter(s => s.status === 'conquered').length} / {submissions.length} {submissions.length === 1 ? 'Quest' : 'Quests'} Conquered
-              </span>
-              <span>Success Rate: {submissions.length > 0 ? Math.round((submissions.filter(s => s.status === 'conquered').length / submissions.length) * 100) : 0}%</span>
-            </div>
-            
-            {submissions.map((quest) => {
-            const isConquered = quest.status === 'conquered'
-            const isOngoing = quest.status === 'ongoing'
-            
-            return (
-              <div 
-                key={quest.id} 
-                className={`group border rounded-xl p-4 transition-all duration-300 flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-0 sm:justify-between ${
-                  isConquered 
-                    ? 'bg-green-900/10 border-green-600/30 hover:border-green-500/50' 
-                    : 'bg-slate-900 border-slate-800 hover:border-purple-500/50'
-                }`}
-              >
-                <div className="flex items-center gap-4">
-                  <div className={`w-12 h-12 rounded-lg flex items-center justify-center text-xl transition-transform group-hover:scale-110 ${
-                    isConquered ? 'bg-green-900/30 text-green-400' : 'bg-slate-800 text-slate-400'
-                  }`}>
-                    {isConquered ? (
-                      <span className="animate-pulse">⚔️</span>
-                    ) : (
-                      <span>📜</span>
-                    )}
-                  </div>
-                  
-                  <div>
-                    <h3 className={`font-bold group-hover:text-purple-400 transition ${
-                      isConquered ? 'text-green-400' : 'text-white'
-                    }`}>
-                      {quest.title}
-                    </h3>
-                    <p className="text-xs text-slate-500">
-                      {quest.difficulty} • {quest.languages?.[0]?.toUpperCase() || 'PYTHON'}
-                    </p>
-                    {quest.attempts > 0 && (
-                      <p className="text-xs text-slate-500">
-                        {quest.attempts} attempt{quest.attempts > 1 ? 's' : ''}
-                      </p>
-                    )}
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-between sm:justify-end gap-4 sm:gap-6 text-sm">
-                  <span className={`px-3 py-1 rounded-full text-xs font-bold border ${
-                    quest.status === 'conquered'  ? 'bg-green-500/20 text-green-400 border-green-500/30'
-                    : quest.status === 'partial'  ? 'bg-blue-500/20 text-blue-400 border-blue-500/30'
-                    : quest.status === 'wrong'    ? 'bg-red-500/20 text-red-400 border-red-500/30'
-                    : quest.status === 'error'    ? 'bg-red-500/20 text-red-400 border-red-500/30'
-                    : quest.status === 'timeout'  ? 'bg-orange-500/20 text-orange-400 border-orange-500/30'
-                    : quest.status === 'not_started' ? 'bg-slate-700/50 text-slate-500 border-slate-700'
-                    : 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'
-                  }`}>
-                    {quest.status === 'conquered'   ? '⚔️ CONQUERED'
-                    : quest.status === 'partial'    ? '⚡ PARTIAL'
-                    : quest.status === 'wrong'      ? '❌ WRONG ANSWER'
-                    : quest.status === 'error'      ? '🔴 ERROR'
-                    : quest.status === 'timeout'    ? '⏱ TIMEOUT'
-                    : quest.status === 'not_started'? '📋 NOT STARTED'
-                    : '📜 ONGOING'}
-                  </span>
-
-                  <div className="text-right">
-                    {quest.submission ? (
-                      <div>
-                        <span className={`font-bold text-lg ${
-                          isConquered ? 'text-yellow-400' : 'text-slate-500'
-                        }`}>
-                          {isConquered
-                            ? `+${quest.xp_reward} XP`
-                            : `${quest.submission.score ?? 0} / ${quest.xp_reward} XP`}
-                        </span>
-                      </div>
-                    ) : (
-                      <span className="font-bold text-lg text-slate-600">{quest.xp_reward} XP</span>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )
-          })}
-          </>
-        )}
+        {[...Array(4)].map((_, i) => <div key={i} className="h-16 animate-pulse rounded-xl border border-amber-300/10 bg-[#0b1224]" />)}
       </div>
+    )
+  }
+
+  const conquered = submissions.filter(s => s.status === 'conquered').length
+  const attempted = submissions.filter(s => s.status !== 'not_started').length
+  const xpEarned = submissions.reduce((sum, s) => {
+    if (!s.submission) return sum
+    return sum + (s.status === 'conquered' ? (s.xp_reward || 0) : (s.submission.score ?? 0))
+  }, 0)
+  const rate = attempted > 0 ? Math.round((conquered / attempted) * 100) : 0
+
+  const STATUS = {
+    conquered:   { label: 'Conquered',    cls: 'text-emerald-300 border-emerald-400/40 bg-emerald-400/10' },
+    partial:     { label: 'Partial',      cls: 'text-sky-300 border-sky-400/40 bg-sky-400/10' },
+    wrong:       { label: 'Wrong answer', cls: 'text-rose-300 border-rose-400/40 bg-rose-400/10' },
+    error:       { label: 'Error',        cls: 'text-rose-300 border-rose-400/40 bg-rose-400/10' },
+    timeout:     { label: 'Timeout',      cls: 'text-orange-300 border-orange-400/40 bg-orange-400/10' },
+    not_started: { label: 'Not started',  cls: 'text-slate-400 border-slate-600' },
+    ongoing:     { label: 'Ongoing',      cls: 'text-amber-200 border-amber-300/40 bg-amber-300/10' },
+  }
+
+  const tiles = [
+    { label: 'Quests conquered', value: `${conquered} / ${submissions.length}` },
+    { label: 'Attempted', value: attempted },
+    { label: 'Success rate', value: `${rate}%` },
+    { label: 'Quest XP', value: xpEarned },
+  ]
+
+  if (submissions.length === 0) {
+    return (
+      <div className="rounded-2xl border border-dashed border-amber-300/25 bg-gradient-to-br from-[#0f1836] to-[#0a1024] px-6 py-14 text-center">
+        <span className="mx-auto mb-4 block h-2 w-2 rotate-45 bg-amber-300" aria-hidden="true" />
+        <h3 className="font-cinzel text-xl font-bold text-amber-100">No quests yet</h3>
+        <p className="mt-2 text-sm text-slate-400">
+          There are no quests in {selectedSection?.name} yet. Check the Quest Board later.
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div>
+      <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {tiles.map(t => (
+          <div key={t.label} className="rounded-xl border border-amber-300/20 bg-gradient-to-br from-[#0f1836] to-[#0a1024] p-4">
+            <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">{t.label}</p>
+            <p className="mt-1 font-cinzel text-2xl font-bold text-amber-300">{t.value}</p>
+          </div>
+        ))}
+      </div>
+
+      <ul className="space-y-3">
+        {submissions.map(quest => {
+          const st = STATUS[quest.status] || STATUS.ongoing
+          const isConquered = quest.status === 'conquered'
+          const accent = isConquered ? 'bg-emerald-400' : quest.status === 'not_started' ? 'bg-slate-600' : quest.status === 'wrong' || quest.status === 'error' ? 'bg-rose-400' : 'bg-amber-300'
+          return (
+            <li key={quest.id} className="relative flex flex-col gap-3 overflow-hidden rounded-xl border border-amber-300/20 bg-gradient-to-br from-[#0f1836] to-[#0a1024] p-4 pl-5 sm:flex-row sm:items-center sm:justify-between sm:p-5 sm:pl-6">
+              <span className={`absolute inset-y-0 left-0 w-1 ${accent}`} aria-hidden="true" />
+              <div className="min-w-0">
+                <h3 className="font-cinzel text-base font-bold leading-snug text-amber-50 sm:text-lg">{quest.title}</h3>
+                <p className="mt-1 text-xs text-slate-500">
+                  {quest.difficulty}
+                  {quest.languages?.length ? ` · ${quest.languages.map(l => ({ python: 'Python', java: 'Java', csharp: 'C#' }[l] || l)).join(', ')}` : ''}
+                  {quest.attempts > 0 ? ` · ${quest.attempts} attempt${quest.attempts > 1 ? 's' : ''}` : ''}
+                </p>
+              </div>
+              <div className="flex items-center justify-between gap-5 sm:justify-end">
+                <span className={`rounded border px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${st.cls}`}>{st.label}</span>
+                <span className={`min-w-[84px] text-right font-cinzel text-lg font-bold ${isConquered ? 'text-amber-300' : 'text-slate-500'}`}>
+                  {quest.submission
+                    ? (isConquered ? `+${quest.xp_reward} XP` : `${quest.submission.score ?? 0} / ${quest.xp_reward}`)
+                    : `${quest.xp_reward} XP`}
+                </span>
+              </div>
+            </li>
+          )
+        })}
+      </ul>
     </div>
   )
 }

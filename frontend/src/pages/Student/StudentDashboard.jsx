@@ -192,8 +192,8 @@ function ArcaneSandbox({ seedCode = null, seedLanguage = 'python', sandboxHealth
   // Trigger a particle burst animation after running code
   const burstParticles = (success) => {
     const emojis = success
-      ? ['✨', '⚡', '🔮', '💫', '🌟', '🎯', '']
-      : ['', '⚠️', '🔥', '❌']
+      ? ['✦', '◆', '✧', '✦', '◆']
+      : ['◆', '×']
     const newP = Array.from({ length: success ? 14 : 7 }, (_, i) => ({
       id: Date.now() + i,
       x: 20 + Math.random() * 60,
@@ -282,7 +282,7 @@ function ArcaneSandbox({ seedCode = null, seedLanguage = 'python', sandboxHealth
       {/* Particles */}
       <div className="fixed inset-0 pointer-events-none z-[9999] overflow-hidden">
         {particles.map(p => (
-          <div key={p.id} className="absolute text-2xl"
+          <div key={p.id} className="absolute text-2xl text-amber-300"
             style={{ left: `${p.x}%`, top: `${p.y}%`, animationDelay: `${p.delay}ms`, animation: 'sandboxBurst 1.4s ease-out forwards' }}>
             {p.emoji}
           </div>
@@ -292,46 +292,46 @@ function ArcaneSandbox({ seedCode = null, seedLanguage = 'python', sandboxHealth
       {/* Save dialog */}
       {saveDialog && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[9999] flex items-center justify-center">
-          <div className="bg-slate-900 border-2 border-emerald-600/50 rounded-2xl p-6 w-80 shadow-2xl">
-            <h3 className="font-bold text-white mb-4">💾 Name Your Scroll</h3>
+          <div className="bg-[#0b1224] border border-amber-300/40 rounded-2xl p-6 w-80 shadow-2xl">
+            <h3 className="font-cinzel font-bold text-amber-100 mb-4">Name your scroll</h3>
             <input autoFocus type="text" value={saveName}
               onChange={e => setSaveName(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && handleSave()}
               placeholder="e.g. My Fibonacci Spell"
-              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm outline-none focus:border-emerald-500 mb-4" />
+              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm outline-none focus:border-amber-300/60 mb-4" />
             <div className="flex gap-2">
               <button onClick={() => { setSaveDialog(false); setSaveName('') }}
                 className="flex-1 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 text-sm transition">Cancel</button>
               <button onClick={handleSave} disabled={!saveName.trim()}
-                className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 rounded-lg text-white font-bold text-sm transition">Save</button>
+                className="flex-1 py-2 bg-violet-600 hover:bg-violet-500 border border-amber-300/50 disabled:opacity-50 rounded-lg text-white font-bold text-sm transition">Save</button>
             </div>
           </div>
         </div>
       )}
 
       {/* ── Sandbox Header ── */}
-      <div className="relative shrink-0 flex items-center justify-between px-4 py-2.5 bg-slate-900/80 border-b border-emerald-600/30 gap-2 flex-wrap">
+      <div className="relative shrink-0 flex items-center justify-between px-4 py-2.5 bg-[#0b1224] border-b border-amber-300/25 gap-2 flex-wrap">
 
         {/* Left */}
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
-            <div className="w-7 h-7 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-lg flex items-center justify-center text-sm shadow shadow-emerald-600/30">🧪</div>
+            <div className="w-7 h-7 rounded-lg border border-amber-300/40 bg-amber-300/10 flex items-center justify-center" aria-hidden="true"><span className="block w-2 h-2 rotate-45 bg-amber-300" /></div>
             <div>
-              <p className="text-xs font-black text-emerald-300 leading-none">Arcane Sandbox</p>
-              <p className="text-[9px] text-slate-500 leading-none mt-0.5">
+              <p className="font-cinzel text-sm font-bold text-amber-100 leading-none">Arcane Sandbox</p>
+              <p className="text-[10px] text-slate-500 leading-none mt-1">
                 Docker isolated · {sandboxHealth?.limits?.timeout_s ?? 10}s limit · {sandboxHealth?.limits?.memory_mb ?? 128}MB RAM
               </p>
             </div>
           </div>
           {seedCode && (
             <span className="flex items-center gap-1 px-2 py-0.5 bg-purple-600/20 border border-purple-600/40 rounded-full text-[9px] text-purple-300 font-bold">
-              🔗 Carried from Quest
+              Carried from quest
             </span>
           )}
           {runCount > 0 && (
             <div className="hidden sm:flex items-center gap-1 px-2 py-1 bg-slate-800 rounded-lg border border-slate-700">
               <span className="text-[9px] text-slate-400">Spells cast:</span>
-              <span className="text-emerald-400 font-black text-xs">{runCount}</span>
+              <span className="text-amber-300 font-black text-xs">{runCount}</span>
             </div>
           )}
         </div>
@@ -346,10 +346,10 @@ function ArcaneSandbox({ seedCode = null, seedLanguage = 'python', sandboxHealth
               <button key={key} onClick={() => { setLang(key); setOutput(null) }}
                 className={`max-sm:min-h-[44px] px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 border relative ${
                   lang === key
-                    ? 'bg-emerald-600/30 border-emerald-500/60 text-emerald-300 shadow shadow-emerald-600/20'
+                    ? 'bg-amber-300/10 border-amber-300/60 text-amber-200'
                     : 'border-slate-700 text-slate-400 hover:text-white hover:border-slate-600'
                 }`}>
-                {meta.icon} {meta.label}
+                {meta.label}
                 {/* Red dot if image missing */}
                 {sandboxHealth && sandboxHealth.images?.[key] === false && (
                   <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full" title="Image not built" />
@@ -360,20 +360,20 @@ function ArcaneSandbox({ seedCode = null, seedLanguage = 'python', sandboxHealth
         </div>
 
         {/* Right: toolbar */}
-        <div className="flex items-center gap-1">
+        <div className="flex flex-wrap items-center gap-1">
 
           {/* Templates */}
           <div ref={templatesAnchorRef}>
             <button onClick={() => { setShowTemplates(!showTemplates); setShowSaved(false); setShowSettings(false) }}
               className="max-sm:min-h-[44px] max-sm:min-w-[44px] max-sm:justify-center px-2 py-1.5 text-xs text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition flex items-center gap-1 border border-transparent hover:border-slate-700">
-              📜 <span className="hidden md:inline">Scrolls</span>
+              <span className="text-[11px] font-bold uppercase tracking-wider">Scrolls</span>
             </button>
             <MobileSheet show={showTemplates} onClose={() => setShowTemplates(false)} widthClass="sm:w-52" anchorRef={templatesAnchorRef}>
               <p className="text-[9px] text-slate-500 uppercase tracking-wider px-3 pt-1 sm:pt-3 pb-1 font-bold">Spell Templates</p>
               {Object.entries(SPELL_TEMPLATES[lang] || {}).map(([key, tpl]) => (
                 <button key={key} onClick={() => { applyTemplate(key); setShowTemplates(false) }}
                   className="w-full flex items-center gap-2 px-3 py-3 sm:py-2 text-sm sm:text-xs text-slate-300 hover:text-white hover:bg-slate-800 transition text-left">
-                  <span>{tpl.icon}</span> {tpl.label}
+                  {tpl.label}
                 </button>
               ))}
             </MobileSheet>
@@ -383,9 +383,9 @@ function ArcaneSandbox({ seedCode = null, seedLanguage = 'python', sandboxHealth
           <div ref={savedAnchorRef}>
             <button onClick={() => { setShowSaved(!showSaved); setShowTemplates(false); setShowSettings(false) }}
               className="max-sm:min-h-[44px] max-sm:min-w-[44px] max-sm:justify-center px-2 py-1.5 text-xs text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition flex items-center gap-1 border border-transparent hover:border-slate-700">
-              🗂️
+              <span className="text-[11px] font-bold uppercase tracking-wider hidden md:inline">Saved</span><span className="text-[11px] font-bold uppercase tracking-wider md:hidden">Saved</span>
               {savedScrolls.length > 0 && (
-                <span className="w-3.5 h-3.5 bg-emerald-600 text-white text-[7px] rounded-full flex items-center justify-center font-bold">
+                <span className="w-3.5 h-3.5 bg-amber-400 text-slate-900 text-[7px] rounded-full flex items-center justify-center font-bold">
                   {savedScrolls.length}
                 </span>
               )}
@@ -398,7 +398,7 @@ function ArcaneSandbox({ seedCode = null, seedLanguage = 'python', sandboxHealth
                   <div key={s.id} className="flex items-center gap-2 px-3 py-2 hover:bg-slate-800 group">
                     <button onClick={() => { setLang(s.language); setCode(s.code); setOutput(null); setShowSaved(false) }} className="flex-1 text-left">
                       <p className="text-sm sm:text-xs text-slate-300 group-hover:text-white truncate">{s.name}</p>
-                      <p className="text-[9px] text-slate-500">{LANG_META[s.language]?.icon} {s.ts}</p>
+                      <p className="text-[10px] text-slate-500">{LANG_META[s.language]?.label} · {s.ts}</p>
                     </button>
                     <button onClick={() => {
                       const u = savedScrolls.filter(x => x.id !== s.id)
@@ -413,33 +413,33 @@ function ArcaneSandbox({ seedCode = null, seedLanguage = 'python', sandboxHealth
           {/* Settings */}
           <div ref={settingsAnchorRef}>
             <button onClick={() => { setShowSettings(!showSettings); setShowTemplates(false); setShowSaved(false) }}
-              className="px-2 py-1.5 text-xs text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition border border-transparent hover:border-slate-700 min-w-[44px] min-h-[44px] flex items-center justify-center">⚙️</button>
+              className="px-2 py-1.5 text-xs text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition border border-transparent hover:border-slate-700 min-w-[44px] min-h-[44px] flex items-center justify-center text-[11px] font-bold uppercase tracking-wider">Size</button>
             <MobileSheet show={showSettings} onClose={() => setShowSettings(false)} widthClass="sm:w-44" anchorRef={settingsAnchorRef}>
               <div className="px-3 pb-3 sm:p-3">
                 <p className="text-[9px] text-slate-500 uppercase tracking-wider mb-2 font-bold">Font Size</p>
                 <div className="flex gap-1">
                   {[12, 14, 16, 18].map(s => (
                     <button key={s} onClick={() => setFontSize(s)}
-                      className={`flex-1 py-2 sm:py-1 rounded text-xs font-bold transition ${fontSize === s ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'}`}>{s}</button>
+                      className={`flex-1 py-2 sm:py-1 rounded text-xs font-bold transition ${fontSize === s ? 'bg-amber-300 text-slate-900' : 'bg-slate-800 text-slate-400 hover:text-white'}`}>{s}</button>
                   ))}
                 </div>
               </div>
             </MobileSheet>
           </div>
 
-          <button onClick={handleDownload} title="Download" className="px-2 py-1.5 text-xs text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition border border-transparent hover:border-slate-700 min-w-[44px] min-h-[44px] flex items-center justify-center">📥</button>
-          <button onClick={() => setSaveDialog(true)} title="Save scroll" className="px-2 py-1.5 text-xs text-slate-400 hover:text-emerald-400 hover:bg-slate-800 rounded-lg transition border border-transparent hover:border-emerald-600/40 min-w-[44px] min-h-[44px] flex items-center justify-center">💾</button>
+          <button onClick={handleDownload} title="Download" className="px-2 py-1.5 text-xs text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition border border-transparent hover:border-slate-700 min-w-[44px] min-h-[44px] flex items-center justify-center text-[11px] font-bold uppercase tracking-wider">Export</button>
+          <button onClick={() => setSaveDialog(true)} title="Save scroll" className="px-2 py-1.5 text-xs text-slate-400 hover:text-amber-200 hover:bg-slate-800 rounded-lg transition border border-transparent hover:border-amber-300/40 min-w-[44px] min-h-[44px] flex items-center justify-center text-[11px] font-bold uppercase tracking-wider">Save</button>
 
           {/* Run */}
           <button onClick={handleRun} disabled={isRunning}
             className={`ml-1 max-sm:min-h-[44px] px-4 py-1.5 rounded-lg text-xs font-black transition flex items-center gap-1.5 border ${
               isRunning
                 ? 'bg-slate-700 border-slate-600 text-slate-400 cursor-not-allowed'
-                : 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 border-emerald-400/30 text-white shadow shadow-emerald-600/20'
+                : 'bg-gradient-to-b from-violet-500 via-violet-600 to-violet-800 hover:from-violet-400 border-amber-300/55 text-white shadow-[0_4px_16px_-4px_rgba(124,58,237,0.65)]'
             }`}>
             {isRunning
-              ? <><span className="w-3 h-3 border-2 border-slate-400 border-t-transparent rounded-full animate-spin" /> Casting...</>
-              : <>▶ Cast <span className="hidden sm:inline text-emerald-200 font-normal">(Ctrl+Enter)</span></>
+              ? <><span className="w-3 h-3 border-2 border-slate-400 border-t-transparent rounded-full animate-spin" /> Casting…</>
+              : <>Cast <span className="hidden sm:inline text-amber-200/80 font-normal">(Ctrl+Enter)</span></>
             }
           </button>
         </div>
@@ -450,18 +450,18 @@ function ArcaneSandbox({ seedCode = null, seedLanguage = 'python', sandboxHealth
 
         {/* Mobile-only Code/Output tabs, shown once there's something to switch to */}
         {(output || isRunning) && (
-          <div className="md:hidden shrink-0 flex border-b border-emerald-600/20 bg-slate-900/60">
+          <div className="md:hidden shrink-0 flex border-b border-amber-300/15 bg-slate-900/60">
             <button
               onClick={() => setMobileTab('code')}
-              className={`flex-1 py-2 text-xs font-bold transition ${mobileTab === 'code' ? 'text-emerald-400 border-b-2 border-emerald-400' : 'text-slate-500'}`}
+              className={`flex-1 py-2 text-xs font-bold transition ${mobileTab === 'code' ? 'text-amber-200 border-b-2 border-amber-300' : 'text-slate-500'}`}
             >
-              💻 Code
+              Code
             </button>
             <button
               onClick={() => setMobileTab('output')}
-              className={`flex-1 py-2 text-xs font-bold transition ${mobileTab === 'output' ? 'text-emerald-400 border-b-2 border-emerald-400' : 'text-slate-500'}`}
+              className={`flex-1 py-2 text-xs font-bold transition ${mobileTab === 'output' ? 'text-amber-200 border-b-2 border-amber-300' : 'text-slate-500'}`}
             >
-              🔮 Output
+              Output
             </button>
           </div>
         )}
@@ -471,7 +471,7 @@ function ArcaneSandbox({ seedCode = null, seedLanguage = 'python', sandboxHealth
         {/* Editor */}
         <div ref={editorContainerRef} className={`overflow-hidden flex-col ${(output || isRunning) && mobileTab === 'output' ? 'hidden' : 'flex'} md:flex`}
           style={{ flex: output ? '1 1 55%' : '1 1 100%', minWidth: 0, transition: 'flex 0.3s ease', position: 'relative' }}>
-          <div className="h-0.5 w-full bg-gradient-to-r from-emerald-600 via-teal-500 to-emerald-600 opacity-70 shrink-0" />
+          <div className="h-0.5 w-full bg-gradient-to-r from-violet-600 via-amber-300 to-violet-600 opacity-70 shrink-0" />
           <Editor
             height="100%"
             width="100%"
@@ -482,33 +482,32 @@ function ArcaneSandbox({ seedCode = null, seedLanguage = 'python', sandboxHealth
             options={sandboxEditorOptions}
             onMount={(editor, monaco) => {
               editorRef.current = editor
-              monaco.editor.defineTheme('arcane-emerald', {
+              monaco.editor.defineTheme('forge-citadel', {
                 base: 'vs-dark', inherit: true,
                 rules: [
-                  { token: 'keyword',  foreground: '34d399' },
-                  { token: 'string',   foreground: 'a3e635' },
+                  { token: 'keyword',  foreground: 'c4b5fd' },
+                  { token: 'string',   foreground: 'f3d78a' },
                   { token: 'comment',  foreground: '374151', fontStyle: 'italic' },
                   { token: 'number',   foreground: 'fb923c' },
                   { token: 'function', foreground: '38bdf8' },
                 ],
                 colors: {
-                  'editor.background':                '#020617',
-                  'editor.lineHighlightBackground':   '#064e3b18',
-                  'editorCursor.foreground':          '#34d399',
-                  'editor.selectionBackground':       '#05966940',
+                  'editor.background':                '#070b18',
+                  'editor.lineHighlightBackground':   '#e0b84f12',
+                  'editorCursor.foreground':          '#e0b84f',
+                  'editor.selectionBackground':       '#7c3aed40',
                   'editorLineNumber.foreground':      '#1f2937',
-                  'editorLineNumber.activeForeground':'#34d399',
+                  'editorLineNumber.activeForeground':'#e0b84f',
                 },
               })
-              monaco.editor.setTheme('arcane-emerald')
+              monaco.editor.setTheme('forge-citadel')
               setTimeout(() => editor.layout(), 100)
             }}
           />
           {!output && !isRunning && runCount === 0 && (
             <div className="hidden sm:block absolute bottom-6 left-1/2 -translate-x-1/2 pointer-events-none">
-              <div className="flex items-center gap-2 whitespace-nowrap px-4 py-2 bg-slate-900/90 border border-emerald-600/20 rounded-full text-xs text-slate-400 backdrop-blur shadow">
-                <span className="text-emerald-400">▶</span>
-                Press <kbd className="px-1.5 py-0.5 bg-slate-800 rounded text-[10px] text-emerald-300 border border-slate-700 mx-1">Ctrl+Enter</kbd> to cast your spell
+              <div className="flex items-center gap-2 whitespace-nowrap px-4 py-2 bg-slate-900/90 border border-amber-300/15 rounded-full text-xs text-slate-400 backdrop-blur shadow">
+                Press <kbd className="px-1.5 py-0.5 bg-slate-800 rounded text-[10px] text-amber-200 border border-slate-700 mx-1">Ctrl+Enter</kbd> to cast your spell
               </div>
             </div>
           )}
@@ -516,11 +515,11 @@ function ArcaneSandbox({ seedCode = null, seedLanguage = 'python', sandboxHealth
 
         {/* Output pane */}
         {(output || isRunning) && (
-          <div ref={outputRef} className={`flex-col border-l-0 md:border-l border-emerald-600/20 bg-slate-950 ${mobileTab === 'code' ? 'hidden' : 'flex'} md:flex`}
+          <div ref={outputRef} className={`flex-col border-l-0 md:border-l border-amber-300/15 bg-[#070b18] ${mobileTab === 'code' ? 'hidden' : 'flex'} md:flex`}
             style={{ flex: '1 1 45%', minWidth: 0, minHeight: 0 }}>
-            <div className="shrink-0 flex items-center justify-between px-4 py-2 bg-slate-900/80 border-b border-emerald-600/20">
-              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
-                🔮 Crystal Output
+            <div className="shrink-0 flex items-center justify-between px-4 py-2 bg-[#0b1224] border-b border-amber-300/15">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-[0.2em] flex items-center gap-2">
+                Crystal Output
                 {output && !hasError && <span className="text-emerald-400 font-normal normal-case tracking-normal text-[11px]">✓ {formatTime(output.elapsed)}</span>}
                 {output && hasError  && <span className="text-red-400 font-normal normal-case tracking-normal text-[11px]">Error · {formatTime(output.elapsed)}</span>}
               </span>
@@ -530,18 +529,18 @@ function ArcaneSandbox({ seedCode = null, seedLanguage = 'python', sandboxHealth
             <div className="flex-1 overflow-y-auto p-4 font-mono text-xs" style={{ minHeight: 0 }}>
               {isRunning && !output && (
                 <div className="flex flex-col items-center justify-center h-full gap-3">
-                  <div className="w-10 h-10 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin" />
-                  <p className="text-emerald-400 animate-pulse text-xs">Consulting the oracle...</p>
-                  <p className="text-slate-600 text-[10px]">Docker container spinning up...</p>
+                  <div className="w-10 h-10 border-4 border-amber-300 border-t-transparent rounded-full animate-spin" />
+                  <p className="text-amber-200 animate-pulse text-xs">Consulting the oracle…</p>
+                  <p className="text-slate-600 text-[10px]">Docker container spinning up…</p>
                 </div>
               )}
 
               {output && (
                 <>
                   <div className={`flex items-center gap-2 mb-4 pb-3 border-b ${hasError ? 'border-red-900' : 'border-emerald-900'}`}>
-                    <span className="text-xl">{hasError ? '💥' : '✨'}</span>
+                    <span className={`w-2 h-2 rotate-45 ${hasError ? 'bg-rose-400' : 'bg-emerald-400'}`} aria-hidden="true" />
                     <span className={`text-xs font-bold ${hasError ? 'text-red-400' : 'text-emerald-400'}`}>
-                      {hasError ? 'Spell fizzled!' : 'Spell cast successfully!'}
+                      {hasError ? 'Spell fizzled' : 'Spell cast successfully'}
                     </span>
                     <span className="ml-auto text-[10px] text-slate-500">Run #{runCount}</span>
                   </div>
@@ -565,9 +564,9 @@ function ArcaneSandbox({ seedCode = null, seedLanguage = 'python', sandboxHealth
                   )}
 
                   <div className="mt-3 pt-3 border-t border-slate-800 flex gap-4 text-[10px] text-slate-500 flex-wrap">
-                    <span>⏱ {formatTime(output.elapsed)}</span>
-                    <span className="capitalize">{LANG_META[lang]?.icon} {lang}</span>
-                    <span>🐳 Docker isolated</span>
+                    <span>{formatTime(output.elapsed)}</span>
+                    <span>{LANG_META[lang]?.label}</span>
+                    <span>Docker isolated</span>
                     {output.returncode !== undefined && <span>Exit: {output.returncode}</span>}
                   </div>
                 </>
@@ -587,7 +586,7 @@ function ArcaneSandbox({ seedCode = null, seedLanguage = 'python', sandboxHealth
                         hErr ? 'bg-red-900/20 border-red-800/40 text-red-400 hover:bg-red-900/40'
                               : 'bg-emerald-900/20 border-emerald-800/40 text-emerald-400 hover:bg-emerald-900/40'
                       }`} title={`Restore run at ${h.ts}`}>
-                      {hErr ? '💥' : '✨'} {h.ts}
+                      {hErr ? 'Error' : 'OK'} · {h.ts}
                     </button>
                   )
                 })}
@@ -1127,7 +1126,7 @@ export default function StudentDashboard({ user, onLogout }) {
             {activeTab === 'sandbox' && (
               <div>
                 <SandboxHealthBanner health={sandboxHealth} />
-                <div className="rounded-2xl overflow-hidden border border-emerald-600/30 shadow-2xl shadow-emerald-900/20" style={{ height: 'calc(100vh - 240px)', minHeight: 480 }}>
+                <div className="rounded-2xl overflow-hidden border border-amber-300/25 shadow-2xl" style={{ height: 'calc(100vh - 240px)', minHeight: 480 }}>
                   <ArcaneSandbox
                     seedCode={sandboxSeed?.code || null}
                     seedLanguage={sandboxSeed?.language || 'python'}
@@ -1214,7 +1213,7 @@ export default function StudentDashboard({ user, onLogout }) {
               )}
 
               {courseTab === 'announcements' && (
-                <StudentAnnouncements classId={selectedSection.id} sectionName={selectedSection.name} />
+                <StudentAnnouncements classId={selectedSection.id} sectionName={selectedSection.name} readIds={new Set(notifications.filter(n => n.read).map(n => n.id))} onMarkRead={markNotificationRead} />
               )}
               {courseTab === 'board' && (
                 <ProblemList
@@ -1230,7 +1229,7 @@ export default function StudentDashboard({ user, onLogout }) {
                 />
               )}
               {courseTab === 'sandbox' && (
-                 <div className="h-[600px] rounded-xl overflow-hidden border border-emerald-600/30">
+                 <div className="h-[600px] rounded-xl overflow-hidden border border-amber-300/25 bg-[#070b18]">
                     <ArcaneSandbox sandboxHealth={sandboxHealth} />
                  </div>
               )}
