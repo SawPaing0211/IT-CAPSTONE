@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { API_BASE } from '../api/client'
+import crystalIcon from '../assets/landing/forge-crystal-icon.webp'
 
 // Same rule the server enforces (it is the one that decides).
 const ruleError = (pw) => {
@@ -51,35 +52,41 @@ export default function ChangePasswordModal({ forced = false, onClose, onChanged
 
   return (
     <div className="fixed inset-0 bg-black/85 backdrop-blur-sm flex items-center justify-center z-[100] p-4" role="dialog" aria-modal="true">
-      <form onSubmit={submit} className="bg-slate-900 border border-purple-600/50 rounded-2xl w-full max-w-md p-6 space-y-4 shadow-2xl">
-        <div>
-          <h2 className="text-xl font-black text-white">{forced ? 'Choose a new password' : 'Change password'}</h2>
-          <p className="text-slate-400 text-sm mt-1">
-            {forced
-              ? 'You are using a temporary password. Set your own to continue.'
-              : 'Changing it signs you out of your other devices.'}
-          </p>
+      <form onSubmit={submit} className="relative bg-gradient-to-b from-slate-900 to-slate-950 border border-purple-600/50 rounded-2xl w-full max-w-md p-6 space-y-4 shadow-2xl shadow-purple-950/60 overflow-hidden">
+        <div className="pointer-events-none absolute -top-16 -right-16 w-48 h-48 rounded-full bg-purple-700/20 blur-[80px]" />
+        <div className="relative flex items-center gap-3">
+          <div className="w-10 h-10 shrink-0 bg-gradient-to-br from-purple-600 to-pink-600 rounded-lg flex items-center justify-center shadow-lg shadow-purple-600/30 p-1.5">
+            <img src={crystalIcon} alt="" className="w-full h-full object-contain drop-shadow" />
+          </div>
+          <div>
+            <h2 className="text-xl font-black bg-gradient-to-r from-purple-300 via-pink-300 to-purple-300 bg-clip-text text-transparent drop-shadow">{forced ? 'Choose a new password' : 'Change password'}</h2>
+            <p className="text-slate-400 text-sm mt-0.5">
+              {forced
+                ? 'You are using a temporary password. Set your own to continue.'
+                : 'Changing it signs you out of your other devices.'}
+            </p>
+          </div>
         </div>
-        {error && <div role="alert" className="p-3 bg-red-600/20 border border-red-600/40 rounded-lg text-red-300 text-sm">{error}</div>}
-        {done && <div className="p-3 bg-green-600/20 border border-green-600/40 rounded-lg text-green-300 text-sm">Password changed.</div>}
-        <label className="block text-sm text-slate-400">{forced ? 'Temporary password' : 'Current password'}
+        {error && <div role="alert" className="relative p-3 bg-red-600/20 border border-red-600/40 rounded-lg text-red-300 text-sm">{error}</div>}
+        {done && <div className="relative p-3 bg-green-600/20 border border-green-600/40 rounded-lg text-green-300 text-sm">Password changed.</div>}
+        <label className="relative block text-sm text-slate-400">{forced ? 'Temporary password' : 'Current password'}
           <input type="password" autoComplete="current-password" value={current} onChange={e => setCurrent(e.target.value)} className={`${input} mt-1`} />
         </label>
-        <label className="block text-sm text-slate-400">New password
+        <label className="relative block text-sm text-slate-400">New password
           <input type="password" autoComplete="new-password" value={next} onChange={e => setNext(e.target.value)} className={`${input} mt-1`} />
           <span className="text-xs text-slate-500">8+ characters with a letter and a number.</span>
         </label>
-        <label className="block text-sm text-slate-400">Confirm new password
+        <label className="relative block text-sm text-slate-400">Confirm new password
           <input type="password" autoComplete="new-password" value={confirm} onChange={e => setConfirm(e.target.value)} className={`${input} mt-1`} />
         </label>
-        <div className="flex gap-3 pt-2">
+        <div className="relative flex gap-3 pt-2">
           {forced ? (
-            <button type="button" onClick={onLogout} className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300">Sign out</button>
+            <button type="button" onClick={onLogout} className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 border border-purple-600/20 rounded-lg text-slate-300 transition">Sign out</button>
           ) : (
-            <button type="button" onClick={onClose} className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300">Cancel</button>
+            <button type="button" onClick={onClose} className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 border border-purple-600/20 rounded-lg text-slate-300 transition">Cancel</button>
           )}
           <button type="submit" disabled={loading || !current || !next || !confirm}
-            className="flex-1 py-2.5 bg-gradient-to-r from-blue-600 to-purple-600 disabled:opacity-50 rounded-lg text-white font-black">
+            className="flex-1 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 disabled:opacity-50 rounded-lg text-white font-black shadow-lg shadow-purple-600/30 transition">
             {loading ? 'Saving…' : 'Change password'}
           </button>
         </div>

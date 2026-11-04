@@ -13,6 +13,7 @@ import MobileSheet from '../../components/MobileSheet'
 import BottomNav from '../../components/BottomNav'
 import StudentLessons from './StudentLessons'
 import StudentAnnouncements from './StudentAnnouncements'
+import crystalIcon from '../../assets/landing/forge-crystal-icon.webp'
 
 // ─── Spell templates per language ─────────────────────────────────────────
 const SPELL_TEMPLATES = {
@@ -661,8 +662,8 @@ export default function StudentDashboard({ user, onLogout }) {
             streak: data.streak ?? 0,
             total_submissions: data.total_submissions ?? 0,
             accepted_submissions: data.accepted_submissions ?? 0,
-            success_rate: data.success_rate ?? 0,
             quests_done: data.quests_done ?? data.accepted_submissions ?? 0,
+            success_rate: data.success_rate ?? 0,
           })
         } else {
           setHeroStats({ total_xp: 0, level: 1, streak: 0, total_submissions: 0, accepted_submissions: 0, success_rate: 0 })
@@ -889,10 +890,18 @@ export default function StudentDashboard({ user, onLogout }) {
 
       {/* Background particles */}
       <div ref={backgroundRef} className="fixed inset-0 pointer-events-none transition-transform duration-100 ease-out overflow-hidden">
-        {[...Array(50)].map((_, i) => (
-          <div key={i} className="absolute w-1 h-1 bg-white/30 rounded-full animate-float"
-            style={{ left: `${Math.random() * 100}%`, top: `${Math.random() * 100}%`, animationDelay: `${Math.random() * 5}s`, animationDuration: `${3 + Math.random() * 4}s`, opacity: 0.3 + Math.random() * 0.5, boxShadow: '0 0 4px rgba(168, 85, 247, 0.5)' }} />
-        ))}
+        {/* Ambient nebula glow — echoes the landing/login sky so the dashboard
+            reads as the same world, without competing with the UI on top */}
+        <div className="absolute -top-32 -left-24 w-[520px] h-[520px] rounded-full bg-purple-700/20 blur-[120px]" />
+        <div className="absolute top-1/3 -right-32 w-[460px] h-[460px] rounded-full bg-fuchsia-600/15 blur-[130px]" />
+        <div className="absolute bottom-0 left-1/4 w-[420px] h-[420px] rounded-full bg-indigo-600/15 blur-[110px]" />
+        {[...Array(50)].map((_, i) => {
+          const gold = i % 7 === 0
+          return (
+            <div key={i} className={`absolute rounded-full animate-float ${gold ? 'w-1 h-1 bg-amber-200/70' : 'w-1 h-1 bg-white/30'}`}
+              style={{ left: `${Math.random() * 100}%`, top: `${Math.random() * 100}%`, animationDelay: `${Math.random() * 5}s`, animationDuration: `${3 + Math.random() * 4}s`, opacity: 0.3 + Math.random() * 0.5, boxShadow: gold ? '0 0 6px rgba(252, 211, 77, 0.7)' : '0 0 4px rgba(168, 85, 247, 0.5)' }} />
+          )
+        })}
         <div className="absolute inset-0 bg-gradient-to-t from-slate-950/50 via-transparent to-purple-950/20" />
       </div>
 
@@ -900,7 +909,9 @@ export default function StudentDashboard({ user, onLogout }) {
       <header className="relative z-20 bg-slate-900/90 backdrop-blur border-b border-purple-600/40 px-4 sm:px-6 py-3 sm:py-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 sticky top-0">
         {/* Logo */}
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-gradient-to-br from-purple-600 to-pink-600 rounded-lg flex items-center justify-center text-xl shadow-lg shadow-purple-600/30 animate-pulse-slow">⚔️</div>
+          <div className="w-10 h-10 bg-gradient-to-br from-purple-600 to-pink-600 rounded-lg flex items-center justify-center shadow-lg shadow-purple-600/30 animate-pulse-slow p-1.5">
+            <img src={crystalIcon} alt="" className="w-full h-full object-contain drop-shadow" />
+          </div>
           <div>
             <h1 className="font-black text-base sm:text-lg bg-gradient-to-r from-purple-300 via-pink-300 to-purple-300 bg-clip-text text-transparent drop-shadow">Adventure Realm</h1>
             <p className="text-[10px] text-slate-400 -mt-0.5">Powered by Forge.Dev</p>
