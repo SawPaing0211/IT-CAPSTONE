@@ -617,7 +617,11 @@ useEffect(() => {
   }
 
   const editorOptions = {
-    minimap: { enabled: true },
+    minimap: { enabled: false },
+    overviewRulerLanes: 0,
+    hideCursorInOverviewRuler: true,
+    overviewRulerBorder: false,
+    scrollbar: { verticalScrollbarSize: 6, horizontalScrollbarSize: 6, useShadows: false },
     fontSize: 14,
     lineHeight: 1.6,
     fontFamily: "'Fira Code', 'JetBrains Mono', 'Cascadia Code', 'Consolas', monospace",
@@ -785,7 +789,7 @@ useEffect(() => {
               : 'text-slate-400'
           }`}
         >
-          📜 Problem
+          Problem
         </button>
         <button
           onClick={() => setMobilePanel('code')}
@@ -795,7 +799,7 @@ useEffect(() => {
               : 'text-slate-400'
           }`}
         >
-          💻 Code
+          Code
         </button>
       </div>
 
@@ -814,33 +818,33 @@ useEffect(() => {
           <div className="flex border-b border-amber-300/15 bg-[#0a1024]/80 shrink-0">
             <button
               onClick={() => setActiveTab('problem')}
-              className={`flex-1 px-4 py-2 text-[11px] font-bold uppercase tracking-[0.2em] transition ${
+              className={`flex-1 px-2 py-2.5 whitespace-nowrap text-[11px] font-bold uppercase tracking-[0.14em] transition ${
                 activeTab === 'problem'
                   ? 'bg-violet-600/15 text-amber-300 border-b-2 border-amber-300'
                   : 'text-slate-400 hover:text-amber-100'
               }`}
             >
-              📜 Problem
+              Problem
             </button>
             <button
               onClick={() => setActiveTab('testcases')}
-              className={`flex-1 px-4 py-2 text-[11px] font-bold uppercase tracking-[0.2em] transition ${
+              className={`flex-1 px-2 py-2.5 whitespace-nowrap text-[11px] font-bold uppercase tracking-[0.14em] transition ${
                 activeTab === 'testcases'
                   ? 'bg-violet-600/15 text-amber-300 border-b-2 border-amber-300'
                   : 'text-slate-400 hover:text-amber-100'
               }`}
             >
-              📋 Test Cases
+              Test Cases
             </button>
             <button
               onClick={() => setActiveTab('hints')}
-              className={`flex-1 px-4 py-2 text-[11px] font-bold uppercase tracking-[0.2em] transition relative ${
+              className={`flex-1 px-2 py-2.5 whitespace-nowrap text-[11px] font-bold uppercase tracking-[0.14em] transition relative ${
                 activeTab === 'hints'
                   ? 'bg-violet-600/15 text-amber-300 border-b-2 border-amber-300'
                   : 'text-slate-400 hover:text-amber-100'
               }`}
             >
-              💡 Hints
+              Hints
               {quest.hints?.length > 0 && (
                 <span className="absolute -top-1 -right-1 w-4 h-4 bg-yellow-600 text-white text-[8px] rounded-full flex items-center justify-center">
                   {quest.hints.length}
@@ -850,7 +854,7 @@ useEffect(() => {
           </div>
 
           {/* Scrollable content */}
-          <div className="flex-1 overflow-y-auto p-5" style={{ minHeight: 0 }}>
+          <div className="flex-1 overflow-y-auto quiet-scroll p-5" style={{ minHeight: 0 }}>
             {activeTab === 'problem' && (
               <div className="space-y-6">
                 <div>
@@ -894,7 +898,7 @@ useEffect(() => {
                             ? 'bg-green-600/20 text-green-400'
                             : 'bg-red-600/20 text-red-400'
                         }`}>
-                          {output.test_results[idx].passed ? '✅ PASSED' : '❌ FAILED'}
+                          {output.test_results[idx].passed ? 'PASSED' : 'FAILED'}
                         </span>
                       )}
                     </div>
@@ -969,7 +973,7 @@ useEffect(() => {
           {/* Toolbar (~48px, shrink-0) — icon-only below sm, full labels sm+
               (side by side, this row has 3+ buttons plus a filename label;
               at phone width that overflows unless text collapses to icons) */}
-          <div className="flex items-center justify-between px-2 sm:px-4 py-2 bg-[#0a1024] border-b border-amber-300/15 shrink-0 gap-1 overflow-x-auto">
+          <div className="flex items-center justify-between px-2 sm:px-4 py-2 bg-[#0a1024] border-b border-amber-300/15 shrink-0 gap-2 flex-wrap">
             <div className="flex gap-1 shrink-0">
               {quest.languages?.map(lang => (
                 <button
@@ -985,7 +989,7 @@ useEffect(() => {
                 </button>
               ))}
               {(quest.languages?.length || 0) > 1 && (
-                <span className="hidden md:inline self-center ml-2 text-[10px] text-slate-400">
+                <span className="hidden min-[1700px]:inline self-center ml-2 text-[10px] text-slate-500">
                   {languageRule === 'required'
                     ? `Required: ${Object.keys(submissionsByLang).length} of ${quest.languages.length} languages submitted`
                     : `Optional: ${Object.keys(submissionsByLang).length} of ${quest.languages.length} submitted · each extra language earns +25% XP`}
@@ -1000,7 +1004,7 @@ useEffect(() => {
                   className="rounded-xl border border-amber-300/30 bg-[#0b1224] hover:border-amber-300/60 text-[11px] font-bold uppercase tracking-[0.14em] text-amber-200 hover:text-amber-100 transition flex items-center gap-1 px-2 sm:px-3 py-1.5 max-sm:min-h-[44px] max-sm:min-w-[44px] max-sm:justify-center"
                   title="Take your current code to the sandbox to experiment"
                 >
-                  🧪 <span className="hidden sm:inline">Try in Sandbox</span>
+                  <span className="sm:hidden" aria-hidden="true">🧪</span><span className="hidden sm:inline">Try in Sandbox</span>
                 </button>
               )}
 
@@ -1008,15 +1012,15 @@ useEffect(() => {
                 onClick={handleReset}
                 className="rounded-xl border border-amber-300/30 bg-[#0b1224] hover:border-amber-300/60 text-[11px] font-bold uppercase tracking-[0.14em] text-amber-200 hover:text-amber-100 transition flex items-center gap-1 px-2 sm:px-3 py-1.5 max-sm:min-h-[44px] max-sm:min-w-[44px] max-sm:justify-center"
               >
-                🔄 <span className="hidden sm:inline">Reset</span>
+                <span className="sm:hidden" aria-hidden="true">↺</span><span className="hidden sm:inline">Reset</span>
               </button>
               <button
                 onClick={handleDownload}
                 className="rounded-xl border border-amber-300/30 bg-[#0b1224] hover:border-amber-300/60 text-[11px] font-bold uppercase tracking-[0.14em] text-amber-200 hover:text-amber-100 transition flex items-center gap-1 px-2 sm:px-3 py-1.5 max-sm:min-h-[44px] max-sm:min-w-[44px] max-sm:justify-center"
               >
-                <DownloadIcon size={13} /> <span className="hidden sm:inline">Download</span>
+                <span className="sm:hidden"><DownloadIcon size={13} /></span><span className="hidden sm:inline">Download</span>
               </button>
-              <span className="hidden sm:inline text-[10px] text-slate-500">
+              <span className="hidden 2xl:inline text-[10px] text-slate-500">
                 Main.{language === 'python' ? 'py' : language === 'java' ? 'java' : 'cs'}
               </span>
             </div>
@@ -1068,7 +1072,7 @@ useEffect(() => {
             {/* Console header */}
             <div className="flex items-center justify-between px-4 py-2 border-b border-amber-300/15 bg-[#0b1224] shrink-0">
               <span className="text-[11px] font-bold text-amber-300 uppercase tracking-[0.2em] flex items-center gap-2">
-                🔮 Crystal Ball (Console)
+                Crystal Ball (Console)
                 {isLoading && <span className="text-blue-400 animate-pulse">• Casting spell...</span>}
               </span>
               <div className="flex gap-2">
@@ -1098,12 +1102,12 @@ useEffect(() => {
                         : 'bg-gradient-to-b from-[#f6dc92] via-[#e0b84f] to-[#b8862b] text-[#2a1a05] border border-amber-200/70 shadow-[0_4px_16px_-4px_rgba(224,184,79,0.55)] hover:brightness-110'
                     }`}
                   >
-                    {isLoading ? '⏳' : '⚔️'} {hasSubmitted
+                    {isLoading ? '⏳' : ''} {hasSubmitted
                       ? (priorSubmission?.status === 'accepted'
                           ? ((languageRule === 'required' && (quest?.languages?.length || 1) > 1 && Object.keys(submissionsByLang).length < quest.languages.length)
-                              ? `✅ Submitted (${Object.keys(submissionsByLang).length} of ${quest.languages.length})`
-                              : '✅ Conquered')
-                          : '🔒 Submitted')
+                              ? `✓ Submitted (${Object.keys(submissionsByLang).length} of ${quest.languages.length})`
+                              : '✓ Conquered')
+                          : 'Submitted')
                       : 'Submit'}
                   </button>
                 )}
@@ -1111,10 +1115,10 @@ useEffect(() => {
             </div>
 
             {/* Console output (scrollable within the 192px) */}
-            <div className="console-output overflow-y-auto p-4 font-mono text-xs [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-slate-950 [&::-webkit-scrollbar-track]:rounded-full [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gradient-to-b [&::-webkit-scrollbar-thumb]:from-purple-600 [&::-webkit-scrollbar-thumb]:to-pink-600 [&::-webkit-scrollbar-thumb]:shadow-[0_0_8px_rgba(168,85,247,0.6)]" style={{ flex: '1 1 0', minHeight: 0 }}>
+            <div className="console-output overflow-y-auto quiet-scroll p-4 font-mono text-xs" style={{ flex: '1 1 0', minHeight: 0 }}>
               {!output && !isLoading && (
                 <div className="text-center py-4 text-slate-500">
-                  <p className="text-lg mb-2">🔮</p>
+                  <p className="mb-2 text-amber-300/70" aria-hidden="true">◆</p>
                   <p>Cast your spell to see the results...</p>
                   <p className="text-xs mt-2">Press Ctrl+Enter to run your code</p>
                 </div>
@@ -1133,8 +1137,8 @@ useEffect(() => {
                     output.status === 'accepted' ? 'text-green-400' :
                     output.status === 'error'    ? 'text-red-400'   : 'text-yellow-400'
                   }`}>
-                    <span className="text-xl">
-                      {output.status === 'accepted' ? '✅' : output.status === 'error' ? '❌' : '⚠️'}
+                    <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-sm font-bold text-slate-950 ${output.status === 'accepted' ? 'bg-emerald-400' : output.status === 'error' ? 'bg-rose-400' : 'bg-amber-300'}`}>
+                      {output.status === 'accepted' ? '✓' : output.status === 'error' ? '✕' : '!'}
                     </span>
                     <div>
                       <p className="font-bold text-sm">
