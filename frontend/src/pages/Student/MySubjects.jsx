@@ -19,24 +19,30 @@ export default function MySubjects({ onSelectSubject, user, stats }) {
   const [subjects, setSubjects] = useState([])
   const [loading, setLoading] = useState(true)
 
-  // Fetch the student's enrolled subjects
-  useEffect(() => {
-    const fetchSubjects = async () => {
-      try {
-        const token = localStorage.getItem('token')
-        const subjectsRes = await fetch(`${API_BASE}/api/student/subjects`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        })
-        const subjectsData = await subjectsRes.json()
-        setSubjects(subjectsData)
-      } catch (err) {
-        console.error('Failed to load subjects:', err)
-      } finally {
-        setLoading(false)
-      }
+  const [failed, setFailed] = useState(false)
+
+  // Fetch the student's enrolled subjects. A failed request shows a retry
+  // card instead of the "not enrolled" message, which would be wrong.
+  const fetchSubjects = async () => {
+    setLoading(true)
+    setFailed(false)
+    try {
+      const token = localStorage.getItem('token')
+      const subjectsRes = await fetch(`${API_BASE}/api/student/subjects`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      if (!subjectsRes.ok) throw new Error(`HTTP ${subjectsRes.status}`)
+      const subjectsData = await subjectsRes.json()
+      setSubjects(Array.isArray(subjectsData) ? subjectsData : [])
+    } catch (err) {
+      console.error('Failed to load subjects:', err)
+      setFailed(true)
+    } finally {
+      setLoading(false)
     }
-    fetchSubjects()
-  }, [])
+  }
+
+  useEffect(() => { fetchSubjects() }, [])
 
   const openSubject = (subject) => {
     // Build the subject payload and hand it up to the dashboard
@@ -62,6 +68,18 @@ export default function MySubjects({ onSelectSubject, user, stats }) {
         <div className="h-8 w-48 bg-slate-800/80 rounded-lg" />
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {[...Array(3)].map((_, i) => <div key={i} className="h-[190px] rounded-xl bg-slate-900/70 border border-slate-800" />)}
+        </div>
+      </div>
+    )
+  }
+
+  if (failed) {
+    return (
+      <div className="p-4 sm:p-6 max-w-4xl mx-auto">
+        <div className="rounded-xl border border-amber-300/25 bg-gradient-to-br from-[#0f1836] to-[#0a1024] p-10 text-center">
+          <h2 className="font-cinzel text-2xl font-bold text-white mb-2">The scroll would not open</h2>
+          <p role="alert" className="text-slate-300 mb-5">We could not load your subjects. Check your connection and try again.</p>
+          <button onClick={fetchSubjects} className="px-5 py-2.5 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-sm font-bold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-300">Try again</button>
         </div>
       </div>
     )

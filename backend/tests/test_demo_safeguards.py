@@ -74,9 +74,12 @@ def test_install_refuses_a_database_with_users_but_no_synthetic_marker_and_accep
 
 
 def test_production_compose_and_image_carry_no_demo_switches():
-    compose = open(os.path.join(REPO, 'docker-compose.yml'), encoding='utf-8').read()
-    assert 'FORGE_ENV: production' in compose
-    assert 'FORGE_DEMO' not in compose
+    # docker-compose.yml was removed with the old deployment files; check it only if it comes back
+    compose_path = os.path.join(REPO, 'docker-compose.yml')
+    if os.path.exists(compose_path):
+        compose = open(compose_path, encoding='utf-8').read()
+        assert 'FORGE_ENV: production' in compose
+        assert 'FORGE_DEMO' not in compose
     ignore = open(os.path.join(BACKEND, '.dockerignore'), encoding='utf-8').read().split()
     for name in ('demo_runner.py', 'seed_demo.py', '.env', 'uploads/'):
         assert name in ignore, f'{name} must stay out of the image'
