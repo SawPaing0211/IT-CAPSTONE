@@ -2,6 +2,16 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Cinzel (SIL OFL), served from our own files so it works offline. Used for display titles. */
+@font-face {
+  font-family: 'Cinzel';
+  font-style: normal;
+  font-weight: 400 900;
+  font-display: swap;
+  src: url('./assets/fonts/cinzel-latin-wght-normal.woff2') format('woff2-variations');
+}
+.font-cinzel { font-family: 'Cinzel', Georgia, 'Times New Roman', serif; }
+
 /* ========================================= */
 /* ROOT LAYOUT — LOCK TO VIEWPORT            */
 /* ========================================= */

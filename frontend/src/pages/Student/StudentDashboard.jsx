@@ -8,6 +8,7 @@ import ProgressStats from './components/ProgressStats'
 import QuestLog from './QuestLog'
 import MySubjects from './MySubjects'
 import BountyBoard from './BountyBoard'
+import QuestSpotlight from './components/QuestSpotlight'
 import { api, API_BASE} from '../../api/client'
 import MobileSheet from '../../components/MobileSheet'
 import BottomNav from '../../components/BottomNav'
@@ -1083,7 +1084,14 @@ export default function StudentDashboard({ user, onLogout }) {
         {/* ================= MODE 1: DASHBOARD (No Subject Selected) ================= */}
         {!selectedSection ? (
           <div className="animate-fade-in">
-            {activeTab === 'subjects' && <MySubjects onSelectSubject={handleEnterSubject} user={user} stats={heroStats} />}
+            {activeTab === 'subjects' && (
+              <>
+                <div className="px-4 sm:px-6 pt-4 sm:pt-6 max-w-6xl mx-auto">
+                  <QuestSpotlight onSelectQuest={handleBountyQuestSelect} onBrowse={() => setActiveTab('bounty')} />
+                </div>
+                <MySubjects onSelectSubject={handleEnterSubject} user={user} stats={heroStats} />
+              </>
+            )}
             {activeTab === 'bounty' && <BountyBoard onSelectQuest={handleBountyQuestSelect} />}
             {activeTab === 'hall' && (
               <div className="overflow-hidden">
