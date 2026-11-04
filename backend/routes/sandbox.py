@@ -74,13 +74,15 @@ SECURITY_OPTS = {lang: list(_BASE_SECURITY_OPTS) for lang in ('python', 'java', 
 #        javac errors for Solution.java already reference the student's
 #        own line numbers.  Offset = 0.
 #
-# C#:    Program.cs (the wrapper) prepends ~7 lines before Solution.Run(),
-#        so raw csc line numbers need offset subtracted.
+# C#:    Solution.cs (student code) and Program.cs (wrapper) are SEPARATE
+#        files too, so csc already reports the student's own line numbers.
+#        Offset = 0 (checked against a real build: undefined name on
+#        student line 5 is reported as Solution.cs(5,17)).
 #
 # Python: No wrapper; offset = 0.
 COMPILE_LINE_OFFSETS = {
     'java':   0,
-    'csharp': 7,
+    'csharp': 0,
     'python': 0,
 }
 
@@ -248,6 +250,10 @@ def get_compile_error_message(result: dict, language: str) -> str:
     """
     stderr = result.get('stderr', '')
     stderr = stderr.replace('__COMPILE_ERROR__\n', '').replace('__COMPILE_ERROR__', '')
+    if language == 'csharp':
+        # run_csharp.sh prints the compiler errors on stdout (dotnet build 2>&1),
+        # only the sentinel goes to stderr
+        stderr = (stderr + '\n' + result.get('stdout', '')).strip()
 
     if language == 'java':
         return _parse_java_compile_error(stderr)

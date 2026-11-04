@@ -193,3 +193,27 @@ def test_draft_cannot_overwrite_after_final_submission(world, monkeypatch):
     assert r.status_code == 409
     with A.app.app_context():
         assert A.Submission.query.filter_by(user_id=world['uid']).first().code == 'c'
+
+
+CS_BUILD_OUT = (
+    "/tmp/work/build/Solution.cs(5,17): error CS0103: The name 'undefinedVar' does not exist in the current context [/tmp/work/build/sandbox.csproj]\n"
+    "/tmp/work/build/Solution.cs(5,17): error CS0103: The name 'undefinedVar' does not exist in the current context [/tmp/work/build/sandbox.csproj]\n"
+)
+
+
+def test_csharp_compile_error_is_reported_as_error_with_the_students_line(world, monkeypatch):
+    # run_csharp.sh: sentinel on stderr, compiler text on stdout, exit 1
+    monkeypatch.setattr(A, '_run_in_docker_with_stdin',
+                        lambda c, l, s: {'stdout': CS_BUILD_OUT, 'stderr': '__COMPILE_ERROR__\n', 'returncode': 1, 'timed_out': False, 'elapsed': 5})
+    res = A.evaluate_code('c', [{'input': '1', 'expected': '1'}], 'csharp')
+    assert res[0]['kind'] == 'runtime_error'
+    assert res[0]['output'].startswith("Line 5, Col 17: The name 'undefinedVar' does not exist")
+    assert res[0]['output'].count('CS0103') == 1   # duplicates collapsed
+
+
+def test_java_compile_error_message_is_clean(world, monkeypatch):
+    err = "__COMPILE_ERROR__\n/tmp/sandbox/Solution.java:6: error: cannot find symbol\n  int b = x;\n          ^\n1 error\n"
+    monkeypatch.setattr(A, '_run_in_docker_with_stdin',
+                        lambda c, l, s: {'stdout': '', 'stderr': err, 'returncode': 1, 'timed_out': False, 'elapsed': 5})
+    res = A.evaluate_code('c', [{'input': '1', 'expected': '1'}], 'java')
+    assert res[0]['kind'] == 'runtime_error' and res[0]['output'] == 'Line 6: cannot find symbol'

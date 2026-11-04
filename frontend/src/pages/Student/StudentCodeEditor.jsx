@@ -17,7 +17,7 @@ export default function StudentCodeEditor({
   heroLevel,
   onOpenSandbox
 }) {
-  const LANG_LINE_OFFSET = { python: 0, java: 0, csharp: 7 }
+  const LANG_LINE_OFFSET = { python: 0, java: 0, csharp: 0 }
 
   // Draft code is cached in localStorage, which is shared by the whole
   // browser -- without the student's own id in the key, whoever coded
@@ -915,7 +915,7 @@ useEffect(() => {
                         <div>
                            <p className="text-slate-500 mb-1">Your Output:</p>
                            <code className="text-red-400 font-mono block bg-slate-950 p-2 rounded whitespace-pre-wrap">
-                            {formatErrorOutput(output.test_results[idx].output, language)}
+                            {output.test_results[idx].kind === 'runtime_error' ? formatErrorOutput(output.test_results[idx].output, language) : output.test_results[idx].output}
                           </code>
                         </div>
                       )}
@@ -1133,9 +1133,9 @@ useEffect(() => {
               )}
               {output && (
                 <div className="space-y-3">
-                  <div className={`flex items-center gap-3 pb-3 border-b border-slate-700 ${
-                    output.status === 'accepted' ? 'text-green-400' :
-                    output.status === 'error'    ? 'text-red-400'   : 'text-yellow-400'
+                  <div className={`flex items-center gap-3 rounded-xl border p-3.5 ${
+                    output.status === 'accepted' ? 'text-green-400 border-emerald-400/30 bg-emerald-400/5' :
+                    output.status === 'error'    ? 'text-red-400 border-rose-400/30 bg-rose-400/5'   : 'text-yellow-400 border-amber-300/40 bg-amber-300/5'
                   }`}>
                     <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-sm font-bold text-slate-950 ${output.status === 'accepted' ? 'bg-emerald-400' : output.status === 'error' ? 'bg-rose-400' : 'bg-amber-300'}`}>
                       {output.status === 'accepted' ? '✓' : output.status === 'error' ? '✕' : '!'}
@@ -1151,19 +1151,20 @@ useEffect(() => {
                       {output.status !== 'error' && (
                         <p className="text-xs text-slate-400">
                           {output.is_run_mode
-                            ? `Run mode • Passed ${output.passed ?? output.test_results?.filter(t => t.passed)?.length ?? 0}/${output.total ?? output.test_results?.length ?? 0} tests`
+                            ? `${output.passed ?? output.test_results?.filter(t => t.passed)?.length ?? 0}/${output.total ?? output.test_results?.length ?? 0} test cases passed. Run only, nothing submitted.`
                             : output.scoring_note || `Score: ${output.score} XP • Passed ${output.passed_cases ?? 0}/${output.total_cases ?? 0} tests`}
                         </p>
                       )}
                     </div>
-                    {output.status === 'accepted' && (
+                    {!output.is_run_mode && (output.status === 'accepted' || (output.status === 'partial' && (output.xp_earned || 0) > 0)) && (
                       <div className="ml-auto text-right">
-                        <p className="font-cinzel text-amber-300 font-bold text-xl">+{xpGained} XP</p>
+                        <p className="font-cinzel text-amber-300 font-bold text-xl">+{output.status === 'accepted' ? xpGained : output.xp_earned} XP</p>
                         {combo > 1 && <p className="text-orange-400 text-xs">🔥 {combo}x Combo!</p>}
                       </div>
                     )}
                   </div>
 
+                  <div className="grid grid-cols-1 items-start gap-3 min-[1100px]:grid-cols-2">
                   {output.test_results?.map((tc, idx) => (
                     <div
                       key={idx}
@@ -1180,25 +1181,20 @@ useEffect(() => {
                       {!tc.passed && (
                         <div className="space-y-2 mt-2 text-xs">
                           <div>
-                            <p className="text-slate-500 mb-1">Expected:</p>
+                            <p className="text-slate-500 mb-1 text-[10px] uppercase tracking-[0.14em]">Expected</p>
                             <code className="text-blue-400 font-mono block bg-slate-950 p-2 rounded whitespace-pre-wrap">{tc.expected}</code>
                           </div>
                           <div>
-                            <p className="text-slate-500 mb-1">Your Output:</p>
+                            <p className="text-slate-500 mb-1 text-[10px] uppercase tracking-[0.14em]">{tc.kind === 'runtime_error' ? 'Error' : tc.kind === 'timeout' ? 'Timeout' : 'Your output'}</p>
                             <code className="text-red-400 font-mono block bg-slate-950 p-2 rounded whitespace-pre-wrap">
-                              {formatErrorOutput(tc.output, language)}
+                              {tc.kind === 'runtime_error' ? formatErrorOutput(tc.output, language) : tc.output}
                             </code>
                           </div>
-                          {tc.message && (
-                            <div>
-                              <p className="text-slate-500 mb-1">Error:</p>
-                              <code className="text-red-400 font-mono block bg-slate-950 p-2 rounded whitespace-pre-wrap">{formatErrorOutput(tc.output, language)}</code>
-                            </div>
-                          )}
                         </div>
                       )}
                     </div>
                   ))}
+                  </div>
 
                   {output.error && (
                     <div className="p-3 bg-red-900/20 rounded-lg border border-red-600/30">

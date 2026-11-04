@@ -1090,6 +1090,13 @@ def evaluate_code(code, test_cases, language, raise_on_infra=False):
         stderr    = result.get('stderr', '').strip()
         timed_out = result.get('timed_out', False)
         error     = result.get('error', '')
+        # java/c# compile failures: the compiler text can sit on stdout or
+        # stderr, so build the student-facing message from both
+        compile_failed = '__COMPILE_ERROR__' in stderr and language in ('java', 'csharp')
+        compile_msg = ''
+        if compile_failed:
+            from routes.sandbox import get_compile_error_message
+            compile_msg = get_compile_error_message(result, language)
         if error and raise_on_infra:
             raise ExecutionInfrastructureError(error)
 
@@ -1111,14 +1118,15 @@ def evaluate_code(code, test_cases, language, raise_on_infra=False):
                 "kind":      "timeout",
                 "hidden":    is_hidden
             })
-        elif error or (result.get('returncode', 0) != 0 and not actual):
+        elif error or compile_failed or (result.get('returncode', 0) != 0 and not actual):
+            shown_err = compile_msg if compile_failed else (stderr or error)
             results.append({
                 "test_case": shown_case,
                 "expected":  shown_expected,
                 "passed":    False,
-                "output":    "🔒 Hidden" if is_hidden else (stderr or error)[:500],
+                "output":    "🔒 Hidden" if is_hidden else shown_err[:500],
                 "runtime":   f"{result.get('elapsed', 0)/1000:.2f}s",
-                "message":   "🔒 Hidden test failed" if is_hidden else (stderr or error)[:80],
+                "message":   "🔒 Hidden test failed" if is_hidden else shown_err[:80],
                 "kind":      "runtime_error",     # compile failure, crash, or no output at all
                 "hidden":    is_hidden
             })
