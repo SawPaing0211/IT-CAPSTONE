@@ -361,3 +361,21 @@ def test_optional_quest_leaves_open_list_after_first_language(world, monkeypatch
     pid = _multi(world, 'optional', langs=('python', 'java'))
     _post_lang(world, pid, 'python')
     assert pid not in _open_ids(world)
+
+
+def test_subjects_list_has_quest_progress(world, monkeypatch):
+    monkeypatch.setattr(A, 'evaluate_code', _ok)
+    pid = _multi(world, 'optional', langs=('python', 'java'))
+    with A.app.app_context():
+        sid = A.db.session.get(A.Problem, pid).subject_id
+
+    def mine():
+        rows = world['c'].get('/api/student/subjects', headers=world['h']).get_json()
+        return next(r for r in rows if r['id'] == sid)
+
+    before = mine()
+    assert before['quests_total'] >= 1 and before['quests_done'] == 0
+    _post_lang(world, pid, 'python')
+    _post_lang(world, pid, 'java')
+    after = mine()
+    assert after['quests_done'] == 1 and after['quests_total'] == before['quests_total']

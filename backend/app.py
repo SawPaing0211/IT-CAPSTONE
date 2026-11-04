@@ -2990,6 +2990,8 @@ def get_student_subjects():
     if not section_ids:
         return jsonify([]), 200
 
+    accepted_ids = {s.problem_id for s in Submission.query.filter_by(user_id=user_id, status='accepted').all()}
+
     seen_subjects = {}
     for section in SubjectSection.query.filter(SubjectSection.id.in_(section_ids)).all():
         subject = Subject.query.get(section.subject_id)
@@ -3001,7 +3003,12 @@ def get_student_subjects():
         instructor = User.query.get(assignment.instructor_id) if assignment else None
 
         if subject.id not in seen_subjects:
+            # quests this student can see in the subject, and how many are cleared
+            visible = [p for p in Problem.query.filter_by(subject_id=subject.id, is_published=True).all()
+                       if not p.visible_to_sections or section.id in p.visible_to_sections]
             seen_subjects[subject.id] = {
+                "quests_total": len(visible),
+                "quests_done": sum(1 for p in visible if p.id in accepted_ids),
                 "id": subject.id,
                 "name": subject.name,
                 "subject_code": subject.subject_code,
