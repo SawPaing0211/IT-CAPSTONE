@@ -40,6 +40,7 @@ export default function CreateProblem() {
     prerequisites: [],
     estimated_time: '15min',
     partial_credit: 100,
+    language_rule: 'optional',
     auto_grade: true,
     plagiarism_threshold: 0.85,
     starter_code: { python: '', java: '', csharp: '' },
@@ -76,6 +77,7 @@ export default function CreateProblem() {
               prerequisites: problemData.prerequisites || [],
               estimated_time: problemData.estimated_time || '15min',
               partial_credit: problemData.partial_credit || 100,
+              language_rule: problemData.language_rule || 'optional',
               auto_grade: problemData.auto_grade !== undefined ? problemData.auto_grade : true,
               plagiarism_threshold: problemData.plagiarism_threshold || 0.85,
               starter_code: problemData.starter_code || { python: '', java: '', csharp: '' },
@@ -545,6 +547,36 @@ export default function CreateProblem() {
                 ))}
               </div>
             </div>
+
+            {formData.languages.length > 1 && (
+              <div>
+                <label className="block text-slate-400 text-sm mb-1">Language rule</label>
+                <p className="text-xs text-slate-500 mb-3">Shown because more than one language is ticked.</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {[
+                    { value: 'required', title: 'Required', text: 'Students must answer in every ticked language. The quest is cleared when all of them are submitted. The quest XP is shared evenly between the languages.' },
+                    { value: 'optional', title: 'Optional + bonus XP', text: 'Students choose 1, 2 or all of the ticked languages. Every extra language adds 25% of the quest XP (100% / 125% / 150% for 1 / 2 / 3 languages).' },
+                  ].map(opt => (
+                    <button
+                      type="button"
+                      key={opt.value}
+                      onClick={() => handleInputChange('language_rule', opt.value)}
+                      className={`text-left p-4 rounded-xl border-2 transition ${
+                        formData.language_rule === opt.value
+                          ? 'border-yellow-500 bg-purple-900/30'
+                          : 'border-slate-700 bg-slate-800 hover:bg-slate-700'
+                      }`}
+                    >
+                      <div className="text-white font-semibold mb-1">{opt.title}</div>
+                      <div className="text-xs text-slate-400">{opt.text}</div>
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs text-slate-500 mt-3">
+                  Each language is graded once and locks on its own. You can still see the code and the language used in the submissions list.
+                </p>
+              </div>
+            )}
           </div>
         )}
 

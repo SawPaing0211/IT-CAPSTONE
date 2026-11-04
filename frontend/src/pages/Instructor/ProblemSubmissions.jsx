@@ -205,63 +205,87 @@ export default function ProblemSubmissions() {
                     </div>
                   </td>
 
-                  {/* Status */}
+                  {/* Status: one line per language the student submitted */}
                   <td className="p-3 sm:p-4">
-                    <span className={`px-3 py-1 rounded-full text-xs font-bold ${
-                      !student.submitted
-                        ? 'bg-slate-700/50 text-slate-400'
-                        : student.status === 'accepted'
-                        ? 'bg-green-600/20 text-green-400'
-                        : student.status === 'partial'
-                        ? 'bg-blue-600/20 text-blue-400'
-                        : student.status === 'wrong_answer'
-                        ? 'bg-yellow-600/20 text-yellow-400'
-                        : 'bg-red-600/20 text-red-400'
-                    }`}>
-                      {!student.submitted ? '⏳ Not Submitted'
-                        : student.status === 'accepted'      ? '✅ Accepted'
-                        : student.status === 'partial'       ? '⚡ Partial'
-                        : student.status === 'wrong_answer'  ? '⚠️ Wrong Answer'
-                        : student.status === 'timeout'       ? '⏱️ Timeout'
-                        : student.status === 'compile_error' ? '🔴 Compile Error'
-                        : student.status === 'error'         ? '❌ Error'
-                        : `📝 ${student.status}`}
-                    </span>
+                    <div className="flex flex-col gap-2 items-start">
+                      {(student.submissions?.length ? student.submissions : [student]).map((row, i) => (
+                        <span key={i} className={`px-3 py-1 rounded-full text-xs font-bold ${
+                          !student.submitted
+                            ? 'bg-slate-700/50 text-slate-400'
+                            : row.status === 'accepted'
+                            ? 'bg-green-600/20 text-green-400'
+                            : row.status === 'partial'
+                            ? 'bg-blue-600/20 text-blue-400'
+                            : row.status === 'wrong_answer'
+                            ? 'bg-yellow-600/20 text-yellow-400'
+                            : 'bg-red-600/20 text-red-400'
+                        }`}>
+                          {!student.submitted ? '⏳ Not Submitted'
+                            : row.status === 'accepted'      ? '✅ Accepted'
+                            : row.status === 'partial'       ? '⚡ Partial'
+                            : row.status === 'wrong_answer'  ? '⚠️ Wrong Answer'
+                            : row.status === 'timeout'       ? '⏱️ Timeout'
+                            : row.status === 'compile_error' ? '🔴 Compile Error'
+                            : row.status === 'error'         ? '❌ Error'
+                            : `📝 ${row.status}`}
+                        </span>
+                      ))}
+                    </div>
                   </td>
 
-                  {/* Score */}
+                  {/* Score: total over all languages, with the split when there are several */}
                   <td className="p-3 sm:p-4">
                     {student.submitted
-                      ? <span className="text-yellow-400 font-mono font-bold">{student.score} XP</span>
+                      ? <div>
+                          <span className="text-yellow-400 font-mono font-bold">{student.score} XP</span>
+                          {student.submissions?.length > 1 && (
+                            <div className="text-slate-500 text-[10px] font-mono mt-1">
+                              {student.submissions.map(r => `${r.language}: ${r.score}`).join(' + ')}
+                            </div>
+                          )}
+                        </div>
                       : <span className="text-slate-500">—</span>}
                   </td>
 
                   {/* Language */}
                   <td className="p-4 hidden md:table-cell">
                     {student.language
-                      ? <span className="text-slate-300 text-sm">
-                          {student.language === 'python' ? '🐍'
-                            : student.language === 'java' ? '☕' : '🔷'} {student.language}
-                        </span>
+                      ? <div className="flex flex-col gap-2">
+                          {(student.submissions?.length ? student.submissions : [student]).map((row, i) => (
+                            <span key={i} className="text-slate-300 text-sm">
+                              {row.language === 'python' ? '🐍'
+                                : row.language === 'java' ? '☕' : '🔷'} {row.language}
+                            </span>
+                          ))}
+                        </div>
                       : <span className="text-slate-500">—</span>}
                   </td>
 
                   {/* Submitted At */}
                   <td className="p-4 text-slate-400 text-sm hidden lg:table-cell">
                     {student.submitted_at
-                      ? new Date(student.submitted_at).toLocaleString()
+                      ? <div className="flex flex-col gap-2">
+                          {(student.submissions?.length ? student.submissions : [student]).map((row, i) => (
+                            <span key={i}>{new Date(row.submitted_at).toLocaleString()}</span>
+                          ))}
+                        </div>
                       : '—'}
                   </td>
 
-                  {/* View Code */}
+                  {/* View Code: one button per language */}
                   <td className="p-3 sm:p-4">
                     {student.submission_id ? (
-                      <button
-                        onClick={() => setViewingSubmissionId(student.submission_id)}
-                        className="px-3 py-1.5 bg-blue-600/20 hover:bg-blue-600 text-blue-400 hover:text-white border border-blue-600/40 hover:border-blue-600 rounded-lg text-xs font-medium transition-all duration-150"
-                      >
-                        {'</>'}  View Code
-                      </button>
+                      <div className="flex flex-col gap-2 items-start">
+                        {(student.submissions?.length ? student.submissions : [student]).map((row, i) => (
+                          <button
+                            key={i}
+                            onClick={() => setViewingSubmissionId(row.submission_id)}
+                            className="px-3 py-1.5 bg-blue-600/20 hover:bg-blue-600 text-blue-400 hover:text-white border border-blue-600/40 hover:border-blue-600 rounded-lg text-xs font-medium transition-all duration-150"
+                          >
+                            {'</>'}  View {row.language} code
+                          </button>
+                        ))}
+                      </div>
                     ) : (
                       <span className="text-slate-600 text-xs">No submission</span>
                     )}

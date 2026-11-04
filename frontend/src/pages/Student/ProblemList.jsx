@@ -4,6 +4,7 @@ import { API_BASE } from '../../api/client'
 export default function ProblemList({ onSelectQuest, currentLevel, sectionId, subjectId }) {
   const [quests, setQuests] = useState([])
   const [loading, setLoading] = useState(true)
+  const [progress, setProgress] = useState({})   // { [questId]: { languages_done: [...] } }
   const [filter, setFilter] = useState('all')
   const [animated, setAnimated] = useState(false)
 
@@ -35,6 +36,12 @@ export default function ProblemList({ onSelectQuest, currentLevel, sectionId, su
             const res = await fetch(url, {
         headers: { 'Authorization': `Bearer ${token}` }
       })
+
+      // which languages this student already submitted, per quest (for the card progress)
+      try {
+        const pr = await fetch(`${API_BASE}/api/student/quest-progress`, { headers: { 'Authorization': `Bearer ${token}` } })
+        if (pr.ok) setProgress(await pr.json())
+      } catch { /* cards just show no progress */ }
 
       if (res.ok) {
         const data = await res.json()
@@ -141,6 +148,13 @@ export default function ProblemList({ onSelectQuest, currentLevel, sectionId, su
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {quests.map((quest, index) => {
             const style = rarityStyles[quest.rarity]
+            // per-language progress: Optional quests count as conquered after the first language,
+            // Required quests only when every ticked language is submitted
+            const done = progress[String(quest.id)]?.languages_done || []
+            const total = quest.languages?.length || 1
+            const multi = total > 1
+            const conquered = done.length > 0 && (!multi || quest.language_rule !== 'required' || done.length >= total)
+            const started = done.length > 0
             return (
               <div 
                 key={quest.id}
@@ -201,10 +215,15 @@ export default function ProblemList({ onSelectQuest, currentLevel, sectionId, su
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     {quest.languages.slice(0, 3).map(lang => (
-                      <span key={lang} className="text-lg group-hover:scale-110 transition-transform" title={lang}>
-                        {lang === 'python' ? '🐍' : lang === 'java' ? '☕' : '🔷'}
+                      <span key={lang} className={`text-lg group-hover:scale-110 transition-transform ${done.includes(lang) ? 'opacity-100' : multi && started ? 'opacity-50' : ''}`} title={done.includes(lang) ? `${lang}: submitted` : lang}>
+                        {done.includes(lang) ? '✓' : lang === 'python' ? '🐍' : lang === 'java' ? '☕' : '🔷'}
                       </span>
                     ))}
+                    {started && (
+                      <span className={`ml-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${conquered ? 'text-green-400 border-green-600/50 bg-green-900/20' : 'text-yellow-300 border-yellow-600/50 bg-yellow-900/20'}`}>
+                        {multi ? `${done.length} of ${total} languages` : 'Submitted'}{conquered ? ' · Conquered' : ' · in progress'}
+                      </span>
+                    )}
                     {quest.languages.length > 3 && (
                       <span className="text-xs text-slate-500">+{quest.languages.length - 3}</span>
                     )}
@@ -219,7 +238,7 @@ export default function ProblemList({ onSelectQuest, currentLevel, sectionId, su
                 {!quest.completed && (
                   <div className="absolute inset-0 bg-gradient-to-t from-purple-900/60 to-transparent rounded-xl opacity-0 group-hover:opacity-100 transition-opacity flex items-end justify-center pb-4 pointer-events-none z-20">
                     <button className="px-5 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 text-white font-bold rounded-lg shadow-lg pointer-events-auto transform translate-y-2 group-hover:translate-y-0 transition-all duration-300 flex items-center gap-2 hover:scale-105">
-                      <span>⚔️</span> Start Quest
+                      <span>⚔️</span> {started ? (multi && done.length < total ? 'Continue Quest' : 'View Quest') : 'Start Quest'}
                     </button>
                   </div>
                 )}

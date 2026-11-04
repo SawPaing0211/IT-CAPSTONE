@@ -73,7 +73,7 @@ export default function ProgressStats({ stats, username, fullName }) {
   const heroData = {
     level: realStats?.level ?? 1,
     xp: realStats?.total_xp ?? 0,
-    questsCompleted: realStats?.accepted_submissions ?? 0,
+    questsCompleted: realStats?.quests_done ?? realStats?.accepted_submissions ?? 0,
     streak: realStats?.streak ?? 0,
     totalAttempts: realStats?.total_submissions ?? 0,
     failedAttempts: (realStats?.total_submissions ?? 0) - (realStats?.accepted_submissions ?? 0),

@@ -662,6 +662,7 @@ export default function StudentDashboard({ user, onLogout }) {
             total_submissions: data.total_submissions ?? 0,
             accepted_submissions: data.accepted_submissions ?? 0,
             success_rate: data.success_rate ?? 0,
+            quests_done: data.quests_done ?? data.accepted_submissions ?? 0,
           })
         } else {
           setHeroStats({ total_xp: 0, level: 1, streak: 0, total_submissions: 0, accepted_submissions: 0, success_rate: 0 })

@@ -161,7 +161,7 @@ export default function MySubjects({ onSelectSubject, user, stats }) {
           <div className="text-[9px] sm:text-xs text-slate-500 uppercase tracking-wider mt-0.5 sm:mt-1 truncate">Total Subjects</div>
         </div>
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-2.5 sm:p-4 text-center">
-          <div className="text-lg sm:text-3xl font-bold text-green-400">{stats?.accepted_submissions ?? 0}</div>
+          <div className="text-lg sm:text-3xl font-bold text-green-400">{stats?.quests_done ?? stats?.accepted_submissions ?? 0}</div>
           <div className="text-[9px] sm:text-xs text-slate-500 uppercase tracking-wider mt-0.5 sm:mt-1 truncate">Quests Done</div>
         </div>
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-2.5 sm:p-4 text-center">

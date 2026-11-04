@@ -62,8 +62,12 @@ export default function StudentCodeEditor({
   const [xpGained, setXpGained] = useState(0)
   const [userRole, setUserRole] = useState(null)
   const [isQuestCompleted, setIsQuestCompleted] = useState(false)
-  const [hasSubmitted, setHasSubmitted] = useState(false)
-  const [priorSubmission, setPriorSubmission] = useState(null)
+  // one graded submission PER LANGUAGE: { python: {...}, java: {...} }. A language locks on its own;
+  // the other ticked languages stay open (the professor's language rule says whether they are required).
+  const [submissionsByLang, setSubmissionsByLang] = useState({})
+  const [languageRule, setLanguageRule] = useState(null)   // 'required' | 'optional' | null (single language)
+  const hasSubmitted = !!submissionsByLang[language]
+  const priorSubmission = submissionsByLang[language] || null
   const [savedCode, setSavedCode] = useState('')
   const [showSuccessAnim, setShowSuccessAnim] = useState(false)
   const [combo, setCombo] = useState(0)
@@ -305,10 +309,15 @@ useEffect(() => {
         })
         if (subRes.ok) {
           const subData = await subRes.json()
+          setLanguageRule(subData.language_rule || null)
           if (subData.has_submitted) {
-            setHasSubmitted(true)
-            setPriorSubmission(subData)
-            setIsQuestCompleted(subData.status === 'accepted')
+            const map = {}
+            ;(subData.submissions || [{ language: subData.language, status: subData.status, score: subData.score }])
+              .forEach(x => { map[x.language] = x })
+            setSubmissionsByLang(map)
+            setIsQuestCompleted(Object.values(map).some(x => x.status === 'accepted'))
+          } else {
+            setSubmissionsByLang({})
           }
         }
       } catch (err) {
@@ -526,8 +535,7 @@ useEffect(() => {
       // draft once a final submission exists, so nothing is written here.
 
       // Lock submit after ANY submission (accepted, error, partial, etc.)
-      setHasSubmitted(true)
-      setPriorSubmission(data)
+      setSubmissionsByLang(prev => ({ ...prev, [data.language || language]: data }))
 
       // The submission is committed at this point. Ask for achievements in the
       // background: the store never rejects, and nothing here can turn a
@@ -544,9 +552,9 @@ useEffect(() => {
       }
     } catch (err) {
       if (err.status === 409 || err.message?.includes('Already submitted')) {
-        setHasSubmitted(true)
+        setSubmissionsByLang(prev => ({ ...prev, [language]: prev[language] || { status: 'error' } }))
         setOutput({
-          error: 'You have already submitted this problem. Use Run to test your code.',
+          error: 'You have already submitted this problem in this language. Use Run to test your code.',
           status: 'error',
           is_run_mode: false
         })
@@ -674,9 +682,16 @@ useEffect(() => {
           <div className="bg-slate-900 border-2 border-green-600/50 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
             <h3 className="font-bold text-white mb-2">⚔️ Submit your final answer?</h3>
             <p className="text-sm text-slate-400 mb-4">
-              This is graded once and cannot be submitted again. Use <b>Run</b> as many times as you like to test
+              This is graded once for <b>{language}</b> and cannot be submitted again in that language
+              {(quest.languages?.length || 0) > 1 ? ' (your other languages stay open)' : ''}. Use <b>Run</b> as many times as you like to test
               your code first. Run is not graded and gives no XP.
             </p>
+            {languageRule !== 'required' && (quest.languages?.length || 0) > 1 && Object.keys(submissionsByLang).length > 0 && (
+              <div className="mb-4 rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                ⚠️ <b>Bonus language.</b> You already submitted another language, so {language} only earns the +25% bonus
+                for tests it passes. A failing or wrong answer earns 0 bonus XP and still locks {language}. Run it until it passes before you submit.
+              </div>
+            )}
             <div className="flex gap-2">
               <button onClick={() => setShowSubmitConfirm(false)}
                 className="flex-1 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 text-sm transition">Keep editing</button>
@@ -960,9 +975,16 @@ useEffect(() => {
                       : 'text-slate-400 hover:text-white hover:bg-slate-800/60 border border-transparent'
                   }`}
                 >
-                  {lang === 'python' ? '🐍' : lang === 'java' ? '☕' : '🔷'} <span className="hidden sm:inline">{lang}</span>
+                  {submissionsByLang[lang] ? '✓' : (lang === 'python' ? '🐍' : lang === 'java' ? '☕' : '🔷')} <span className="hidden sm:inline">{lang}</span>
                 </button>
               ))}
+              {(quest.languages?.length || 0) > 1 && (
+                <span className="hidden md:inline self-center ml-2 text-[10px] text-slate-400">
+                  {languageRule === 'required'
+                    ? `Required: ${Object.keys(submissionsByLang).length} of ${quest.languages.length} languages submitted`
+                    : `Optional: ${Object.keys(submissionsByLang).length} of ${quest.languages.length} submitted · each extra language earns +25% XP`}
+                </span>
+              )}
             </div>
             <div className="flex items-center gap-1 sm:gap-2 shrink-0">
               {/* try in sandbox button */}
@@ -1069,7 +1091,11 @@ useEffect(() => {
                     }`}
                   >
                     {isLoading ? '⏳' : '⚔️'} {hasSubmitted
-                      ? (priorSubmission?.status === 'accepted' ? '✅ Conquered' : '🔒 Submitted')
+                      ? (priorSubmission?.status === 'accepted'
+                          ? ((languageRule === 'required' && (quest?.languages?.length || 1) > 1 && Object.keys(submissionsByLang).length < quest.languages.length)
+                              ? `✅ Submitted (${Object.keys(submissionsByLang).length} of ${quest.languages.length})`
+                              : '✅ Conquered')
+                          : '🔒 Submitted')
                       : 'Submit'}
                   </button>
                 )}
@@ -1104,7 +1130,10 @@ useEffect(() => {
                     </span>
                     <div>
                       <p className="font-bold text-sm">
-                        {output.status === 'accepted' ? 'Victory! All tests passed!' :
+                        {output.status === 'accepted'
+                          ? ((!output.is_run_mode && languageRule === 'required' && (quest?.languages?.length || 1) > 1 && Object.keys(submissionsByLang).length < quest.languages.length)
+                              ? `${language} cleared. Answer ${quest.languages.filter(l => !submissionsByLang[l]).join(', ')} to clear the quest.`
+                              : 'Victory! All tests passed!') :
                          output.status === 'error'    ? 'Runtime Error' : 'Some tests failed'}
                       </p>
                       {output.status !== 'error' && (
