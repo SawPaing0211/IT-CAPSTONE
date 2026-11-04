@@ -379,3 +379,23 @@ def test_subjects_list_has_quest_progress(world, monkeypatch):
     _post_lang(world, pid, 'java')
     after = mine()
     assert after['quests_done'] == 1 and after['quests_total'] == before['quests_total']
+
+
+def test_stats_difficulty_progress_counts_quests(world, monkeypatch):
+    monkeypatch.setattr(A, 'evaluate_code', _ok)
+    pid = _multi(world, 'optional', langs=('python', 'java'))
+    with A.app.app_context():
+        pr = A.db.session.get(A.Problem, pid)
+        level, sid = pr.difficulty, pr.subject_id
+
+    def row(qs=''):
+        d = world['c'].get('/api/student/stats' + qs, headers=world['h']).get_json()['difficulty_progress']
+        return next(r for r in d if r['level'] == level)
+
+    before = row(f'?subject_id={sid}')
+    assert before['total'] >= 1
+    _post_lang(world, pid, 'python')
+    _post_lang(world, pid, 'java')
+    after = row(f'?subject_id={sid}')
+    # two language submissions, still one quest
+    assert after['completed'] == before['completed'] + 1 and after['total'] == before['total']

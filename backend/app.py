@@ -2662,6 +2662,25 @@ def calculate_streak(subs):
             break
     return min(streak, 30)  # cap it so it never shows a silly huge number
 
+def student_difficulty_progress(user_id, subject_id=None):
+    """Quests cleared out of quests visible to the student, per difficulty.
+    Counts quests (not submissions): same visibility rule as the course cards."""
+    section_ids = [e.section_id for e in IrregularEnrollment.query.filter_by(student_id=user_id).all()]
+    visible = {}
+    if section_ids:
+        for section in SubjectSection.query.filter(SubjectSection.id.in_(section_ids)).all():
+            if subject_id and section.subject_id != subject_id:
+                continue
+            for pr in Problem.query.filter_by(subject_id=section.subject_id, is_published=True).all():
+                if not pr.visible_to_sections or section.id in pr.visible_to_sections:
+                    visible[pr.id] = pr.difficulty
+    accepted_ids = {s.problem_id for s in Submission.query.filter_by(user_id=user_id, status='accepted').all()}
+    out = []
+    for level in ('Easy', 'Medium', 'Hard'):
+        ids = [pid for pid, d in visible.items() if d == level]
+        out.append({"level": level, "total": len(ids), "completed": sum(1 for pid in ids if pid in accepted_ids)})
+    return out
+
 @app.route('/api/student/stats', methods=['GET'])
 @jwt_required()
 def get_student_stats():
@@ -2709,7 +2728,8 @@ def get_student_stats():
             "success_rate": round((accepted/len(subs)*100), 1) if subs else 0.0,
             "streak": streak,
             "last_submission": subs[0].submitted_at.isoformat() if subs else None,
-            "scope": "subject"
+            "scope": "subject",
+            "difficulty_progress": student_difficulty_progress(user.id, subject_id)
         }), 200
 
     subs = Submission.query.filter_by(user_id=user.id).all()
@@ -2726,7 +2746,8 @@ def get_student_stats():
         "success_rate": round((accepted/len(subs)*100), 1) if subs else 0.0,
         "streak": streak,
         "last_submission": subs[0].submitted_at.isoformat() if subs else None,
-        "scope": "global"
+        "scope": "global",
+        "difficulty_progress": student_difficulty_progress(user.id)
     }), 200
 
 

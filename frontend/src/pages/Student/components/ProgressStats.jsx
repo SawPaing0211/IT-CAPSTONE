@@ -91,24 +91,17 @@ export default function ProgressStats({ stats, username, fullName }) {
         total:  recentSubmissions.filter(s => s.language === lang.key).length || 0,
       }))
     })(),
-    // was hardcoded before: Easy 3/5, Medium 0/0, Hard 0/0, always, no
-    // matter what the student actually did. now it's a real count from
-    // real submissions. needs "difficulty" on each submission object,
-    // which /api/student/submissions didn't send until [this pass] —
-    // if this ever shows all zeros again, check that field is still there.
+    // counts quests, not submissions: cleared / visible quests per level, from /api/student/stats
     difficulty: (() => {
       const levels = [
         { level: 'Easy',   color: 'text-green-400',  bg: 'bg-green-500',  borderColor: 'border-green-500' },
         { level: 'Medium', color: 'text-yellow-400', bg: 'bg-yellow-500', borderColor: 'border-yellow-500' },
         { level: 'Hard',   color: 'text-red-400',    bg: 'bg-red-500',    borderColor: 'border-red-500' },
       ]
+      const rows = realStats?.difficulty_progress || []
       return levels.map(lvl => {
-        const atThisLevel = recentSubmissions.filter(s => s.difficulty === lvl.level)
-        return {
-          ...lvl,
-          completed: atThisLevel.filter(s => s.status === 'accepted').length,
-          total: atThisLevel.length,
-        }
+        const r = rows.find(x => x.level === lvl.level)
+        return { ...lvl, completed: r?.completed ?? 0, total: r?.total ?? 0 }
       })
     })(),
     // Real 28-day activity computed from submissions
