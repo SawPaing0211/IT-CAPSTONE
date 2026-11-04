@@ -9,12 +9,13 @@ import QuestLog from './QuestLog'
 import MySubjects from './MySubjects'
 import BountyBoard from './BountyBoard'
 import QuestSpotlight from './components/QuestSpotlight'
+import StudentSidebar from './components/StudentSidebar'
 import { api, API_BASE} from '../../api/client'
 import MobileSheet from '../../components/MobileSheet'
 import BottomNav from '../../components/BottomNav'
 import StudentLessons from './StudentLessons'
 import StudentAnnouncements from './StudentAnnouncements'
-import crystalIcon from '../../assets/landing/forge-crystal-icon.webp'
+import crystalLogo from '../../assets/landing/forge-crystal-logo.webp'
 
 // ─── Spell templates per language ─────────────────────────────────────────
 const SPELL_TEMPLATES = {
@@ -607,7 +608,7 @@ function ArcaneSandbox({ seedCode = null, seedLanguage = 'python', sandboxHealth
 // heads up to myself: the tabs got renamed a while back ('quests' -> 'subjects')
 // so anything setting activeTab needs to use 'subjects', not the old name
 export default function StudentDashboard({ user, onLogout }) {
-  const [activeTab, setActiveTab]             = useState('subjects')
+  const [activeTab, setActiveTab]             = useState('dashboard')
   const [selectedQuest, setSelectedQuest]     = useState(null)
   const [heroStats, setHeroStats]             = useState(null)
   const [loading, setLoading]                 = useState(true)
@@ -747,6 +748,8 @@ export default function StudentDashboard({ user, onLogout }) {
   const handleExitSubject = () => {
     setSelectedSection(null)
   }
+  // sidebar / bottom nav: leave any open course, then switch tab
+  const goTab = (id) => { setSelectedSection(null); setActiveTab(id) }
 
   // "My Progress" in the account dropdown jumps to the one real Hero Sheet —
   // the dashboard-level one, since it's account-wide anyway. Exits out of
@@ -871,6 +874,7 @@ export default function StudentDashboard({ user, onLogout }) {
   }
 
   const tabs = [
+    { id: 'dashboard',  label: '🏠 Dashboard',          icon: '🏠', shortLabel: 'Home' },
     { id: 'subjects',   label: '🎓 My Subjects',       icon: '🎓', shortLabel: 'Subjects' },
     { id: 'bounty',     label: '🏴 Bounty Board',       icon: '🏴', shortLabel: 'Bounty' },
     { id: 'hall',       label: '👑 Hall of Champions',  icon: '👑', shortLabel: 'Champions' },
@@ -887,7 +891,9 @@ export default function StudentDashboard({ user, onLogout }) {
   ]
 
   return (
-    <div className="min-h-screen max-w-screen overflow-x-hidden bg-gradient-to-b from-slate-950 via-purple-950/30 to-slate-950 text-white relative">
+    <div className="min-h-screen max-w-screen overflow-x-hidden bg-gradient-to-b from-slate-950 via-purple-950/30 to-slate-950 text-white relative lg:pl-[232px]">
+
+      <StudentSidebar activeId={selectedSection ? 'subjects' : activeTab} onSelect={goTab} />
 
       {/* Background particles */}
       <div ref={backgroundRef} className="fixed inset-0 pointer-events-none transition-transform duration-100 ease-out overflow-hidden">
@@ -908,15 +914,10 @@ export default function StudentDashboard({ user, onLogout }) {
 
       {/* ── Header ── */}
       <header className="relative z-20 bg-slate-900/90 backdrop-blur border-b border-purple-600/40 px-4 sm:px-6 py-3 sm:py-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 sticky top-0">
-        {/* Logo */}
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-gradient-to-br from-purple-600 to-pink-600 rounded-lg flex items-center justify-center shadow-lg shadow-purple-600/30 animate-pulse-slow p-1.5">
-            <img src={crystalIcon} alt="" className="w-full h-full object-contain drop-shadow" />
-          </div>
-          <div>
-            <h1 className="font-black text-base sm:text-lg bg-gradient-to-r from-purple-300 via-pink-300 to-purple-300 bg-clip-text text-transparent drop-shadow">Adventure Realm</h1>
-            <p className="text-[10px] text-slate-400 -mt-0.5">Powered by Forge.Dev</p>
-          </div>
+        {/* Logo — below 1024px only; from 1024px the sidebar carries the brand */}
+        <div className="flex items-center gap-2.5 lg:hidden">
+          <img src={crystalLogo} alt="" className="h-11 w-auto shrink-0 select-none" draggable="false" />
+          <span className="font-cinzel font-bold text-lg tracking-wide text-white">FORGE.DEV</span>
         </div>
 
         {/* Hero stats */}
@@ -1051,12 +1052,12 @@ export default function StudentDashboard({ user, onLogout }) {
       </header>
 
       {/* ── Main Content ── */}
-      <main className="relative z-10 container mx-auto px-4 py-6 pb-24 sm:pb-6 overflow-x-hidden">
+      <main className="relative z-10 container mx-auto px-4 py-6 pb-24 lg:pb-6 overflow-x-hidden">
 
         {/* Tabs - Only show when NOT in a subject (Dashboard mode). Desktop only —
             mobile gets the fixed BottomNav below instead. */}
         {!selectedSection && (
-          <div className="hidden sm:flex gap-2 mb-6 border-b border-purple-600/40 pb-2 overflow-x-auto">
+          <div className="hidden gap-2 mb-6 border-b border-purple-600/40 pb-2 overflow-x-auto">
             {tabs.map(tab => (
               <button key={tab.id} onClick={() => !tab.disabled && setActiveTab(tab.id)} disabled={tab.disabled}
                 className={`px-4 sm:px-5 py-2.5 rounded-lg font-semibold transition-all duration-300 whitespace-nowrap border-2 ${
@@ -1078,13 +1079,13 @@ export default function StudentDashboard({ user, onLogout }) {
 
         {/* Mobile bottom tab bar — only in dashboard mode, same tabs as above */}
         {!selectedSection && (
-          <BottomNav tabs={tabs} activeId={activeTab} onSelect={setActiveTab} accentId="sandbox" />
+          <BottomNav tabs={tabs} activeId={activeTab} onSelect={goTab} accentId="sandbox" />
         )}
 
         {/* ================= MODE 1: DASHBOARD (No Subject Selected) ================= */}
         {!selectedSection ? (
           <div className="animate-fade-in">
-            {activeTab === 'subjects' && (
+            {activeTab === 'dashboard' && (
               <>
                 <div className="px-4 sm:px-6 pt-4 sm:pt-6 max-w-6xl mx-auto">
                   <QuestSpotlight onSelectQuest={handleBountyQuestSelect} onBrowse={() => setActiveTab('bounty')} />
@@ -1092,6 +1093,7 @@ export default function StudentDashboard({ user, onLogout }) {
                 <MySubjects onSelectSubject={handleEnterSubject} user={user} stats={heroStats} />
               </>
             )}
+            {activeTab === 'subjects' && <MySubjects onSelectSubject={handleEnterSubject} user={user} stats={heroStats} />}
             {activeTab === 'bounty' && <BountyBoard onSelectQuest={handleBountyQuestSelect} />}
             {activeTab === 'hall' && (
               <div className="overflow-hidden">
@@ -1139,7 +1141,7 @@ export default function StudentDashboard({ user, onLogout }) {
             </div>
 
             {/* Course Navigation Tabs — desktop only, mobile gets the fixed BottomNav below */}
-            <div className="hidden sm:flex gap-2 border-b border-purple-600/40 pb-2 overflow-x-auto">
+            <div className="hidden lg:flex gap-2 border-b border-purple-600/40 pb-2 overflow-x-auto">
               {courseTabs.map(tab => (
                 <button
                   key={tab.id}

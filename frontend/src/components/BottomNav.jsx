@@ -6,7 +6,7 @@
 export default function BottomNav({ tabs, activeId, onSelect, accentId }) {
   return (
     <nav
-      className="sm:hidden fixed bottom-0 inset-x-0 z-30 bg-slate-900/95 backdrop-blur border-t border-purple-600/40 flex"
+      className="lg:hidden fixed bottom-0 inset-x-0 z-30 bg-slate-900/95 backdrop-blur border-t border-purple-600/40 flex"
       style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
     >
       {tabs.map(tab => {
