@@ -80,3 +80,11 @@ def test_run_returns_error_dict_when_setup_fails(tmp_path, monkeypatch):
     monkeypatch.setattr(sb, '_get_docker_client', lambda: object())
     r = sb._run_in_docker('print(1)', 'python')
     assert r['returncode'] == -1 and r['error']
+
+
+def test_source_is_written_with_plain_newlines(tmp_path):
+    # editor sends \r\n; it must not reach the compiler/python as \r\r\n
+    path = sb._write_source(str(tmp_path), 'n = int(input())\r\nprint(n)\r\n', 'python')
+    data = open(path, 'rb').read()
+    assert b'\r' not in data
+    assert data == b'n = int(input())\nprint(n)\n'

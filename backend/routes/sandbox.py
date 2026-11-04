@@ -356,8 +356,13 @@ def _write_source(tmpdir: str, code: str, language: str) -> str:
     else:
         filename = 'solution.py'
 
+    # The editor sends Windows line endings. A text-mode write on Windows
+    # turns each \r\n into \r\r\n, which compilers and Python read as two
+    # line breaks, so every error line number came out doubled. Store plain
+    # \n and write the bytes as-is.
+    code = code.replace('\r\n', '\n').replace('\r', '\n')
     filepath = os.path.join(tmpdir, filename)
-    with open(filepath, 'w', encoding='utf-8') as f:
+    with open(filepath, 'w', encoding='utf-8', newline='\n') as f:
         f.write(code)
     return filepath
 

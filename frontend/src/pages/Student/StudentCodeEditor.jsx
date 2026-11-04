@@ -915,7 +915,7 @@ useEffect(() => {
                         <div>
                            <p className="text-slate-500 mb-1">Your Output:</p>
                            <code className="text-red-400 font-mono block bg-slate-950 p-2 rounded whitespace-pre-wrap">
-                            {formatErrorOutput(tc.output)}
+                            {formatErrorOutput(output.test_results[idx].output, language)}
                           </code>
                         </div>
                       )}

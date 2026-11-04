@@ -850,8 +850,8 @@ def _run_in_docker_with_stdin(code: str, language: str, stdin_input: str) -> dic
             }
 
         input_path = os.path.join(tmpdir, 'input.txt')
-        with open(input_path, 'w', encoding='utf-8') as f:
-            f.write(stdin_input if stdin_input else '')
+        with open(input_path, 'w', encoding='utf-8', newline='\n') as f:
+            f.write((stdin_input or '').replace('\r\n', '\n'))
 
         if language == 'java':
             with open(os.path.join(tmpdir, 'Main.java'), 'w', encoding='utf-8') as f:
