@@ -628,7 +628,11 @@ def _read_setting(name, default, valid):
 STUDENT_EMAIL_DOMAIN = _read_setting('STUDENT_EMAIL_DOMAIN', _DEFAULT_STUDENT_EMAIL_DOMAIN, _DOMAIN_RE)
 ALLOWED_EMAIL_DOMAIN = _read_setting('ALLOWED_EMAIL_DOMAIN', '', _DOMAIN_RE)
 HEAD_ADMIN_EMAIL = _read_setting('HEAD_ADMIN_EMAIL', '', _EMAIL_RE)
-if not HEAD_ADMIN_EMAIL:
+_head_id_setting = os.environ.get('HEAD_ADMIN_USER_ID', '').strip()
+HEAD_ADMIN_USER_ID = int(_head_id_setting) if _head_id_setting.isascii() and _head_id_setting.isdigit() and int(_head_id_setting) > 0 else None
+if _head_id_setting and HEAD_ADMIN_USER_ID is None:
+    CONFIG_DIAGNOSTICS.append('HEAD_ADMIN_USER_ID is invalid; administrator creation is disabled.')
+if not HEAD_ADMIN_EMAIL and not HEAD_ADMIN_USER_ID:
     CONFIG_DIAGNOSTICS.append(
         "HEAD_ADMIN_EMAIL is not set (or invalid): creating or promoting administrator "
         "accounts is disabled. Ordinary sign-in is not affected.")
@@ -665,9 +669,19 @@ def email_domain_allowed(email):
 
 
 def is_head_admin(user):
-    """The head admin is the only account allowed to create or promote admins (never true when unconfigured)."""
-    return bool(HEAD_ADMIN_EMAIL) and bool(user) and user.role == 'administrator' \
-        and normalize_email(user.email) == HEAD_ADMIN_EMAIL
+    """Prefer immutable account identity; renaming a user cannot transfer authority."""
+    if not user or user.role != 'administrator' or not user.is_active:
+        return False
+    if HEAD_ADMIN_USER_ID is not None or _head_id_setting:
+        return user.id == HEAD_ADMIN_USER_ID
+    return bool(HEAD_ADMIN_EMAIL) and normalize_email(user.email) == HEAD_ADMIN_EMAIL
+
+
+def admin_target_error(actor, target):
+    # Otherwise a regular admin could reset the head's password and take over.
+    if target.role == 'administrator' and not is_head_admin(actor):
+        return jsonify({"error": "Only the head administrator can manage administrator accounts."}), 403
+    return None
 
 
 def subject_out_of_scope(subject):
@@ -2446,12 +2460,34 @@ def get_my_submission(problem_id):
         "languages_done": sorted(done.keys()),
         "quest_complete": complete,
         "xp_total": sum(x.score or 0 for x in done.values()),
-        "submissions": [{
-            "language": x.language, "status": x.status, "score": x.score,
-            "passed_cases": x.passed_cases, "total_cases": x.total_cases,
-            "submitted_at": x.submitted_at.isoformat(),
-        } for x in done.values()],
+        "submissions": [student_saved_submission(x) for x in done.values()],
     }), 200
+
+
+def student_saved_submission(sub):
+    """Read-only projection of recorded results. Never return hidden case data."""
+    details = sub.result_details if isinstance(sub.result_details, dict) else {}
+    tests = details.get('tests')
+    recorded = isinstance(tests, list) and len(tests) == sub.total_cases and all(isinstance(t, dict) for t in tests)
+    safe_tests = []
+    if recorded:
+        for index, test in enumerate(tests, 1):
+            hidden = test.get('hidden') is not False  # missing visibility fails closed
+            item = {'index': index, 'passed': test.get('passed') is True, 'hidden': hidden}
+            if test.get('kind') in ('passed', 'wrong_output', 'runtime_error', 'timeout', 'compile_error', 'output_limit'):
+                item['kind'] = test['kind']
+            runtime = test.get('runtime')
+            if isinstance(runtime, str) and _re.fullmatch(r'\d+(?:\.\d+)?(?:ms|s)', runtime):
+                item['runtime'] = runtime
+            if not hidden and isinstance(test.get('output'), str):
+                item['output'] = test['output']
+            safe_tests.append(item)
+    return {
+        'submission_id': sub.id, 'language': sub.language, 'status': sub.status,
+        'score': sub.score, 'passed_cases': sub.passed_cases, 'total_cases': sub.total_cases,
+        'submitted_at': sub.submitted_at.isoformat(),
+        'results_recorded': recorded, 'test_results': safe_tests,
+    }
 
 @app.route('/api/student/quest-progress', methods=['GET'])
 @jwt_required()
@@ -4374,13 +4410,16 @@ def admin_overview(admin):
 @admin_required
 def admin_policy(admin):
     """Settings the admin forms need: email domain and whether this admin may create admins."""
-    head_exists = bool(HEAD_ADMIN_EMAIL) and User.query.filter(
-        db.func.lower(User.email) == HEAD_ADMIN_EMAIL,
-        User.role == 'administrator').first() is not None
+    if HEAD_ADMIN_USER_ID is not None:
+        head_exists = User.query.filter_by(id=HEAD_ADMIN_USER_ID, role='administrator', is_active=True).first() is not None
+    else:
+        head_exists = not _head_id_setting and bool(HEAD_ADMIN_EMAIL) and User.query.filter(
+            db.func.lower(User.email) == HEAD_ADMIN_EMAIL,
+            User.role == 'administrator', User.is_active.is_(True)).first() is not None
     return jsonify({
         "allowed_email_domain": ALLOWED_EMAIL_DOMAIN,
         "student_email_domain": STUDENT_EMAIL_DOMAIN,
-        "head_admin_configured": bool(HEAD_ADMIN_EMAIL),
+        "head_admin_configured": bool(HEAD_ADMIN_USER_ID or (HEAD_ADMIN_EMAIL and not _head_id_setting)),
         "config_diagnostics": list(CONFIG_DIAGNOSTICS),
         "can_create_admins": is_head_admin(admin),
         # false means nobody can create administrators until that account exists
@@ -4533,6 +4572,9 @@ def admin_get_users(admin):
 
         result.append({
             "id": u.id, "username": u.username, "email": u.email, "role": u.role,
+            "is_head_admin": is_head_admin(u),
+            "can_manage": u.id != admin.id and (u.role != 'administrator' or is_head_admin(admin)),
+            "can_delete": u.id != admin.id and not is_head_admin(u) and (u.role != 'administrator' or is_head_admin(admin)),
             "full_name": getattr(u, 'full_name', None) or None,
             "xp": u.xp, "level": u.level, "is_active": u.is_active,
             "created_at": u.created_at.isoformat(),
@@ -4549,11 +4591,38 @@ def admin_get_users(admin):
 @admin_required
 def admin_update_user(admin, user_id):
     target = User.query.get_or_404(user_id)
+    denied = admin_target_error(admin, target)
+    if denied:
+        return denied
     if target.id == admin.id:
         return jsonify({"error": "Cannot modify own account"}), 400
 
-    data = request.get_json()
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "A JSON object is required"}), 400
     changes = []
+
+    if is_head_admin(target) and (data.get('role', target.role) != 'administrator' or data.get('is_active', True) is not True):
+        return jsonify({"error": "The head administrator cannot be demoted or deactivated."}), 403
+    if 'role' in data and data['role'] not in ['student', 'instructor', 'administrator']:
+        return jsonify({"error": "Invalid role"}), 400
+    if 'username' in data:
+        if not isinstance(data['username'], str):
+            return jsonify({"error": "Username must be text"}), 400
+        username = data['username'].strip()
+        if not username or len(username) > 50 or any(ord(ch) < 32 or ord(ch) == 127 for ch in username):
+            return jsonify({"error": "Username must contain 1–50 characters, without control characters."}), 400
+        if data.get('role', target.role) == 'student' and not valid_student_id(username):
+            return jsonify({"error": "Student usernames must not contain spaces or '@'."}), 400
+        collision = User.query.filter(User.id != target.id, db.or_(
+            db.func.lower(User.username) == username.lower(),
+            db.func.lower(User.email) == username.lower())).first()
+        if collision:
+            return jsonify({"error": "Username is already used by another account."}), 409
+        # Preserve permanent email identifiers and all ID-based student history.
+        if username != target.username:
+            changes.append(f"Username: {target.username} -> {username}")
+            target.username = username
 
     if 'role' in data and data['role'] == 'administrator' and target.role != 'administrator' \
             and not is_head_admin(admin):
@@ -4642,7 +4711,11 @@ def admin_update_user(admin, user_id):
             else:
                 changes.append("Removed from all class codes")
 
-    db.session.commit()
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({"error": "Username is already used by another account."}), 409
     log_admin_action(admin.id, "USER_UPDATED", f"Target: {target.username}. Changes: {', '.join(changes) if changes else 'None'}", target_id=user_id)
     return jsonify({"message": "User updated", "changes": changes}), 200
 
@@ -4744,6 +4817,11 @@ def admin_delete_user(admin, user_id):
     if user_id == admin.id:
         return jsonify({"error": "Cannot delete own account"}), 400
     target = User.query.get_or_404(user_id)
+    denied = admin_target_error(admin, target)
+    if denied:
+        return denied
+    if is_head_admin(target):
+        return jsonify({"error": "The head administrator cannot be deleted."}), 403
 
     _cascade_delete_user_data(user_id)
     db.session.delete(target)
@@ -4780,6 +4858,9 @@ def admin_reset_password(admin, user_id):
     never logged). The student must replace it at next sign-in; old sessions end.
     """
     target = User.query.get_or_404(user_id)
+    denied = admin_target_error(admin, target)
+    if denied:
+        return denied
     data = request.get_json(silent=True) or {}
     generated = False
     new_pw = data.get('new_password')
@@ -4807,6 +4888,9 @@ def admin_reset_password(admin, user_id):
 @admin_required
 def admin_unlock_user(admin, user_id):
     target = User.query.get_or_404(user_id)
+    denied = admin_target_error(admin, target)
+    if denied:
+        return denied
     target.login_attempts = 0
     target.locked_until = None
     db.session.commit()

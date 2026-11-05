@@ -7,10 +7,11 @@ import { useState } from 'react'
 //   onClose  - called when X or Cancel is clicked
 //   onSave   - called with the updated form data when Save is clicked
 
-export default function EditUserModal({ user, sections = [], onClose, onSave }) {
+export default function EditUserModal({ user, sections = [], canCreateAdmins = false, onClose, onSave }) {
 
   // ── form state - pre-filled with current user data ───────────────────────────
   const [form, setForm] = useState({
+    username: user.username,
     role:      user.role,
     is_active: user.is_active,
     xp:        user.xp,
@@ -29,8 +30,6 @@ export default function EditUserModal({ user, sections = [], onClose, onSave }) 
   // ── figure out what type of user we're looking at ────────────────────────────
   // admins don't belong to class codes, so we hide that whole section for them
   const isAdmin      = form.role === 'administrator'
-  const isStudent    = form.role === 'student'
-  const isInstructor = form.role === 'instructor'
 
   // ── what shows up in the top badge depending on role ────────────────────────
   const roleMeta = {
@@ -112,6 +111,12 @@ export default function EditUserModal({ user, sections = [], onClose, onSave }) 
         <div className="overflow-y-auto flex-1">
           <form onSubmit={handleSubmit} className="px-6 py-5 space-y-5">
 
+            <div>
+              <label htmlFor="managed-username" className="block text-xs font-semibold text-slate-400 uppercase tracking-widest mb-2">Username</label>
+              <input id="managed-username" value={form.username} onChange={e => setForm({ ...form, username: e.target.value })} required maxLength={50} autoComplete="off" className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2.5 text-white text-sm focus:border-purple-500 outline-none" />
+              <p className="text-xs text-slate-400 mt-2">Changes the sign-in username. Email, password, progress and class assignments are preserved. Student usernames cannot contain spaces or @.</p>
+            </div>
+
             {/* ── ROLE DROPDOWN ──────────────────────────────────────────── */}
             <div>
               <label className="block text-xs font-semibold text-slate-400 uppercase tracking-widest mb-2">
@@ -124,7 +129,7 @@ export default function EditUserModal({ user, sections = [], onClose, onSave }) 
               >
                 <option value="student">Student</option>
                 <option value="instructor">Instructor</option>
-                <option value="administrator">Administrator</option>
+                {canCreateAdmins && <option value="administrator">Administrator</option>}
               </select>
             </div>
 

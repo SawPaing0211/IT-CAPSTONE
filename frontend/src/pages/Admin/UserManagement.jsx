@@ -566,6 +566,7 @@ export default function UserManagement() {
             <EditUserModal
               user={manageModal}
               sections={sections}
+              canCreateAdmins={isMasterAdmin}
               onClose={() => setManageModal(null)}
               onSave={updates => handleUpdateUser(manageModal.id, updates)}
             />
@@ -648,7 +649,7 @@ export default function UserManagement() {
                     <div className="w-10 h-10 bg-gradient-to-br from-purple-600 to-pink-600 rounded-xl flex items-center justify-center text-xl">👤</div>
                     <div>
                       <h2 className="text-xl font-black text-white">Add New User</h2>
-                      <p className="text-slate-400 text-xs">Create a student or instructor account</p>
+                      <p className="text-slate-400 text-xs">{isMasterAdmin ? 'Create a student, instructor or administrator account' : 'Create a student or instructor account'}</p>
                     </div>
                   </div>
                   <button onClick={() => { setAddUserModal(false); resetAddUserForm() }}
@@ -835,7 +836,7 @@ function UserSection({ title, icon, users, onManage, onRecover, onDelete, onUnlo
                       {(user.full_name || user.username)[0].toUpperCase()}
                     </div>
                     <div>
-                      <p className="font-semibold text-white">{user.full_name || user.username}</p>
+                      <p className="font-semibold text-white">{user.full_name || user.username}{user.is_head_admin && <span className="ml-2 text-xs text-amber-300">Head Admin</span>}</p>
                       <p className="text-slate-400 text-xs truncate max-w-[200px]">{user.email}</p>
                       {user.role === 'student' && (
                         <span className="font-mono text-xs text-yellow-300 bg-yellow-900/20 border border-yellow-600/30 px-1.5 py-0.5 rounded mt-0.5 inline-block">
@@ -894,25 +895,29 @@ function UserSection({ title, icon, users, onManage, onRecover, onDelete, onUnlo
                   <div className="flex flex-col gap-1">
                     <div className="flex gap-1">
                       <button
+                        disabled={user.can_manage === false}
+                        title={user.can_manage === false ? 'Administrator accounts are managed by the Head Admin; own-account editing is unavailable.' : undefined}
                         onClick={() => onManage(user)}
                         className="flex-1 px-2 py-1.5 bg-purple-600 hover:bg-purple-500 rounded text-xs transition text-white font-bold whitespace-nowrap"
                       >
                         Manage
                       </button>
                       <button
+                        disabled={user.can_manage === false}
                         onClick={() => onRecover(user)}
                         className="flex-1 px-2 py-1.5 bg-blue-600 hover:bg-blue-500 rounded text-xs transition text-white font-bold whitespace-nowrap"
                       >
                         Recover
                       </button>
                       <button
+                        disabled={user.can_delete === false}
                         onClick={() => onDelete(user.id)}
                         className="flex-1 px-2 py-1.5 bg-red-600/20 hover:bg-red-600 rounded text-xs transition text-red-400 hover:text-white font-bold border border-red-600/50 whitespace-nowrap"
                       >
                         Delete
                       </button>
                     </div>
-                    {user.is_locked && (
+                    {user.is_locked && user.can_manage !== false && (
                       <button
                         onClick={() => onUnlock(user.id, user.username)}
                         className="w-full px-2 py-1.5 bg-orange-600 hover:bg-orange-500 rounded text-xs transition text-white font-black whitespace-nowrap flex items-center justify-center gap-1"
