@@ -14,7 +14,11 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { API_BASE } from '../../api/client'
+import { API_BASE, authFetch } from '../../api/client'
+import QuestButton from '../Student/components/QuestButton'
+import bookIcon from '../../assets/instructor/nav-book.svg'
+import searchIcon from '../../assets/instructor/search.svg'
+import './InstructorRefined.css'
 
 function StudentsModal({ cls, onClose }) {
   const [students, setStudents] = useState([])
@@ -127,280 +131,97 @@ function StudentsModal({ cls, onClose }) {
 
 export default function MyClasses() {
   const navigate = useNavigate()
-  const [searchTerm, setSearchTerm] = useState('')
+  const [search, setSearch] = useState('')
   const [classes, setClasses] = useState([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(false)
+  const [reload, setReload] = useState(0)
   const [studentsModal, setStudentsModal] = useState(null)
-  // Which subject we've drilled into — null means we're still at the
-  // subject-picking step (unless there's only one subject, see below).
-  const [selectedSubjectId, setSelectedSubjectId] = useState(null)
+  const [selectedKey, setSelectedKey] = useState(null)
 
-  // Fetch the instructor's assigned classes on mount
   useEffect(() => {
-    const fetchClasses = async () => {
+    const controller = new AbortController()
+    let current = true
+    async function load() {
+      setLoading(true)
+      setError(false)
       try {
-        const token = localStorage.getItem('token')
-        const res = await fetch(`${API_BASE}/api/instructor/classes`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        })
-        const data = await res.json()
-        setClasses(data.map(c => ({
-          id:           c.id,
-          subjectId:    c.subject_id,
-          name:         c.section_no,
-          section_no:   c.section_no,
-          title:        c.subjects?.length > 0 ? c.subjects.join(' · ') : c.name,
-          description:  c.semester || 'Current Semester',
-          students:     c.student_count || 0,
-          problems:     c.problem_count || 0,
-          lessons:      c.lesson_count || 0,
-          announcements: c.announcement_count || 0,
+        const response = await authFetch(`${API_BASE}/api/instructor/classes`, { signal: controller.signal })
+        if (!response.ok) throw new Error('Classes unavailable')
+        const data = await response.json()
+        if (!Array.isArray(data)) throw new Error('Invalid classes')
+        if (current) setClasses(data.map(cls => ({
+          id: cls.id, subjectId: cls.subject_id, name: String(cls.section_no ?? ''),
+          title: cls.subjects?.length ? cls.subjects.join(' · ') : (cls.name || 'Assigned subject'),
+          semester: cls.semester || 'Semester not specified',
+          students: cls.student_count, quests: cls.problem_count,
+          modules: cls.lesson_count, announcements: cls.announcement_count,
         })))
-      } catch (err) {
-        console.error('Failed to fetch classes:', err)
+      } catch {
+        if (current) setError(true)
       } finally {
-        setLoading(false)
+        if (current) setLoading(false)
       }
     }
-    fetchClasses()
-  }, [])
+    load()
+    return () => { current = false; controller.abort() }
+  }, [reload])
 
-  // Group classes by subject — an instructor can teach the same subject
-  // across several class codes/sections (or teach a handful of unrelated
-  // subjects), so one flat list gets repetitive and confusing fast. This
-  // mirrors the same "pick a subject, then pick a class code" pattern
-  // already used when creating a quest (components/ClassPicker.jsx) — if
-  // there's only one subject, there's nothing to pick between, so that step
-  // is skipped entirely.
-  const subjectGroups = useMemo(() => {
-    const bySubject = new Map()
+  const groups = useMemo(() => {
+    const subjects = new Map()
     for (const cls of classes) {
       const key = cls.subjectId ?? `unassigned-${cls.id}`
-      if (!bySubject.has(key)) {
-        bySubject.set(key, { subjectId: cls.subjectId, name: cls.title, classes: [] })
-      }
-      bySubject.get(key).classes.push(cls)
+      if (!subjects.has(key)) subjects.set(key, { key, name: cls.title, classes: [] })
+      subjects.get(key).classes.push(cls)
     }
-    return Array.from(bySubject.values())
+    return Array.from(subjects.values())
   }, [classes])
 
-  const onlyOneSubject = subjectGroups.length <= 1
-  const step = selectedSubjectId != null || onlyOneSubject ? 'classes' : 'subjects'
-  const activeGroup = subjectGroups.find(g => g.subjectId === selectedSubjectId) || subjectGroups[0]
+  const oneSubject = groups.length === 1
+  const activeGroup = groups.find(group => group.key === selectedKey) || (oneSubject ? groups[0] : null)
+  const showingClasses = Boolean(activeGroup)
+  const term = search.trim().toLowerCase()
+  const filteredSubjects = groups.filter(group => group.name.toLowerCase().includes(term))
+  const filteredClasses = (activeGroup?.classes || []).filter(cls => [cls.name, cls.title, cls.semester].some(value => value.toLowerCase().includes(term)))
+  const number = value => Number.isFinite(value) ? value.toLocaleString() : '—'
+  const book = <span className="ir-book-medallion" aria-hidden="true"><img src={bookIcon} alt="" width="38" height="38" /></span>
 
-  const handleBackToSubjects = () => { setSelectedSubjectId(null); setSearchTerm('') }
-
-  // Filter whichever step is currently showing by the search term
-  const filteredSubjects = subjectGroups.filter(g =>
-    g.name.toLowerCase().includes(searchTerm.toLowerCase())
-  )
-  const classesInScope = step === 'classes' ? (activeGroup?.classes || []) : []
-  const filteredClasses = classesInScope.filter(c =>
-    c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    c.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    c.description.toLowerCase().includes(searchTerm.toLowerCase())
-  )
-
-  const gradients = [
-    'from-purple-600 to-pink-600',
-    'from-blue-600 to-purple-600',
-    'from-emerald-600 to-teal-600',
-    'from-rose-600 to-orange-600',
-    'from-amber-600 to-yellow-600',
-  ]
-
-  const statItems = [
-    { icon: '👥', key: 'students',      label: 'Students',      clickable: true  },
-    { icon: '📝', key: 'problems',      label: 'Quests',    clickable: false },
-    { icon: '📚', key: 'lessons',       label: 'Modules',       clickable: false },
-    { icon: '📢', key: 'announcements', label: 'Announcements', clickable: false },
-  ]
-
-  return (
-    <div className="space-y-6">
-
-      {studentsModal && (
-        <StudentsModal cls={studentsModal} onClose={() => setStudentsModal(null)} />
-      )}
-
-      {/* Header */}
-      <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div className="min-w-0">
-          {step === 'classes' && !onlyOneSubject && (
-            <p className="text-sm mb-1 flex items-center gap-1.5 flex-wrap">
-              <button
-                onClick={handleBackToSubjects}
-                className="text-purple-400 hover:text-purple-300 font-semibold transition flex items-center gap-1"
-              >
-                ← My Classes
-              </button>
-              <span className="text-slate-600">/</span>
-              <span className="text-slate-400">{activeGroup?.name}</span>
-            </p>
-          )}
-          <h1 className="text-2xl font-black text-white tracking-tight truncate">
-            {step === 'subjects' || onlyOneSubject ? 'My Classes' : activeGroup?.name}
-          </h1>
-          <p className="text-slate-400 mt-0.5 text-sm">
-            {step === 'subjects'
-              ? 'Choose a subject to see its class codes'
-              : 'View and manage your assigned class codes'}
-          </p>
-        </div>
-        {!loading && (
-          <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-lg shrink-0">
-            <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
-            <span className="text-slate-300 text-xs font-medium">
-              {step === 'subjects'
-                ? `${subjectGroups.length} ${subjectGroups.length === 1 ? 'Subject' : 'Subjects'}`
-                : `${classesInScope.length} ${classesInScope.length === 1 ? 'Class' : 'Classes'}`}
-            </span>
-          </div>
-        )}
-      </div>
-
-      {/* Search */}
-      <div className="relative">
-        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 text-sm pointer-events-none">🔍</span>
-        <input
-          type="text"
-          placeholder={step === 'subjects' ? 'Search subjects...' : 'Search by class code or semester...'}
-          value={searchTerm}
-          onChange={e => setSearchTerm(e.target.value)}
-          className="w-full bg-slate-900 border border-slate-800 rounded-xl px-5 py-3 pl-12 text-white placeholder-slate-600 focus:border-purple-500/60 focus:outline-none transition text-sm"
-        />
-        {searchTerm && (
-          <button
-            onClick={() => setSearchTerm('')}
-            className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white transition text-sm"
-          >
-            ✕
-          </button>
-        )}
-      </div>
-
-      {/* Loading */}
-      {loading && (
-        <div className="flex items-center justify-center py-20">
-          <div className="flex flex-col items-center gap-4">
-            <div className="animate-spin rounded-full h-10 w-10 border-4 border-purple-500 border-t-transparent" />
-            <p className="text-slate-500 text-sm animate-pulse">Loading classes...</p>
-          </div>
-        </div>
-      )}
-
-      {/* ── Step 1: Subjects ── (only shown when there's more than one) */}
-      {!loading && step === 'subjects' && (
-        filteredSubjects.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 bg-slate-900 border border-slate-800 rounded-2xl">
-            <span className="text-5xl mb-4">🔍</span>
-            <p className="text-slate-300 text-lg font-semibold mb-1">No subjects found</p>
-            <p className="text-slate-500 text-sm">Try adjusting your search</p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filteredSubjects.map((group, idx) => {
-              const totalStudents = group.classes.reduce((sum, c) => sum + c.students, 0)
-              return (
-                <button
-                  key={group.subjectId ?? `unassigned-${idx}`}
-                  onClick={() => { setSelectedSubjectId(group.subjectId); setSearchTerm('') }}
-                  className="text-left bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden hover:border-purple-600/40 hover:shadow-xl hover:shadow-purple-900/10 transition-all duration-300 group"
-                >
-                  <div className={`h-1.5 bg-gradient-to-r ${gradients[idx % gradients.length]}`} />
-                  <div className="p-5">
-                    <div className="flex items-start justify-between mb-3">
-                      <div className={`w-12 h-12 bg-gradient-to-br ${gradients[idx % gradients.length]} rounded-xl flex items-center justify-center text-xl shadow-lg group-hover:scale-105 transition-transform`}>
-                        🏫
-                      </div>
-                      <span className="px-2.5 py-1 bg-purple-600/20 border border-purple-600/40 rounded-full text-xs font-bold text-purple-300 whitespace-nowrap">
-                        {group.classes.length} {group.classes.length === 1 ? 'code' : 'codes'}
-                      </span>
-                    </div>
-                    <h3 className="text-lg font-bold text-white group-hover:text-purple-300 transition truncate">
-                      {group.name}
-                    </h3>
-                    <p className="text-slate-500 text-xs mt-3 pt-3 border-t border-slate-800">
-                      👥 {totalStudents} students total
-                    </p>
-                  </div>
-                </button>
-              )
-            })}
-          </div>
-        )
-      )}
-
-      {/* ── Step 2: Class codes for the chosen subject ── */}
-      {!loading && step === 'classes' && (
-        <div className="space-y-4">
-          {filteredClasses.map((cls, idx) => (
-            <div
-              key={cls.id}
-              onClick={() => navigate(`/instructor/class/${cls.id}`)}
-              className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden hover:border-purple-600/30 hover:shadow-xl hover:shadow-purple-900/10 transition-all duration-300 cursor-pointer group"
-            >
-              <div className="flex items-stretch">
-                {/* colored left accent strip — same pattern as admin cards */}
-                <div className={`w-1.5 bg-gradient-to-b ${gradients[idx % gradients.length]} shrink-0`} />
-
-                <div className="flex-1 p-4 sm:p-6">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex items-start gap-4">
-                      <div className={`w-12 h-12 bg-gradient-to-br ${gradients[idx % gradients.length]} rounded-xl flex items-center justify-center text-xl shadow-lg group-hover:scale-105 transition-transform shrink-0`}>
-                        🏫
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-2 mb-1 flex-wrap">
-                          <h3 className="text-lg font-bold text-white group-hover:text-purple-300 transition">
-                            {cls.title}
-                          </h3>
-                          <span className="px-2 py-0.5 bg-green-500/10 text-green-400 border border-green-500/20 rounded-full text-xs font-bold">
-                            Active
-                          </span>
-                        </div>
-                        <p className="text-slate-400 text-sm font-medium mb-0.5">{cls.name}</p>
-                        <p className="text-slate-500 text-xs">{cls.description}</p>
-                      </div>
-                    </div>
-                    <span className="text-slate-600 group-hover:text-purple-400 group-hover:translate-x-1 transition-all text-xl shrink-0 mt-1">›</span>
-                  </div>
-
-                  {/* Stat pills */}
-                  <div className="flex flex-wrap gap-2 mt-4 pt-4 border-t border-slate-800/60">
-                    {statItems.map(({ icon, key, label, clickable }) => (
-                      <button
-                        key={key}
-                        onClick={clickable ? e => { e.stopPropagation(); setStudentsModal(cls) } : e => e.stopPropagation()}
-                        className={`flex items-center gap-2 px-3 py-1.5 bg-slate-800/60 rounded-lg text-sm transition border ${
-                          clickable
-                            ? 'hover:bg-purple-600/20 hover:border-purple-500/40 border-transparent cursor-pointer'
-                            : 'border-transparent cursor-default'
-                        }`}
-                      >
-                        <span>{icon}</span>
-                        <span className="text-white font-bold">{cls[key]}</span>
-                        <span className="text-slate-500 text-xs">{label}</span>
-                        {clickable && <span className="text-purple-400 text-xs">↗</span>}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
-          ))}
-
-          {filteredClasses.length === 0 && (
-            <div className="flex flex-col items-center justify-center py-16 bg-slate-900 border border-slate-800 rounded-2xl">
-              <span className="text-5xl mb-4">🏫</span>
-              <p className="text-slate-300 text-lg font-semibold mb-1">No classes found</p>
-              <p className="text-slate-500 text-sm">
-                {searchTerm ? 'Try adjusting your search' : 'No class codes assigned yet — ask your admin'}
-              </p>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  )
+  return <div className="ir-my-classes">
+    {studentsModal && <StudentsModal cls={studentsModal} onClose={() => setStudentsModal(null)} />}
+    {showingClasses && !oneSubject && <nav aria-label="Class selection"><button className="ir-text-action" onClick={() => { setSelectedKey(null); setSearch('') }}>← All assigned subjects</button></nav>}
+    <header className="ir-classes-heading">
+      <div><h1>{showingClasses && !oneSubject ? activeGroup.name : 'My Classes'}</h1>
+        <p>{showingClasses ? 'Choose a class code to open its workspace.' : 'Choose an assigned subject to view its class codes.'}</p></div>
+      {!loading && !error && <span className="ir-assigned-count">{showingClasses ? `${activeGroup.classes.length} class ${activeGroup.classes.length === 1 ? 'code' : 'codes'}` : `${groups.length} assigned ${groups.length === 1 ? 'subject' : 'subjects'}`}</span>}
+    </header>
+    <label className="ir-classes-search ir-surface">
+      <img src={searchIcon} alt="" width="22" height="22" /><span className="sr-only">{showingClasses ? 'Search class codes' : 'Search subjects'}</span>
+      <input type="search" value={search} onChange={e => setSearch(e.target.value)} placeholder={showingClasses ? 'Search by class code or semester…' : 'Search subjects'} />
+    </label>
+    {loading ? <div className="ir-surface ir-empty" role="status"><h2>Loading assigned classes…</h2></div>
+      : error ? <div className="ir-surface ir-empty" role="alert"><h2>Unable to load your classes</h2><p>Check your connection and try again.</p><button className="ir-secondary" onClick={() => setReload(value => value + 1)}>Try again</button></div>
+      : groups.length === 0 ? <div className="ir-surface ir-empty">{book}<h2>No assigned classes yet</h2><p>Your assigned subjects will appear here. Contact your administrator to get started.</p></div>
+      : <>
+        {showingClasses ? <div className="ir-class-codes">{filteredClasses.map(cls => <article className="ir-surface ir-class-code-card" key={cls.id}>
+          <div className="ir-subject-identity">{book}<div><h2>Class {cls.name}</h2><p>{cls.title}</p><span>{cls.semester}</span></div></div>
+          <dl className="ir-class-counts">
+            <div><dt>Students</dt><dd><button className="ir-text-action" onClick={() => setStudentsModal(cls)} aria-label={`View students in class ${cls.name}`}>{number(cls.students)} <span>View roster →</span></button></dd></div>
+            <div><dt>Quests</dt><dd>{number(cls.quests)}</dd></div>
+            <div><dt>Modules</dt><dd>{number(cls.modules)}</dd></div>
+            <div><dt>Announcements</dt><dd>{number(cls.announcements)}</dd></div>
+          </dl>
+          <QuestButton ariaLabel={`Open class ${cls.name}`} className="ir-subject-action" onClick={() => navigate(`/instructor/class/${cls.id}`)}>Open Class</QuestButton>
+        </article>)}</div>
+          : <div className="ir-subject-grid">{filteredSubjects.map(group => {
+            const students = group.classes.every(cls => Number.isFinite(cls.students)) ? group.classes.reduce((total, cls) => total + cls.students, 0) : undefined
+            return <article className="ir-surface ir-subject-card" key={group.key}>
+              <div className="ir-subject-identity">{book}<h2>{group.name}</h2></div>
+              <div className="ir-subject-counts"><span className="ir-code-count">{group.classes.length} class {group.classes.length === 1 ? 'code' : 'codes'}</span><span className="ir-student-count" title="Total student enrollments across this subject’s assigned class codes"><strong>{number(students)}</strong> students</span></div>
+              <QuestButton className="ir-subject-action" ariaLabel={`View classes for ${group.name}`} onClick={() => { setSelectedKey(group.key); setSearch('') }}>View Classes</QuestButton>
+            </article>
+          })}</div>}
+        {(showingClasses ? filteredClasses : filteredSubjects).length === 0 && <div className="ir-surface ir-empty"><h2>No matching {showingClasses ? 'class codes' : 'subjects'}</h2><p>Try a different search.</p><button className="ir-secondary" onClick={() => setSearch('')}>Clear search</button></div>}
+        <p className="ir-classes-note">Only {showingClasses ? 'class codes' : 'subjects'} assigned to you are shown.</p>
+      </>}
+  </div>
 }

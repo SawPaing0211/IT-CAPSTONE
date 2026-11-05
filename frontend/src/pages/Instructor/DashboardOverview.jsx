@@ -1,443 +1,138 @@
-// instructor dashboard landing page — first thing they see after login.
-// all data is real from /api/instructor/dashboard-stats and /api/instructor/classes.
-//
-// removed the fake hardcoded badges like "+5 this week" and "+2% vs last week"
-// that were there before — those were just made-up strings, not real data.
-// now shows real values only, or nothing if we don't have the data for it.
-//
-// activityFilter second useEffect: runs whenever activityFilter changes.
-// the early-return condition (activityFilter === 'all' && sections.length === 0)
-// prevents it from firing a pointless fetch on initial mount before sections load.
-
-import { useState, useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { API_BASE, authFetch } from '../../api/client'
 import MobileSheet from '../../components/MobileSheet'
-import { API_BASE } from '../../api/client'
+import QuestButton from '../Student/components/QuestButton'
+import libraryBanner from '../../assets/instructor/library-banner.png'
+import './InstructorRefined.css'
+
+const number = value => typeof value === 'number' && Number.isFinite(value) ? value.toLocaleString() : '—'
+const verdicts = {
+  accepted: ['Accepted', 'success'], partial: ['Some tests failed', 'warning'],
+  wrong_answer: ['Not accepted', 'danger'], timeout: ['Time limit exceeded', 'warning'],
+  error: ['Execution error', 'muted'], pending_review: ['Pending review', 'warning'],
+}
+function SectionHeading({ id, children, action }) {
+  return <div className="ir-section-heading"><h2 id={id}>{children}</h2><span className="ir-divider" aria-hidden="true" />{action}</div>
+}
+function EmptyState({ title, children }) {
+  return <div className="ir-empty"><h3>{title}</h3>{children && <p>{children}</p>}</div>
+}
+async function readDashboard(path, signal) {
+  const response = await authFetch(`${API_BASE}/api/instructor/${path}`, { signal })
+  if (!response.ok) throw new Error('Dashboard data unavailable')
+  return response.json()
+}
+function activityTime(value) {
+  const date = new Date(value)
+  if (!value || Number.isNaN(date.getTime())) return 'Time unavailable'
+  return date.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+}
 
 export default function DashboardOverview() {
   const navigate = useNavigate()
-  const [classes, setClasses]                   = useState([])
-  const [totalStudents, setTotalStudents]       = useState(0)
-  const [loading, setLoading]                   = useState(true)
-  const [avgScore, setAvgScore]                 = useState(0)
-  const [avgBasis, setAvgBasis]                 = useState(null)
-  const [pendingReviews, setPendingReviews]     = useState(0)
-  const [totalProblems, setTotalProblems]       = useState(0)
-  const [newProblemsThisWeek, setNewProblemsThisWeek] = useState(0)
-  const [recentActivity, setRecentActivity]     = useState([])
-  const [topPerformers, setTopPerformers]       = useState([])
-  const [assignedSections, setAssignedSections] = useState([])
-  const [activityFilter, setActivityFilter]     = useState('all')
-  const [activityLoading, setActivityLoading]   = useState(false)
-  const [showActivityFilter, setShowActivityFilter] = useState(false)
-  const activityFilterAnchorRef = useRef(null)
+  const [classes, setClasses] = useState(null)
+  const [stats, setStats] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [errors, setErrors] = useState([])
+  const [reload, setReload] = useState(0)
+  const [activityFilter, setActivityFilter] = useState('all')
+  const [filteredActivity, setFilteredActivity] = useState([])
+  const [activityLoading, setActivityLoading] = useState(false)
+  const [activityError, setActivityError] = useState(false)
+  const [showFilter, setShowFilter] = useState(false)
+  const filterAnchor = useRef(null)
 
-  // Fetch dashboard stats and class list on mount
   useEffect(() => {
-    const fetchDashboardData = async () => {
-      try {
-        const token = localStorage.getItem('token')
-        if (!token) throw new Error('Not authenticated')
+    const controller = new AbortController()
+    let current = true
+    Promise.allSettled([
+      readDashboard('classes', controller.signal),
+      readDashboard('dashboard-stats', controller.signal),
+    ]).then(([classResult, statResult]) => {
+      if (!current) return
+      const failed = []
+      if (classResult.status === 'fulfilled' && Array.isArray(classResult.value)) setClasses(classResult.value)
+      else failed.push('assigned classes')
+      if (statResult.status === 'fulfilled' && statResult.value && typeof statResult.value === 'object' && !Array.isArray(statResult.value)) setStats(statResult.value)
+      else failed.push('dashboard statistics')
+      setErrors(failed)
+      setLoading(false)
+    })
+    return () => { current = false; controller.abort() }
+  }, [reload])
 
-        const [classesRes, statsRes] = await Promise.all([
-          fetch(`${API_BASE}/api/instructor/classes`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-          }),
-          fetch(`${API_BASE}/api/instructor/dashboard-stats`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-          })
-        ])
+  useEffect(() => {
+    if (activityFilter === 'all') return
+    const controller = new AbortController()
+    let current = true
+    readDashboard(`dashboard-stats?class_code=${encodeURIComponent(activityFilter)}`, controller.signal)
+      .then(data => { if (current) setFilteredActivity(data.recent_activity ?? []) })
+      .catch(() => { if (current) setActivityError(true) })
+      .finally(() => { if (current) setActivityLoading(false) })
+    return () => { current = false; controller.abort() }
+  }, [activityFilter, reload])
 
-        if (classesRes.ok) {
-          const classesData = await classesRes.json()
-          setClasses(classesData)
-          setTotalStudents(classesData.reduce((sum, cls) => sum + (cls.student_count || 0), 0))
-        }
-
-        if (statsRes.ok) {
-          const statsData = await statsRes.json()
-          if (typeof statsData.total_students === 'number') setTotalStudents(statsData.total_students)   // distinct students (a student in two classes counts once)
-          setAvgScore(statsData.avg_score ?? 0)
-          setAvgBasis(statsData.avg_score_basis ?? null)
-          setPendingReviews(statsData.pending_reviews ?? 0)
-          setTotalProblems(statsData.total_problems ?? 0)
-          setNewProblemsThisWeek(statsData.new_problems_this_week ?? 0)
-          setRecentActivity(statsData.recent_activity ?? [])
-          setTopPerformers(statsData.top_performers ?? [])
-          setAssignedSections(statsData.assigned_sections ?? [])
-        }
-      } catch (err) {
-        console.error('Dashboard fetch error:', err)
-      } finally {
-        setLoading(false)
+  useEffect(() => {
+    if (!showFilter) return
+    const close = event => {
+      if (event.key === 'Escape') {
+        setShowFilter(false)
+        filterAnchor.current?.querySelector('button')?.focus()
       }
     }
-    fetchDashboardData()
-  }, [])
+    document.addEventListener('keydown', close)
+    return () => document.removeEventListener('keydown', close)
+  }, [showFilter])
 
-  // re-fetch activity when section filter changes
-  // early return prevents a pointless fetch on first render before sections load
-  useEffect(() => {
-    if (activityFilter === 'all' && assignedSections.length === 0) return
-    const fetchFiltered = async () => {
-      setActivityLoading(true)
-      try {
-        const token = localStorage.getItem('token')
-        const url = activityFilter === 'all'
-          ? `${API_BASE}/api/instructor/dashboard-stats`
-          : `${API_BASE}/api/instructor/dashboard-stats?class_code=${activityFilter}`
-        const res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } })
-        if (res.ok) {
-          const data = await res.json()
-          setRecentActivity(data.recent_activity ?? [])
-        }
-      } catch (err) {
-        console.error('Filter fetch error:', err)
-      } finally {
-        setActivityLoading(false)
-      }
-    }
-    fetchFiltered()
-  }, [activityFilter])
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-[60vh]">
-        <div className="flex flex-col items-center gap-4">
-          <div className="animate-spin rounded-full h-12 w-12 border-4 border-purple-500 border-t-transparent" />
-          <p className="text-slate-400 text-sm animate-pulse">Loading dashboard...</p>
-        </div>
-      </div>
-    )
+  const refresh = () => { setLoading(true); setActivityError(false); if (activityFilter !== 'all') setActivityLoading(true); setReload(value => value + 1) }
+  const chooseSection = section => {
+    setShowFilter(false)
+    if (section === activityFilter) return
+    setActivityLoading(section !== 'all')
+    setActivityError(false)
+    setActivityFilter(section)
   }
+  const sections = (stats?.assigned_sections ?? []).map(section => section.section_no)
+  const activity = activityFilter === 'all' ? stats?.recent_activity ?? [] : filteredActivity
+  const performers = stats?.top_performers ?? []
+  const metrics = [
+    { label: 'Total students', value: number(stats?.total_students), caption: 'Across your assigned classes' },
+    { label: 'XP earned', value: stats?.avg_score_basis?.submissions ? `${number(stats.avg_score)}%` : '—', caption: stats && !stats.avg_score_basis?.submissions ? 'No submissions yet' : 'Share of submitted-quest XP', help: 'XP earned as a share of available XP on submitted quests. This is not a grade or completion rate; unsubmitted quests are excluded.' },
+    { label: 'Pending reviews', value: number(stats?.pending_reviews), caption: stats?.pending_reviews === 0 ? 'No reviews pending' : 'Awaiting review' },
+    { label: 'Active quests', value: number(stats?.total_problems), caption: 'Published and available' },
+  ]
 
   return (
-    <div className="space-y-4 sm:space-y-6">
-
-      {/* ── Page Header — same pattern as admin ────────────────────── */}
-      <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div>
-          <h1 className="text-2xl font-black text-white tracking-tight">Dashboard</h1>
-          <p className="text-slate-400 mt-0.5 text-sm">Manage your classes, quests, and student progress</p>
-        </div>
-        <div className="text-xs text-slate-500 text-right">
-          <p className="text-slate-400 font-medium">Updated {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
-        </div>
-      </div>
-
-      {/* ── Stat Cards ─────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        {[
-          {
-            label: 'Total Students',
-            value: totalStudents,
-            icon: '👥',
-            border: 'border-l-purple-500',
-            text: 'text-purple-400',
-            bg: 'bg-purple-500/5',
-          },
-          {
-            label: 'XP earned',
-            value: `${avgScore}%`,
-            icon: '📊',
-            border: 'border-l-blue-500',
-            text: 'text-blue-400',
-            bg: 'bg-blue-500/5',
-            sub: avgBasis && avgBasis.submissions > 0 ? `${avgBasis.students_submitted}/${avgBasis.students_enrolled} students submitted` : 'No submissions yet',
-            subColor: 'text-slate-400',
-            title: avgBasis ? `Share of available XP earned on ${avgBasis.submissions} submitted quests (XP earned ÷ XP available). It is not a grade and not the share of test cases passed. Students who have not submitted are not counted as zero.` : undefined,
-          },
-          {
-            label: 'Pending Reviews',
-            value: pendingReviews,
-            icon: '⏳',
-            border: pendingReviews > 0 ? 'border-l-red-500' : 'border-l-green-500',
-            text: pendingReviews > 0 ? 'text-red-400' : 'text-green-400',
-            bg: pendingReviews > 0 ? 'bg-red-500/5' : 'bg-green-500/5',
-            sub: pendingReviews > 0 ? 'Needs attention' : 'All clear',
-            subColor: pendingReviews > 0 ? 'text-red-400' : 'text-green-400',
-          },
-          {
-            label: 'Active Problems',
-            value: totalProblems,
-            icon: '📝',
-            border: 'border-l-amber-500',
-            text: 'text-amber-400',
-            bg: 'bg-amber-500/5',
-            sub: newProblemsThisWeek > 0 ? `+${newProblemsThisWeek} this week` : null,
-            subColor: 'text-amber-400',
-          },
-        ].map(card => (
-          <div
-            key={card.label}
-            className={`bg-slate-900 border border-slate-800 border-l-4 ${card.border} ${card.bg} rounded-xl p-3 sm:p-5 hover:border-slate-700 transition-all`}
-          >
-            <div className="flex items-start justify-between mb-1.5 sm:mb-3">
-              <p className="text-slate-400 text-[10px] sm:text-xs font-medium uppercase tracking-widest truncate">{card.label}</p>
-              <span className="text-base sm:text-xl opacity-70 shrink-0 ml-1">{card.icon}</span>
-            </div>
-            <p className={`text-xl sm:text-3xl font-black ${card.text} tabular-nums`}>{card.value}</p>
-            {card.sub && (
-              <p className={`text-[10px] sm:text-xs mt-0.5 sm:mt-1 font-medium ${card.subColor} truncate`} title={card.title}>{card.sub}</p>
-            )}
+    <div className="ir-dashboard" aria-busy={loading}>
+      <section className="ir-banner" aria-labelledby="instructor-welcome">
+        <img src={libraryBanner} alt="" fetchPriority="high" draggable="false" />
+        <div className="ir-banner-copy"><p className="ir-eyebrow">Dashboard</p><h1 id="instructor-welcome">Guide the next generation.</h1><p>Manage your classes, quests, and student progress.</p></div>
+      </section>
+      {errors.length > 0 && <div className="ir-load-error" role="alert"><div><strong>Unable to load {errors.join(' and ')}.</strong><p>Previously loaded data is kept visible when available.</p></div><button className="ir-secondary" disabled={loading} onClick={refresh}>Try again</button></div>}
+      {loading && <p className="ir-loading" role="status">Loading your teaching workspace…</p>}
+      <section className="ir-metrics" aria-label="Teaching statistics">
+        {metrics.map(metric => <div className="ir-surface ir-metric" key={metric.label} title={metric.help}><p className="ir-metric-value">{metric.value}</p><h2>{metric.label}</h2><p className="ir-metric-caption">{metric.caption}</p></div>)}
+      </section>
+      <div className="ir-dashboard-grid">
+        <section aria-labelledby="instructor-classes">
+          <SectionHeading id="instructor-classes" action={<button className="ir-text-action" onClick={() => navigate('/instructor/classes')}>View all <span aria-hidden="true">→</span></button>}>My Classes</SectionHeading>
+          {classes === null ? <div className="ir-surface"><EmptyState title={loading ? 'Loading classes…' : 'Classes unavailable'}>Your assigned classes will appear here.</EmptyState></div> : classes.length === 0 ? <div className="ir-surface"><EmptyState title="No assigned classes yet">Contact your administrator to get started.</EmptyState></div> : <div className="ir-class-list">{classes.slice(0, 5).map(cls => <article className="ir-surface ir-class-card" key={cls.id}><div><h3>{cls.name}</h3><p>Class {cls.section_no} · {number(cls.student_count)} students · {number(cls.problem_count)} quests</p></div><QuestButton className="ir-class-button" ariaLabel={`Open ${cls.name}, class ${cls.section_no}`} onClick={() => navigate(`/instructor/class/${cls.id}`)}>Open class</QuestButton></article>)}</div>}
+        </section>
+        <section aria-labelledby="instructor-actions">
+          <SectionHeading id="instructor-actions">Quick Actions</SectionHeading>
+          <div className="ir-surface ir-quick-actions"><QuestButton onClick={() => navigate('/instructor/create-problem/pick-class')}>Create quest</QuestButton><QuestButton onClick={() => navigate('/instructor/announcements')}>Post announcement</QuestButton></div>
+        </section>
+        <section aria-labelledby="instructor-activity">
+          <SectionHeading id="instructor-activity" action={<div ref={filterAnchor}><button className="ir-secondary" aria-expanded={showFilter} onClick={() => setShowFilter(value => !value)}>{activityFilter === 'all' ? 'All sections' : `Class ${activityFilter}`} <span aria-hidden="true">⌄</span></button><MobileSheet show={showFilter} onClose={() => setShowFilter(false)} anchorRef={filterAnchor} widthClass="sm:w-60" panelClassName="ir-filter-panel"><div className="p-2">{['all', ...sections].map(section => <button key={section} className="ir-menu-option" aria-pressed={activityFilter === section} onClick={() => chooseSection(section)}>{section === 'all' ? 'All sections' : `Class ${section}`}</button>)}</div></MobileSheet></div>}>Recent Submission Activity</SectionHeading>
+          <div className="ir-surface ir-activity">
+            {activityLoading ? <EmptyState title="Loading submissions…" /> : activityError ? <div className="ir-empty" role="alert"><h3>Submissions unavailable</h3><p>Try loading this section again.</p><button className="ir-secondary" onClick={refresh}>Try again</button></div> : !stats ? <EmptyState title={loading ? 'Loading submissions…' : 'Submissions unavailable'} /> : activity.length === 0 ? <EmptyState title="No submissions yet">Student submissions will appear here once they start completing quests.</EmptyState> : activity.map((item, index) => { const [label, tone] = verdicts[item.status] ?? ['Result unavailable', 'muted']; return <article className="ir-activity-row" key={item.id ?? index}><div className="ir-activity-identity"><h3>{item.student}</h3><p>{item.problem}{item.section_no ? ` · Class ${item.section_no}` : ''}</p></div><span className={`ir-verdict ir-verdict-${tone}`}>{label}</span><time>{activityTime(item.submitted_at)}</time></article> })}
           </div>
-        ))}
-      </div>
-
-      {/* ── Main Grid ──────────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5">
-
-        {/* Left col — classes + activity */}
-        <div className="lg:col-span-2 space-y-4 sm:space-y-5">
-
-          {/* My Classes */}
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
-            <div className="flex justify-between items-center px-4 sm:px-6 py-4 border-b border-slate-800">
-              <h2 className="text-sm font-bold text-white uppercase tracking-widest flex items-center gap-2">
-                <span>🏫</span> My Classes
-              </h2>
-              <button
-                onClick={() => navigate('/instructor/classes')}
-                className="text-xs text-purple-400 hover:text-purple-300 font-semibold transition"
-              >
-                View All →
-              </button>
-            </div>
-
-            <div className="divide-y divide-slate-800/60">
-              {classes.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-14 text-slate-500">
-                  <span className="text-4xl mb-3">🏫</span>
-                  <p className="text-sm">No classes assigned yet</p>
-                  <p className="text-xs text-slate-600 mt-1">Ask your administrator to assign you to a class</p>
-                </div>
-              ) : (
-                classes.slice(0, 5).map((cls, idx) => {
-                  const gradients = [
-                    'from-purple-600 to-pink-600',
-                    'from-blue-600 to-purple-600',
-                    'from-emerald-600 to-teal-600',
-                    'from-rose-600 to-orange-600',
-                    'from-amber-600 to-yellow-600',
-                  ]
-                  return (
-                    <div
-                      key={cls.id}
-                      onClick={() => navigate(`/instructor/class/${cls.id}`)}
-                      className="flex items-center gap-3 sm:gap-4 px-4 sm:px-6 py-4 hover:bg-slate-800/40 transition cursor-pointer group"
-                    >
-                      <div className={`w-10 h-10 bg-gradient-to-br ${gradients[idx % gradients.length]} rounded-xl flex items-center justify-center text-base shadow-lg group-hover:scale-110 transition-transform shrink-0`}>
-                        🏫
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="font-bold text-white text-sm group-hover:text-purple-300 transition truncate">{cls.name}</p>
-                        <p className="text-slate-500 text-xs">{cls.section_no}</p>
-                      </div>
-                      <div className="flex items-center gap-3 sm:gap-5 text-right shrink-0">
-                        <div>
-                          <p className="text-white font-bold text-sm">{cls.student_count || 0}</p>
-                          <p className="text-slate-600 text-xs">Students</p>
-                        </div>
-                        <div className="hidden sm:block">
-                          <p className="text-white font-bold text-sm">{cls.problem_count || 0}</p>
-                          <p className="text-slate-600 text-xs">Problems</p>
-                        </div>
-                        <span className="text-slate-600 group-hover:text-purple-400 transition text-lg">›</span>
-                      </div>
-                    </div>
-                  )
-                })
-              )}
-            </div>
-          </div>
-
-          {/* Recent Activity */}
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
-            <div className="px-4 sm:px-6 py-4 border-b border-slate-800 flex items-center justify-between gap-4">
-              <h2 className="text-sm font-bold text-white uppercase tracking-widest flex items-center gap-2 shrink-0">
-                <span>⚡</span> Recent Activity
-              </h2>
-              <div ref={activityFilterAnchorRef} className="relative shrink-0">
-                <button
-                  type="button"
-                  onClick={() => setShowActivityFilter(v => !v)}
-                  className="flex items-center gap-1.5 bg-slate-800 border border-slate-700 text-slate-300 text-xs rounded-lg px-3 py-1.5 min-h-[32px] focus:outline-none focus:border-purple-500/60 transition"
-                >
-                  <span className="truncate max-w-[10rem]">
-                    {activityFilter === 'all' ? 'All Sections' : `Class ${activityFilter}`}
-                  </span>
-                  <span className="text-slate-500 text-[10px]">▼</span>
-                </button>
-                <MobileSheet
-                  show={showActivityFilter}
-                  onClose={() => setShowActivityFilter(false)}
-                  widthClass="sm:w-56"
-                  anchorRef={activityFilterAnchorRef}
-                >
-                  <div className="p-2">
-                    <p className="px-3 pt-2 pb-1 text-slate-500 text-xs font-bold uppercase tracking-widest">Filter Activity</p>
-                    <button
-                      onClick={() => { setActivityFilter('all'); setShowActivityFilter(false) }}
-                      className={`w-full text-left px-3 py-2.5 rounded-lg text-sm transition ${
-                        activityFilter === 'all' ? 'bg-purple-600/20 text-purple-300' : 'text-slate-300 hover:bg-slate-800'
-                      }`}
-                    >
-                      All Sections
-                    </button>
-                    {assignedSections.map(sec => (
-                      <button
-                        key={sec.id}
-                        onClick={() => { setActivityFilter(sec.section_no); setShowActivityFilter(false) }}
-                        className={`w-full text-left px-3 py-2.5 rounded-lg text-sm transition ${
-                          activityFilter === sec.section_no ? 'bg-purple-600/20 text-purple-300' : 'text-slate-300 hover:bg-slate-800'
-                        }`}
-                      >
-                        Class {sec.section_no}
-                      </button>
-                    ))}
-                  </div>
-                </MobileSheet>
-              </div>
-            </div>
-
-            <div className="divide-y divide-slate-800/60">
-              {activityLoading ? (
-                <div className="flex items-center justify-center py-10">
-                  <div className="animate-spin rounded-full h-6 w-6 border-2 border-purple-500 border-t-transparent" />
-                </div>
-              ) : recentActivity.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-12 text-slate-500">
-                  <span className="text-4xl mb-3">📭</span>
-                  <p className="text-sm">No submissions yet{activityFilter !== 'all' ? ` in class ${activityFilter}` : ''}</p>
-                </div>
-              ) : (
-                recentActivity.map(activity => {
-                  const statusStyles = {
-                    accepted:     { dot: 'bg-green-400',  badge: 'bg-green-500/10 text-green-400 border-green-500/20' },
-                    wrong_answer: { dot: 'bg-red-400',    badge: 'bg-red-500/10 text-red-400 border-red-500/20' },
-                    partial:      { dot: 'bg-amber-400',  badge: 'bg-amber-500/10 text-amber-400 border-amber-500/20' },
-                    timeout:      { dot: 'bg-orange-400', badge: 'bg-orange-500/10 text-orange-400 border-orange-500/20' },
-                    error:        { dot: 'bg-slate-500',  badge: 'bg-slate-700 text-slate-400 border-slate-600' },
-                  }
-                  const s = statusStyles[activity.status] || statusStyles.error
-                  return (
-                    <div key={activity.id} className="flex items-center gap-3 sm:gap-4 px-4 sm:px-6 py-3.5 hover:bg-slate-800/30 transition">
-                      <div className={`w-2 h-2 rounded-full ${s.dot} shrink-0`} />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm text-white truncate">
-                          <span className="font-semibold">{activity.student}</span>
-                          <span className="text-slate-400"> submitted </span>
-                          <span className="text-purple-400">{activity.problem}</span>
-                        </p>
-                        <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                          {activity.subject && (
-                            <span className="text-slate-500 text-xs truncate">{activity.subject}</span>
-                          )}
-                          {activity.section_no && (
-                            <span className="px-1.5 py-0.5 bg-slate-700/60 text-slate-400 rounded text-xs font-mono shrink-0">
-                              #{activity.section_no}
-                            </span>
-                          )}
-                          <span className="text-slate-600 text-xs shrink-0">
-                            {new Date(activity.submitted_at).toLocaleDateString()} · {new Date(activity.submitted_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                          </span>
-                        </div>
-                      </div>
-                      <span className={`px-2.5 py-1 rounded-full text-xs font-bold shrink-0 border ${s.badge}`}>
-                        {activity.status.replace('_', ' ')}
-                      </span>
-                    </div>
-                  )
-                })
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Right col — quick actions + top performers */}
-        <div className="space-y-4 sm:space-y-5">
-
-          {/* Quick Actions */}
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
-            <div className="px-4 sm:px-6 py-4 border-b border-slate-800">
-              <h2 className="text-sm font-bold text-white uppercase tracking-widest">Quick Actions</h2>
-            </div>
-            <div className="p-4 space-y-2">
-              {[
-                { icon: '⚔️', label: 'Create Quest',     sub: 'Add new challenge',         color: 'purple', path: '/instructor/create-problem/pick-class' },
-                { icon: '📢', label: 'Post Announcement',   sub: 'Communicate with students',  color: 'pink',   path: '/instructor/announcements' },
-              ].map(action => {
-                const colors = {
-                  purple: { bg: 'bg-purple-600/10 hover:bg-purple-600/20 border-purple-600/20', text: 'text-purple-400' },
-                  pink:   { bg: 'bg-pink-600/10 hover:bg-pink-600/20 border-pink-600/20',       text: 'text-pink-400' },
-                }
-                const c = colors[action.color]
-                return (
-                  <button
-                    key={action.label}
-                    onClick={() => navigate(action.path)}
-                    className={`w-full flex items-center gap-3 p-3.5 ${c.bg} border rounded-xl transition group text-left`}
-                  >
-                    <span className="text-xl group-hover:scale-110 transition-transform">{action.icon}</span>
-                    <div>
-                      <p className={`font-bold text-sm ${c.text}`}>{action.label}</p>
-                      <p className="text-slate-500 text-xs">{action.sub}</p>
-                    </div>
-                  </button>
-                )
-              })}
-            </div>
-          </div>
-
-          {/* Top Performers */}
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
-            <div className="px-4 sm:px-6 py-4 border-b border-slate-800">
-              <h2 className="text-sm font-bold text-white uppercase tracking-widest flex items-center gap-2">
-                <span>🏆</span> Top Performers
-              </h2>
-            </div>
-            <div className="p-4 space-y-2">
-              {topPerformers.length === 0 ? (
-                <div className="text-center py-8 text-slate-500">
-                  <span className="text-3xl mb-2 block">🎯</span>
-                  <p className="text-sm">No student data yet</p>
-                </div>
-              ) : (
-                topPerformers.map((student, index) => {
-                  const medals   = ['🥇', '🥈', '🥉']
-                  const rankBg   = [
-                    'bg-yellow-500/10 text-yellow-400 border-yellow-500/30',
-                    'bg-slate-500/10  text-slate-300  border-slate-500/30',
-                    'bg-orange-500/10 text-orange-400 border-orange-500/30',
-                  ]
-                  return (
-                    <div
-                      key={student.id}
-                      className={`flex items-center gap-3 p-3 rounded-xl ${
-                        index < 3 ? 'bg-slate-800/60 border border-slate-700/50' : 'hover:bg-slate-800/30'
-                      } transition`}
-                    >
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold border shrink-0 ${
-                        index < 3 ? rankBg[index] : 'bg-slate-800 text-slate-500 border-slate-700'
-                      }`}>
-                        {index < 3 ? medals[index] : index + 1}
-                      </div>
-                      <div className="w-7 h-7 bg-gradient-to-br from-purple-600 to-pink-600 rounded-full flex items-center justify-center text-xs font-black text-white shrink-0">
-                        {(student.username || 'U')[0].toUpperCase()}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-white text-sm font-semibold truncate">{student.full_name || student.username}</p>
-                        <p className="text-slate-500 text-xs">Level {student.level}</p>
-                      </div>
-                      <span className="text-yellow-400 font-bold text-sm tabular-nums shrink-0">{student.xp} XP</span>
-                    </div>
-                  )
-                })
-              )}
-            </div>
-          </div>
-
-        </div>
+        </section>
+        <section aria-labelledby="instructor-performers">
+          <SectionHeading id="instructor-performers">Top Performers</SectionHeading>
+          <div className="ir-surface ir-performers">{!stats ? <EmptyState title={loading ? 'Loading rankings…' : 'Rankings unavailable'} /> : performers.length === 0 ? <EmptyState title="No rankings yet">Your top performers will appear when students earn XP.</EmptyState> : performers.map((student, index) => <div className="ir-performer" key={student.id}><span className="ir-rank">#{index + 1}</span><div><h3>{student.full_name || student.username}</h3><p>Level {number(student.level)}</p></div><strong className="ir-xp">{number(student.xp)} XP</strong></div>)}</div>
+        </section>
       </div>
     </div>
   )

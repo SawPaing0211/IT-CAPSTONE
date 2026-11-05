@@ -5,6 +5,7 @@ import DownloadIcon from '../../components/DownloadIcon'
 import QuestResultSummary from './components/QuestResultSummary'
 import submitSeal from '../../assets/results/submit-seal.webp'
 import { achievementStore } from '../../utils/achievementStore'
+import { savedQuestResult } from '../../utils/savedQuestResult'
 
 const LANG_CHIP = {
   python: 'border-sky-400/60 text-sky-300',
@@ -73,9 +74,11 @@ export default function StudentCodeEditor({
   // one graded submission PER LANGUAGE: { python: {...}, java: {...} }. A language locks on its own;
   // the other ticked languages stay open (the professor's language rule says whether they are required).
   const [submissionsByLang, setSubmissionsByLang] = useState({})
+  const [submissionQuestId, setSubmissionQuestId] = useState(quest?.id)
   const [languageRule, setLanguageRule] = useState(null)   // 'required' | 'optional' | null (single language)
-  const hasSubmitted = !!submissionsByLang[language]
-  const priorSubmission = submissionsByLang[language] || null
+  const priorSubmission = submissionQuestId === quest?.id ? submissionsByLang[language] || null : null
+  const hasSubmitted = !!priorSubmission
+  const savedFinal = savedQuestResult(priorSubmission, language)
   const [savedCode, setSavedCode] = useState('')
   const [showSuccessAnim, setShowSuccessAnim] = useState(false)
   const [combo, setCombo] = useState(0)
@@ -266,6 +269,8 @@ const formatErrorOutput = (rawOutput, language) => {
 
   // Load saved code on mount + detect role + check completion
 useEffect(() => {
+  let current = true
+  setOutput(null)
   // Detect user role from JWT
   const token = localStorage.getItem('token')
   if (token) {
@@ -298,7 +303,7 @@ useEffect(() => {
     const loadServerDraft = async () => {
       try {
         const res = await api.get(`/api/problems/${quest.id}/draft?language=${language}`)
-        if (res?.code) {
+        if (current && res?.code) {
           setSavedCode(res.code)
           setCode(res.code)
           localStorage.setItem(getStorageKey(quest.id, language), res.code)
@@ -316,8 +321,10 @@ useEffect(() => {
         const subRes = await authFetch(`${API_BASE}/api/problems/${quest.id}/my-submission`, {
           headers: { 'Authorization': `Bearer ${token}` }
         })
-        if (subRes.ok) {
+        if (current && subRes.ok) {
           const subData = await subRes.json()
+          if (!current) return
+          setSubmissionQuestId(quest.id)
           setLanguageRule(subData.language_rule || null)
           if (subData.has_submitted) {
             const map = {}
@@ -336,6 +343,7 @@ useEffect(() => {
 
     checkSubmission() // Call the async function
   }
+  return () => { current = false }
 }, [quest, language]) // Re-run when quest or language changes
 
   // restores which hints this student already revealed for this quest,
@@ -541,7 +549,8 @@ useEffect(() => {
       // draft once a final submission exists, so nothing is written here.
 
       // Lock submit after ANY submission (accepted, error, partial, etc.)
-      setSubmissionsByLang(prev => ({ ...prev, [data.language || language]: data }))
+      setSubmissionQuestId(quest.id)
+      setSubmissionsByLang(prev => ({ ...prev, [data.language || language]: { ...data, results_recorded: Array.isArray(data.test_results) } }))
 
       // The submission is committed at this point. Ask for achievements in the
       // background: the store never rejects, and nothing here can turn a
@@ -983,6 +992,7 @@ useEffect(() => {
               {quest.languages?.map(lang => (
                 <button
                   key={lang}
+                  disabled={isLoading}
                   onClick={() => setLanguage(lang)}
                   className={`px-3 sm:px-4 py-1.5 rounded-lg border text-[11px] font-bold uppercase tracking-[0.16em] transition flex items-center gap-1.5 max-sm:min-h-[44px] ${
                     language === lang
@@ -1121,7 +1131,23 @@ useEffect(() => {
 
             {/* Console output (scrollable within the 192px) */}
             <div className="console-output overflow-y-auto quiet-scroll p-4 font-mono text-xs" style={{ flex: '1 1 0', minHeight: 0 }}>
-              {!output && !isLoading && (
+              {savedFinal && (
+                <section aria-label={`Saved final submission: ${language}`} className="mb-4 space-y-3">
+                  <QuestResultSummary output={savedFinal} xpGained={0} language={language} />
+                  {savedFinal.submitted_at && <p className="text-xs text-slate-400">Submitted {new Date(/(?:Z|[+-]\d{2}:\d{2})$/.test(savedFinal.submitted_at) ? savedFinal.submitted_at : `${savedFinal.submitted_at}Z`).toLocaleString(undefined, { timeZoneName: 'short' })}</p>}
+                  {savedFinal.results_recorded ? <details open={!output}>
+                    <summary className="cursor-pointer py-2 text-xs text-amber-200 focus-visible:outline focus-visible:outline-2">Saved test results</summary>
+                    <div className="grid grid-cols-1 gap-2 min-[1100px]:grid-cols-2">
+                      {savedFinal.test_results.map((test, index) => <div key={index} className={`rounded-lg border p-3 ${test.passed ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-rose-500/30 bg-rose-500/5'}`}>
+                        <p className={test.passed ? 'text-emerald-300' : 'text-rose-300'}>Test {test.index ?? index + 1}{test.hidden ? ' (hidden)' : ''}: {test.passed ? 'PASSED' : 'FAILED'}</p>
+                        <p className="mt-1 text-slate-400">{test.runtime || 'Timing not recorded'}</p>
+                        {!test.hidden && !test.passed && typeof test.output === 'string' && <><p className="mt-2 text-slate-400">Recorded output</p><pre className="whitespace-pre-wrap break-words text-slate-200">{test.output}</pre></>}
+                      </div>)}
+                    </div>
+                  </details> : <p className="text-xs text-slate-400">Detailed results unavailable. Only the stored verdict, score and pass counts are available; this answer was not re-run.</p>}
+                </section>
+              )}
+              {!output && !isLoading && !savedFinal && (
                 <div className="text-center py-4 text-slate-500">
                   <p className="mb-2 text-amber-300/70" aria-hidden="true">◆</p>
                   <p>Cast your spell to see the results...</p>
@@ -1136,7 +1162,7 @@ useEffect(() => {
                   </div>
                 </div>
               )}
-              {output && (
+              {output && (!savedFinal || output.is_run_mode || output.error) && (
                 <div className="space-y-3">
                   <QuestResultSummary output={output} xpGained={xpGained} language={language}
                     remainingLanguages={languageRule === 'required' ? (quest.languages || []).filter(l => !submissionsByLang[l]) : []} />

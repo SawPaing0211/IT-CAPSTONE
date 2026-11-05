@@ -8,14 +8,14 @@ export default function QuestResultSummary({ output, xpGained, language, remaini
   const total = output.total ?? output.total_cases ?? cases.length
   // A request/capture error is not a failed student answer. A pass needs an
   // actual result, never equality between two absent counts.
-  const unavailable = output.status === 'error' || !!output.error || !Number.isFinite(Number(total)) || Number(total) <= 0
+  const unavailable = (!output.is_saved_final && output.status === 'error') || !!output.error || !Number.isFinite(Number(total)) || Number(total) <= 0
   const accepted = !unavailable && output.status === 'accepted' && total > 0 && passed === total
   const partial = !unavailable && !accepted && passed > 0
   const tone = unavailable ? 'border-violet-300/30 bg-violet-400/5 text-violet-200'
     : accepted ? 'border-emerald-400/30 bg-emerald-400/5 text-emerald-300'
       : partial ? 'border-amber-300/40 bg-amber-300/5 text-amber-200' : 'border-rose-400/30 bg-rose-400/5 text-rose-300'
   const earnedXP = output.is_run_mode ? 0 : (output.xp_earned ?? (accepted ? xpGained : 0) ?? 0)
-  const title = unavailable ? 'Execution could not finish'
+  const title = output.is_saved_final ? `Saved final · ${language === 'csharp' ? 'C#' : language === 'java' ? 'Java' : 'Python'} · ${output.status.replaceAll('_', ' ')}` : unavailable ? 'Execution could not finish'
     : accepted ? (remainingLanguages.length && !output.is_run_mode ? `${language} cleared` : 'Victory! All tests passed!')
       : partial ? 'Some tests passed — keep refining' : 'No tests passed'
 
@@ -25,13 +25,15 @@ export default function QuestResultSummary({ output, xpGained, language, remaini
     <div className="min-w-0 flex-1">
       <p className="text-sm font-bold leading-relaxed">{title}</p>
       <p className="mt-1 text-xs leading-relaxed text-slate-300">
-        {unavailable ? 'Review the message below. No successful result is available.'
+        {output.is_saved_final ? `Stored result · Passed ${passed}/${total} tests · Viewing does not award XP`
+          : unavailable ? 'Review the message below. No successful result is available.'
           : output.is_run_mode ? `Run preview · Passed ${passed}/${total} tests · Not submitted · No XP`
             : `Final result · Passed ${passed}/${total} tests`}
       </p>
       {!output.is_run_mode && !unavailable && output.scoring_note && <p className="mt-1 text-xs text-slate-400">{output.scoring_note}</p>}
       {accepted && !output.is_run_mode && remainingLanguages.length > 0 && <p className="mt-1 text-xs text-amber-100">Answer {remainingLanguages.join(', ')} to clear the quest.</p>}
     </div>
-    {!output.is_run_mode && !unavailable && earnedXP > 0 && <p className="ml-auto whitespace-nowrap font-cinzel text-xl font-bold text-amber-200 tabular-nums">+{earnedXP} XP</p>}
+    {output.is_saved_final && <p className="ml-auto whitespace-nowrap text-sm font-bold text-amber-200 tabular-nums">Recorded quest score: {output.score ?? '—'} XP</p>}
+    {!output.is_saved_final && !output.is_run_mode && !unavailable && earnedXP > 0 && <p className="ml-auto whitespace-nowrap font-cinzel text-xl font-bold text-amber-200 tabular-nums">+{earnedXP} XP</p>}
   </div>
 }
