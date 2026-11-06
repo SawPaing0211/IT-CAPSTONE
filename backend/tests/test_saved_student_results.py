@@ -90,6 +90,30 @@ class SavedResultsTests(unittest.TestCase):
         self.assertFalse(response['has_submitted'])
         self.assertEqual(response['submissions'],[])
 
+    def test_author_can_inspect_current_hidden_definitions_without_student_exposure(self):
+        teacher = A.User(username='case_author', email='author@example.test', password_hash='unused', role='instructor')
+        outsider = A.User(username='case_outsider', email='outsider@example.test', password_hash='unused', role='instructor')
+        A.db.session.add_all([teacher, outsider]); A.db.session.flush()
+        self.quest.created_by = teacher.id
+        self.quest.test_cases = [{'input': 'PRIVATE CASE', 'expected': 'PRIVATE EXPECTED', 'visible': False}]
+        A.db.session.commit()
+        url = f'/api/instructor/submissions/{self.sub.id}/code'
+        headers = lambda user: {'Authorization': 'Bearer '+create_access_token(identity=str(user.id))}
+        try:
+            before = (self.owner.xp, self.sub.score, A.Submission.query.count(), A.SubmissionSlot.query.count())
+            response = self.client.get(url, headers=headers(teacher))
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json['current_test_cases'], [{'index': 1, 'input': 'PRIVATE CASE', 'expected': 'PRIVATE EXPECTED', 'hidden': True}])
+            self.assertTrue(response.json['test_results'][1]['passed'])
+            self.assertNotIn('current_test_cases', self.get_result().json['submissions'][0])
+            self.assertNotIn('PRIVATE', self.get_result().get_data(as_text=True))
+            self.assertEqual(self.client.get(url, headers=self.headers).status_code, 403)
+            self.assertEqual(self.client.get(url, headers=headers(outsider)).status_code, 403)
+            self.assertEqual(before, (self.owner.xp, self.sub.score, A.Submission.query.count(), A.SubmissionSlot.query.count()))
+        finally:
+            self.quest.created_by = None
+            A.db.session.delete(teacher); A.db.session.delete(outsider); A.db.session.commit()
+
 
 if __name__ == '__main__':
     unittest.main()

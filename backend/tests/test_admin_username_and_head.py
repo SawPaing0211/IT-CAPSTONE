@@ -118,6 +118,40 @@ class AdminAccountTests(unittest.TestCase):
         r = self.client.put(self.url('student'), headers=self.headers['teacher'], json={'username':'permission_other'})
         self.assertEqual(r.status_code, 403)
 
+    def test_full_names_for_students_and_instructors_preserve_account_identity(self):
+        for key, name in [('student', '  María Santos-Reyes  '), ('teacher', 'Professor José Dela Cruz')]:
+            with self.subTest(role=key):
+                user = self.users[key]
+                original = (user.id, user.username, user.email, user.password_hash, user.xp, user.level, user.role, user.is_active)
+                response = self.client.put(self.url(key), headers=self.headers['admin'], json={'full_name': name})
+                self.assertEqual(response.status_code, 200, response.get_json())
+                A.db.session.expire_all()
+                self.assertEqual(user.full_name, name.strip())
+                self.assertEqual((user.id, user.username, user.email, user.password_hash, user.xp, user.level, user.role, user.is_active), original)
+                listing = self.client.get('/api/admin/users', headers=self.headers['admin']).get_json()
+                self.assertEqual(next(row['full_name'] for row in listing if row['id'] == user.id), name.strip())
+        self.assertEqual(self.client.put(self.url('student'), headers=self.headers['admin'], json={'full_name': ''}).status_code, 200)
+        self.assertIsNone(self.users['student'].full_name)
+
+    def test_invalid_full_name_rejects_entire_update(self):
+        student = self.users['student']
+        student.full_name = 'Original Name'
+        A.db.session.commit()
+        for name in [None, 123, ['Name'], 'x' * 201, 'First\nLast', 'First\x00Last']:
+            with self.subTest(name=name):
+                response = self.client.put(self.url('student'), headers=self.headers['admin'], json={'full_name': name, 'username': 'permission_rejected', 'xp': 999})
+                self.assertEqual(response.status_code, 400)
+                A.db.session.expire_all()
+                self.assertEqual(student.full_name, 'Original Name')
+                self.assertEqual(student.username, 'permission_student')
+                self.assertEqual(student.xp, 125)
+
+    def test_full_name_changes_require_admin_and_cannot_modify_admin_names(self):
+        self.assertEqual(self.client.put(self.url('student'), headers=self.headers['teacher'], json={'full_name': 'Not allowed'}).status_code, 403)
+        self.assertEqual(self.client.put(self.url('teacher'), headers=self.headers['student'], json={'full_name': 'Not allowed'}).status_code, 403)
+        self.assertEqual(self.client.put(self.url('head'), headers=self.headers['admin'], json={'full_name': 'Not allowed'}).status_code, 403)
+        self.assertEqual(self.client.put(self.url('admin'), headers=self.headers['head'], json={'full_name': 'Not allowed'}).status_code, 400)
+
 
 if __name__ == '__main__':
     unittest.main()

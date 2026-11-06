@@ -1768,7 +1768,17 @@ def create_lesson():
     if not is_instructor_or_admin(user):
         return jsonify({"error": "Unauthorized"}), 403
 
-    data = request.get_json()
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "A JSON object is required"}), 400
+    if not isinstance(data.get('title'), str) or not data['title'].strip() or len(data['title'].strip()) > 200:
+        return jsonify({"error": "Module title must contain 1–200 characters"}), 400
+    if not isinstance(data.get('description'), str) or not data['description'].strip():
+        return jsonify({"error": "Module description is required"}), 400
+    if type(data.get('week_number')) is not int or not 1 <= data['week_number'] <= 18:
+        return jsonify({"error": "Week must be a whole number from 1 to 18"}), 400
+    if 'is_published' in data and type(data['is_published']) is not bool:
+        return jsonify({"error": "Visibility must be Draft or Publish"}), 400
 
     # Validation -- section_id is now required: a module belongs to one
     # specific class code, never the whole subject (see get_lessons /
@@ -1782,16 +1792,16 @@ def create_lesson():
         return jsonify({"error": "Class code not found"}), 404
 
     # Verify instructor is assigned to this subject
-    if not is_instructor_assigned(user_id, section.subject_id):
-        return jsonify({"error": "You are not assigned to teach this subject"}), 403
+    if not is_instructor_assigned(user_id, section.subject_id, section.id):
+        return jsonify({"error": "You are not assigned to teach this class"}), 403
     if subject_out_of_scope(Subject.query.get(section.subject_id)):
         return jsonify({"error": OUT_OF_SCOPE_MSG}), 400
 
     # Create lesson -- subject_id always derived from the section so the
     # two can never disagree
     lesson = Lesson(
-        title=data['title'],
-        description=data.get('description', ''),
+        title=data['title'].strip(),
+        description=data['description'].strip(),
         week_number=data['week_number'],
         subject_id=section.subject_id,
         section_id=section.id,
@@ -1837,8 +1847,12 @@ def upload_lesson_file(lesson_id):
     if file_ext not in allowed_types:
         return jsonify({"error": f"File type .{file_ext} not allowed"}), 400
 
-    # Validate file size (16MB max)
-    if file.content_length and file.content_length > 16 * 1024 * 1024:
+    # Multipart part Content-Length is usually absent. Measure the spooled
+    # stream itself before saving, and preserve its exact byte count.
+    file.stream.seek(0, 2)
+    file_size = file.stream.tell()
+    file.stream.seek(0)
+    if file_size > 16 * 1024 * 1024:
         return jsonify({"error": "File too large (max 16MB)"}), 400
 
     # Generate secure filename
@@ -1859,7 +1873,7 @@ def upload_lesson_file(lesson_id):
         filename=secure_name,
         original_filename=file.filename,
         file_type=file_ext,
-        file_size=file.content_length or 0,
+        file_size=file_size,
         storage_path=file_path
     )
 
@@ -1884,7 +1898,17 @@ def update_lesson(lesson_id):
     if lesson.created_by != user_id and user.role != 'administrator':
         return jsonify({"error": "Not your lesson"}), 403
 
-    data = request.get_json()
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "A JSON object is required"}), 400
+    if 'title' in data and (not isinstance(data['title'], str) or not data['title'].strip() or len(data['title'].strip()) > 200):
+        return jsonify({"error": "Module title must contain 1–200 characters"}), 400
+    if 'description' in data and (not isinstance(data['description'], str) or not data['description'].strip()):
+        return jsonify({"error": "Module description is required"}), 400
+    if 'week_number' in data and (type(data['week_number']) is not int or not 1 <= data['week_number'] <= 18):
+        return jsonify({"error": "Week must be a whole number from 1 to 18"}), 400
+    if 'is_published' in data and type(data['is_published']) is not bool:
+        return jsonify({"error": "Visibility must be Draft or Publish"}), 400
     if 'title'        in data: lesson.title        = data['title'].strip()
     if 'description'  in data: lesson.description  = data['description'].strip()
     if 'week_number'  in data: lesson.week_number  = int(data['week_number'])
@@ -3449,6 +3473,7 @@ def get_instructor_class_detail(classId):
         "section_no": section.section_no,
         "section_code": section.section_no,
         "name": ', '.join(subjects) if subjects else section.section_no,
+        "is_active": section.is_active,
         "semester": section.semester or 'Current Semester',
         "subjects": subjects,
         "student_count": student_count,
@@ -3992,6 +4017,12 @@ def get_submission_code(submission_id):
         "results_recorded": details is not None,
         "execution_mode": (details or {}).get("runner"),
         "test_results": (details or {}).get("tests", []),
+        # Author-only current definitions, not historical execution snapshots.
+        "current_test_cases": [
+            {"index": index + 1, "input": case.get("input", ""),
+             "expected": case.get("expected", ""), "hidden": case.get("visible", True) is False}
+            for index, case in enumerate(problem.test_cases or []) if isinstance(case, dict)
+        ],
         "note": None if details is not None else
                 "This submission was saved before per-test results were recorded. Only the stored status, score and "
                 "pass counts are available; they were not re-run."
@@ -4606,6 +4637,11 @@ def admin_update_user(admin, user_id):
         return jsonify({"error": "The head administrator cannot be demoted or deactivated."}), 403
     if 'role' in data and data['role'] not in ['student', 'instructor', 'administrator']:
         return jsonify({"error": "Invalid role"}), 400
+    if 'full_name' in data:
+        if data.get('role', target.role) not in ('student', 'instructor'):
+            return jsonify({"error": "Name changes are available for students and instructors."}), 400
+        if not isinstance(data['full_name'], str) or len(data['full_name'].strip()) > 200 or any(ord(ch) < 32 or ord(ch) == 127 for ch in data['full_name']):
+            return jsonify({"error": "Full name must be text of at most 200 characters, without control characters."}), 400
     if 'username' in data:
         if not isinstance(data['username'], str):
             return jsonify({"error": "Username must be text"}), 400
@@ -4623,6 +4659,12 @@ def admin_update_user(admin, user_id):
         if username != target.username:
             changes.append(f"Username: {target.username} -> {username}")
             target.username = username
+
+    if 'full_name' in data:
+        full_name = data['full_name'].strip() or None
+        if full_name != target.full_name:
+            changes.append(f"Full name: {target.full_name or '(not set)'} -> {full_name or '(not set)'}")
+            target.full_name = full_name
 
     if 'role' in data and data['role'] == 'administrator' and target.role != 'administrator' \
             and not is_head_admin(admin):
