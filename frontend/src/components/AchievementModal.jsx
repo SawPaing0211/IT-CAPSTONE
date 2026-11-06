@@ -18,7 +18,7 @@ const numeric = value => Number.isFinite(Number(value)) ? Math.max(0, Number(val
 const targetOf = badge => numeric(badge.requirement_value ?? badge.max_progress)
 const progressOf = badge => numeric(badge.progress)
 const percentOf = badge => targetOf(badge) > 0 ? Math.min(100, progressOf(badge) / targetOf(badge) * 100) : 0
-const statusOf = badge => badge.is_earned ? 'Earned' : isUnavailable(badge) ? 'Coming soon' : 'In progress'
+const statusOf = badge => badge.is_earned ? 'Earned' : isUnavailable(badge) ? (badge.category === 'instructor' ? 'Not available yet' : 'Coming soon') : badge.category === 'instructor' && progressOf(badge) === 0 ? 'Locked' : 'In progress'
 
 function earnedDate(badge) {
   if (!badge.is_earned) return 'Not yet'

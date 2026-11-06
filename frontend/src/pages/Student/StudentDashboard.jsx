@@ -647,15 +647,33 @@ export default function StudentDashboard({ user, onLogout }) {
 
   // Parallax
   useEffect(() => {
-    const handler = (e) => {
-      if (backgroundRef.current) {
-        const x = (e.clientX - window.innerWidth / 2) / 50
-        const y = (e.clientY - window.innerHeight / 2) / 50
-        backgroundRef.current.style.transform = `translate(${x}px, ${y}px)`
-      }
+    const motion = window.matchMedia('(prefers-reduced-motion: reduce)')
+    const pointer = window.matchMedia('(hover: hover) and (pointer: fine)')
+    let frame = 0
+    const reset = () => {
+      cancelAnimationFrame(frame)
+      if (backgroundRef.current) backgroundRef.current.style.transform = ''
     }
-    window.addEventListener('mousemove', handler)
-    return () => window.removeEventListener('mousemove', handler)
+    const handler = (e) => {
+      if (motion.matches || !pointer.matches) return
+      const x = Math.max(-24, Math.min(24, (e.clientX - window.innerWidth / 2) / 50))
+      const y = Math.max(-24, Math.min(24, (e.clientY - window.innerHeight / 2) / 50))
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => {
+        if (backgroundRef.current) backgroundRef.current.style.transform = `translate(${x}px, ${y}px)`
+      })
+    }
+    window.addEventListener('mousemove', handler, { passive: true })
+    window.addEventListener('blur', reset)
+    motion.addEventListener('change', reset)
+    pointer.addEventListener('change', reset)
+    return () => {
+      reset()
+      window.removeEventListener('mousemove', handler)
+      window.removeEventListener('blur', reset)
+      motion.removeEventListener('change', reset)
+      pointer.removeEventListener('change', reset)
+    }
   }, [])
 
   // Hero stats
@@ -903,12 +921,13 @@ export default function StudentDashboard({ user, onLogout }) {
   ]
 
   return (
-    <div className="min-h-screen max-w-screen overflow-x-hidden bg-gradient-to-b from-slate-950 via-purple-950/30 to-slate-950 text-white relative lg:pl-[232px]">
+    <div className="min-h-screen max-w-screen overflow-x-hidden bg-gradient-to-b from-slate-950 via-purple-950/30 to-slate-950 text-white relative isolate lg:pl-[232px]">
 
       <StudentSidebar activeId={selectedSection ? 'subjects' : activeTab} onSelect={goTab} />
 
       {/* Background particles */}
-      <div ref={backgroundRef} className="fixed inset-0 pointer-events-none transition-transform duration-100 ease-out overflow-hidden">
+      <div aria-hidden="true" className="fixed inset-0 -z-10 pointer-events-none overflow-hidden">
+      <div ref={backgroundRef} className="absolute -inset-8 transition-transform duration-100 ease-out motion-reduce:transition-none overflow-hidden">
         {/* Ambient nebula glow — echoes the landing/login sky so the dashboard
             reads as the same world, without competing with the UI on top */}
         <div className="absolute -top-32 -left-24 w-[520px] h-[520px] rounded-full bg-purple-700/20 blur-[120px]" />
@@ -922,6 +941,7 @@ export default function StudentDashboard({ user, onLogout }) {
           )
         })}
         <div className="absolute inset-0 bg-gradient-to-t from-slate-950/50 via-transparent to-purple-950/20" />
+      </div>
       </div>
 
       {/* ── Header ── */}

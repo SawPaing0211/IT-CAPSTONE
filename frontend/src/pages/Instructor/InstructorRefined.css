@@ -1,8 +1,19 @@
-.instructor-shell{--ir-gold:#f4d57b;--ir-text:#f8fafc;--ir-muted:#b4c0d3;--ir-border:rgba(244,213,123,.32);min-height:100vh;color:var(--ir-text);background:#080b1c url('../../assets/instructor/atmosphere.svg') center top/100% auto repeat-y}
+.instructor-shell{--ir-gold:#f4d57b;--ir-text:#f8fafc;--ir-muted:#b4c0d3;--ir-border:rgba(244,213,123,.32);position:relative;isolation:isolate;min-height:100vh;color:var(--ir-text);background:#080b1c}
+.ir-atmosphere-viewport{position:fixed;inset:0;z-index:0;pointer-events:none;overflow:hidden;background:linear-gradient(180deg,#020617,#170b2d 50%,#020617)}
+.ir-atmosphere{position:absolute;inset:-32px;transition:transform .1s ease-out}
+.ir-nebula{position:absolute;border-radius:50%;filter:blur(120px);pointer-events:none}
+.ir-nebula-one{top:-128px;left:-96px;width:520px;height:520px;background:#7e22ce33}
+.ir-nebula-two{top:33%;right:-128px;width:460px;height:460px;background:#c026d326;filter:blur(130px)}
+.ir-nebula-three{bottom:0;left:25%;width:420px;height:420px;background:#4f46e526;filter:blur(110px)}
+.ir-particle{position:absolute;width:4px;height:4px;border-radius:50%;background:#ffffff4d;box-shadow:0 0 4px #a855f780;animation:ir-particle-float 5s ease-in-out infinite}
+.ir-particle-gold{background:#fde68ab3;box-shadow:0 0 6px #fcd34db3}
+@keyframes ir-particle-float{0%,100%{transform:translateY(0);opacity:.35}50%{transform:translateY(-12px);opacity:.7}}
+@media(prefers-reduced-motion:reduce),(hover:none),(pointer:coarse){.ir-atmosphere{transform:none!important;transition:none}.ir-particle{animation:none}}
 .instructor-shell button:focus-visible{outline:2px solid #c4b5fd;outline-offset:4px}
+.ir-back-button{flex-shrink:0;min-width:88px}
 .instructor-shell button:disabled{opacity:.6;cursor:wait}
 .ir-sidebar{display:none}
-.ir-main{min-width:0;min-height:100vh}
+.ir-main{position:relative;z-index:1;min-width:0;min-height:100vh}
 .ir-topbar{position:relative;z-index:20;min-height:76px;padding:16px 32px;display:flex;justify-content:space-between;align-items:center;gap:20px;background:rgba(10,17,39,.94);border-bottom:1px solid var(--ir-border)}
 .ir-identity{display:flex;gap:20px;align-items:center;min-width:0}
 .ir-identity strong{font-family:Cinzel,serif;font-size:20px}

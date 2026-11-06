@@ -1,7 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import StudentCodeModal from "./StudentCodeModal";
 import { API_BASE } from '../../api/client'
+import './InstructorQuestReview.css'
+import InstructorBackButton from '../../components/InstructorBackButton'
 
 export default function ProblemSubmissions() {
   const { problemId } = useParams()
@@ -17,13 +19,8 @@ export default function ProblemSubmissions() {
   const [error, setError] = useState(null)
   const [viewingSubmissionId, setViewingSubmissionId] = useState(null)
 
-  // Load submission data whenever the problem id changes
-  useEffect(() => {
-    fetchData()
-  }, [problemId])
-
   // Fetch this problem's submissions and per-student status
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
@@ -45,7 +42,11 @@ export default function ProblemSubmissions() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [problemId])
+
+  // Loading/error are remote-resource states reset for each selected quest.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { fetchData() }, [fetchData])
 
   // Filter students by submission status
   const filteredStudents = students.filter(student => {
@@ -74,12 +75,7 @@ export default function ProblemSubmissions() {
     return (
       <div className="text-center py-20">
         <p className="text-red-400 mb-4">⚠️ {error}</p>
-        <button
-          onClick={goBack}
-          className="px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300"
-        >
-          ← Back to Problems
-        </button>
+        <InstructorBackButton onClick={goBack}>Back to Quests</InstructorBackButton>
       </div>
     )
   }
@@ -91,7 +87,7 @@ export default function ProblemSubmissions() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="iq-screen iq-submissions space-y-6">
 
       {/* Modal */}
       {viewingSubmissionId && (
@@ -102,31 +98,24 @@ export default function ProblemSubmissions() {
       )}
 
       {/* Header */}
-      <div className="flex items-start justify-between gap-3 flex-wrap">
+      <div className="iq-heading flex items-start justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-3 sm:gap-4 min-w-0">
-          <button
-            onClick={goBack}
-            className="shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center text-slate-400 hover:text-white transition rounded-lg hover:bg-slate-800"
-            aria-label="Back"
-          >
-            <span className="sm:hidden text-xl">←</span>
-            <span className="hidden sm:inline">← Back</span>
-          </button>
+          <InstructorBackButton onClick={goBack} />
           <div className="min-w-0">
-            <h1 className="text-lg sm:text-2xl font-bold text-white truncate">{problem.title}</h1>
+            <h1>{problem.title}</h1>
             <p className="text-slate-400 text-xs sm:text-base">Submission Overview</p>
           </div>
         </div>
         <button
           onClick={fetchData}
-          className="px-4 py-2 min-h-[44px] bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 font-medium transition shrink-0"
+          className="ir-secondary"
         >
-          🔄 Refresh
+          Refresh
         </button>
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="iq-stats grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
           <p className="text-slate-400 text-sm">Total Students</p>
           <p className="text-2xl font-bold text-white">{students.length}</p>
@@ -140,13 +129,13 @@ export default function ProblemSubmissions() {
           <p className="text-2xl font-bold text-yellow-400">{pendingCount}</p>
         </div>
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
-          <p className="text-slate-400 text-sm">Avg Score</p>
-          <p className="text-2xl font-bold text-blue-400">{avgScore} XP</p>
+          <p className="text-slate-400 text-sm">Average submitted XP</p>
+          <p className="text-2xl font-bold text-blue-400">{submittedCount ? `${avgScore} XP` : '—'}</p>
         </div>
       </div>
 
       {/* Filters */}
-      <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
+      <div className="iq-filters flex gap-2 overflow-x-auto pb-1 -mx-1 px-1" role="group" aria-label="Filter students">
         {[
           { key: 'all', label: `All (${students.length})`, active: 'bg-blue-600' },
           { key: 'submitted', label: `Submitted (${submittedCount})`, active: 'bg-green-600' },
@@ -155,6 +144,7 @@ export default function ProblemSubmissions() {
           <button
             key={tab.key}
             onClick={() => setFilter(tab.key)}
+            aria-pressed={filter === tab.key}
             className={`px-4 py-2 min-h-[44px] rounded-lg font-medium transition shrink-0 whitespace-nowrap ${
               filter === tab.key
                 ? `${tab.active} text-white`
@@ -167,7 +157,8 @@ export default function ProblemSubmissions() {
       </div>
 
       {/* Table */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-x-auto">
+      <p className="iq-table-hint">Recorded submissions only · Select a language’s code to view its saved result. <span>Scroll the table to see all columns.</span></p>
+      <div className="iq-table-wrap" role="region" aria-label="Student submissions. Scroll horizontally on small screens." tabIndex={0}>
         <table className="w-full text-left min-w-[640px]">
           <thead className="bg-slate-800/50 text-slate-400 text-sm">
             <tr>
@@ -183,9 +174,7 @@ export default function ProblemSubmissions() {
             {filteredStudents.length === 0 ? (
               <tr>
                 <td colSpan="6" className="p-8 text-center text-slate-500">
-                  {students.length === 0
-                    ? 'No students enrolled in your classes yet.'
-                    : 'No students match this filter.'}
+                  <div className="iq-empty"><h3>{students.length === 0 ? 'No students enrolled yet' : filter === 'submitted' ? 'No submissions yet' : filter === 'pending' ? 'No pending submissions' : 'No matching students'}</h3><p>{students.length === 0 ? 'Enrolled students will appear here.' : filter === 'submitted' ? 'Saved submissions will appear here when students submit this quest.' : 'Choose All to view the complete student list.'}</p>{filter !== 'all' && <button className="ir-secondary" onClick={() => setFilter('all')}>Show all students</button>}</div>
                 </td>
               </tr>
             ) : (
@@ -252,9 +241,8 @@ export default function ProblemSubmissions() {
                     {student.language
                       ? <div className="flex flex-col gap-2">
                           {(student.submissions?.length ? student.submissions : [student]).map((row, i) => (
-                            <span key={i} className="text-slate-300 text-sm">
-                              {row.language === 'python' ? '🐍'
-                                : row.language === 'java' ? '☕' : '🔷'} {row.language}
+                            <span key={i} className="iq-language text-slate-300 text-sm">
+                              {row.language === 'csharp' ? 'C#' : row.language === 'java' ? 'Java' : row.language === 'python' ? 'Python' : row.language}
                             </span>
                           ))}
                         </div>
@@ -280,9 +268,9 @@ export default function ProblemSubmissions() {
                           <button
                             key={i}
                             onClick={() => setViewingSubmissionId(row.submission_id)}
-                            className="px-3 py-1.5 bg-blue-600/20 hover:bg-blue-600 text-blue-400 hover:text-white border border-blue-600/40 hover:border-blue-600 rounded-lg text-xs font-medium transition-all duration-150"
+                            className="ir-secondary iq-view-code"
                           >
-                            {'</>'}  View {row.language} code
+                            {'</>'}  View {row.language === 'csharp' ? 'C#' : row.language === 'java' ? 'Java' : row.language === 'python' ? 'Python' : row.language} code
                           </button>
                         ))}
                       </div>

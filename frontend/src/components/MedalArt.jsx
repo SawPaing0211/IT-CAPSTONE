@@ -11,6 +11,13 @@ import leaderboardChamp from '../assets/medals/leaderboard-champ.webp'
 import hardCoder from '../assets/medals/hard-coder.webp'
 import debugMaster from '../assets/medals/debug-master.webp'
 import marathonCoder from '../assets/medals/marathon-coder.webp'
+import instructorCatalog from '../assets/instructor/medals/catalog.json'
+
+const instructorAssets = import.meta.glob('../assets/instructor/medals/*.png', { eager: true, query: '?url', import: 'default' })
+function instructorArt(badge, earned) {
+  const slug = instructorCatalog[medalKey(badge)]
+  return slug ? instructorAssets[`../assets/instructor/medals/${slug}--${earned ? 'earned' : 'locked'}.png`] : null
+}
 
 // Keyed by medalKey(): category|requirement_type|requirement_value.
 // Unknown achievement definitions retain the generic fallback below.
@@ -29,8 +36,10 @@ const ART = {
   'student|leaderboard|10': leaderboardChamp,
 }
 
+// Retain the shared predicate consumed by AchievementBadge alongside the art component.
+// eslint-disable-next-line react-refresh/only-export-components
 export function hasMedalArt(badge) {
-  return !!ART[medalKey(badge)]
+  return !!ART[medalKey(badge)] || !!instructorArt(badge, false)
 }
 
 const Generic = ({ earned }) => (
@@ -45,6 +54,8 @@ const Generic = ({ earned }) => (
 
 // Earned = full colour. Locked / coming soon = silver (grayscale) and dimmed.
 export default function MedalArt({ badge, earned, unavailable = false, className = '' }) {
+  const approvedInstructor = instructorArt(badge, earned)
+  if (approvedInstructor) return <img src={approvedInstructor} alt="" aria-hidden="true" draggable="false" loading="lazy" className={`block object-contain ${className}`} />
   const src = ART[medalKey(badge)]
   if (!src) return <span className={`block ${className}`}><Generic earned={earned} /></span>
   return (

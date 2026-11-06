@@ -12,6 +12,7 @@ export default function EditUserModal({ user, sections = [], canCreateAdmins = f
   // ── form state - pre-filled with current user data ───────────────────────────
   const [form, setForm] = useState({
     username: user.username,
+    full_name: user.full_name || '',
     role:      user.role,
     is_active: user.is_active,
     xp:        user.xp,
@@ -43,8 +44,13 @@ export default function EditUserModal({ user, sections = [], canCreateAdmins = f
   const handleSubmit = e => {
     e.preventDefault()
     // only send section_ids if the user isn't an admin (admins have no sections)
-    const payload = { ...form }
-    if (!isAdmin) payload.section_ids = selectedSectionIds
+    // Only send edited fields: a name-only change must not rewrite enrollments,
+    // instructor assignments, XP, roles, or sign-in identifiers.
+    const payload = Object.fromEntries(Object.entries(form).filter(([key, value]) =>
+      key !== 'full_name' && value !== user[key]))
+    if (!isAdmin && form.full_name !== (user.full_name || '')) payload.full_name = form.full_name.trim()
+    const originalSectionIds = (user.sections || []).map(section => section.id).filter(Boolean)
+    if (!isAdmin && (selectedSectionIds.length !== originalSectionIds.length || selectedSectionIds.some(id => !originalSectionIds.includes(id)))) payload.section_ids = selectedSectionIds
     onSave(payload)
   }
 
@@ -109,7 +115,13 @@ export default function EditUserModal({ user, sections = [], canCreateAdmins = f
 
         {/* ── SCROLLABLE FORM BODY ──────────────────────────────────────────── */}
         <div className="overflow-y-auto flex-1">
-          <form onSubmit={handleSubmit} className="px-6 py-5 space-y-5">
+          <form id="manage-user-form" onSubmit={handleSubmit} className="px-6 py-5 space-y-5">
+
+            {!isAdmin && <div>
+              <label htmlFor="managed-full-name" className="block text-xs font-semibold text-slate-400 uppercase tracking-widest mb-2">Full Name</label>
+              <input id="managed-full-name" value={form.full_name} onChange={e => setForm({ ...form, full_name: e.target.value })} maxLength={200} autoComplete="off" aria-describedby="managed-full-name-help" className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2.5 text-white text-sm focus:border-purple-500 outline-none" />
+              <p id="managed-full-name-help" className="text-xs text-slate-400 mt-2">Changes the name shown in Forge.Dev, not the sign-in username. Leave blank to display the username.</p>
+            </div>}
 
             <div>
               <label htmlFor="managed-username" className="block text-xs font-semibold text-slate-400 uppercase tracking-widest mb-2">Username</label>
@@ -385,8 +397,7 @@ export default function EditUserModal({ user, sections = [], canCreateAdmins = f
           </button>
           <button
             type="submit"
-            form=""
-            onClick={handleSubmit}
+            form="manage-user-form"
             className="flex-1 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-xl font-semibold text-white text-sm transition-all shadow-lg shadow-purple-600/20 active:scale-[0.98]"
           >
             Save Changes

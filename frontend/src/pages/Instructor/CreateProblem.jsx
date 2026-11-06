@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { API_BASE } from '../../api/client'
+import InstructorBackButton from '../../components/InstructorBackButton'
 
 export default function CreateProblem() {
   const navigate = useNavigate()
@@ -308,14 +309,7 @@ export default function CreateProblem() {
       )}
       {/* Header */}
       <div className="flex items-center gap-3 sm:gap-4">
-        <button
-          onClick={() => navigate(resolveBackTarget())}
-          className="shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center text-slate-400 hover:text-white transition rounded-lg hover:bg-slate-800"
-          aria-label="Back"
-        >
-          <span className="sm:hidden text-xl">←</span>
-          <span className="hidden sm:inline">← Back</span>
-        </button>
+        <InstructorBackButton onClick={() => navigate(resolveBackTarget())} />
         <div className="min-w-0">
           <h1 className="text-xl sm:text-3xl font-bold text-white truncate">
             {isEditing ? '✏️ Edit Quest' : '⚔️ Create New Quest'}

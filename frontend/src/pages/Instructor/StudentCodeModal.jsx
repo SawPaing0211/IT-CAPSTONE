@@ -1,263 +1,123 @@
-import { useEffect, useState } from "react";
-import { api } from "../../api/client";
+import { useEffect, useRef, useState } from 'react'
+import { api } from '../../api/client'
+import ModuleIcon from './ModuleIcon'
+import './InstructorQuestReview.css'
+
+const languageName = language => ({ python: 'Python', java: 'Java', csharp: 'C#' }[language] || language)
+const statusName = status => String(status || 'Unavailable').replaceAll('_', ' ')
 
 export default function StudentCodeModal({ submissionId, onClose }) {
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [copied, setCopied] = useState(false);
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+  const [copied, setCopied] = useState(false)
+  const [copyError, setCopyError] = useState(false)
+  const [reload, setReload] = useState(0)
+  const dialogRef = useRef(null)
+  const copyTimer = useRef(null)
 
-  // Fetch the submission's code and test results when the modal opens
   useEffect(() => {
-    if (!submissionId) return;
-    setLoading(true);
-    setError(null);
-    api
-      .get(`/api/instructor/submissions/${submissionId}/code`)
-      .then((res) => setData(res))
-      .catch(() => setError("Failed to load submission."))
-      .finally(() => setLoading(false));
-  }, [submissionId]);
+    const dialog = dialogRef.current
+    const previousFocus = document.activeElement
+    const oldOverflow = document.body.style.overflow
+    dialog.showModal()
+    document.body.style.overflow = 'hidden'
+    return () => {
+      clearTimeout(copyTimer.current)
+      dialog.close()
+      document.body.style.overflow = oldOverflow
+      previousFocus?.focus()
+    }
+  }, [])
 
-  // Copy the submitted code to the clipboard
-  const handleCopy = () => {
-    if (!data?.code) return;
-    navigator.clipboard.writeText(data.code);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
+  useEffect(() => {
+    let active = true
+    // Reset the remote resource state when its identity changes or Retry is used.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setLoading(true)
+    setData(null)
+    setError(null)
+    setCopied(false)
+    setCopyError(false)
+    api.get(`/api/instructor/submissions/${submissionId}/code`)
+      .then(result => { if (active) setData(result) })
+      .catch(() => { if (active) setError('We could not load this submission. Check your connection and try again.') })
+      .finally(() => { if (active) setLoading(false) })
+    return () => { active = false }
+  }, [submissionId, reload])
 
-  // Pick a color for the submission status badge
-  const statusColor = (status) => {
-    if (status === "accepted") return "#4ade80";
-    if (status === "wrong_answer") return "#f87171";
-    if (status === "timeout") return "#fb923c";
-    return "#94a3b8";
-  };
-
-  // Format the language name with its icon
-  const langLabel = (lang) => {
-    if (lang === "python") return "🐍 Python";
-    if (lang === "java") return "☕ Java";
-    if (lang === "csharp") return "🔷 C#";
-    return lang;
-  };
+  const handleCopy = async () => {
+    if (!data?.code) return
+    setCopyError(false)
+    try {
+      await navigator.clipboard.writeText(data.code)
+      setCopied(true)
+      clearTimeout(copyTimer.current)
+      copyTimer.current = setTimeout(() => setCopied(false), 2000)
+    } catch {
+      setCopyError(true)
+    }
+  }
 
   return (
-    <div style={styles.overlay} onClick={onClose}>
-      <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
-        {/* Header */}
-        <div style={styles.header}>
+    <dialog ref={dialogRef} className="iq-code-dialog" aria-labelledby="submission-dialog-title" onCancel={event => { event.preventDefault(); onClose() }} onClick={event => { if (event.target === event.currentTarget) onClose() }}>
+      <div className="iq-dialog-inner">
+        <header className="iq-dialog-header">
           <div>
-            <div style={styles.headerTitle}>Student Code Viewer</div>
-            {data && (
-              <div style={styles.headerSub}>
-                {data.student?.username} · {data.problem?.title} ·{" "}
-                <span style={{ color: statusColor(data.status) }}>
-                  {data.status?.replace("_", " ").toUpperCase()}
-                </span>
-              </div>
-            )}
+            <p className="iq-readonly"><ModuleIcon name="lock" size={14} /> Read-only submission</p>
+            <h2 id="submission-dialog-title">Student code & result</h2>
+            {data && <p className="iq-dialog-subtitle">{data.student?.full_name || data.student?.username} · {data.problem?.title}</p>}
           </div>
-          <button onClick={onClose} style={styles.closeBtn}>✕</button>
-        </div>
-
-        {/* Body */}
-        <div style={styles.body}>
-          {loading && <div style={styles.center}>Loading submission...</div>}
-          {error && <div style={styles.center}>{error}</div>}
-
-          {data && (
-            <>
-              {/* Meta row */}
-              <div style={styles.metaRow}>
-                <span style={styles.badge}>{langLabel(data.language)}</span>
-                <span style={styles.badge}>
-                  Score: {data.score} XP
-                </span>
-                <span style={styles.badge}>
-                  {new Date(data.submitted_at).toLocaleString()}
-                </span>
-                <button onClick={handleCopy} style={styles.copyBtn}>
-                  {copied ? "✓ Copied" : "Copy Code"}
-                </button>
+          <button className="iq-close" aria-label="Close submission" onClick={onClose} autoFocus>×</button>
+        </header>
+        <div className="iq-dialog-body">
+          {loading && <p className="iq-empty" role="status">Loading saved submission…</p>}
+          {error && <div className="iq-empty" role="alert"><ModuleIcon name="warning" size={28} /><h3>Submission unavailable</h3><p>{error}</p><button className="ir-secondary" onClick={() => setReload(value => value + 1)}>Try again</button></div>}
+          {data && <>
+            <div className="iq-code-meta">
+              <span className="iq-language">{languageName(data.language)}</span>
+              <span>{new Date(data.submitted_at).toLocaleString()}</span>
+              <button className="ir-secondary" onClick={handleCopy}>{copied ? 'Copied' : 'Copy code'}</button>
+            </div>
+            <div role="status" className="iq-copy-status">{copyError ? 'Copy failed. You can select the code below and copy it manually.' : copied ? 'Code copied to clipboard.' : ''}</div>
+            <div className="iq-code" tabIndex={0} role="region" aria-label="Submitted code"><pre>{data.code}</pre></div>
+            <section className="iq-recorded" aria-label="Recorded result">
+              <div className="iq-result-heading"><h3>Recorded result</h3><strong>{data.score} <span>XP</span></strong></div>
+              <div className="iq-result-meta">
+                <span className={`iq-status ${data.status === 'accepted' ? 'iq-status-success' : 'iq-status-warning'}`}>{statusName(data.status)}</span>
+                <span>{data.results_recorded ? `Passed ${data.passed_cases ?? 0} of ${data.total_cases ?? 0} tests` : 'Per-test details unavailable'}</span>
               </div>
-
-              {/* Code block */}
-              <div style={styles.codeWrapper}>
-                <pre style={styles.codeBlock}>{data.code}</pre>
+              <p>Saved at submission. Viewing this result does not run code or change XP.</p>
+              {data.execution_mode === 'demo-stub' && <p className="iq-warning">SIMULATED (demo) result, not real execution.</p>}
+              {data.error_msg && <pre className="iq-error-message">{data.error_msg}</pre>}
+            </section>
+            {!data.results_recorded && <p className="iq-warning">{data.note || 'No per-test results were recorded for this submission.'}</p>}
+            {data.results_recorded && data.test_results?.length > 0 && <section className="iq-test-section">
+              <h3>Per-test results <span>{data.test_results.filter(result => result.passed).length}/{data.test_results.length} passed</span></h3>
+              <div className="iq-test-grid">
+                {data.test_results.map(result => <article key={result.index} className={`iq-test-card ${result.passed ? 'is-passed' : 'is-failed'}`}>
+                  <header><strong>Test {result.index}</strong><span>{result.passed ? 'Passed' : 'Failed'}</span></header>
+                  {result.hidden && <p className="iq-hidden"><ModuleIcon name="lock" size={13} /> Hidden from students</p>}
+                  <>
+                    {result.kind && <p>{statusName(result.kind)}</p>}
+                    {result.message && <div className="iq-test-detail"><span>Note</span><code>{result.message}</code></div>}
+                    {!result.passed && result.output && <div className="iq-test-detail"><span>Output</span><code>{result.output}</code></div>}
+                  </>
+                </article>)}
               </div>
-
-              {/* Recorded assessment: nothing here is executed or recalculated */}
-              <div style={styles.section}>
-                <div style={styles.sectionTitle}>Recorded result</div>
-                <div style={{ ...styles.testRow, flexWrap: "wrap", gap: 8 }}>
-                  <span style={styles.badge}>Status: {String(data.status || "").replace("_", " ")}</span>
-                  <span style={styles.badge}>Score: {data.score} XP</span>
-                  <span style={styles.badge}>Passed {data.passed_cases ?? 0} of {data.total_cases ?? 0} tests</span>
-                  {data.execution_mode === "demo-stub" && (
-                    <span style={{ ...styles.badge, color: "#fbbf24" }}>SIMULATED (demo) result, not real execution</span>
-                  )}
-                </div>
-                <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 6 }}>
-                  Stored when the student submitted. Opening this view does not run the code or change anything.
-                </div>
-                {data.error_msg && <div style={{ ...styles.testRow, color: "#f87171" }}>{data.error_msg}</div>}
-              </div>
-
-              {!data.results_recorded && (
-                <div style={{ ...styles.section, color: "#fbbf24", fontSize: 13 }}>
-                  {data.note || "No per-test results were recorded for this submission."}
-                </div>
-              )}
-
-              {data.results_recorded && data.test_results?.length > 0 && (
-                <div style={styles.section}>
-                  <div style={styles.sectionTitle}>
-                    Per-test results ({data.test_results.filter((r) => r.passed).length}/
-                    {data.test_results.length} passed)
-                  </div>
-                  <div style={styles.testGrid}>
-                    {data.test_results.map((r) => (
-                      <div
-                        key={r.index}
-                        style={{
-                          ...styles.testCard,
-                          borderLeft: `3px solid ${r.passed ? "#4ade80" : "#f87171"}`,
-                        }}
-                      >
-                        <div style={styles.testHeader}>
-                          <span>{r.passed ? "✅" : "❌"} Test {r.index}{r.hidden ? " (hidden)" : ""}</span>
-                          <span style={styles.runtime}>{String(r.kind || "").replace("_", " ")}</span>
-                        </div>
-                        {!r.hidden && r.message && (
-                          <div style={styles.testRow}>
-                            <span style={styles.testLabel}>Note:</span>
-                            <code style={styles.testCode}>{r.message}</code>
-                          </div>
-                        )}
-                        {!r.hidden && !r.passed && r.output && (
-                          <div style={styles.testRow}>
-                            <span style={styles.testLabel}>Got:</span>
-                            <code style={{ ...styles.testCode, color: "#f87171" }}>{r.output}</code>
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </>
-          )}
+            </section>}
+            {Array.isArray(data.current_test_cases) && <section className="iq-test-section">
+              <h3>Current quest test cases</h3>
+              <p className="iq-definition-note">Author view · These are the quest’s current inputs and expected outputs. They may have changed since submission; they are not a snapshot of what ran. Hidden-case output was not retained in older submission records.</p>
+              <div className="iq-test-grid">{data.current_test_cases.map(test => <article key={test.index} className="iq-test-card iq-definition">
+                <header><strong>Test {test.index}</strong><span>{test.hidden ? 'Hidden from students' : 'Visible to students'}</span></header>
+                <div className="iq-test-detail"><span>Input</span><pre>{String(test.input) || '(empty)'}</pre></div>
+                <div className="iq-test-detail"><span>Expected output</span><pre>{String(test.expected) || '(empty)'}</pre></div>
+              </article>)}</div>
+            </section>}
+          </>}
         </div>
       </div>
-    </div>
-  );
+    </dialog>
+  )
 }
-
-const styles = {
-  overlay: {
-    position: "fixed", inset: 0,
-    background: "rgba(0,0,0,0.7)",
-    display: "flex", alignItems: "center", justifyContent: "center",
-    zIndex: 1000,
-  },
-  modal: {
-    background: "#0f172a",
-    border: "1px solid #1e293b",
-    borderRadius: "12px",
-    width: "min(900px, 95vw)",
-    maxHeight: "90vh",
-    display: "flex", flexDirection: "column",
-    overflow: "hidden",
-  },
-  header: {
-    display: "flex", justifyContent: "space-between", alignItems: "flex-start",
-    padding: "20px 24px",
-    borderBottom: "1px solid #1e293b",
-    background: "#0f172a",
-  },
-  headerTitle: {
-    fontSize: "18px", fontWeight: 700, color: "#f1f5f9",
-  },
-  headerSub: {
-    fontSize: "13px", color: "#94a3b8", marginTop: "4px",
-  },
-  closeBtn: {
-    background: "none", border: "none",
-    color: "#94a3b8", fontSize: "20px",
-    cursor: "pointer", padding: "0 4px",
-  },
-  body: {
-    overflowY: "auto", padding: "20px 24px", flex: 1,
-  },
-  center: {
-    textAlign: "center", color: "#94a3b8", padding: "40px",
-  },
-  metaRow: {
-    display: "flex", flexWrap: "wrap", gap: "8px",
-    alignItems: "center", marginBottom: "16px",
-  },
-  badge: {
-    background: "#1e293b", color: "#94a3b8",
-    borderRadius: "6px", padding: "4px 10px",
-    fontSize: "12px",
-  },
-  copyBtn: {
-    marginLeft: "auto",
-    background: "#3b82f6", color: "#fff",
-    border: "none", borderRadius: "6px",
-    padding: "5px 14px", fontSize: "12px",
-    cursor: "pointer",
-  },
-  codeWrapper: {
-    background: "#020617",
-    border: "1px solid #1e293b",
-    borderRadius: "8px",
-    overflow: "auto",
-    marginBottom: "20px",
-    maxHeight: "340px",
-  },
-  codeBlock: {
-    margin: 0, padding: "16px 20px",
-    color: "#e2e8f0",
-    fontFamily: "'Fira Code', 'Cascadia Code', monospace",
-    fontSize: "13px",
-    lineHeight: "1.6",
-    whiteSpace: "pre",
-  },
-  section: { marginTop: "8px" },
-  sectionTitle: {
-    fontSize: "14px", fontWeight: 600,
-    color: "#f1f5f9", marginBottom: "12px",
-  },
-  testGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
-    gap: "10px",
-  },
-  testCard: {
-    background: "#1e293b",
-    borderRadius: "8px",
-    padding: "12px",
-  },
-  testHeader: {
-    display: "flex", justifyContent: "space-between",
-    fontSize: "13px", fontWeight: 600,
-    color: "#f1f5f9", marginBottom: "8px",
-  },
-  runtime: { fontSize: "11px", color: "#64748b" },
-  testRow: {
-    display: "flex", gap: "6px",
-    alignItems: "flex-start", marginTop: "4px",
-  },
-  testLabel: {
-    fontSize: "11px", color: "#64748b",
-    minWidth: "54px", paddingTop: "2px",
-  },
-  testCode: {
-    fontSize: "12px", color: "#7dd3fc",
-    wordBreak: "break-all",
-    fontFamily: "monospace",
-  },
-};

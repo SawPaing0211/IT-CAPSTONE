@@ -1,224 +1,65 @@
-// instructor achievements — badge gallery showing all 15 instructor badges,
-// earned and locked. all data is real from /api/instructor/achievements.
-//
-// badges use the same shared AchievementBadge component the student side
-// uses (components/AchievementBadge.jsx) — icon + name, tap/hover for the
-// full description/progress/reward in a tooltip — so a badge looks and
-// behaves like the same "thing" on both sides of the app, and the grid
-// stays compact instead of a tall stack of description cards.
-//
-// filter tabs: All/Earned/In Progress/Locked. sort by default/xp/progress.
-
-import { useState, useRef } from 'react'
-import MobileSheet from '../../components/MobileSheet'
-import AchievementBadge from '../../components/AchievementBadge'
+import { useState } from 'react'
 import useAchievements from '../../hooks/useAchievements'
-import { splitAchievements } from '../../utils/achievementView'
+import { splitAchievements, isUnavailable } from '../../utils/achievementView'
+import MedalArt from '../../components/MedalArt'
+import AchievementModal from '../../components/AchievementModal'
+import ModuleIcon from './ModuleIcon'
+import './InstructorAchievements.css'
 
-const SORT_LABELS = { default: 'Default', xp: 'XP Reward', progress: 'Progress' }
+const statusOf = badge => badge.is_earned ? 'Earned' : isUnavailable(badge) ? 'Not available yet' : badge.progress > 0 ? 'In progress' : 'Locked'
+const targetOf = badge => Math.max(0, Number(badge.requirement_value ?? badge.max_progress) || 0)
+const progressOf = badge => Math.max(0, Number(badge.progress) || 0)
 
 export default function InstructorAchievements() {
-  const [filter, setFilter]             = useState('all')
-  const [sortBy, setSortBy]             = useState('default')
-  const [showSortMenu, setShowSortMenu] = useState(false)
-  const sortMenuRef = useRef(null)
-
-  // Shared user-scoped store (celebrations are queued app-wide from just_earned).
   const { achievements, loading, error, reload } = useAchievements()
+  const [filter, setFilter] = useState('all')
+  const [sortBy, setSortBy] = useState('default')
+  const [selectedId, setSelectedId] = useState(null)
+  const split = splitAchievements(achievements)
+  const inProgress = split.locked.filter(badge => progressOf(badge) > 0)
+  const locked = split.locked.filter(badge => progressOf(badge) === 0)
+  const list = filter === 'earned' ? split.earned : filter === 'progress' ? inProgress : filter === 'locked' ? locked : filter === 'unavailable' ? split.unavailable : achievements
+  const filtered = [...list].sort((a, b) => {
+    if (sortBy === 'xp') return b.xp_reward - a.xp_reward
+    const progress = badge => targetOf(badge) ? progressOf(badge) / targetOf(badge) : 0
+    if (sortBy === 'progress') return progress(b) - progress(a)
+    return Number(!!b.is_earned) - Number(!!a.is_earned) || progress(b) - progress(a)
+  })
+  const filters = [
+    { key: 'all', label: 'All', count: achievements.length },
+    { key: 'earned', label: 'Earned', count: split.earned.length },
+    { key: 'progress', label: 'In progress', count: inProgress.length },
+    { key: 'locked', label: 'Locked', count: locked.length },
+    { key: 'unavailable', label: 'Not available yet', count: split.unavailable.length },
+  ]
 
-  // Split achievements into earned, in-progress, and locked groups
-  const split      = splitAchievements(achievements)
-  const earned     = split.earned
-  const unavailable = split.unavailable
-  const inProgress = split.locked.filter(a => a.progress > 0)
-  const locked     = split.locked.filter(a => !(a.progress > 0))
-  const totalXP    = earned.reduce((sum, a) => sum + a.xp_reward, 0)
-
-  // Filter achievements by the selected tab, then sort by the chosen order
-  const filtered = (() => {
-    let list =
-      filter === 'earned'   ? earned :
-      filter === 'progress' ? inProgress :
-      filter === 'locked'   ? locked :
-      filter === 'unavailable' ? unavailable :
-      achievements
-
-    if (sortBy === 'xp') {
-      list = [...list].sort((a, b) => b.xp_reward - a.xp_reward)
-    } else if (sortBy === 'progress') {
-      list = [...list].sort((a, b) => {
-        const pa = a.max_progress > 0 ? a.progress / a.max_progress : 0
-        const pb = b.max_progress > 0 ? b.progress / b.max_progress : 0
-        return pb - pa
-      })
-    } else {
-      // earned first, then in-progress by % completion, then locked
-      list = [...list].sort((a, b) => {
-        if (a.is_earned !== b.is_earned) return a.is_earned ? -1 : 1
-        const pa = a.max_progress > 0 ? a.progress / a.max_progress : 0
-        const pb = b.max_progress > 0 ? b.progress / b.max_progress : 0
-        return pb - pa
-      })
-    }
-    return list
-  })()
-
-  if (loading) return (
-    <div className="space-y-6">
-      <div className="h-8 w-64 bg-slate-800 rounded-lg animate-pulse mb-2" />
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        {[...Array(4)].map((_, i) => <div key={i} className="h-24 bg-slate-800 rounded-2xl animate-pulse" />)}
+  return <section className="ia-page" aria-labelledby="teaching-achievements-title">
+    <header className="ia-heading"><h1 id="teaching-achievements-title">Teaching Achievements</h1><p>Every milestone begins with your next class. Explore your teaching achievements.</p></header>
+    {loading ? <div className="ia-empty" role="status">Loading your achievements…</div> : error ? <div className="ia-empty" role="alert"><ModuleIcon name="warning" size={32} /><h2>Achievements unavailable</h2><p>{error.message || 'We could not load your achievements. Please try again.'}</p><button className="ir-secondary" onClick={() => reload().catch(() => {})}>Try again</button></div> : <>
+      <dl className="ia-summary">
+        <div><dd>{split.earned.length} <span>/ {split.denominator}</span></dd><dt>Attainable earned</dt></div>
+        <div><dd>{inProgress.length}</dd><dt>In progress</dt></div>
+        <div><dd>{locked.length}</dd><dt>Locked</dt></div>
+        <div><dd>{split.unavailable.length}</dd><dt>Not available yet</dt></div>
+      </dl>
+      <div className="ia-toolbar">
+        <div className="ia-filters" role="group" aria-label="Filter teaching achievements">{filters.map(tab => <button key={tab.key} type="button" aria-pressed={filter === tab.key} onClick={() => setFilter(tab.key)}>{tab.label} <span>({tab.count})</span></button>)}</div>
+        <label className="ia-sort">Sort <select value={sortBy} onChange={event => setSortBy(event.target.value)}><option value="default">Default</option><option value="xp">XP reward</option><option value="progress">Progress</option></select></label>
       </div>
-      <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-4">
-        {[...Array(12)].map((_, i) => <div key={i} className="aspect-square bg-slate-800 rounded-xl animate-pulse" />)}
-      </div>
-    </div>
-  )
-
-  if (error) return (
-    <div className="flex flex-col items-center justify-center py-20 gap-4">
-      <span className="text-5xl">⚠️</span>
-      <p className="text-red-400 font-semibold">{error.message || 'Failed to fetch achievements'}</p>
-      <button onClick={() => reload().catch(() => {})} className="px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 text-sm font-medium transition">
-        🔄 Retry
-      </button>
-    </div>
-  )
-
-  return (
-    <div className="space-y-4 sm:space-y-7">
-
-      {/* Header — same pattern as other redesigned pages */}
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-black text-white tracking-tight">Achievements</h1>
-          <p className="text-slate-400 mt-0.5 text-sm">Milestones earned through your work as an instructor</p>
-        </div>
-        {achievements.length > 0 && (
-          <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-purple-500/10 border border-purple-500/20 rounded-lg">
-            <span className="text-purple-400 text-xs font-bold">{earned.length}/{split.denominator} Earned</span>
-          </div>
-        )}
-      </div>
-
-      {/* Stat strip */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
-        {[
-          { label: 'Earned',        value: earned.length,     icon: '🥇', color: 'text-yellow-400', border: 'border-l-yellow-500' },
-          { label: 'In Progress',   value: inProgress.length, icon: '⚡', color: 'text-blue-400',   border: 'border-l-blue-500' },
-          { label: 'Locked',        value: locked.length,     icon: '🔒', color: 'text-slate-400',  border: 'border-l-slate-600' },
-          { label: 'XP from Badges',value: `${totalXP} XP`,  icon: '✨', color: 'text-purple-400', border: 'border-l-purple-500' },
-        ].map(stat => (
-          <div key={stat.label} className={`bg-slate-900 border border-slate-800 border-l-4 ${stat.border} rounded-xl p-2.5 sm:p-4`}>
-            <p className={`text-lg sm:text-2xl font-black ${stat.color} tabular-nums leading-none`}>{stat.value}</p>
-            <p className="text-slate-500 text-[10px] sm:text-xs mt-0.5 sm:mt-1 flex items-center gap-1 truncate"><span>{stat.icon}</span> {stat.label}</p>
-          </div>
-        ))}
-      </div>
-
-      {/* Overall progress bar */}
-      {split.denominator > 0 && (
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3 sm:p-5">
-          <div className="flex items-center justify-between mb-3">
-            <p className="text-white font-semibold text-sm">Overall Completion</p>
-            <p className="text-slate-400 text-sm tabular-nums">
-              {Math.round((earned.length / split.denominator) * 100)}%
-            </p>
-          </div>
-          <div className="w-full h-3 bg-slate-800 rounded-full overflow-hidden">
-            <div
-              className="h-full bg-gradient-to-r from-purple-600 via-blue-500 to-cyan-400 rounded-full transition-all duration-1000"
-              style={{ width: `${(earned.length / split.denominator) * 100}%` }}
-            />
-          </div>
-          <div className="flex justify-between text-xs text-slate-600 mt-1.5">
-            <span>0</span>
-            <span>{split.denominator} total</span>
-          </div>
-        </div>
-      )}
-
-      {/* Filters + Sort */}
-      <div className="flex flex-wrap gap-3 items-center justify-between">
-        <div className="flex gap-1.5 sm:gap-2 flex-wrap">
-          {[
-            { key: 'all',      label: `All (${achievements.length})` },
-            { key: 'earned',   label: `Earned (${earned.length})` },
-            { key: 'progress', label: `In Progress (${inProgress.length})` },
-            { key: 'locked',   label: `Locked (${locked.length})` },
-            ...(unavailable.length ? [{ key: 'unavailable', label: `Not available yet (${unavailable.length})` }] : []),
-          ].map(tab => (
-            <button
-              key={tab.key}
-              onClick={() => setFilter(tab.key)}
-              className={`px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl text-xs sm:text-sm font-medium transition ${
-                filter === tab.key
-                  ? 'bg-purple-600 text-white shadow-lg shadow-purple-900/30'
-                  : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-        <div ref={sortMenuRef} className="relative shrink-0">
-          <button
-            onClick={() => setShowSortMenu(v => !v)}
-            className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl px-3 sm:px-4 py-1.5 sm:py-2 text-slate-300 text-xs sm:text-sm transition"
-          >
-            <span>Sort: {SORT_LABELS[sortBy]}</span>
-            <span className="text-slate-500 text-[10px]">▼</span>
-          </button>
-          <MobileSheet show={showSortMenu} onClose={() => setShowSortMenu(false)} widthClass="sm:w-48" anchorRef={sortMenuRef}>
-            <div className="py-2">
-              {Object.entries(SORT_LABELS).map(([key, label]) => (
-                <button
-                  key={key}
-                  onClick={() => { setSortBy(key); setShowSortMenu(false) }}
-                  className={`w-full px-4 py-2.5 text-left text-sm transition ${
-                    sortBy === key ? 'text-purple-300 bg-purple-600/10 font-semibold' : 'text-slate-300 hover:text-white hover:bg-slate-800/80'
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          </MobileSheet>
-        </div>
-      </div>
-
-      {/* Grid — icon + name, same as the student side's badge gallery. Tap
-          (or hover on desktop) a badge for its full description, progress
-          and reward in a tooltip. */}
-      {filtered.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 bg-slate-900 border border-slate-800 rounded-2xl">
-          <span className="text-5xl mb-4">🎯</span>
-          <p className="text-slate-300 font-semibold text-lg mb-1">No achievements here</p>
-          <p className="text-slate-500 text-sm">Try a different filter</p>
-        </div>
-      ) : (
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6">
-          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-4 sm:gap-5">
-            {filtered.map(badge => (
-              <div key={badge.id} className="flex flex-col items-center gap-2">
-                <AchievementBadge badge={badge} size="md" />
-                <p className={`text-xs text-center font-medium truncate w-full ${badge.is_earned ? 'text-white' : 'text-slate-500'}`}>
-                  {badge.name}
-                </p>
-              </div>
-            ))}
-          </div>
-          <p className="text-slate-600 text-xs text-center mt-5 pt-4 border-t border-slate-800">
-            Tap a badge for details · Keep teaching to earn more! ✨
-          </p>
-        </div>
-      )}
-
-      {locked.length > 0 && filter !== 'locked' && (
-        <p className="text-slate-600 text-xs text-center">
-          {locked.length} achievement{locked.length !== 1 ? 's' : ''} still locked — keep teaching!
-        </p>
-      )}
-    </div>
-  )
+      {filtered.length ? <div className="ia-grid">{filtered.map(badge => {
+        const target = targetOf(badge)
+        const progress = progressOf(badge)
+        const unavailable = isUnavailable(badge)
+        return <button key={badge.id} type="button" className={`ia-card ${badge.is_earned ? 'ia-earned' : unavailable ? 'ia-unavailable' : ''}`} aria-label={`View ${badge.name}, ${statusOf(badge)}`} onClick={() => setSelectedId(badge.id)}>
+          <MedalArt badge={badge} earned={!!badge.is_earned} unavailable={unavailable} className="ia-medal" />
+          <h2>{badge.name}</h2><p className="ia-description">{badge.description}</p>
+          <span className={`ia-state ${badge.is_earned ? 'earned' : unavailable ? 'unavailable' : progress > 0 ? 'progress' : ''}`}>{statusOf(badge)}{!badge.is_earned && !unavailable && target > 0 ? ` · ${progress} / ${target}` : ''}</span>
+          {!unavailable && target > 0 && <span className="ia-track" role="progressbar" aria-label={`${badge.name} progress`} aria-valuemin={0} aria-valuemax={target} aria-valuenow={Math.min(progress, target)}><span style={{ width: `${Math.min(progress / target * 100, 100)}%` }} /></span>}
+          <span className="ia-card-footer"><strong>+{badge.xp_reward} XP</strong><span>View details <span aria-hidden="true">→</span></span></span>
+        </button>
+      })}</div> : <div className="ia-empty"><ModuleIcon name="book" size={40} /><h2>{filter === 'earned' ? 'Your first medal awaits' : 'No achievements in this view'}</h2><p>{filter === 'earned' ? 'Meet a teaching milestone to earn your first medal.' : 'Choose another filter to explore your achievements.'}</p><button className="ir-secondary" onClick={() => setFilter('all')}>View all achievements</button></div>}
+      <footer className="ia-footer"><p>Select an achievement to view its requirements, progress and reward.</p><p>{split.earned.reduce((sum, badge) => sum + (Number(badge.xp_reward) || 0), 0)} XP from earned medals</p></footer>
+    </>}
+    {selectedId !== null && <AchievementModal achievements={filtered} initialSelectedId={selectedId} onClose={() => setSelectedId(null)} />}
+  </section>
 }

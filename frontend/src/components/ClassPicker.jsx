@@ -15,6 +15,7 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import { API_BASE } from '../api/client'
+import InstructorBackButton from './InstructorBackButton'
 
 const GRADIENTS = [
   'from-purple-600 to-pink-600',
@@ -124,13 +125,7 @@ export default function ClassPicker({
       {/* Header */}
       <div className="flex items-center gap-4">
         {(step === 'class' && !onlyOneSubject) || onCancel ? (
-          <button
-            onClick={handleBack}
-            className="shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center text-slate-400 hover:text-white transition rounded-lg hover:bg-slate-800"
-            aria-label="Back"
-          >
-            ←
-          </button>
+          <InstructorBackButton onClick={handleBack} />
         ) : null}
         <div className="min-w-0">
           <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight flex items-center gap-2">

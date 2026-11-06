@@ -6,15 +6,18 @@
 // edit button navigates to CreateProblem with ?edit=id so it pre-fills the form.
 // delete hits /api/problems/:id and removes from local state on success.
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { API_BASE } from '../../api/client'
+import ModuleIcon from './ModuleIcon'
+import './InstructorQuestReview.css'
 
 export default function ProblemManagement({ classId, subjectId }) {
   const navigate = useNavigate()
   const [problems, setProblems] = useState([])
   const [loading, setLoading]   = useState(true)
   const [search, setSearch]     = useState('')
+  const [loadError, setLoadError] = useState(null)
   const [deleteTarget, setDeleteTarget] = useState(null)
   const [success, setSuccess]   = useState(null)
   const [deleteError, setDeleteError] = useState(null)
@@ -24,9 +27,6 @@ export default function ProblemManagement({ classId, subjectId }) {
   // already awarded. Holds the target + the backend's own message so the
   // second, stronger confirmation can show exactly why it's asking again.
   const [forceDeleteTarget, setForceDeleteTarget] = useState(null)
-
-  // Load quests whenever the class changes
-  useEffect(() => { fetchProblems() }, [classId])
 
   // From inside a class tab, subjectId is already known — go straight to the
   // locked-subject wizard. Reached standalone (no class context), route
@@ -41,20 +41,28 @@ export default function ProblemManagement({ classId, subjectId }) {
   }
 
   // Fetch quests for this class, or all instructor quests if none specified
-  const fetchProblems = async () => {
+  const fetchProblems = useCallback(async () => {
+    setLoading(true)
+    setLoadError(null)
     try {
       const token = localStorage.getItem('token')
       const url = classId
         ? `${API_BASE}/api/instructor/classes/${classId}/problems`
         : `${API_BASE}/api/instructor/problems`
       const res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } })
-      if (res.ok) setProblems(await res.json())
+      if (!res.ok) throw new Error('Unable to load quests. Please try again.')
+      setProblems(await res.json())
     } catch (err) {
       console.error('Failed to fetch problems:', err)
+      setLoadError('Unable to load quests. Check your connection and try again.')
     } finally {
       setLoading(false)
     }
-  }
+  }, [classId])
+
+  // Loading/error are remote-resource states reset when the selected class changes.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { fetchProblems() }, [fetchProblems])
 
   const handleDelete = (problem) => {
     setDeleteTarget(problem)
@@ -139,19 +147,19 @@ export default function ProblemManagement({ classId, subjectId }) {
   )
 
   return (
-    <div className="space-y-4 sm:space-y-6">
+    <div className="iq-screen iq-quests space-y-4 sm:space-y-6">
 
       {/* Header */}
-      <div className="flex justify-between items-start gap-4 flex-wrap sm:flex-nowrap">
+      <div className="iq-heading flex justify-between items-start gap-4 flex-wrap sm:flex-nowrap">
         <div>
           <h2 className="text-2xl font-black text-white tracking-tight">Quests</h2>
           <p className="text-slate-400 mt-0.5 text-sm">Create and manage coding quests for your students</p>
         </div>
         <button
           onClick={goToCreateQuest}
-          className="px-4 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white rounded-xl font-bold transition shadow-lg shadow-purple-600/20 flex items-center gap-2 text-sm"
+          className="ir-primary"
         >
-          ⚔️ Create Quest
+          <ModuleIcon name="plus" size={18} /> Create Quest
         </button>
       </div>
 
@@ -168,7 +176,7 @@ export default function ProblemManagement({ classId, subjectId }) {
       )}
 
       {/* Stat Strip */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-3">
+      <div className="iq-stats grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-3">
         {[
           { label: 'Total',     value: problems.length,                                             border: 'border-l-slate-500',   text: 'text-white' },
           { label: 'Coding',    value: problems.filter(p => p.problem_type === 'coding').length,    border: 'border-l-purple-500',  text: 'text-purple-400' },
@@ -183,19 +191,21 @@ export default function ProblemManagement({ classId, subjectId }) {
       </div>
 
       {/* Search */}
-      <div className="relative">
-        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 text-sm pointer-events-none">🔍</span>
+      <div className="iq-search relative">
+        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 text-sm pointer-events-none"><ModuleIcon name="search" size={18} /></span>
         <input
           type="text"
           placeholder="Search quests..."
+          aria-label="Search quests"
           value={search}
           onChange={e => setSearch(e.target.value)}
           className="w-full bg-slate-900 border border-slate-800 rounded-xl px-5 py-2.5 pl-11 text-white placeholder-slate-600 focus:border-purple-500/60 focus:outline-none transition text-sm"
         />
       </div>
 
+      {loadError && <div className="iq-empty" role="alert"><ModuleIcon name="warning" size={28} /><h3>Quests unavailable</h3><p>{loadError}</p><button className="ir-secondary" onClick={fetchProblems}>Try again</button></div>}
       {/* Table */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-x-auto">
+      {!loadError && <div className="iq-table-wrap" role="region" aria-label="Quest list. Scroll horizontally on small screens." tabIndex={0}>
         <table className="w-full text-left text-sm min-w-[640px]">
           <thead>
             <tr className="bg-slate-800/60 text-slate-500 text-xs uppercase tracking-wider border-b border-slate-800">
@@ -240,9 +250,9 @@ export default function ProblemManagement({ classId, subjectId }) {
                     {/* Title */}
                     <td className="px-3 sm:px-5 py-4">
                       <div className="flex flex-col gap-1">
-                        <span className="font-semibold text-purple-400 group-hover:text-purple-300 transition group-hover:underline underline-offset-2">
+                        <button className="iq-quest-title" onClick={e => { e.stopPropagation(); navigate(`/instructor/problem/${problem.id}/submissions?from=${encodeURIComponent(fromPath)}`) }}>
                           {problem.title}
-                        </span>
+                        </button>
                         {problem.is_event_quest && (
                           <span className="w-fit px-2 py-0.5 bg-yellow-500/10 text-yellow-400 border border-yellow-500/20 rounded text-xs font-bold">
                             ⭐ EVENT
@@ -258,7 +268,7 @@ export default function ProblemManagement({ classId, subjectId }) {
                           ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20'
                           : 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
                       }`}>
-                        {problem.problem_type === 'coding' ? '💻 Coding' : '🐛 Debug'}
+                        {problem.problem_type === 'coding' ? 'Coding' : 'Debugging'}
                       </span>
                     </td>
 
@@ -269,7 +279,7 @@ export default function ProblemManagement({ classId, subjectId }) {
                           const l = langConfig[lang] || { icon: '📄', label: lang }
                           return (
                             <span key={lang} className="px-2 py-1 bg-slate-800 border border-slate-700 rounded-md text-xs text-slate-300 flex items-center gap-1">
-                              <span>{l.icon}</span> {l.label}
+                              {l.label}
                             </span>
                           )
                         })}
@@ -309,16 +319,18 @@ export default function ProblemManagement({ classId, subjectId }) {
                         <button
                           onClick={() => navigate(`/instructor/create-problem?edit=${problem.id}&from=${encodeURIComponent(fromPath)}`)}
                           title="Edit"
+                          aria-label={`Edit ${problem.title}`}
                           className="p-2 hover:bg-purple-500/10 rounded-lg transition text-slate-500 hover:text-purple-400"
                         >
-                          ✏️
+                          <ModuleIcon name="edit" size={18} />
                         </button>
                         <button
                           onClick={() => handleDelete(problem)}
                           title="Delete"
+                          aria-label={`Delete ${problem.title}`}
                           className="p-2 hover:bg-red-500/10 rounded-lg transition text-slate-500 hover:text-red-400"
                         >
-                          🗑️
+                          <ModuleIcon name="trash" size={18} />
                         </button>
                       </div>
                     </td>
@@ -328,7 +340,7 @@ export default function ProblemManagement({ classId, subjectId }) {
             )}
           </tbody>
         </table>
-      </div>
+      </div>}
 
       {filtered.length > 0 && (
         <p className="text-slate-600 text-xs text-right">
