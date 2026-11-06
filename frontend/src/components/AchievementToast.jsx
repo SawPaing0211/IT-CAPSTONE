@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import MedalArt from './MedalArt';
 
 // Visual-only celebration card (announcement lives in AchievementCelebrations).
 export default function AchievementToast({ badge, onClose, reducedMotion = false, remaining = 0 }) {
@@ -24,8 +25,8 @@ export default function AchievementToast({ badge, onClose, reducedMotion = false
     <div aria-hidden="true" data-testid="achievement-toast" data-reduced-motion={reducedMotion ? 'true' : 'false'}
          className={`fixed top-6 right-6 z-[200] ${motion}`}>
       <div className="bg-slate-900 border border-purple-500/50 rounded-xl shadow-2xl shadow-purple-500/20 p-4 flex items-center gap-4 max-w-sm">
-        <div className={`w-12 h-12 bg-gradient-to-br from-purple-600 to-pink-600 rounded-lg flex items-center justify-center text-2xl shadow-lg ${reducedMotion ? '' : 'animate-bounce'}`}>
-          {badge.icon || '🏆'}
+        <div className={`w-14 h-14 shrink-0 ${reducedMotion ? '' : 'animate-bounce'}`}>
+          <MedalArt badge={badge} earned={true} className="h-full w-full" />
         </div>
         <div>
           <p className="text-[10px] text-purple-400 font-bold uppercase tracking-wider">Achievement Unlocked!</p>

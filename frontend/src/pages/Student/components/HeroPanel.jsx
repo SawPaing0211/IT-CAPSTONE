@@ -5,6 +5,7 @@
 
 import useAchievements from '../../../hooks/useAchievements'
 import { splitAchievements } from '../../../utils/achievementView'
+import MedalArt from '../../../components/MedalArt'
 
 const MAX_RECENT = 4
 
@@ -89,7 +90,7 @@ export default function HeroPanel({ stats, user, onOpenHeroSheet }) {
           <ul className="flex flex-wrap gap-3">
             {recent.map(t => (
               <li key={t.id} className="w-14 text-center" title={t.name}>
-                <div className="mx-auto w-11 h-11 rounded-full border-2 border-amber-300/60 bg-[#0b1224] flex items-center justify-center text-xl" aria-hidden="true">{t.icon || '🏆'}</div>
+                <MedalArt badge={t} earned={true} className="mx-auto h-14 w-14" />
                 <p className="mt-1 text-[9px] leading-tight text-slate-400 line-clamp-2 break-words">{t.name}</p>
               </li>
             ))}
