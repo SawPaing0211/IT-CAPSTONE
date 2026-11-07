@@ -1,11 +1,9 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useId, useRef } from 'react'
 import './Leaderboard.css'
 import SectionTitle from './SectionTitle'
 import crown from '../../../assets/hall/crown.svg'
-import cornerDiamond from '../../../assets/hall/corner-diamond.svg'
-import rankFirst from '../../../assets/hall/rank-first.svg'
-import rankSecond from '../../../assets/hall/rank-second.svg'
-import rankThird from '../../../assets/hall/rank-third.svg'
+import podiumSheet from '../../../assets/hall/ornate-leaderboard-frames.png'
+import { podiumFrames } from './podiumFrames'
 import MobileSheet from '../../../components/MobileSheet'
 import { API_BASE, authFetch } from '../../../api/client'
 
@@ -35,6 +33,27 @@ function getInitial(player) {
 
 function getDisplayName(player) {
   return player.full_name || player.username
+}
+
+function ChampionBanner({ player, position, isCurrentUser }) {
+  const clipId = useId()
+  const { viewBox, outline } = podiumFrames[position - 1]
+  const name = getDisplayName(player)
+
+  return (
+    <article className={`hall-champion hall-champion-${position}`} aria-label={`Rank ${player.rank}: ${name}`}>
+      <svg className="hall-champion-art" viewBox={viewBox} aria-hidden="true" focusable="false">
+        <defs><clipPath id={clipId}><path d={outline} /></clipPath></defs>
+        <image href={podiumSheet} width="1672" height="941" clipPath={`url(#${clipId})`} />
+      </svg>
+      <div className="hall-champion-caption">
+        <p className="hall-champion-rank">#{player.rank}</p>
+        <h3 className="hall-champion-name font-cinzel" title={name}>{name}</h3>
+        <p className="hall-champion-stats"><span>Level {player.level}</span><strong>{player.xp} XP</strong></p>
+        {isCurrentUser && <span className="hall-you mt-1.5">You</span>}
+      </div>
+    </article>
+  )
 }
 
 export default function Leaderboard({ currentUsername }) {
@@ -129,7 +148,6 @@ export default function Leaderboard({ currentUsername }) {
 
   const previousRank = currentUser ? leaders[leaders.indexOf(currentUser) - 1] : null
   const leadingXP = Math.max(1, Number(leaders[0]?.xp) || 0)
-  const rankArt = [rankFirst, rankSecond, rankThird]
 
   return (
     <div className="champions-hall space-y-6">
@@ -173,18 +191,8 @@ export default function Leaderboard({ currentUsername }) {
 
       {!loading && !error && leaders.length > 0 && <>
         <div className="hall-podium">
-          {[1, 0, 2].map(index => topThree[index] && (
-            <article key={topThree[index].id} className={`hall-panel hall-champion hall-champion-${index + 1}`} aria-label={`Rank ${topThree[index].rank}: ${getDisplayName(topThree[index])}`}>
-              {['tl','tr','bl','br'].map(position => <img key={position} src={cornerDiamond} alt="" className={`hall-corner hall-corner-${position}`} />)}
-              {index === 0 && <img src={crown} alt="" className="hall-crown" />}
-              <div className="hall-avatar-wrap">
-                <div className="hall-avatar">{topThree[index].avatar}</div>
-                <div className="hall-rank-medallion"><img src={rankArt[index]} alt="" /><span>{topThree[index].rank}</span></div>
-              </div>
-              <h3 className="mt-5 max-w-full truncate px-1 font-cinzel text-xs font-bold text-white sm:text-base" title={getDisplayName(topThree[index])}>{getDisplayName(topThree[index])}</h3>
-              <p className="mt-1 flex flex-wrap justify-center gap-x-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-300"><span>Level {topThree[index].level}</span><span aria-hidden="true">·</span><span className="tabular-nums">{topThree[index].xp} XP</span></p>
-              {topThree[index].username === currentUsername && <span className="hall-you mt-2">You</span>}
-            </article>
+          {topThree.map((player, index) => (
+            <ChampionBanner key={player.id} player={player} position={index + 1} isCurrentUser={player.username === currentUsername} />
           ))}
         </div>
         {leaders.length > 3 && <section aria-label="Remaining rankings">
