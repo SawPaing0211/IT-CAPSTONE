@@ -149,7 +149,7 @@ def test_single_student_create_edit_list_without_year(ctx):
     with A.app.app_context():
         sec_id = A.SubjectSection.query.filter_by(section_no='29001').first().id
     r = c.post('/api/admin/users', headers=h, json={
-        'username': '2026-20001', 'email': '2026-20001@student.com', 'password': 'Pw12345!',
+        'username': '2026-20001', 'email': '2026-20001@laconsolacion.edu', 'password': 'Pw12345!',
         'role': 'student', 'full_name': 'Solo Student', 'section_ids': [sec_id]})
     assert r.status_code in (200, 201), r.get_json()
     listing = c.get('/api/admin/users', headers=h).get_json()

@@ -62,7 +62,7 @@ def test_change_flow_policy_current_password_and_new_session(c):
     assert c.get('/api/auth/me', headers=h).status_code == 401
     # old password dead, new password works, both identifiers
     assert login(c, '404000001', TEMP)[0].status_code == 401
-    r2, _ = login(c, '404000001@student.com', 'Newpass123')
+    r2, _ = login(c, '404000001@laconsolacion.edu', 'Newpass123')
     assert r2.status_code == 200 and r2.get_json()['must_change_password'] is False
 
 
@@ -92,7 +92,7 @@ def test_admin_reset_forces_change_ends_sessions_and_unlocks(c):
     temp = out.get_json()['temporary_password']
     assert len(temp) >= 12
     assert c.get('/api/auth/me', headers=sh).status_code == 401                 # session before reset ended
-    r2, h2 = login(c, '404000003@student.com', temp)                            # unlocked, either identifier
+    r2, h2 = login(c, '404000003@laconsolacion.edu', temp)                            # unlocked, either identifier
     assert r2.status_code == 200 and r2.get_json()['must_change_password'] is True
     assert c.get('/api/problems', headers=h2).status_code == 403
     # admin-typed passwords obey the same policy

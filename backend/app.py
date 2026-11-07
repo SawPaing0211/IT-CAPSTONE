@@ -8,7 +8,7 @@ from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime, timedelta, timezone
 from functools import wraps
-import subprocess, sys, time, csv, json, io, unicodedata, re, base64, secrets, string
+import subprocess, sys, time, csv, json, io, re, base64, secrets, string
 from io import StringIO
 from sqlalchemy import text, inspect, distinct, func
 from sqlalchemy.exc import IntegrityError, OperationalError
@@ -16,6 +16,9 @@ import logging
 import uuid as _uuid
 logger = logging.getLogger('forge')
 from routes.sandbox import sandbox_bp, _run_in_docker, handles_setup_errors
+from account_email_policy import (ACCOUNT_EMAIL_DOMAIN, _EMAIL_RE, normalize_email,
+                                  normalize_student_id, valid_student_id, generated_student_email,
+                                  email_domain_allowed, account_email)
 import re as _re
 from datetime import datetime as _dt, timedelta as _td
 from collections import defaultdict as _dd
@@ -592,20 +595,8 @@ def parse_due_date(value):
         dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
     return dt, None
 
-# Institution settings (La Consolacion University deployment).
-# There is deliberately NO built-in institution default for staff email rules or
-# the head administrator: an unset value disables the dependent feature instead of
-# silently authorizing some old address.
-#   STUDENT_EMAIL_DOMAIN  domain used for GENERATED student identifiers
-#                         (<student_id>@student.com). These are sign-in identifiers,
-#                         not deliverable inboxes, and the project does not own the domain.
-#   ALLOWED_EMAIL_DOMAIN  optional restriction for STAFF emails; empty = any valid email.
-#   HEAD_ADMIN_EMAIL      existing administrator account allowed to create/promote
-#                         administrators; empty = those operations are disabled.
-_DEFAULT_STUDENT_EMAIL_DOMAIN = 'student.com'
-_DOMAIN_RE = _re.compile(r'^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$')
-_EMAIL_RE = _re.compile(r'^[^@\s]+@[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$')
-
+# Institution account addresses use one fixed domain. Head Admin authority is
+# configured separately and should be pinned by immutable user ID.
 # human-readable problems found while reading the settings (shown at startup and
 # by /api/admin/policy); never contain secrets
 CONFIG_DIAGNOSTICS = []
@@ -614,19 +605,16 @@ CONFIG_DIAGNOSTICS = []
 def _read_setting(name, default, valid):
     """Env value if present and well formed, else the default (with a diagnostic). Never crashes."""
     raw = os.environ.get(name, '').strip().lower()
-    if name.endswith('_DOMAIN'):
-        raw = raw.lstrip('@')
     if not raw:
         return default
-    if not valid.match(raw):
+    if not valid.fullmatch(raw):
         CONFIG_DIAGNOSTICS.append(f"{name} is not a valid value ({raw!r}) and was ignored.")
         print(f"WARNING: {name} is not a valid value ({raw!r}); ignored.")
         return default
     return raw
 
 
-STUDENT_EMAIL_DOMAIN = _read_setting('STUDENT_EMAIL_DOMAIN', _DEFAULT_STUDENT_EMAIL_DOMAIN, _DOMAIN_RE)
-ALLOWED_EMAIL_DOMAIN = _read_setting('ALLOWED_EMAIL_DOMAIN', '', _DOMAIN_RE)
+STUDENT_EMAIL_DOMAIN = ALLOWED_EMAIL_DOMAIN = ACCOUNT_EMAIL_DOMAIN
 HEAD_ADMIN_EMAIL = _read_setting('HEAD_ADMIN_EMAIL', '', _EMAIL_RE)
 _head_id_setting = os.environ.get('HEAD_ADMIN_USER_ID', '').strip()
 HEAD_ADMIN_USER_ID = int(_head_id_setting) if _head_id_setting.isascii() and _head_id_setting.isdigit() and int(_head_id_setting) > 0 else None
@@ -637,35 +625,6 @@ if not HEAD_ADMIN_EMAIL and not HEAD_ADMIN_USER_ID:
         "HEAD_ADMIN_EMAIL is not set (or invalid): creating or promoting administrator "
         "accounts is disabled. Ordinary sign-in is not affected.")
     print("NOTICE: HEAD_ADMIN_EMAIL is not configured; creating/promoting administrators is disabled.")
-
-
-def normalize_email(value):
-    """Trimmed, lower-cased email for comparison (None for empty)."""
-    v = (value or '').strip().lower()
-    return v or None
-
-
-def normalize_student_id(value):
-    """Student IDs are strings; only surrounding whitespace is removed (leading zeros kept)."""
-    return str(value if value is not None else '').strip()
-
-
-def valid_student_id(sid):
-    """Non-empty, no whitespace, no '@' (so an ID can never look like an email)."""
-    return bool(sid) and len(sid) <= 64 and not _re.search(r'[\s@]', sid)
-
-
-def generated_student_email(student_id):
-    """Generated sign-in identifier for a student: <student_id>@<STUDENT_EMAIL_DOMAIN>."""
-    return f"{normalize_student_id(student_id).lower()}@{STUDENT_EMAIL_DOMAIN}"
-
-
-def email_domain_allowed(email):
-    """Staff email rule: a well-formed address, restricted to ALLOWED_EMAIL_DOMAIN only when one is configured."""
-    e = normalize_email(email)
-    if not e or not _EMAIL_RE.match(e):
-        return False
-    return (not ALLOWED_EMAIL_DOMAIN) or e.endswith('@' + ALLOWED_EMAIL_DOMAIN)
 
 
 def is_head_admin(user):
@@ -1184,27 +1143,20 @@ def resolve_login_identifier(identifier):
     """
     Map what the person typed to ONE account. Returns (user, ambiguous).
     Accepts the username / student ID, or the account's email (case-insensitive).
-    A student's generated identifier <student_id>@<STUDENT_EMAIL_DOMAIN> also reaches
-    the student whose ID is that local part. If the possible matches are different
-    accounts the attempt is refused rather than guessed.
+    An email must be institutional and match a stored address. Refuse ambiguous
+    matches rather than creating aliases in the shared student/staff namespace.
     """
     ident = (identifier or '').strip()
-    found = {}
-    u = User.query.filter_by(username=ident).first()
-    if u:
-        found[u.id] = u
-    if '@' in ident:
-        email = normalize_email(ident)
-        for u in User.query.filter(db.func.lower(User.email) == email).all():
-            found[u.id] = u
-        local, _, domain = email.rpartition('@')
-        if domain == STUDENT_EMAIL_DOMAIN and local:
-            u = User.query.filter(db.func.lower(User.username) == local, User.role == 'student').first()
-            if u:
-                found[u.id] = u
+    if '@' in ident and not email_domain_allowed(ident):
+        return None, False
+    if '@' not in ident:
+        return User.query.filter_by(username=ident).first(), False
+    email = normalize_email(ident)
+    found = User.query.filter(db.or_(db.func.lower(User.email) == email,
+                                     db.func.lower(User.username) == email)).limit(2).all()
     if len(found) > 1:
         return None, True
-    return (next(iter(found.values())) if found else None), False
+    return (found[0] if found else None), False
 
 
 @app.route('/api/auth/login', methods=['POST'])
@@ -4490,9 +4442,9 @@ def admin_policy(admin):
 @app.route('/api/admin/users', methods=['POST'])
 @admin_required
 def admin_create_user(admin):
-    data = request.get_json()
-    required = ['username', 'email', 'password', 'role']
-    if not all(k in data for k in required):
+    data = request.get_json(silent=True)
+    required = ('username', 'password', 'role')
+    if not isinstance(data, dict) or not all(isinstance(data.get(k), str) for k in required):
         return jsonify({"error": "Missing required fields"}), 400
     if data['role'] not in ['student', 'instructor', 'administrator']:
         return jsonify({"error": "Invalid role"}), 400
@@ -4503,34 +4455,23 @@ def admin_create_user(admin):
         return jsonify({"error": pw_err}), 400
     role = data['role']
     username = normalize_student_id(data['username']) if role == 'student' else (data['username'] or '').strip()
-    if not username:
-        return jsonify({"error": "Username is required"}), 400
-    if role == 'student':
-        # students are identified by ID; the email is a GENERATED identifier, not an inbox
-        if not valid_student_id(username):
-            return jsonify({"error": "Student ID must not contain spaces or '@'."}), 400
-        expected = generated_student_email(username)
-        supplied = normalize_email(data.get('email'))
-        if supplied and supplied != expected:
-            return jsonify({"error": f"Student sign-in emails are generated from the student ID ({expected}); a different address cannot be used."}), 400
-        data['email'] = expected
-    else:
-        if not email_domain_allowed(data['email']):
-            hint = f" (@{ALLOWED_EMAIL_DOMAIN})" if ALLOWED_EMAIL_DOMAIN else ""
-            return jsonify({"error": f"A valid staff email address{hint} is required."}), 400
-        if normalize_email(data['email']).endswith('@' + STUDENT_EMAIL_DOMAIN):
-            return jsonify({"error": f"@{STUDENT_EMAIL_DOMAIN} is reserved for generated student identifiers."}), 400
-        data['email'] = normalize_email(data['email'])
+    if not username or len(username) > 50 or _re.search(r'[\x00-\x1f\x7f]', username):
+        return jsonify({"error": "Username must contain 1–50 characters without control characters."}), 400
+    if '@' in username or (role == 'student' and not valid_student_id(username)):
+        return jsonify({"error": "Use a username without '@'. Student IDs also cannot contain spaces."}), 400
+    try:
+        data['email'] = account_email(username, role, data.get('email'))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
     if HEAD_ADMIN_EMAIL and normalize_email(data['email']) == HEAD_ADMIN_EMAIL:
         return jsonify({"error": "That email address is reserved for the head administrator."}), 400
     data['username'] = username
     # login accepts a username or an email, so a username equal to someone's
     # email would shadow that person's login
-    if '@' in username and User.query.filter(db.func.lower(User.email) == username.lower()).first():
-        return jsonify({"error": "Username cannot match another account's email address"}), 400
     if User.query.filter_by(username=username).first():
         return jsonify({"error": "Username already exists"}), 400
-    if User.query.filter(db.func.lower(User.email) == data['email']).first():
+    if User.query.filter(db.or_(db.func.lower(User.email) == data['email'],
+                                db.func.lower(User.username) == data['email'])).first():
         return jsonify({"error": "Email already exists"}), 400
     new_user = User(
         username=data['username'],
@@ -4574,14 +4515,36 @@ def admin_get_users(admin):
     role = request.args.get('role')
     search = request.args.get('search', '').lower()
     status = request.args.get('status')
+    section = request.args.get('section')
 
     q = User.query
     if role and role != 'all': q = q.filter_by(role=role)
     if status == 'active': q = q.filter_by(is_active=True)
     elif status == 'inactive': q = q.filter_by(is_active=False)
-    if search: q = q.filter((User.username.ilike(f'%{search}%')) | (User.email.ilike(f'%{search}%')) | (User.full_name.ilike(f'%{search}%')))
+    if search:
+        q = q.filter(db.or_(User.username.icontains(search, autoescape=True),
+                            User.email.icontains(search, autoescape=True),
+                            User.full_name.icontains(search, autoescape=True),
+                            db.and_(User.role == 'student', db.func.replace(User.username, '-', '').icontains(search.replace('-', ''), autoescape=True))
+                            if search.replace('-', '') else db.false()))
+    if section:
+        section_id = request.args.get('section', type=int)
+        if section_id is None or section_id <= 0:
+            return jsonify({"error": "Invalid class code filter."}), 400
+        q = q.filter(db.or_(
+            db.and_(User.role == 'student', User.id.in_(db.select(IrregularEnrollment.student_id).where(IrregularEnrollment.section_id == section_id))),
+            db.and_(User.role == 'instructor', User.id.in_(db.select(TeacherAssignment.instructor_id).where(TeacherAssignment.section_id == section_id))),
+        ))
 
-    users = q.order_by(User.created_at.desc()).limit(500).all()
+    sort = request.args.get('sort', 'newest')
+    if sort not in ('name_asc', 'name_desc', 'newest'):
+        return jsonify({"error": "Invalid user sort order."}), 400
+    display_name = db.func.lower(db.func.coalesce(db.func.nullif(db.func.trim(User.full_name), ''), User.username))
+    order = (User.created_at.desc(), User.id.desc()) if sort == 'newest' else (
+        display_name.desc() if sort == 'name_desc' else display_name.asc(),
+        db.func.lower(User.username).asc(), User.id.asc(),
+    )
+    users = q.order_by(*order).limit(500).all()
 
     result = []
     for u in users:
@@ -4680,6 +4643,8 @@ def admin_update_user(admin, user_id):
             return jsonify({"error": "Username must contain 1–50 characters, without control characters."}), 400
         if data.get('role', target.role) == 'student' and not valid_student_id(username):
             return jsonify({"error": "Student usernames must not contain spaces or '@'."}), 400
+        if '@' in username and username != target.username:
+            return jsonify({"error": "Use a username without '@'."}), 400
         collision = User.query.filter(User.id != target.id, db.or_(
             db.func.lower(User.username) == username.lower(),
             db.func.lower(User.email) == username.lower())).first()
@@ -6048,7 +6013,7 @@ def admin_seed_subjects(admin):
 # PASTE THIS BLOCK INTO app.py
 #
 # Add these imports at the top of app.py if not already present:
-#   import unicodedata, re, base64, secrets, string, csv, io
+#   import re, base64, secrets, string, csv, io
 #   (all are stdlib — no pip installs needed)
 #
 # Add these two SQLAlchemy models anywhere in the MODELS section:
@@ -6081,85 +6046,6 @@ def admin_seed_subjects(admin):
 # ============================================================
 
 
-# ── Email-generation helpers ────────────────────────────────────────────
-
-_SUFFIXES = frozenset({"jr", "sr", "i", "ii", "iii", "iv", "v"})
-
-
-def _clean_name_part(token: str) -> str:
-    """
-    Normalise one name token for email use:
-      - NFD decompose  →  strip combining accents  (ñ→n, é→e)
-      - lowercase
-      - remove every non-alpha character
-        (hyphens, apostrophes, spaces already split out)
-    """
-    nfd = unicodedata.normalize("NFD", token)
-    ascii_only = nfd.encode("ascii", "ignore").decode("ascii")
-    return re.sub(r"[^a-z]", "", ascii_only.lower())
-
-
-def _build_email_local(firstname: str, middlename: str, lastname: str) -> str:
-    """
-    Build the local part of the institutional email address.
-    Rules (from spec):
-      - Full first name (can be compound, e.g. "Paul Christian Caleb")
-      - Full middle name (not just initial); skip if blank
-      - Full last name; hyphens removed by _clean_name_part
-      - Skip suffix tokens (Jr., I., etc.)
-    Returns dot-joined parts, e.g. "paul.christian.caleb.rejano"
-    """
-    parts = []
-
-    for token in firstname.strip().split():
-        clean = token.rstrip(".")
-        if clean.lower() not in _SUFFIXES:
-            slug = _clean_name_part(token)
-            if slug:
-                parts.append(slug)
-
-    if middlename and middlename.strip():
-        for token in middlename.strip().split():
-            clean = token.rstrip(".")
-            if clean.lower() not in _SUFFIXES:
-                slug = _clean_name_part(token)
-                if slug:
-                    parts.append(slug)
-
-    for token in lastname.strip().split():
-        clean = token.rstrip(".")
-        if clean.lower() not in _SUFFIXES:
-            slug = _clean_name_part(token)
-            if slug:
-                parts.append(slug)
-
-    return ".".join(parts)
-
-
-def _generate_enrollment_email(
-    firstname: str,
-    middlename: str,
-    lastname: str,
-    suffix: str,
-    student_id_raw: str,
-    existing_emails: set,
-) -> str:
-    """
-    Return a unique institutional email (ALLOWED_EMAIL_DOMAIN).
-    Duplicate → append numeric part of student_id, e.g. paul.rejano.202400100
-    """
-    local = _build_email_local(firstname, middlename, lastname)
-    email = f"{local}@{ALLOWED_EMAIL_DOMAIN}"
-
-    if email not in existing_emails:
-        return email
-
-    # Collision — append digits from student_id
-    id_digits = re.sub(r"[^0-9]", "", student_id_raw)
-    email = f"{local}.{id_digits}@{ALLOWED_EMAIL_DOMAIN}"
-    return email  # caller adds to set
-
-
 def _generate_secure_password(length: int = 12) -> str:
     """
     Cryptographically secure 12-char password.
@@ -6189,8 +6075,8 @@ def admin_bulk_enrollment_upload(admin):
     CSV columns (header row required, order does NOT matter):
         student_id, firstname, middlename, lastname, suffix,
         student_type, section_no
-    (middlename and suffix are optional. Extra columns, including a legacy
-    year_level column from older files, are accepted and ignored.)
+    (middlename, suffix and email are optional. Other extra columns, including
+    a legacy year_level column, are accepted and ignored.)
 
     Regular row example (one section — their fixed cohort's class code):
         2024-00001,Juan,Santos,Dela Cruz,,regular,29022
@@ -6275,6 +6161,7 @@ def admin_bulk_enrollment_upload(admin):
     existing_usernames: set = {
         row[0] for row in db.session.query(User.username).all()
     }
+    existing_email_usernames = {name.lower() for name in existing_usernames if name and '@' in name}
 
     # student_id string → User (already-created users, re-populated per flush)
     users_by_sid: dict = {
@@ -6293,8 +6180,10 @@ def admin_bulk_enrollment_upload(admin):
         stype = row.get("student_type", "").strip().lower()
         sid   = row.get("student_id", "").strip()
 
-        if not sid:
-            row_errors.append(f"Row {idx}: student_id is empty — skipped")
+        try:
+            account_email(sid, 'student', row.get('email'))
+        except ValueError as exc:
+            row_errors.append(f"Row {idx}: {exc} — skipped")
             continue
         if stype == "regular":
             regular_rows.append((idx, row))
@@ -6339,21 +6228,15 @@ def admin_bulk_enrollment_upload(admin):
 
         # --- username = student_id (matches existing CSV convention) ---
         if sid in existing_usernames:
-            # user exists but wasn't in our cache — refresh & return
-            user = User.query.filter_by(username=sid).first()
-            if user:
-                users_by_sid[sid] = user
-                return user, None, False
-            # shouldn't happen, but guard
             row_errors.append(f"Row {idx} (student_id={sid}): username conflict — skipped")
             return None, None, False
 
         # --- generated sign-in identifier: <student_id>@STUDENT_EMAIL_DOMAIN ---
-        if not valid_student_id(sid):
-            row_errors.append(f"Row {idx} (student_id={sid}): student ID must not contain spaces or '@' — skipped")
+        if len(sid) > 50:
+            row_errors.append(f"Row {idx} (student_id={sid}): student ID exceeds 50 characters — skipped")
             return None, None, False
         email = generated_student_email(sid)
-        if email in existing_emails:
+        if email in existing_emails or email in existing_email_usernames or email == HEAD_ADMIN_EMAIL:
             row_errors.append(
                 f"Row {idx} (student_id={sid}): identifier '{email}' already belongs to another account — skipped"
             )
@@ -6638,7 +6521,7 @@ def admin_bulk_upload_users(admin):
         return jsonify({"error": "Maximum 1500 rows per upload"}), 400
 
     # Validate required columns
-    headers = {k.strip().lower() for k in rows[0].keys()}
+    headers = {k.strip().lower() for k in rows[0] if k is not None}
     required = (
         {'student_id', 'firstname', 'lastname'}
         if role_type == 'student'
@@ -6665,7 +6548,7 @@ def admin_bulk_upload_users(admin):
 
     try:
         for row_num, row in enumerate(rows, start=2):
-            row = {k.strip().lower(): v.strip() for k, v in row.items()}
+            row = {k.strip().lower(): (v or '').strip() for k, v in row.items() if k is not None}
 
             row_errors = []
             fn = row.get('firstname', '')
@@ -6690,20 +6573,20 @@ def admin_bulk_upload_users(admin):
                 continue
 
             # Build email and username
-            if role_type == 'student':
-                email    = generated_student_email(row['student_id'])
-                username = row['student_id']
-            else:
-                # staff addresses are never invented: an explicit, valid email is required
-                email = normalize_email(row.get('email'))
-                if not email_domain_allowed(email) or email.endswith('@' + STUDENT_EMAIL_DOMAIN):
-                    msg = ['email column must hold a valid staff email address']
-                    errors.append({'row': row_num, 'errors': msg})
-                    results.append({'row': row_num, 'status': 'error', 'errors': msg})
-                    continue
-                username = row.get('employee_id', email.split('@')[0])
+            username = row['student_id'] if role_type == 'student' else row['employee_id']
+            try:
+                if '@' in username or _re.search(r'[\x00-\x1f\x7f]', username):
+                    raise ValueError('Use a username without @ or control characters.')
+                email = account_email(username, role_type, row.get('email'))
+            except ValueError as exc:
+                errors.append({'row': row_num, 'errors': [str(exc)]})
+                results.append({'row': row_num, 'status': 'error', 'errors': [str(exc)]})
+                continue
 
-            if (HEAD_ADMIN_EMAIL and email.lower() == HEAD_ADMIN_EMAIL) or User.query.filter(db.func.lower(User.email) == email.lower()).first():
+            if (HEAD_ADMIN_EMAIL and email == HEAD_ADMIN_EMAIL) or User.query.filter(db.or_(
+                db.func.lower(User.email) == email, db.func.lower(User.username) == email,
+                User.username == username,
+            )).first():
                 results.append({
                     'row': row_num, 'status': 'skipped',
                     'reason': 'email_exists', 'email': email

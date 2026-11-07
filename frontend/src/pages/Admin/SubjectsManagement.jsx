@@ -11,7 +11,7 @@ const YEAR_ACCENT = {
   4: { grad: 'from-rose-500 to-red-600',     bar: 'bg-rose-500',    border: 'border-rose-500/25',    hoverBorder: 'hover:border-rose-400/50',    text: 'text-rose-300',    chip: 'bg-rose-500/10 text-rose-300 border-rose-500/25',    label: '4th Year' },
 }
 const NO_YEAR_ACCENT = { grad: 'from-slate-500 to-slate-600', bar: 'bg-slate-500', border: 'border-slate-700', hoverBorder: 'hover:border-slate-500/60', text: 'text-slate-300', chip: 'bg-slate-700/40 text-slate-300 border-slate-600/40', label: 'No Year Set' }
-const accentFor = (year) => YEAR_ACCENT[year] || NO_YEAR_ACCENT
+const accentFor = (year) => YEAR_ACCENT[year] || (year ? { ...NO_YEAR_ACCENT, label: 'Year ' + year } : NO_YEAR_ACCENT)
 const INITIAL_SUBJECT = { internal_subject_no: '', subject_code: '', name: '', description: '', units: '', department: '' }
 const DEPARTMENTS = [
   ['CCIT', 'College of Computing and Information Technology (CCIT)'],
@@ -22,10 +22,12 @@ const DEPARTMENTS = [
   ['CED', 'College of Education (CED)'],
   ['GE', 'General Education'],
 ]
-const subjectField = 'block w-full min-h-11 rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-400'
+const subjectField = 'block w-full min-h-11 rounded-lg border border-slate-600 bg-slate-950 [color-scheme:dark] px-3 py-2 text-sm text-slate-100 placeholder:text-slate-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-400'
 
 export default function SubjectsManagement() {
   const [subjects, setSubjects] = useState([])
+  const [search, setSearch] = useState('')
+  const [year, setYear] = useState('all')
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [showCreateModal, setShowCreateModal] = useState(false)
@@ -231,6 +233,13 @@ export default function SubjectsManagement() {
     )
   }
 
+  const query = search.trim().toLowerCase()
+  const years = [...new Set(subjects.map(subject => String(subject.year_level ?? 'none')))].sort()
+  const visibleSubjects = subjects.filter(subject =>
+    (year === 'all' || String(subject.year_level ?? 'none') === year) &&
+    [subject.name, subject.subject_code, subject.internal_subject_no, subject.department].some(value => String(value ?? '').toLowerCase().includes(query))
+  )
+
   return (
     <div className="space-y-6">
       {/* Toast */}
@@ -254,7 +263,7 @@ export default function SubjectsManagement() {
                 </div>
               </div>
               <p className="text-slate-300 text-sm">
-                Delete <span className="text-white font-semibold">"{deleteTarget.name}"</span>? This will affect any class codes using this subject.
+                Delete <span className="text-white font-semibold">"{deleteTarget.name}"</span>? This removes its lessons, class codes, enrollments and instructor assignments, and detaches its quests from the catalog.
               </p>
             </div>
             <div className="flex gap-3 p-6 pt-0">
@@ -278,20 +287,19 @@ export default function SubjectsManagement() {
       {/* Edit Subject Modal */}
       {showEditModal && editingSubject && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-slate-900 border-2 border-purple-600/50 rounded-2xl w-full max-w-lg shadow-2xl shadow-purple-900/40 overflow-hidden">
-            <div className="bg-gradient-to-r from-purple-900/60 to-pink-900/40 px-6 py-5 border-b border-purple-600/30 flex items-center justify-between">
+          <div className="bg-slate-900 border border-amber-300/35 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden">
+            <div className="bg-violet-950/40 px-6 py-5 border-b border-amber-300/25 flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-gradient-to-br from-purple-500 to-pink-500 rounded-xl flex items-center justify-center text-xl">✏️</div>
                 <div>
-                  <h2 className="text-xl font-black text-white">Edit Subject</h2>
-                  <p className="text-purple-300/70 text-xs">Update subject details</p>
+                  <h2 className="font-cinzel text-xl font-semibold text-white">Edit subject</h2>
+                  <p className="text-slate-300 text-sm">Update subject details</p>
                 </div>
               </div>
               <button onClick={() => { setShowEditModal(false); setEditingSubject(null) }}
                 className="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition text-lg">✕</button>
             </div>
             <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 <div>
                   <label className="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">Subject Number</label>
                   <input type="text" value={editForm.internal_subject_no}
@@ -371,7 +379,7 @@ export default function SubjectsManagement() {
                   Cancel
                 </button>
                 <button onClick={handleSaveEdit}
-                  className="flex-1 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-xl text-white font-bold transition shadow-lg shadow-purple-600/30 flex items-center justify-center gap-2">
+                  className="flex-1 py-2.5 bg-violet-700 hover:bg-violet-600 rounded-xl text-white font-bold transition shadow-lg shadow-purple-600/30 flex items-center justify-center gap-2">
                   💾 Save Changes
                 </button>
               </div>
@@ -382,18 +390,13 @@ export default function SubjectsManagement() {
 
       {/* Header */}
       <div className="flex items-center justify-between gap-4 flex-wrap">
-        <div className="flex items-center gap-4">
-          <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-purple-600 to-pink-600 flex items-center justify-center text-xl shadow-lg shadow-purple-900/40 shrink-0">
-            📚
-          </div>
-          <div>
-            <h1 className="text-2xl font-black text-white tracking-tight">Subjects Management</h1>
-            <p className="text-slate-500 text-sm mt-0.5">Create and manage course subjects</p>
-          </div>
+        <div>
+          <h2 className="font-cinzel text-2xl font-semibold text-white">Subject catalog</h2>
+          <p className="mt-1 text-sm text-slate-300">Find and manage the subjects used by class codes.</p>
         </div>
         <button
           onClick={() => setShowCreateModal(true)}
-          className="px-5 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-xl text-white font-bold text-sm transition shadow-lg shadow-purple-600/20 flex items-center gap-2"
+          className="px-5 py-2.5 bg-violet-700 hover:bg-violet-600 rounded-xl text-white font-bold text-sm transition shadow-lg shadow-purple-600/20 flex items-center gap-2"
         >
           <span>+</span> New Subject
         </button>
@@ -430,25 +433,38 @@ export default function SubjectsManagement() {
         </div>
       </div>
 
-      {/* Subjects List, grouped by year level so cohorts are easy to scan */}
-      {subjects.length === 0 ? (
+      {subjects.length > 0 && <section aria-label="Subject filters" className="grid gap-4 rounded-xl border border-amber-300/25 bg-slate-900 p-4 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_auto] sm:items-end">
+        <label className="min-w-0 space-y-2 text-sm text-slate-200"><span>Search subjects</span>
+          <input type="search" className={subjectField} value={search} onChange={event => setSearch(event.target.value)} placeholder="Subject name, code, or department" />
+        </label>
+        <label className="min-w-0 space-y-2 text-sm text-slate-200"><span id="subject-year-filter-label">Curriculum year</span>
+          <select aria-labelledby="subject-year-filter-label" className={subjectField} value={year} onChange={event => setYear(event.target.value)}>
+            <option value="all">All years</option>
+            {years.map(value => <option key={value} value={value}>{value === 'none' ? 'No year set' : accentFor(Number(value)).label}</option>)}
+          </select>
+        </label>
+        <button type="button" disabled={!search && year === 'all'} className="min-h-11 rounded-lg px-3 text-sm font-semibold text-amber-200 hover:bg-amber-300/10 focus-visible:outline focus-visible:outline-violet-400 disabled:opacity-50" onClick={() => { setSearch(''); setYear('all') }}>Clear filters</button>
+      </section>}
+      {subjects.length > 0 && <p className="text-sm text-slate-300" aria-live="polite">Showing {visibleSubjects.length} of {subjects.length} subjects</p>}
+
+      {visibleSubjects.length === 0 ? (
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-12 text-center">
           <div className="text-6xl mb-4">📚</div>
-          <h3 className="text-xl font-bold text-white mb-2">No subjects found</h3>
-          <p className="text-slate-400">Create your first subject to get started!</p>
+          <h3 className="text-xl font-bold text-white mb-2">{subjects.length ? 'No matching subjects' : 'No subjects yet'}</h3>
+          <p className="text-slate-400">{subjects.length ? 'Try another search or clear the filters.' : 'Create a subject to get started.'}</p>
         </div>
       ) : (
         <div className="space-y-8">
           {Object.entries(
-            subjects.reduce((groups, s) => {
-              const key = YEAR_ACCENT[s.year_level] ? s.year_level : 'none'
+            visibleSubjects.reduce((groups, s) => {
+              const key = s.year_level ?? 'none'
               ;(groups[key] ||= []).push(s)
               return groups
             }, {})
           )
             .sort(([a], [b]) => (a === 'none' ? 1 : b === 'none' ? -1 : a - b))
             .map(([yearKey, group]) => {
-              const accent = YEAR_ACCENT[yearKey] || NO_YEAR_ACCENT
+              const accent = accentFor(Number(yearKey))
               return (
                 <div key={yearKey}>
                   <div className="flex items-center gap-3 mb-3">
@@ -461,12 +477,12 @@ export default function SubjectsManagement() {
                     {group.map(subject => {
                       const a = accentFor(subject.year_level)
                       return (
-                        <div
+                        <article
                           key={subject.id}
                           className={`relative bg-slate-900/60 border ${a.border} ${a.hoverBorder} rounded-xl pl-5 pr-4 py-4 transition group overflow-hidden`}
                         >
                           <span className={`absolute left-0 top-0 bottom-0 w-1 ${a.bar}`} />
-                          <div className="flex items-start justify-between gap-3">
+                          <div className="flex flex-col items-start justify-between gap-3 sm:flex-row">
                             <div className="flex items-start gap-3 flex-1 min-w-0">
                               <div className={`w-10 h-10 bg-gradient-to-br ${a.grad} rounded-xl flex items-center justify-center text-lg flex-shrink-0`}>
                                 💻
@@ -484,7 +500,7 @@ export default function SubjectsManagement() {
                                     </span>
                                   )}
                                 </div>
-                                <h3 className="text-white font-bold truncate mt-1">{subject.name}</h3>
+                                <h3 className="mt-1 break-words font-cinzel text-base font-semibold text-white">{subject.name}</h3>
                                 {subject.description ? (
                                   <p className="text-slate-500 text-xs mt-0.5 line-clamp-1">{subject.description}</p>
                                 ) : (
@@ -497,24 +513,24 @@ export default function SubjectsManagement() {
                                 </div>
                               </div>
                             </div>
-                            <div className="flex gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition shrink-0">
+                            <div className="flex flex-wrap justify-end gap-2 shrink-0">
                               <button
                                 onClick={() => handleEditClick(subject)}
-                                title="Edit subject"
-                                className="w-8 h-8 flex items-center justify-center bg-slate-800 hover:bg-purple-600/30 text-slate-400 hover:text-purple-300 rounded-lg transition"
+                                aria-label={'Edit ' + subject.name}
+                                className="min-h-10 rounded-lg border border-amber-300/30 px-3 text-sm font-semibold text-amber-100 hover:bg-amber-300/10 focus-visible:outline focus-visible:outline-violet-400"
                               >
-                                ✏️
+                                Edit
                               </button>
                               <button
                                 onClick={() => handleDeleteSubject(subject.id, subject.name)}
-                                title="Delete subject"
-                                className="w-8 h-8 flex items-center justify-center bg-slate-800 hover:bg-red-600/30 text-slate-400 hover:text-red-300 rounded-lg transition"
+                                aria-label={'Delete ' + subject.name}
+                                className="min-h-10 rounded-lg border border-red-400/25 px-3 text-sm font-semibold text-red-200 hover:bg-red-400/10 focus-visible:outline focus-visible:outline-violet-400"
                               >
-                                🗑️
+                                Delete
                               </button>
                             </div>
                           </div>
-                        </div>
+                        </article>
                       )
                     })}
                   </div>

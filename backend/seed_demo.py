@@ -17,14 +17,18 @@ SAFETY
 
 Attachments are written to <database folder>/demo_uploads (FORGE_UPLOADS_DIR is set here):
   FORGE_DEMO=1 FORGE_DEMO_RUNNER=1 DATABASE_URL=sqlite:////path/forge_demo.db \
-  HEAD_ADMIN_EMAIL=demo.admin@forge-demo.example python /path/to/backend/seed_demo.py
+  HEAD_ADMIN_EMAIL=demo.admin@laconsolacion.edu python /path/to/backend/seed_demo.py
 """
 import io, os, sys, base64, csv, json, secrets, string
 from datetime import datetime, timedelta
+from account_email_policy import email_domain_allowed
 
 url = os.environ.get('DATABASE_URL', '')
 if os.environ.get('FORGE_DEMO', '') != '1' or os.environ.get('FORGE_DEMO_RUNNER', '') != '1' or not url.startswith('sqlite:///') or 'demo' not in os.path.basename(url).lower():
     raise SystemExit("Refusing to run: needs FORGE_DEMO=1, FORGE_DEMO_RUNNER=1 and DATABASE_URL=sqlite:///...demo....db")
+os.environ.setdefault('HEAD_ADMIN_EMAIL', 'demo.admin@laconsolacion.edu')
+if not email_domain_allowed(os.environ['HEAD_ADMIN_EMAIL']):
+    raise SystemExit('Refusing to seed a demo administrator outside the account email domain.')
 path = url[len('sqlite:///'):]
 if os.path.exists(path):
     os.remove(path)
@@ -33,8 +37,6 @@ _up = os.path.join(os.path.dirname(os.path.abspath(path)), 'demo_uploads')
 import shutil; shutil.rmtree(_up, ignore_errors=True)
 os.environ['FORGE_UPLOADS_DIR'] = _up
 os.environ['FORGE_AUTO_SCHEMA'] = '1'
-os.environ.setdefault('STUDENT_EMAIL_DOMAIN', 'student.com')
-os.environ.setdefault('HEAD_ADMIN_EMAIL', 'demo.admin@forge-demo.example')
 os.environ.pop('FORGE_ENV', None)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -99,10 +101,9 @@ if not all(sec.values()):
 
 # ---- staff (clearly synthetic) ----
 staff = {}
-for uname, email, full in [('demo.instructor1', 'instructor1@forge-demo.example', 'Demo Instructor One'),
-                           ('demo.instructor2', 'instructor2@forge-demo.example', 'Demo Instructor Two')]:
+for uname, full in [('demo.instructor1', 'Demo Instructor One'), ('demo.instructor2', 'Demo Instructor Two')]:
     p_ = pw()
-    r = ok(call('post', '/api/admin/users', AT, json={'username': uname, 'email': email, 'password': p_, 'role': 'instructor', 'full_name': full}), 201)
+    r = ok(call('post', '/api/admin/users', AT, json={'username': uname, 'password': p_, 'role': 'instructor', 'full_name': full}), 201)
     staff[uname] = r['user']['id']
     # first-login change is demonstrated on the new student; staff get a final password via the real endpoint
     t = login(uname, p_)

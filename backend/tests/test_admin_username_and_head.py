@@ -69,9 +69,9 @@ class AdminAccountTests(unittest.TestCase):
                 self.assertEqual(r.status_code, 400)
                 self.assertEqual(self.users['student'].username, 'permission_student')
                 self.assertEqual(self.users['student'].xp, 125)
-        for name in ['PERMISSION_ADMIN', 'admin@example.test']:
+        for name, expected_status in [('PERMISSION_ADMIN', 409), ('admin@example.test', 400)]:
             r = self.client.put(self.url('teacher'), headers=self.headers['admin'], json={'username': name})
-            self.assertEqual(r.status_code, 409)
+            self.assertEqual(r.status_code, expected_status)
 
     def test_regular_admin_cannot_take_over_administrators(self):
         for target in ['head', 'admin']:
@@ -88,7 +88,7 @@ class AdminAccountTests(unittest.TestCase):
                     self.assertIsNotNone(A.db.session.get(A.User, self.users[target].id))
 
     def test_only_head_creates_and_promotes_admins(self):
-        body = {'username': 'permission_created', 'email': 'created@example.test', 'password': 'Testing123!', 'role': 'administrator'}
+        body = {'username': 'permission_created', 'email': 'created@laconsolacion.edu', 'password': 'Testing123!', 'role': 'administrator'}
         self.assertEqual(self.client.post('/api/admin/users', headers=self.headers['admin'], json=body).status_code, 403)
         self.assertEqual(self.client.post('/api/admin/users', headers=self.headers['head'], json=body).status_code, 201)
         self.assertEqual(self.client.put(self.url('teacher'), headers=self.headers['admin'], json={'role':'administrator'}).status_code, 403)
@@ -96,7 +96,7 @@ class AdminAccountTests(unittest.TestCase):
 
     def test_regular_admin_creates_students_and_instructors(self):
         for role in ['student', 'instructor']:
-            body = {'username': 'permission_new_' + role, 'email': '' if role == 'student' else 'new@example.test', 'password': 'Testing123!', 'role': role}
+            body = {'username': 'permission_new_' + role, 'password': 'Testing123!', 'role': role}
             r = self.client.post('/api/admin/users', headers=self.headers['admin'], json=body)
             self.assertEqual(r.status_code, 201, r.get_json())
 

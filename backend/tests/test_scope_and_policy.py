@@ -1,6 +1,6 @@
 # Out-of-scope subjects must not receive NEW activity, existing records must stay,
 # the curriculum year of an existing subject must not change on edit, and the
-# institution email / head-admin rules must come from settings, not hardcoded.
+# fixed institutional domain and configured Head Admin must be enforced.
 import io, os, sys, tempfile
 import pytest
 
@@ -149,7 +149,7 @@ def test_existing_enrollment_in_out_of_scope_subject_survives_edits(ctx):
 
 def test_new_student_cannot_be_created_into_out_of_scope_section(ctx):
     r = ctx['c'].post('/api/admin/users', headers=ctx['head'], json={
-        'username': 'new_stu_y2', 'email': 'new_stu_y2@student.com', 'password': 'Pw12345!',
+        'username': 'new_stu_y2', 'email': 'new_stu_y2@laconsolacion.edu', 'password': 'Pw12345!',
         'role': 'student', 'section_ids': [ctx['s2']]})
     assert r.status_code == 400
     with A.app.app_context():
@@ -159,12 +159,12 @@ def test_new_student_cannot_be_created_into_out_of_scope_section(ctx):
 # ── email domain and administrator authorization ────────────────────────────
 def test_only_head_admin_creates_or_promotes_admins(ctx):
     c = ctx['c']
-    body = {'username': 'adm_new', 'email': 'adm.new@forge-test.example', 'password': 'Pw12345!', 'role': 'administrator'}
+    body = {'username': 'adm_new', 'email': 'adm.new@laconsolacion.edu', 'password': 'Pw12345!', 'role': 'administrator'}
     assert c.post('/api/admin/users', headers=ctx['other'], json=body).status_code == 403
     assert c.post('/api/admin/users', headers=ctx['head'], json=body).status_code == 201
     # a normal admin can still create students and instructors
     r = c.post('/api/admin/users', headers=ctx['other'], json={
-        'username': 'plain_stu', 'email': 'plain_stu@student.com', 'password': 'Pw12345!', 'role': 'student'})
+        'username': 'plain_stu', 'email': 'plain_stu@laconsolacion.edu', 'password': 'Pw12345!', 'role': 'student'})
     assert r.status_code == 201, r.get_json()
     with A.app.app_context():
         uid = A.User.query.filter_by(username='plain_stu').first().id
@@ -179,36 +179,70 @@ def test_policy_endpoint(ctx):
     assert ctx['c'].get('/api/admin/policy', headers=ctx['ins']).status_code == 403
 
 
-def test_staff_email_domain_is_optional_and_students_use_generated_identifier(ctx, monkeypatch):
-    c = ctx['c']
-    # no staff restriction configured: any valid address
-    assert A.ALLOWED_EMAIL_DOMAIN == ''
-    r = c.post('/api/admin/users', headers=ctx['head'], json={
-        'username': 'staff_free', 'email': 'Free.Staff@Example.org', 'password': 'Pw12345!', 'role': 'instructor'})
-    assert r.status_code == 201, r.get_json()
-    with A.app.app_context():
-        assert A.User.query.filter_by(username='staff_free').first().email == 'free.staff@example.org'
-    # staff may not use the generated-student domain
-    r = c.post('/api/admin/users', headers=ctx['head'], json={
-        'username': 'staff_bad', 'email': 'x@student.com', 'password': 'Pw12345!', 'role': 'instructor'})
-    assert r.status_code == 400
-    # restriction configured: enforced for staff only
-    monkeypatch.setattr(A, 'ALLOWED_EMAIL_DOMAIN', 'school.example')
-    r = c.post('/api/admin/users', headers=ctx['head'], json={
-        'username': 'dom_a', 'email': 'a@elsewhere.example', 'password': 'Pw12345!', 'role': 'instructor'})
-    assert r.status_code == 400 and 'school.example' in r.get_json()['error']
-    r = c.post('/api/admin/users', headers=ctx['head'], json={
-        'username': 'dom_b', 'email': 'b@school.example', 'password': 'Pw12345!', 'role': 'instructor'})
-    assert r.status_code == 201
-    r = c.post('/api/admin/users', headers=ctx['head'], json={
-        'username': '2026-40001', 'email': '', 'password': 'Pw12345!', 'role': 'student'})
-    assert r.status_code == 201, r.get_json()
-    # CSV-generated students follow the student domain, not the staff one
-    r = _csv(ctx, "student_id,firstname,lastname,student_type,section_no\n2026-30009,Gen,Mail,regular,39001\n")
-    assert r.status_code == 200
-    with A.app.app_context():
-        assert A.User.query.filter_by(username='2026-30009').first().email == '2026-30009@student.com'
+def test_one_email_domain_across_manual_and_csv_creation(ctx):
+    client = ctx['c']
+    assert A.ALLOWED_EMAIL_DOMAIN == A.STUDENT_EMAIL_DOMAIN == 'laconsolacion.edu'
+    for role, username, expected in (
+        ('student', '2026-40001', '2026-40001'),
+        ('instructor', 'Example Staff', 'example.staff'),
+        ('administrator', 'Example Admin', 'example.admin'),
+    ):
+        request = {'username': username, 'password': 'Pw12345!', 'role': role}
+        for bad in ('person@elsewhere.example', 'person@laconsolacion.edu.example', 'person@sub.laconsolacion.edu'):
+            assert client.post('/api/admin/users', headers=ctx['head'], json={**request, 'email': bad}).status_code == 400
+        response = client.post('/api/admin/users', headers=ctx['head'], json=request)
+        assert response.status_code == 201, response.get_json()
+        assert response.get_json()['user']['email'] == f'{expected}@laconsolacion.edu'
 
+    duplicate = {'username': 'Example_Staff', 'password': 'Pw12345!', 'role': 'instructor'}
+    assert client.post('/api/admin/users', headers=ctx['head'], json=duplicate).status_code == 400
+    assert _csv(ctx, "student_id,firstname,lastname,student_type,section_no,email\n"
+                    "2026-30009,Gen,Mail,regular,39001,\n"
+                    "2026-30010,Bad,Mail,regular,39001,wrong@example.org\n").status_code == 207
+    with A.app.app_context():
+        assert A.User.query.filter_by(username='2026-30009').first().email == '2026-30009@laconsolacion.edu'
+        assert A.User.query.filter_by(username='2026-30010').first() is None
+
+    instructor_csv = 'employee_id,firstname,lastname,department,email\nlegacy-x,Wrong,Domain,CCIT,wrong@example.org\nbatch-x,New,Staff,CCIT,\n'
+    response = client.post('/api/admin/users/bulk-upload', headers=ctx['head'],
+                           data={'role_type': 'instructor', 'file': (io.BytesIO(instructor_csv.encode()), 'users.csv')})
+    assert response.status_code == 207, response.get_json()
+    with A.app.app_context():
+        assert A.User.query.filter_by(username='legacy-x').first() is None
+        assert A.User.query.filter_by(username='batch-x').first().email == 'batch.x@laconsolacion.edu'
+
+
+def test_user_list_combines_search_class_and_display_name_sort(ctx):
+    with A.app.app_context():
+        first = _user('list_z', 'list_z@example.test', 'student')
+        first.full_name = 'Filter Student Alice'
+        last = _user('list_a', 'list_a@example.test', 'student')
+        last.full_name = 'Filter Student Zara'
+        outside = _user('list_other', 'list_other@example.test', 'student')
+        outside.full_name = 'Filter Student Bob'
+        A.db.session.add_all([A.IrregularEnrollment(student_id=user.id, section_id=ctx['s1']) for user in (first, last)])
+        A.db.session.commit()
+    base = f"/api/admin/users?role=student&search=Filter+Student&section={ctx['s1']}"
+    for sort, names in [('name_asc', ['list_z', 'list_a']), ('name_desc', ['list_a', 'list_z'])]:
+        response = ctx['c'].get(f'{base}&sort={sort}', headers=ctx['head'])
+        assert response.status_code == 200, response.get_json()
+        assert [user['username'] for user in response.get_json()] == names
+    assert ctx['c'].get('/api/admin/users?section=bad', headers=ctx['head']).status_code == 400
+
+
+def test_email_inventory_preserves_local_parts_and_blocks_collisions():
+    from types import SimpleNamespace
+    from account_inventory import plan_emails
+    def row(id, username, email):
+        return SimpleNamespace(id=id, username=username, email=email, role='student')
+    plans = {item[0]: item[2:] for item in plan_emails([
+        row(1, 'renamed', '00001@old.example'),
+        row(2, 'another', 'duplicate@old.example'),
+        row(3, 'third', 'DUPLICATE@laconsolacion.edu'),
+        row(4, 'old@old.example', 'unique@old.example'),
+    ])}
+    assert plans[1] == ('00001@old.example', '00001@laconsolacion.edu', 'ready')
+    assert all(plans[id][-1].startswith('BLOCKED') for id in (2, 3, 4))
 
 
 # ── unclassified / invalid curriculum year is out of scope too ───────────────
@@ -309,14 +343,8 @@ def test_existing_problem_and_submissions_in_out_of_scope_subject_stay_accessibl
 
 # ── configuration: absent, invalid, changed ──────────────────────────────────
 def test_invalid_config_is_ignored_with_a_diagnostic(monkeypatch):
-    monkeypatch.setenv('ALLOWED_EMAIL_DOMAIN', 'not a domain')
     monkeypatch.setenv('HEAD_ADMIN_EMAIL', 'nobody')
-    assert A._read_setting('ALLOWED_EMAIL_DOMAIN', 'd.example', A._DOMAIN_RE) == 'd.example'
     assert A._read_setting('HEAD_ADMIN_EMAIL', 'h@d.example', A._EMAIL_RE) == 'h@d.example'
-    monkeypatch.setenv('ALLOWED_EMAIL_DOMAIN', '@School.Example')
-    assert A._read_setting('ALLOWED_EMAIL_DOMAIN', 'd.example', A._DOMAIN_RE) == 'school.example'
-    monkeypatch.delenv('ALLOWED_EMAIL_DOMAIN')
-    assert A._read_setting('ALLOWED_EMAIL_DOMAIN', 'd.example', A._DOMAIN_RE) == 'd.example'
 
 
 def test_head_admin_cannot_be_obtained_through_the_api(ctx):
@@ -346,10 +374,7 @@ def test_head_admin_cannot_be_obtained_through_the_api(ctx):
 def test_username_cannot_shadow_another_accounts_email(ctx):
     r = ctx['c'].post('/api/admin/users', headers=ctx['head'], json={
         'username': A.HEAD_ADMIN_EMAIL, 'email': 'shadow@student.com', 'password': 'Pw12345!', 'role': 'student'})
-    # (only refused when that email belongs to an existing account)
-    with A.app.app_context():
-        exists = A.User.query.filter(A.db.func.lower(A.User.email) == A.HEAD_ADMIN_EMAIL).first() is not None
-    assert r.status_code == (400 if exists else 201)
+    assert r.status_code == 400
 
 
 def test_policy_reports_missing_head_account(ctx, monkeypatch):

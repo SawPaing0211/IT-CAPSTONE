@@ -1,14 +1,15 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import EditUserModal from './EditUserModal'
 import PasswordField from '../../components/PasswordField'
 import SubjectManagement from './SubjectsManagement'
 import RecoveryModal from './RecoveryModal'
 import UploadCSVModal from './UploadCSVModal'
-import { API_BASE } from '../../api/client'
+import { API_BASE, authFetch } from '../../api/client'
 
 // same hand-drawn line icons as the Class Codes page (SectionsManagement.jsx)
 // — copied exactly, not redrawn, so both admin pages use the literal same
 // icon instead of two different ones that just look similar.
+const control = 'w-full min-w-0 min-h-11 rounded-lg border border-slate-600 bg-slate-950 px-3 text-sm text-slate-100 [color-scheme:dark] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-400'
 const Icon = {
   Download: ({ size = 14, color = 'currentColor' }) => (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
@@ -40,12 +41,13 @@ export default function UserManagement() {
   const [roleFilter, setRoleFilter] = useState('all')
   const [sectionFilter, setSectionFilter] = useState('all')
   const [statusFilter, setStatusFilter] = useState('all')
+  const [sort, setSort] = useState('name_asc')
 
   const [manageModal, setManageModal] = useState(null)
   const [recoveryModal, setRecoveryModal] = useState(null)
   const [addUserModal, setAddUserModal] = useState(false)
   const [addUserForm, setAddUserForm] = useState({
-    username: '', email: '', password: '', role: 'student', section_id: ''
+    username: '', password: '', role: 'student', section_id: ''
   })
   const [addUserLoading, setAddUserLoading] = useState(false)
   const [addUserError, setAddUserError] = useState('')
@@ -70,8 +72,8 @@ export default function UserManagement() {
   }
 
   // Settings come from the server (it also enforces them): whether this admin may
-  // create administrators, and the domain of generated student identifiers.
-  const [policy, setPolicy] = useState({ can_create_admins: false, student_email_domain: 'student.com' })
+  // create administrators, and the domain of generated account identifiers.
+  const [policy, setPolicy] = useState({ can_create_admins: false, student_email_domain: 'laconsolacion.edu' })
   const isMasterAdmin = policy.can_create_admins
   useEffect(() => {
     let cancelled = false
@@ -83,11 +85,13 @@ export default function UserManagement() {
       .catch(() => {})
     return () => { cancelled = true }
   }, [])
-  const generatedStudentEmail = `${(addUserForm.username || '').trim().toLowerCase() || '<student ID>'}@${policy.student_email_domain}`
+  const emailLocal = addUserForm.username.trim().toLowerCase()
+  const generatedEmailLocal = addUserForm.role === 'student' ? emailLocal : emailLocal.replace(/[^a-z0-9]+/g, '.').replace(/^\.|\.$/g, '')
+  const generatedEmail = generatedEmailLocal ? generatedEmailLocal + '@' + policy.student_email_domain : ''
 
   // Clear the add-user form back to its defaults
   const resetAddUserForm = () => {
-    setAddUserForm({ username: '', email: '', password: '', role: 'student', section_id: '' })
+    setAddUserForm({ username: '', password: '', role: 'student', section_id: '' })
     setAddUserError('')
     setAddUserSuccess('')
   }
@@ -97,8 +101,8 @@ export default function UserManagement() {
     setAddUserError('')
     setAddUserSuccess('')
     const isStudent = addUserForm.role === 'student'
-    if (!addUserForm.username || (!isStudent && !addUserForm.email) || !addUserForm.password) {
-      setAddUserError(isStudent ? 'Student ID and password are required.' : 'Username, email, and password are required.')
+    if (!addUserForm.username.trim() || !addUserForm.password) {
+      setAddUserError(isStudent ? 'Student ID and password are required.' : 'Username and password are required.')
       return
     }
     if (addUserForm.password.length < 8) {
@@ -110,7 +114,6 @@ export default function UserManagement() {
       const token = localStorage.getItem('token')
       const payload = {
         username: addUserForm.username,
-        email: isStudent ? '' : addUserForm.email,   // students get a generated identifier
         password: addUserForm.password,
         role: addUserForm.role,
         section_ids: addUserForm.section_id ? [parseInt(addUserForm.section_id)] : []
@@ -123,7 +126,7 @@ export default function UserManagement() {
       const data = await res.json()
       if (res.ok) {
         setAddUserSuccess(`✅ User "${data.user.username}" created successfully!`)
-        setAddUserForm({ username: '', email: '', password: '', role: 'student', section_id: '' })
+        setAddUserForm({ username: '', password: '', role: 'student', section_id: '' })
         fetchUsers()
         setTimeout(() => { setAddUserModal(false); setAddUserSuccess('') }, 2000)
       } else {
@@ -136,55 +139,54 @@ export default function UserManagement() {
     }
   }
 
-  // Re-fetch users and sections whenever a filter or search term changes
+  const [usersError, setUsersError] = useState('')
+  const [sectionError, setSectionError] = useState(false)
+  const [userListVersion, setUserListVersion] = useState(0)
+  const fetchUsers = () => setUserListVersion(version => version + 1)
+
   useEffect(() => {
-    fetchUsers()
-    fetchSections()
-  }, [roleFilter, sectionFilter, statusFilter, search])
-
-  // Fetch users matching the current filters from the server
-  const fetchUsers = async () => {
-    try {
-      const token = localStorage.getItem('token')
-      let url = `${API_BASE}/api/admin/users?`
-      if (roleFilter !== 'all') url += `role=${roleFilter}&`
-      if (statusFilter !== 'all') url += `status=${statusFilter}&`
-      if (search) url += `search=${encodeURIComponent(search)}&`
-
-      const res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } })
-
-      if (res.status === 401) {
-        showToast('Session expired — logging you out...', 'error')
-        localStorage.removeItem('token')
-        setTimeout(() => { window.location.href = '/' }, 1200)
-        return
-      }
-      if (res.ok) {
+    if (activeTab !== 'users') return
+    const controller = new AbortController()
+    const query = new URLSearchParams()
+    query.set('sort', sort)
+    if (search.trim()) query.set('search', search.trim())
+    if (roleFilter !== 'all') query.set('role', roleFilter)
+    if (statusFilter !== 'all') query.set('status', statusFilter)
+    if (sectionFilter !== 'all') query.set('section', sectionFilter)
+    const timer = setTimeout(async () => {
+      setUsersError('')
+      setLoading(true)
+      try {
+        const res = await authFetch(`${API_BASE}/api/admin/users?${query}`, { signal: controller.signal })
+        if (!res.ok) throw new Error('Users unavailable')
         const data = await res.json()
-        setUsers(Array.isArray(data) ? data : [])
+        if (!Array.isArray(data)) throw new Error('Unexpected user list')
+        if (!controller.signal.aborted) setUsers(data)
+      } catch {
+        if (!controller.signal.aborted) setUsersError('Could not load users. Try again.')
+      } finally {
+        if (!controller.signal.aborted) setLoading(false)
       }
-    } catch (err) {
-      console.error('Failed to fetch users:', err)
-    } finally {
-      setLoading(false)
+    }, search ? 200 : 0)
+    return () => {
+      clearTimeout(timer)
+      controller.abort()
     }
-  }
+  }, [search, roleFilter, statusFilter, sectionFilter, sort, activeTab, userListVersion])
 
-  // Fetch the list of class code sections for the filter dropdown
-  const fetchSections = async () => {
+  const fetchSections = useCallback(async () => {
+    setSectionError(false)
     try {
-      const token = localStorage.getItem('token')
-      const res = await fetch(`${API_BASE}/api/admin/sections`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      })
-      if (res.ok) {
-        const data = await res.json()
-        setSections(Array.isArray(data) ? data : [])
-      }
-    } catch (err) {
-      console.error('Failed to fetch sections:', err)
+      const res = await authFetch(API_BASE + '/api/admin/sections')
+      if (!res.ok) throw new Error('Class codes unavailable')
+      const data = await res.json()
+      if (!Array.isArray(data)) throw new Error('Unexpected class list')
+      setSections(data)
+    } catch {
+      setSectionError(true)
     }
-  }
+  }, [])
+  useEffect(() => { fetchSections() }, [fetchSections])
 
   // Send the edited user fields to the server
   const handleUpdateUser = async (userId, updates) => {
@@ -265,7 +267,7 @@ export default function UserManagement() {
     setConfirmInput('')
     setConfirmModal({
       title: 'Delete All Students',
-      message: `This permanently deletes all ${groupedUsers.student.length} student account(s) — including their submissions, progress, and enrollment records. This cannot be undone.`,
+      message: 'This permanently deletes every student account, including accounts hidden by the filters, and their submissions, progress, and enrollments. This cannot be undone.',
       requiredPhrase: 'DELETE ALL STUDENTS',
       onConfirm: performBulkDeleteStudents,
     })
@@ -311,28 +313,15 @@ export default function UserManagement() {
     } catch { showToast('Network error. Please try again.', 'error') }
   }
 
-  // Filter users by section if selected
-  const filteredUsers = users.filter(user => {
-    if (roleFilter !== 'all' && user.role !== roleFilter) return false
-    if (sectionFilter !== 'all') {
-      const enrolled = (user.sections || []).some(s => String(s.id) === sectionFilter)
-      if (!enrolled) return false
-    }
-    if (statusFilter !== 'all') {
-      if (statusFilter === 'active' && !user.is_active) return false
-      if (statusFilter === 'inactive' && user.is_active) return false
-    }
-    if (search) {
-      const q = search.toLowerCase().replace(/-/g, '')
-      const fullName = (user.full_name || '').toLowerCase()
-      return (
-        user.username.toLowerCase().replace(/-/g, '').includes(q) ||
-        user.email.toLowerCase().includes(q) ||
-        fullName.includes(q)
-      )
-    }
-    return true
-  })
+  const filteredUsers = users
+
+  const classesBySubject = new Map()
+  for (const section of [...sections].sort((a, b) => (a.subject_name || '').localeCompare(b.subject_name || '') || String(a.section_no).localeCompare(String(b.section_no), undefined, { numeric: true }))) {
+    const subject = section.subject_name || section.subject_code || 'Other classes'
+    if (!classesBySubject.has(subject)) classesBySubject.set(subject, [])
+    classesBySubject.get(subject).push(section)
+  }
+  const hasFilters = Boolean(search || roleFilter !== 'all' || sectionFilter !== 'all' || statusFilter !== 'all')
 
   // Split the user list into admin, instructor, and student groups for the tables below
   const groupedUsers = {
@@ -351,7 +340,7 @@ export default function UserManagement() {
             ? 'bg-red-600 border-red-500/50'
             : toast.type === 'warning'
               ? 'bg-amber-600 border-amber-500/50'
-              : 'bg-gradient-to-r from-purple-600 to-pink-600 border-purple-400/50'
+              : 'bg-violet-700 hover:bg-violet-600 border-purple-400/50'
         }`}>
           {toast.type === 'error' ? '❌' : toast.type === 'warning' ? '⚠️' : '✅'} {toast.msg}
         </div>
@@ -360,16 +349,18 @@ export default function UserManagement() {
       {/* Tab Switcher */}
       <div className="flex gap-2 border-b border-slate-800 pb-2">
         <button
+          aria-pressed={activeTab === 'users'}
           onClick={() => setActiveTab('users')}
-          className={`px-5 py-2 rounded-t-lg font-semibold text-sm transition ${activeTab === 'users' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
+          className={`px-5 py-2 rounded-t-lg font-semibold text-sm transition ${activeTab === 'users' ? 'bg-violet-950 text-amber-100 ring-1 ring-inset ring-amber-300/35' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
         >
-          👤 Users
+          Users
         </button>
         <button
+          aria-pressed={activeTab === 'subjects'}
           onClick={() => setActiveTab('subjects')}
-          className={`px-5 py-2 rounded-t-lg font-semibold text-sm transition ${activeTab === 'subjects' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
+          className={`px-5 py-2 rounded-t-lg font-semibold text-sm transition ${activeTab === 'subjects' ? 'bg-violet-950 text-amber-100 ring-1 ring-inset ring-amber-300/35' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
         >
-          📚 Subjects
+          Subjects
         </button>
       </div>
 
@@ -392,14 +383,14 @@ export default function UserManagement() {
                     const url = URL.createObjectURL(blob)
                     const a = document.createElement('a')
                     a.href = url
-                    a.download = `users_report_${new Date().toISOString().split('T')[0]}.csv`
+                    a.download = `submissions_report_${new Date().toISOString().split('T')[0]}.csv`
                     a.click()
                     URL.revokeObjectURL(url)
                   }
                 }}
                 className="px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2 transition hover:opacity-85 hover:brightness-110 bg-white/5 border border-white/10 text-slate-300"
               >
-                <Icon.Download size={14} /> Export CSV
+                <Icon.Download size={14} /> Export submission CSV
               </button>
               <button
                 onClick={() => setCsvModal(true)}
@@ -409,13 +400,14 @@ export default function UserManagement() {
               </button>
               <button
                 onClick={() => setAddUserModal(true)}
-                className="px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2 transition hover:opacity-85 hover:brightness-110 bg-gradient-to-r from-purple-600 to-pink-600 text-white"
+                className="px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2 transition hover:opacity-85 hover:brightness-110 bg-violet-700 hover:bg-violet-600 text-white"
               >
                 <Icon.Users size={14} /> Add User
               </button>
               <button
                 onClick={handleBulkDeleteStudents}
-                disabled={groupedUsers.student.length === 0}
+                disabled={hasFilters || loading || !!usersError || groupedUsers.student.length === 0}
+                title={hasFilters ? 'Clear filters to access the global delete action' : undefined}
                 className="px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2 transition hover:opacity-85 hover:brightness-110 bg-red-600/15 border border-red-500/40 text-red-400 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:opacity-40"
               >
                 🗑️ Delete All Students
@@ -423,79 +415,68 @@ export default function UserManagement() {
             </div>
           </div>
 
-          {/* Filters */}
-          <div className="bg-slate-900/80 rounded-2xl border border-purple-600/30 p-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              <div className="relative">
-                <input
-                  type="text"
-                  placeholder="Search by name, student no., or email..."
-                  value={search}
-                  onChange={e => setSearch(e.target.value)}
-                  autoComplete="off"
-                  className="w-full bg-slate-800 border border-slate-700 rounded-lg pl-10 pr-4 py-2 text-white focus:border-purple-500 outline-none transition"
-                />
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">🔍</span>
-              </div>
-
-              <select
-                value={roleFilter}
-                onChange={e => setRoleFilter(e.target.value)}
-                className="bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white focus:border-purple-500 outline-none transition"
-              >
-                <option value="all">All Roles</option>
-                <option value="administrator">Administrator</option>
-                <option value="instructor">Instructor</option>
-                <option value="student">Student</option>
-              </select>
-
-              <select
-                value={sectionFilter}
-                onChange={e => setSectionFilter(e.target.value)}
-                className="bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white focus:border-purple-500 outline-none transition"
-              >
-                <option value="all">All Class Codes</option>
-                {sections.map(s => (
-                  <option key={s.id} value={String(s.id)}>
-                    {s.section_no}{s.subject_code ? ` — ${s.subject_code}` : ''}
-                  </option>
-                ))}
-              </select>
-
-              <select
-                value={statusFilter}
-                onChange={e => setStatusFilter(e.target.value)}
-                className="bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white focus:border-purple-500 outline-none transition"
-              >
-                <option value="all">All Status</option>
-                <option value="active">Active</option>
-                <option value="inactive">Inactive</option>
-              </select>
+          <section aria-label="User filters" className="rounded-xl border border-amber-300/25 bg-slate-900 p-4 sm:p-5">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+              <h2 className="font-cinzel text-lg font-semibold text-slate-100">Find users</h2>
+              {hasFilters && <button type="button" className="min-h-9 rounded px-2 text-sm font-semibold text-amber-200 hover:bg-amber-300/10 focus-visible:outline focus-visible:outline-violet-400" onClick={() => { setSearch(''); setRoleFilter('all'); setSectionFilter('all'); setStatusFilter('all') }}>Clear filters</button>}
             </div>
-          </div>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 2xl:grid-cols-[1.5fr_1fr_1.35fr_1fr_1fr]">
+              <label className="min-w-0 space-y-2 text-sm text-slate-200"><span>Search</span>
+                <input className={control} type="search" placeholder="Name, username, or email" value={search} onChange={e => setSearch(e.target.value)} />
+              </label>
+              <label className="min-w-0 space-y-2 text-sm text-slate-200"><span id="user-role-filter-label">Role</span>
+                <select aria-labelledby="user-role-filter-label" className={control} value={roleFilter} onChange={e => setRoleFilter(e.target.value)}>
+                  <option value="all">All roles</option><option value="administrator">Administrator</option><option value="instructor">Instructor</option><option value="student">Student</option>
+                </select>
+              </label>
+              <label className="min-w-0 space-y-2 text-sm text-slate-200"><span id="user-class-filter-label">Class code</span>
+                <select aria-labelledby="user-class-filter-label" className={control} value={sectionFilter} onChange={e => setSectionFilter(e.target.value)}>
+                  <option value="all">All class codes</option>
+                  {[...classesBySubject].map(([subject, codes]) => <optgroup key={subject} label={subject}>
+                    {codes.map(section => <option key={section.id} value={String(section.id)}>{section.section_no}{section.subject_code ? ' — ' + section.subject_code : ''}</option>)}
+                  </optgroup>)}
+                </select>
+              </label>
+              <label className="min-w-0 space-y-2 text-sm text-slate-200"><span id="user-status-filter-label">Status</span>
+                <select aria-labelledby="user-status-filter-label" className={control} value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+                  <option value="all">Any status</option><option value="active">Active</option><option value="inactive">Inactive</option>
+                </select>
+              </label>
+              <label className="min-w-0 space-y-2 text-sm text-slate-200"><span id="user-sort-label">Sort by</span>
+                <select aria-labelledby="user-sort-label" className={control} value={sort} onChange={e => setSort(e.target.value)}>
+                  <option value="name_asc">Name: A–Z</option>
+                  <option value="name_desc">Name: Z–A</option>
+                  <option value="newest">Newest first</option>
+                </select>
+              </label>
+            </div>
+            {sectionError && <p role="alert" className="mt-3 text-sm text-amber-200">Class codes could not be loaded. <button type="button" onClick={fetchSections} className="underline">Retry</button></p>}
+          </section>
 
           {/* Stats */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div className="bg-slate-900/80 rounded-xl border border-green-600/30 p-4">
-              <p className="text-slate-400 text-sm mb-1">Total Students</p>
+              <p className="text-slate-400 text-sm mb-1">Students shown</p>
               <p className="text-2xl font-black text-green-400">{groupedUsers.student.length}</p>
             </div>
             <div className="bg-slate-900/80 rounded-xl border border-blue-600/30 p-4">
-              <p className="text-slate-400 text-sm mb-1">Total Instructors</p>
+              <p className="text-slate-400 text-sm mb-1">Instructors shown</p>
               <p className="text-2xl font-black text-blue-400">{groupedUsers.instructor.length}</p>
             </div>
             <div className="bg-slate-900/80 rounded-xl border border-purple-600/30 p-4">
-              <p className="text-slate-400 text-sm mb-1">Administrators</p>
+              <p className="text-slate-400 text-sm mb-1">Administrators shown</p>
               <p className="text-2xl font-black text-purple-400">{groupedUsers.admin.length}</p>
             </div>
             <div className="bg-slate-900/80 rounded-xl border border-yellow-600/30 p-4">
               <p className="text-slate-400 text-sm mb-1">Filtered Results</p>
-              <p className="text-2xl font-black text-yellow-400">{filteredUsers.length}</p>
+              <p aria-live="polite" className="text-2xl font-black text-yellow-400">{loading || usersError ? '—' : filteredUsers.length}</p>
             </div>
           </div>
 
           {/* User Tables */}
-          {loading ? (
+          {usersError ? (
+            <div role="alert" className="rounded-xl border border-amber-300/25 bg-slate-900 p-5 text-amber-100">{usersError} <button type="button" onClick={fetchUsers} className="underline">Retry</button></div>
+          ) : loading ? (
             <div className="flex justify-center py-12">
               <div className="animate-spin rounded-full h-12 w-12 border-4 border-purple-600 border-t-transparent"></div>
             </div>
@@ -626,16 +607,16 @@ export default function UserManagement() {
           {/* Add User Modal */}
           {addUserModal && (
             <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-              <div className="bg-slate-900 border border-purple-600/50 rounded-2xl w-full max-w-md shadow-2xl shadow-purple-900/50">
+              <div role="dialog" aria-modal="true" aria-labelledby="add-user-title" className="max-h-[calc(100dvh-2rem)] overflow-y-auto bg-slate-900 border border-amber-300/35 rounded-2xl w-full max-w-md shadow-2xl">
                 <div className="flex items-center justify-between p-6 border-b border-purple-600/30">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-gradient-to-br from-purple-600 to-pink-600 rounded-xl flex items-center justify-center text-xl">👤</div>
+                    <div className="w-10 h-10 bg-violet-800 border border-violet-400/40 rounded-xl flex items-center justify-center text-xl">👤</div>
                     <div>
-                      <h2 className="text-xl font-black text-white">Add New User</h2>
+                      <h2 id="add-user-title" className="font-cinzel text-xl font-semibold text-white">Add new user</h2>
                       <p className="text-slate-400 text-xs">{isMasterAdmin ? 'Create a student, instructor or administrator account' : 'Create a student or instructor account'}</p>
                     </div>
                   </div>
-                  <button onClick={() => { setAddUserModal(false); resetAddUserForm() }}
+                  <button aria-label="Close add user" onClick={() => { setAddUserModal(false); resetAddUserForm() }}
                     className="text-slate-400 hover:text-white text-2xl transition">✕</button>
                 </div>
 
@@ -652,42 +633,21 @@ export default function UserManagement() {
                   )}
 
                   <div>
-                    <label className="block text-sm text-slate-400 mb-1.5">Username <span className="text-red-400">*</span></label>
+                    <label htmlFor="add-user-username" className="block text-sm text-slate-300 mb-1.5">{addUserForm.role === 'student' ? 'Student ID' : 'Username'} <span className="text-red-400">*</span></label>
                     <input
+                      id="add-user-username"
                       type="text"
                       value={addUserForm.username}
                       onChange={e => setAddUserForm({ ...addUserForm, username: e.target.value })}
-                      placeholder="e.g. john_doe"
+                      placeholder={addUserForm.role === 'student' ? 'e.g. 2026001' : 'e.g. jane_doe'}
                       className="w-full bg-slate-800 border border-slate-700 focus:border-purple-500 rounded-lg px-4 py-2.5 text-white outline-none transition placeholder-slate-500"
                     />
                   </div>
 
-                  {addUserForm.role === 'student' ? (
-                    <div>
-                      <label className="block text-sm text-slate-400 mb-1.5">Generated sign-in email</label>
-                      <input
-                        type="text"
-                        readOnly
-                        value={generatedStudentEmail}
-                        className="w-full bg-slate-800/60 border border-slate-700 rounded-lg px-4 py-2.5 text-slate-300 outline-none"
-                      />
-                      <p className="text-xs text-slate-500 mt-1">
-                        Generated from the student ID. Students can sign in with the ID or this address.
-                        It is an identifier only, not a real inbox.
-                      </p>
-                    </div>
-                  ) : (
-                    <div>
-                      <label className="block text-sm text-slate-400 mb-1.5">Email <span className="text-red-400">*</span></label>
-                      <input
-                        type="email"
-                        value={addUserForm.email}
-                        onChange={e => setAddUserForm({ ...addUserForm, email: e.target.value })}
-                        placeholder="e.g. name@your-institution.example"
-                        className="w-full bg-slate-800 border border-slate-700 focus:border-purple-500 rounded-lg px-4 py-2.5 text-white outline-none transition placeholder-slate-500"
-                      />
-                    </div>
-                  )}
+                  <label className="block space-y-2 text-sm text-slate-300">
+                    <span>Generated sign-in email</span>
+                    <input readOnly className={control} value={generatedEmail} placeholder={'@' + policy.student_email_domain} />
+                  </label>
 
                   <div>
                     <label htmlFor="add-user-password" className="block text-sm text-slate-400 mb-1.5">Password <span className="text-red-400">*</span></label>
@@ -761,7 +721,7 @@ export default function UserManagement() {
                   <button
                     onClick={handleAddUser}
                     disabled={addUserLoading}
-                    className="flex-1 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-white font-black transition shadow-lg shadow-purple-600/30 flex items-center justify-center gap-2"
+                    className="flex-1 py-2.5 bg-violet-700 hover:bg-violet-600 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-white font-semibold transition flex items-center justify-center gap-2"
                   >
                     {addUserLoading
                       ? <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Creating...</>
@@ -779,11 +739,11 @@ export default function UserManagement() {
 
 function UserSection({ title, icon, users, onManage, onRecover, onDelete, onUnlock }) {
   return (
-    <div className="bg-slate-900/80 rounded-2xl border border-purple-600/30 overflow-hidden">
-      <div className="bg-slate-800/80 border-b border-purple-600/30 px-6 py-4">
+    <div className="bg-slate-900 rounded-xl border border-amber-300/25 overflow-hidden">
+      <div className="bg-violet-950/25 border-b border-amber-300/20 px-5 py-4">
         <div className="flex items-center gap-3">
           <span className="text-2xl">{icon}</span>
-          <h3 className="text-xl font-bold text-white">{title}</h3>
+          <h3 className="font-cinzel text-xl font-semibold text-white">{title}</h3>
           <span className="px-3 py-1 bg-purple-600/30 text-purple-300 rounded-full text-sm font-bold border border-purple-600/50">
             {users.length}
           </span>
@@ -807,12 +767,12 @@ function UserSection({ title, icon, users, onManage, onRecover, onDelete, onUnlo
               <tr key={user.id} className="hover:bg-slate-800/50 transition">
                 <td className="p-4">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-gradient-to-br from-purple-600 to-pink-600 rounded-full flex items-center justify-center font-bold text-sm flex-shrink-0">
+                    <div className="w-10 h-10 bg-violet-800 border border-violet-400/40 rounded-full flex items-center justify-center font-bold text-sm flex-shrink-0">
                       {(user.full_name || user.username)[0].toUpperCase()}
                     </div>
                     <div>
                       <p className="font-semibold text-white">{user.full_name || user.username}{user.is_head_admin && <span className="ml-2 text-xs text-amber-300">Head Admin</span>}</p>
-                      <p className="text-slate-400 text-xs truncate max-w-[200px]">{user.email}</p>
+                      <p className="text-slate-300 text-xs break-all">{user.email}</p>
                       {user.role === 'student' && (
                         <span className="font-mono text-xs text-yellow-300 bg-yellow-900/20 border border-yellow-600/30 px-1.5 py-0.5 rounded mt-0.5 inline-block">
                           {user.username}

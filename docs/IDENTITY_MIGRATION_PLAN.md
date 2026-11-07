@@ -1,27 +1,11 @@
-# Identity migration plan (DRAFT - for review; nothing has been applied)
+# Account email cutover
 
-Goal: no active dependency on the previous institution's email identities, while keeping every
-account id, password hash, enrollment link, submission, score, XP value and audit relationship.
+All new Forge.Dev accounts use `@laconsolacion.edu`. The application generates sign-in identifiers; it does not create mailboxes. Existing records are not migrated on startup.
 
-## Why this is safe in principle
-Every table refers to a user by `users.id`; none stores the email. Changing `users.email`
-alone therefore keeps enrollments, submissions, XP and audit rows attached. The audit
-`details` text is history and is NOT rewritten.
+1. Verify the database target and a recoverable backup. Identify the intended active Head Admin by immutable user ID, and verify their username sign-in.
+2. From the backend folder, use the read-only `python account_inventory.py --out <new-private-plan.csv>` on the verified target. Keep the CSV private and inspect as plain text. It includes account IDs and old/new emails, without password data. The optional `--legacy-domain` flag counts matching audit-history rows; it does not limit the inventory.
+3. Resolve any duplicate targets, malformed addresses and legacy email-shaped usernames before proceeding. For ordinary addresses the plan preserves the stored local part, even if a student ID was edited after account creation. Do not merge or recreate accounts.
+4. In a controlled maintenance window, verify the Head Admin configuration by ID and apply only reviewed identity-field changes by ID in one transaction. Keep the old values for rollback. Do not edit passwords, XP, enrollments, quests, submissions or historical audit text.
+5. Verify account, enrollment and submission counts and the Head Admin's privilege boundary before reopening. Confirm username and new email sign-in with approved test accounts; previous-domain email sign-in is refused by the new policy.
 
-## Steps (to run only after review)
-1. Back up the database and verify the backup restores (see backup/restore check).
-2. `python account_inventory.py --legacy-domain <old-domain> --head-admin <email> --out plan.csv`
-   (read-only). Review: counts by role, collisions, rows marked BLOCKED / NEEDS VALUE.
-3. Students: proposed email = `<student_id>@student.com` (generated identifier, not an inbox).
-   BLOCKED rows (identifier already used, or username not a usable ID) are resolved by hand.
-4. Staff: the university supplies each real address; none is invented. Until supplied, those
-   accounts keep their current email and still sign in with their username.
-5. Head admin: verify per `HEAD_ADMIN_SETUP_AND_RECOVERY.md` BEFORE touching any administrator row.
-6. Apply in one transaction per role group, only the reviewed rows, with a before/after count check.
-7. Verify: each migrated student signs in by ID and by new email with the SAME password; XP,
-   enrollments and submission counts equal the pre-migration numbers.
-8. Rollback: restore the backup, or reverse using the saved `plan.csv` (old email column).
-
-## Not done yet
-No row has been changed. Student sign-in by `<student_id>@student.com` already works for
-existing students before migration, because the login resolves the ID from the address.
+The preflight does not apply the migration.

@@ -1,7 +1,8 @@
 # Head administrator: setup and recovery
 
-Forge.dev has no built-in head administrator. `HEAD_ADMIN_EMAIL` in `backend/.env` names
-the ONE existing administrator account allowed to create or promote other administrators.
+Forge.dev has no built-in head administrator. `HEAD_ADMIN_USER_ID` identifies the one
+existing administrator allowed to create or promote other administrators. The legacy
+`HEAD_ADMIN_EMAIL` selector is used only if the ID setting is absent.
 
 ## Behaviour when it is not set (or is malformed)
 - The server starts normally and prints a NOTICE; `/api/admin/policy` reports
@@ -13,10 +14,10 @@ the ONE existing administrator account allowed to create or promote other admini
 ## Setup (once, before final testing)
 1. Decide which existing administrator is the head admin (project owner's decision; do not guess).
 2. Confirm that account exists, is active, and its owner can sign in:
-   `python account_inventory.py --legacy-domain <old-domain> --head-admin <email>`
-   (read-only). It must report "matches exactly one ACTIVE administrator".
-3. Put that exact email in `backend/.env` as `HEAD_ADMIN_EMAIL=...` (and, for Docker, in the
-   repo-root `.env`). Restart the backend.
+   `python account_inventory.py --head-admin <email> --out <new-private-plan.csv>`
+   (read-only). It must report the verified ID of the configured, active administrator.
+3. Set `HEAD_ADMIN_USER_ID` to that ID in the deployment's backend environment and
+   restart the backend during the approved cutover. A nonempty invalid ID does not fall back to email.
 4. Sign in as that account; Admin > Create User now offers the Administrator role.
 
 ## If the head admin cannot sign in (lockout / forgotten password)
@@ -28,9 +29,8 @@ the ONE existing administrator account allowed to create or promote other admini
   Do this only after verifying the account holder's identity out of band.
 
 ## Changing who the head admin is
-Change the account's email and `HEAD_ADMIN_EMAIL` together, in one maintenance step, after
-the new account has been verified. Until both match, privileged admin creation stays disabled
-(safe failure). Never create a new administrator account just to satisfy the setting.
+Change `HEAD_ADMIN_USER_ID` only after verifying the replacement account is the intended
+active administrator. Changing an email does not transfer authority when the ID is set.
 
 ## What this procedure does NOT do
 It creates no accounts, changes no identities and edits no permissions by itself.

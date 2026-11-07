@@ -1,3 +1,4 @@
+import crystal from '../../assets/landing/forge-crystal-logo.webp'
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { openChangePassword } from '../../utils/accountEvents'
 import DashboardOverview from './DashboardOverview'
@@ -13,6 +14,16 @@ const API = `${API_BASE}/api`
 
 // Reads the login token from localStorage and adds it to every API request.
 // Also Without this the backend rejects requests with 401 Unauthorized.
+function AdminBrand({ collapsed = false }) {
+  return <div className="flex min-w-0 items-center gap-3">
+    <img src={crystal} alt={collapsed ? "Forge.dev" : ""} width="28" height="42" className="h-[42px] w-7 shrink-0 object-contain" />
+    {!collapsed && <div className="min-w-0">
+      <span className="font-cinzel block whitespace-nowrap text-xl font-bold tracking-wide text-white">FORGE.DEV</span>
+      <span className="block text-xs text-slate-400">Administration</span>
+    </div>}
+  </div>
+}
+
 function authHeaders() {
   const token = localStorage.getItem('token')
   return {
@@ -191,7 +202,7 @@ function CommandPalette({ open, onClose, onNavigate, tabs }) {
                   <p className="text-xs text-slate-500 truncate">{tab.description}</p>
                 </div>
                 {tab.badge > 0 && (
-                  <span className="ml-auto text-xs bg-pink-500 text-white font-bold rounded-full px-1.5 py-0.5 leading-none flex-shrink-0">
+                  <span className="ml-auto text-xs bg-amber-300 text-slate-950 font-bold rounded-full px-1.5 py-0.5 leading-none flex-shrink-0">
                     {tab.badge}
                   </span>
                 )}
@@ -481,18 +492,19 @@ export default function AdminDashboard({ user, onLogout }) {
     const btn = (
       <button
         onClick={() => handleTabChange(tab.id)}
+        aria-label={tab.label}
         aria-current={isActive ? 'page' : undefined}
         className={`
           relative w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200
           focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-1 focus:ring-offset-slate-900
           ${isActive
-            ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-lg shadow-purple-700/40'
-            : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+            ? 'bg-violet-950 text-amber-50 ring-1 ring-inset ring-violet-400/45'
+            : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
           }
         `}
       >
         {isActive && (
-          <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 bg-white rounded-full -ml-px opacity-80" />
+          <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 bg-amber-300 rounded-full" />
         )}
         <span className="flex-shrink-0">{tab.icon}</span>
         {!sidebarCollapsed && (
@@ -504,7 +516,7 @@ export default function AdminDashboard({ user, onLogout }) {
           </span>
         )}
         {tab.badge > 0 && sidebarCollapsed && (
-          <span className="absolute top-1 right-1 w-2 h-2 bg-pink-500 rounded-full" />
+          <span className="absolute top-1 right-1 w-2 h-2 bg-amber-300 rounded-full" />
         )}
       </button>
     )
@@ -526,22 +538,11 @@ export default function AdminDashboard({ user, onLogout }) {
       {/* ── DESKTOP SIDEBAR ────────────────────────────────────────────── */}
       {!isMobile && (
         <aside
-          className={`fixed left-0 top-0 h-full bg-slate-900/95 backdrop-blur-xl border-r border-purple-600/20 z-50 flex flex-col transition-all duration-300 ease-in-out ${sidebarWidth}`}
+          className={`fixed left-0 top-0 h-full bg-[#080b1d] border-r border-amber-300/20 z-50 flex flex-col transition-all duration-300 ease-in-out ${sidebarWidth}`}
           aria-label="Sidebar navigation"
         >
-          {/* Logo */}
-          <div className="flex items-center gap-3 px-4 py-5 border-b border-slate-800/60 flex-shrink-0">
-            <div className="w-9 h-9 bg-gradient-to-br from-purple-600 to-pink-600 rounded-xl flex items-center justify-center shadow-lg shadow-purple-700/40 flex-shrink-0 text-xl">
-              👑
-            </div>
-            {!sidebarCollapsed && (
-              <div className="overflow-hidden">
-                <h1 className="font-black text-sm bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent leading-tight">
-                  Forge.Administrator
-                </h1>
-                <p className="text-[10px] text-slate-500 mt-0.5">Control Panel</p>
-              </div>
-            )}
+          <div className="flex min-h-[82px] items-center border-b border-amber-300/15 px-5 py-3">
+            <AdminBrand collapsed={sidebarCollapsed} />
           </div>
 
           {/* Ctrl+K search button */}
@@ -630,21 +631,18 @@ export default function AdminDashboard({ user, onLogout }) {
       {/* ── MOBILE SLIDE-IN DRAWER ──────────────────────────────────────── */}
       {isMobile && (
         <aside
-          className={`fixed left-0 top-0 h-full w-72 bg-slate-900/98 backdrop-blur-xl border-r border-purple-600/20 z-50 flex flex-col transition-transform duration-300 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}
+          className={`fixed left-0 top-0 h-full w-72 bg-[#080b1d] border-r border-amber-300/20 z-50 flex flex-col transition-transform duration-300 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}
           aria-label="Sidebar navigation"
         >
           <div className="flex items-center justify-between px-4 py-4 border-b border-slate-800/60">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 bg-gradient-to-br from-purple-600 to-pink-600 rounded-xl flex items-center justify-center text-xl">👑</div>
-              <h1 className="font-black text-sm bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent">Forge.Administrator</h1>
-            </div>
+            <AdminBrand />
             <button onClick={() => setSidebarOpen(false)} className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400" aria-label="Close sidebar">
               <svg viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
                 <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
               </svg>
             </button>
           </div>
-          <nav className="flex-1 px-3 py-3 space-y-1 overflow-y-auto">
+          <nav className="flex-1 px-3 py-4 space-y-2 overflow-y-auto">
             {tabs.map(tab => <SidebarNavItem key={tab.id} tab={tab} />)}
           </nav>
           <div className="p-4 border-t border-slate-800/60">

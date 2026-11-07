@@ -24,7 +24,6 @@ const STRENGTH_COLOR = ['', '#ef4444', '#f97316', '#eab308', '#3b82f6', '#22c55e
 const REQUIRED_CSV_COLS = ['student_id', 'firstname', 'lastname', 'student_type', 'section_no']
 
 // tiny delay helper for animation timing
-const delay = (ms) => new Promise(r => setTimeout(r, ms))
 
 // ── sample csv so admins can download a template and not guess the format ─────
 const SAMPLE_CSV = [
@@ -95,7 +94,6 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
 
   const [form, setForm] = useState({
     username:   '',
-    email:      '',
     password:   '',
     role:       'student',
     section_id: '',
@@ -113,8 +111,10 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
 
   // Institution settings come from the server, so nothing here hardcodes a school.
   // The server enforces both rules; this only decides what the form offers.
-  const [policy, setPolicy] = useState({ allowed_email_domain: '', student_email_domain: 'student.com', can_create_admins: false })
+  const [policy, setPolicy] = useState({ student_email_domain: 'laconsolacion.edu', can_create_admins: false })
   const headAdmin = policy.can_create_admins
+  const emailLocal = form.username.trim().toLowerCase()
+  const generatedEmailLocal = form.role === 'student' ? emailLocal : emailLocal.replace(/[^a-z0-9]+/g, '.').replace(/^\.|\.$/g, '')
   useEffect(() => {
     let cancelled = false
     fetch(`${API}/api/admin/policy`, {
@@ -141,7 +141,7 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
 
   // Clear the single-user form back to its defaults
   const resetForm = () => {
-    setForm({ username: '', email: '', password: '', role: 'student', section_id: '' })
+    setForm({ username: '', password: '', role: 'student', section_id: '' })
     setPwStrength(0)
     setCreatedUser(null)
     setStep(1)
@@ -170,9 +170,6 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
     const errs = {}
     if (!form.username.trim())         errs.username = 'Username is required'
     else if (form.username.length < 3) errs.username = 'Min 3 characters'
-    if (form.role === 'student') { /* email is generated from the student ID */ }
-    else if (!form.email.trim())       errs.email = 'Email is required'
-    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) errs.email = 'Invalid email'
     if (!form.password)                errs.password = 'Password is required'
     else if (form.password.length < 8) errs.password = 'Min 8 characters'
     setErrors(errs)
@@ -190,7 +187,6 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           username:    form.username.trim(),
-          email:       form.role === 'student' ? '' : form.email.trim().toLowerCase(),
           password:    form.password,
           role:        form.role,
           section_ids: form.section_id ? [parseInt(form.section_id)] : [],
@@ -433,38 +429,11 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
                     {errors.username && <p className="text-red-400 text-xs mt-1">{errors.username}</p>}
                   </div>
 
-                  {/* email: generated for students, entered for staff */}
-                  {form.role === 'student' ? (
-                    <div>
-                      <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-2">
-                        Generated sign-in email
-                      </label>
-                      <input
-                        type="text"
-                        readOnly
-                        value={`${form.username.trim().toLowerCase() || '<student ID>'}@${policy.student_email_domain}`}
-                        className={inputCls(false)}
-                      />
-                      <p className="text-slate-500 text-xs mt-1">
-                        Generated from the student ID; the student may sign in with the ID or this address.
-                        It is an identifier only, not a real inbox.
-                      </p>
-                    </div>
-                  ) : (
-                    <div>
-                      <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-2">
-                        Email Address *
-                      </label>
-                      <input
-                        type="email"
-                        value={form.email}
-                        onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
-                        placeholder={policy.allowed_email_domain ? `user@${policy.allowed_email_domain}` : 'name@your-institution.example'}
-                        className={inputCls(errors.email)}
-                      />
-                      {errors.email && <p className="text-red-400 text-xs mt-1">{errors.email}</p>}
-                    </div>
-                  )}
+                  <label className="block space-y-2">
+                    <span className="text-sm font-semibold text-slate-300">Generated sign-in email</span>
+                    <input type="text" readOnly className={inputCls(false)} placeholder={'@' + policy.student_email_domain}
+                      value={generatedEmailLocal ? generatedEmailLocal + '@' + policy.student_email_domain : ''} />
+                  </label>
 
                   {/* password + strength bar */}
                   <div>
