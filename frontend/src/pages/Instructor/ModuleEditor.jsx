@@ -11,6 +11,7 @@ export default function ModuleEditor({ classId, subjectId, classInfo, lesson, on
   const [uncertain, setUncertain] = useState(false)
   const [saving, setSaving] = useState(false)
   const [dirty, setDirty] = useState(false)
+  const [discarding, setDiscarding] = useState(false)
   const busy = useRef(false)
   const heading = useRef(null)
   const className = classInfo?.subjects?.join(' · ') || classInfo?.name || 'Assigned class'
@@ -26,10 +27,7 @@ export default function ModuleEditor({ classId, subjectId, classInfo, lesson, on
   function change(field, value) { setForm(previous => ({ ...previous, [field]: value })); setDirty(true) }
   function cancel() {
     if (busy.current) return
-    const message = savedId && !lesson
-      ? 'A draft was already created. Leave the editor? That draft and any uploaded files will remain in the module list; unsaved changes will be discarded.'
-      : 'Discard your unsaved module changes?'
-    if ((dirty || uncertain) && !window.confirm(message)) return
+    if (dirty || uncertain) { setDiscarding(true); return }
     onCancel()
   }
   function pickFiles(event) {
@@ -86,5 +84,22 @@ export default function ModuleEditor({ classId, subjectId, classInfo, lesson, on
       {savedId && !lesson && error && <p className="im-muted">Draft #{savedId} is saved on the server. Confirmed uploads are retained.</p>}
       <footer className="im-action-bar"><p><ModuleIcon name={form.published ? 'eye' : 'lock'} />{saving ? 'Saving module and attachments…' : form.published ? 'Visible to students after publishing' : 'Drafts stay hidden from students'}</p><div><button type="button" className="ir-secondary" disabled={saving} onClick={cancel}>{uncertain ? 'Return to modules' : 'Cancel'}</button><button type="submit" className="im-primary" disabled={saving || uncertain || !subjectId}>{saving ? 'Saving…' : form.published ? 'Publish Module' : 'Save as Draft'}</button></div></footer>
     </form>
+    {discarding && <DiscardModuleDialog savedDraft={savedId && !lesson} onKeep={() => setDiscarding(false)} onDiscard={onCancel} />}
   </section>
+}
+
+function DiscardModuleDialog({ savedDraft, onKeep, onDiscard }) {
+  const dialog = useRef(null)
+  useEffect(() => {
+    const opener = document.activeElement
+    const node = dialog.current
+    node.showModal()
+    return () => { node.close(); if (opener?.isConnected) opener.focus() }
+  }, [])
+  return <dialog ref={dialog} className="im-dialog" aria-labelledby="module-discard-title" onCancel={event => { event.preventDefault(); onKeep() }}>
+    <div className="im-dialog-inner"><h2 id="module-discard-title">Discard unsaved module changes?</h2>
+      <p>{savedDraft ? 'The saved draft and confirmed attachments will remain in the module list. Only your unsaved changes will be discarded.' : 'This module has not been saved. Keep editing to preserve your changes.'}</p>
+      <div className="im-inline-actions"><button type="button" className="ir-secondary" autoFocus onClick={onKeep}>Keep editing</button><button type="button" className="ir-secondary im-danger" onClick={onDiscard}>Discard changes</button></div>
+    </div>
+  </dialog>
 }

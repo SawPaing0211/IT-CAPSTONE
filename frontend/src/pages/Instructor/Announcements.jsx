@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useOutletContext } from 'react-router-dom'
 import ClassPicker from '../../components/ClassPicker'
 import { API_BASE, authFetch } from '../../api/client'
 import ModuleIcon from './ModuleIcon'
@@ -28,6 +28,7 @@ export default function Announcements({ classId, classInfo, onEditingChange }) {
 }
 
 function AnnouncementWorkspace({ classId, className, subjectName, onChangeClass, onEditingChange }) {
+  const viewer = useOutletContext()
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
   const [loaded, setLoaded] = useState(false)
@@ -143,8 +144,23 @@ function AnnouncementWorkspace({ classId, className, subjectName, onChangeClass,
   const filtered = items.filter(a => (priority === 'all' || a.priority === priority) && `${a.title}\n${a.content}`.toLowerCase().includes(search.toLowerCase()))
   const pinned = filtered.filter(a => a.is_pinned)
   const regular = filtered.filter(a => !a.is_pinned)
+  // Older servers omit can_manage. They still enforce authorship on writes.
+  const canManage = item => item.can_manage ?? Boolean(viewer?.username && item.instructor === viewer.username)
   const cards = entries => entries.map(a => <article key={a.id} className={`ia-card ${a.is_pinned ? 'ia-pinned' : ''}`}>
-    <header><div><div className="ia-card-badges">{a.is_pinned && <span className="ia-pin-badge"><PinIcon />Pinned</span>}<span className={`ia-priority-badge ia-${a.priority}`}>{PRIORITIES[a.priority] || 'Medium'} priority</span></div><h3>{a.title}</h3><p className="ia-meta">{a.instructor || 'Instructor'}<span aria-hidden="true"> · </span><time>{timestamp(a.created_at)}</time></p></div><div className="ia-card-actions"><button type="button" className="ia-icon-button" aria-label={`Edit announcement: ${a.title}`} onClick={() => start(a)} disabled={saving || deleting}><ModuleIcon name="edit" size={18} /></button><button type="button" className="ia-icon-button ia-delete" aria-label={`Delete announcement: ${a.title}`} onClick={() => { setDeleteError(''); setDeleteTarget(a) }} disabled={saving || deleting}><ModuleIcon name="trash" size={18} /></button></div></header>
+    <header>
+      <div>
+        <div className="ia-card-badges">
+          {a.is_pinned && <span className="ia-pin-badge"><PinIcon />Pinned</span>}
+          <span className={`ia-priority-badge ia-${a.priority}`}>{PRIORITIES[a.priority] || 'Medium'} priority</span>
+        </div>
+        <h3>{a.title}</h3>
+        <p className="ia-meta">{a.instructor || 'Instructor'}<span aria-hidden="true"> · </span><time>{timestamp(a.created_at)}</time></p>
+      </div>
+      {canManage(a) && <div className="ia-card-actions">
+        <button type="button" className="ia-icon-button" aria-label={`Edit announcement: ${a.title}`} onClick={() => start(a)} disabled={saving || deleting}><ModuleIcon name="edit" size={18} /></button>
+        <button type="button" className="ia-icon-button ia-delete" aria-label={`Delete announcement: ${a.title}`} onClick={() => { setDeleteError(''); setDeleteTarget(a) }} disabled={saving || deleting}><ModuleIcon name="trash" size={18} /></button>
+      </div>}
+    </header>
     <p className="ia-message-body">{a.content}</p>
   </article>)
 

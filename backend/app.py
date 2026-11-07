@@ -774,6 +774,17 @@ def get_instructor_sections_for_subject(instructor_id, subject_id):
     ).all()
     return [a.section_id for a in assignments if a.section_id is not None]
 
+
+def validate_quest_sections(instructor_id, subject_id, section_ids):
+    if not isinstance(section_ids, list) or not section_ids or any(
+        type(section_id) is not int or section_id <= 0 for section_id in section_ids
+    ):
+        return jsonify({"error": "Select at least one valid class code for this quest"}), 400
+
+    assigned = set(get_instructor_sections_for_subject(instructor_id, subject_id))
+    if not set(section_ids).issubset(assigned):
+        return jsonify({"error": "Choose only class codes assigned to you for this subject"}), 403
+
 def admin_required(f):
     @wraps(f)
     @jwt_required()
@@ -1408,9 +1419,10 @@ def create_problem():
     # empty used to silently mean "every section of this subject", which
     # is exactly the behavior that let old quests leak into new class
     # codes. it's required now.
-    visible_to_sections = data.get('visible_to_sections') or []
-    if not visible_to_sections:
-        return jsonify({"error": "Select at least one class code this quest should be visible to"}), 400
+    visible_to_sections = data.get('visible_to_sections')
+    section_error = validate_quest_sections(user_id, subject_id, visible_to_sections)
+    if section_error:
+        return section_error
 
     if data['xp_reward'] > max_xp[data['difficulty']]:
         return jsonify({
@@ -1652,9 +1664,10 @@ def update_problem(problem_id):
     if subject_id != problem.subject_id and subject_out_of_scope(Subject.query.get(subject_id)):
         return jsonify({"error": OUT_OF_SCOPE_MSG}), 400
 
-    visible_to_sections = data.get('visible_to_sections', problem.visible_to_sections) or []
-    if not visible_to_sections:
-        return jsonify({"error": "Select at least one class code this quest should be visible to"}), 400
+    visible_to_sections = data.get('visible_to_sections', problem.visible_to_sections)
+    section_error = validate_quest_sections(user_id, subject_id, visible_to_sections)
+    if section_error:
+        return section_error
 
     # ===== UPDATE FIELDS =====
     problem.title = data['title']
@@ -3290,12 +3303,8 @@ def get_class_problems(class_id):
     if not is_instructor_or_admin(user):
         return jsonify({"error": "Unauthorized"}), 403
 
-    if user.role != 'administrator':
-        assignment = TeacherAssignment.query.filter_by(
-            instructor_id=user_id
-        ).first()
-        if not assignment:
-            return jsonify({"error": "Not assigned to any section"}), 403
+    if not instructor_teaches_section(user, class_id):
+        return jsonify({"error": "Not your class"}), 403
 
     section = SubjectSection.query.get(class_id)
     if not section:
@@ -3327,6 +3336,22 @@ def get_class_problems(class_id):
         })
 
     return jsonify(result), 200
+
+
+def _published_quest_counts(instructor_id, sections):
+    """Count published quests for each exact class, using the activity list's scope."""
+    counts = {section.id: 0 for section in sections}
+    if counts:
+        scopes = Problem.query.with_entities(Problem.visible_to_sections).filter_by(
+            created_by=instructor_id, is_published=True
+        ).all()
+        for (visible_sections,) in scopes:
+            if not isinstance(visible_sections, list):
+                continue
+            valid_ids = {section_id for section_id in visible_sections if type(section_id) is int}
+            for section_id in valid_ids & counts.keys():
+                counts[section_id] += 1
+    return counts
 
 @app.route('/api/instructor/problems/<int:problem_id>', methods=['GET'])
 @jwt_required()
@@ -3393,6 +3418,10 @@ def get_instructor_classes():
         return jsonify([]), 200
 
     sections = SubjectSection.query.filter(SubjectSection.id.in_(section_ids)).all()
+    quest_counts = _published_quest_counts(user_id, sections)
+    lesson_counts = dict(db.session.query(Lesson.section_id, db.func.count(Lesson.id)).filter(
+        Lesson.created_by == user_id, Lesson.section_id.in_(section_ids)
+    ).group_by(Lesson.section_id).all())
     result = []
 
     for s in sections:
@@ -3400,16 +3429,6 @@ def get_instructor_classes():
         subjects = [Subject.query.get(sid).name for sid in my_subject_ids if Subject.query.get(sid)]
 
         student_count = IrregularEnrollment.query.filter_by(section_id=s.id).count()
-        problem_count = Problem.query.filter_by(
-            created_by=user_id, is_published=True, subject_id=s.subject_id
-        ).count()
-
-        lesson_count = 0
-        if my_subject_ids:
-            lesson_count = Lesson.query.filter(
-                Lesson.subject_id.in_(my_subject_ids)
-            ).count()
-
         announcement_count = Announcement.query.filter_by(class_id=s.id).count()
 
         result.append({
@@ -3421,8 +3440,8 @@ def get_instructor_classes():
             "subject_id": s.subject_id,  # needed by the quest-creation class picker
             "semester": s.semester,
             "student_count": student_count,
-            "problem_count": problem_count,
-            "lesson_count": lesson_count,
+            "problem_count": quest_counts[s.id],
+            "lesson_count": lesson_counts.get(s.id, 0),
             "announcement_count": announcement_count
         })
 
@@ -3455,15 +3474,8 @@ def get_instructor_class_detail(classId):
 
     student_count = IrregularEnrollment.query.filter_by(section_id=classId).count()
 
-    problem_count = Problem.query.filter_by(
-        created_by=user_id, is_published=True, subject_id=section.subject_id
-    ).count()
-
-    lesson_count = 0
-    if my_subject_ids:
-        lesson_count = Lesson.query.filter(
-            Lesson.subject_id.in_(my_subject_ids)
-        ).count()
+    problem_count = _published_quest_counts(user_id, [section])[classId]
+    lesson_count = Lesson.query.filter_by(created_by=user_id, section_id=classId).count()
 
     announcement_count = Announcement.query.filter_by(class_id=section.id).count()
 
@@ -4121,8 +4133,19 @@ def create_announcement():
 @app.route('/api/announcements', methods=['GET'])
 @jwt_required()
 def get_announcements():
+    user = db.session.get(User, int(get_jwt_identity()))
+    if not user:
+        return jsonify({"error": "Unauthorized"}), 403
     class_id = request.args.get('class_id', type=int)
-    if class_id:
+    if 'class_id' in request.args and (class_id is None or class_id <= 0):
+        return jsonify({"error": "Invalid class"}), 400
+    if class_id is not None:
+        if user.role == 'student':
+            allowed = class_id in _student_section_ids(user.id)
+        else:
+            allowed = instructor_teaches_section(user, class_id)
+        if not allowed:
+            return jsonify({"error": "Not authorized to view this class"}), 403
         q = Announcement.query.filter_by(class_id=class_id)
     else:
         q = Announcement.query.filter(Announcement.class_id == None)
@@ -4134,7 +4157,10 @@ def get_announcements():
         "is_pinned": a.is_pinned,
         "priority": a.priority,
         "created_at": a.created_at.isoformat(),
-        "instructor": User.query.get(a.instructor_id).username if a.instructor_id else "System"
+        "instructor": User.query.get(a.instructor_id).username if a.instructor_id else "System",
+        "can_manage": user.role == 'administrator' or (
+            user.role == 'instructor' and class_id is not None and a.instructor_id == user.id
+        )
     } for a in q.order_by(Announcement.is_pinned.desc(), Announcement.created_at.desc()).all()]), 200
 
 @app.route('/api/announcements/<int:announcement_id>', methods=['DELETE'])
@@ -4150,6 +4176,8 @@ def delete_announcement(announcement_id):
     if ann.instructor_id != user_id and user.role != 'administrator':
         return jsonify({"error": "Not your announcement"}), 403
 
+    if ann.class_id is not None and not instructor_teaches_section(user, ann.class_id):
+        return jsonify({"error": "Not your class"}), 403
     db.session.delete(ann)
     db.session.commit()
     return jsonify({"message": "Announcement deleted"}), 200
@@ -4167,6 +4195,8 @@ def update_announcement(announcement_id):
 
     if ann.instructor_id != user_id and user.role != 'administrator':
         return jsonify({"error": "Not your announcement"}), 403
+    if ann.class_id is not None and not instructor_teaches_section(user, ann.class_id):
+        return jsonify({"error": "Not your class"}), 403
 
     data = request.get_json()
     if not data.get('title') or not data.get('content'):

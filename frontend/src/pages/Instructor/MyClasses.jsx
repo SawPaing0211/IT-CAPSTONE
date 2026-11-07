@@ -12,7 +12,7 @@
 // StudentsModal hits /api/admin/sections/:id/students — yes it's the admin
 // endpoint, but instructors have access to it (backend checks instructor_or_admin)
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { API_BASE, authFetch } from '../../api/client'
 import QuestButton from '../Student/components/QuestButton'
@@ -25,43 +25,56 @@ function StudentsModal({ cls, onClose }) {
   const [students, setStudents] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const [loadError, setLoadError] = useState('')
+  const [reload, setReload] = useState(0)
+  const dialog = useRef(null)
+  useEffect(() => {
+    const opener = document.activeElement
+    const node = dialog.current
+    node.showModal()
+    return () => { node.close(); if (opener?.isConnected) opener.focus() }
+  }, [])
 
   // Fetch enrolled students for this class when the modal opens
   useEffect(() => {
+    const controller = new AbortController()
     const fetchStudents = async () => {
+      setLoading(true); setLoadError('')
       try {
-        const token = localStorage.getItem('token')
-        const res = await fetch(`${API_BASE}/api/admin/sections/${cls.id}/students`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        })
-        if (res.ok) setStudents(await res.json())
+        const res = await authFetch(`${API_BASE}/api/admin/sections/${cls.id}/students`, { signal: controller.signal })
+        if (!res.ok) throw new Error('Unable to load this class roster.')
+        const data = await res.json()
+        if (!Array.isArray(data)) throw new Error('The class roster is incomplete.')
+        if (!controller.signal.aborted) setStudents(data)
       } catch (err) {
-        console.error('Failed to fetch students:', err)
+        if (!controller.signal.aborted) setLoadError(err.message)
       } finally {
-        setLoading(false)
+        if (!controller.signal.aborted) setLoading(false)
       }
     }
     fetchStudents()
-  }, [cls.id])
+    return () => controller.abort()
+  }, [cls.id, reload])
 
   // Filter the student list by the search text
   const filtered = students.filter(s =>
     (s.full_name || s.username).toLowerCase().includes(search.toLowerCase()) ||
     s.username.toLowerCase().includes(search.toLowerCase()) ||
-    s.email.toLowerCase().includes(search.toLowerCase())
+    (s.email || '').toLowerCase().includes(search.toLowerCase())
   )
 
   return (
-    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <dialog ref={dialog} className="im-dialog" aria-labelledby="class-roster-title" onCancel={event => { event.preventDefault(); onClose() }}>
       <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-2xl max-h-[80vh] flex flex-col shadow-2xl">
 
         <div className="flex items-center justify-between gap-3 p-4 sm:p-6 border-b border-slate-800">
           <div>
-            <h2 className="text-xl font-bold text-white">Class {cls.name} — Students</h2>
-            <p className="text-slate-400 text-sm mt-0.5">{cls.title} · {students.length} enrolled</p>
+            <h2 id="class-roster-title" className="text-xl font-bold text-white">Class {cls.name} — Students</h2>
+            <p className="text-slate-400 text-sm mt-0.5">{cls.title}{!loading && !loadError && ` · ${students.length} enrolled`}</p>
           </div>
           <button
             onClick={onClose}
+            aria-label="Close class roster"
             className="w-9 h-9 flex items-center justify-center rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition"
           >
             ✕
@@ -86,7 +99,7 @@ function StudentsModal({ cls, onClose }) {
             <div className="flex items-center justify-center py-16">
               <div className="animate-spin rounded-full h-8 w-8 border-4 border-purple-500 border-t-transparent" />
             </div>
-          ) : filtered.length === 0 ? (
+          ) : loadError ? <div className="p-6" role="alert"><p>{loadError}</p><button className="ir-secondary" onClick={() => setReload(n => n + 1)}>Retry roster</button></div> : filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-slate-500">
               <span className="text-4xl mb-3">👥</span>
               <p className="text-sm">{search ? 'No students match your search' : 'No students enrolled yet'}</p>
@@ -123,10 +136,10 @@ function StudentsModal({ cls, onClose }) {
         </div>
 
         <div className="px-4 sm:px-6 py-4 border-t border-slate-800">
-          <p className="text-slate-500 text-xs">Showing {filtered.length} of {students.length} students</p>
+          <p className="text-slate-500 text-xs">{loading ? 'Loading roster…' : loadError ? 'Roster unavailable' : `Showing ${filtered.length} of ${students.length} students`}</p>
         </div>
       </div>
-    </div>
+    </dialog>
   )
 }
 

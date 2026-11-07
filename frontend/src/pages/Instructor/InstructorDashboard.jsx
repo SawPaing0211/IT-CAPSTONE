@@ -107,7 +107,7 @@ export default function InstructorDashboard({ user, onLogout }) {
             </MobileSheet>
           </div>
         </header>
-        <div className="instructor-content"><Outlet /></div>
+        <div className="instructor-content"><Outlet context={user} /></div>
       </main>
       <BottomNav tabs={menuItems.map(item => ({ id: item.path, icon: <img src={item.icon} alt="" width="22" height="22" />, shortLabel: item.shortLabel }))} activeId={activePath} onSelect={navigate} />
     </div>

@@ -92,6 +92,87 @@ class ModuleWorkflowTests(unittest.TestCase):
         self.assertEqual(self.client.post(path, headers=self.headers['teacher'], data={'file': (io.BytesIO(b'x'), 'script.exe')}).status_code, 400)
         self.assertEqual(A.LessonFile.query.count(), 0)
 
+    def test_class_summaries_use_section_scope_and_published_quest_counts(self):
+        A.db.session.add(A.TeacherAssignment(instructor_id=self.teacher.id, subject_id=self.subject.id, section_id=self.other_section.id))
+        A.db.session.commit()
+        self.assertEqual(self.create().status_code, 201)
+        self.assertEqual(self.create(section_id=self.other_section.id).status_code, 201)
+        self.assertEqual(self.create(section_id=self.other_section.id).status_code, 201)
+        for sections, published in [([self.section.id, self.section.id], True), ([self.other_section.id], True),
+                                    ([self.other_section.id], True), ([self.section.id], False)]:
+            A.db.session.add(A.Problem(title='Scope check', description='Synthetic', difficulty='Easy', test_cases=[],
+                                       xp_reward=1, subject_id=self.subject.id, created_by=self.teacher.id,
+                                       visible_to_sections=sections, is_published=published))
+        A.db.session.commit()
+        try:
+            response = self.client.get('/api/instructor/classes', headers=self.headers['teacher'])
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual({item['id']: (item['problem_count'], item['lesson_count']) for item in response.json},
+                             {self.section.id: (1, 1), self.other_section.id: (2, 2)})
+            detail = self.client.get(f'/api/instructor/classes/{self.section.id}', headers=self.headers['teacher'])
+            self.assertEqual((detail.json['problem_count'], detail.json['lesson_count']), (1, 1))
+            activity = self.client.get(f'/api/instructor/classes/{self.section.id}/problems', headers=self.headers['teacher'])
+            self.assertEqual(len(activity.json), 2)
+        finally:
+            A.Problem.query.filter_by(created_by=self.teacher.id).delete()
+            A.db.session.commit()
+
+    def test_unassigned_class_quest_list_is_denied(self):
+        response = self.client.get(f'/api/instructor/classes/{self.other_section.id}/problems', headers=self.headers['teacher'])
+        self.assertEqual(response.status_code, 403)
+
+    def test_quest_save_rejects_unassigned_sections(self):
+        payload = {
+            'title': 'Scope check', 'description': 'Synthetic quest', 'difficulty': 'Easy',
+            'xp_reward': 1, 'test_cases': [{'input': '', 'expected': '1'}],
+            'subject_id': self.subject.id, 'visible_to_sections': [self.section.id, self.other_section.id],
+        }
+        headers = self.headers['teacher']
+        try:
+            self.assertEqual(self.client.post('/api/problems', headers=headers, json=payload).status_code, 403)
+            self.assertEqual(A.Problem.query.filter_by(created_by=self.teacher.id).count(), 0)
+            created = self.client.post('/api/problems', headers=headers,
+                                       json={**payload, 'visible_to_sections': [self.section.id]})
+            self.assertEqual(created.status_code, 201)
+            quest = A.Problem.query.filter_by(created_by=self.teacher.id).one()
+            quest_id = quest.id
+            self.assertEqual(self.client.put(f'/api/problems/{quest_id}', headers=headers, json=payload).status_code, 403)
+            self.assertEqual(A.db.session.get(A.Problem, quest_id).visible_to_sections, [self.section.id])
+        finally:
+            A.Problem.query.filter_by(created_by=self.teacher.id).delete()
+            A.db.session.commit()
+
+    def test_announcement_reads_require_class_membership(self):
+        response = self.client.post('/api/announcements', headers=self.headers['teacher'],
+                                    json={'class_id': self.section.id, 'title': 'Scoped update', 'content': 'Synthetic announcement'})
+        self.assertEqual(response.status_code, 201)
+        try:
+            path = f'/api/announcements?class_id={self.section.id}'
+            for role in ['teacher', 'student']:
+                allowed = self.client.get(path, headers=self.headers[role])
+                self.assertEqual(allowed.status_code, 200)
+                self.assertEqual([item['title'] for item in allowed.json], ['Scoped update'])
+                self.assertIs(allowed.json[0]['can_manage'], role == 'teacher')
+            self.assertEqual(self.client.get(path, headers=self.headers['other']).status_code, 403)
+            self.assertEqual(self.client.get(f'/api/announcements?class_id={self.other_section.id}',
+                                             headers=self.headers['teacher']).status_code, 403)
+            self.assertEqual(self.client.get('/api/announcements?class_id=invalid', headers=self.headers['student']).status_code, 400)
+            edit_path = f"/api/announcements/{response.json['announcement_id']}"
+            edited = self.client.put(edit_path, headers=self.headers['teacher'],
+                                     json={'title': 'Revised update', 'content': 'Synthetic announcement', 'is_pinned': True})
+            self.assertEqual(edited.status_code, 200)
+            self.assertTrue(self.client.get(path, headers=self.headers['student']).json[0]['is_pinned'])
+            A.TeacherAssignment.query.filter_by(instructor_id=self.teacher.id, section_id=self.section.id).delete()
+            A.db.session.commit()
+            self.assertEqual(self.client.get(path, headers=self.headers['teacher']).status_code, 403)
+            self.assertEqual(self.client.put(edit_path, headers=self.headers['teacher'],
+                                             json={'title': 'Blocked', 'content': 'Blocked'}).status_code, 403)
+            self.assertEqual(self.client.delete(edit_path, headers=self.headers['teacher']).status_code, 403)
+            self.assertEqual(self.client.get(path, headers=self.headers['student']).json[0]['title'], 'Revised update')
+        finally:
+            A.Announcement.query.filter_by(id=response.json['announcement_id']).delete()
+            A.db.session.commit()
+
 
 if __name__ == '__main__':
     try: unittest.main()

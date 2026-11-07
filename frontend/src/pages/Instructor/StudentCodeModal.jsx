@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { formatApiTimestamp } from '../../utils/apiTimestamp'
 import { api } from '../../api/client'
 import ModuleIcon from './ModuleIcon'
 import './InstructorQuestReview.css'
@@ -76,7 +77,7 @@ export default function StudentCodeModal({ submissionId, onClose }) {
           {data && <>
             <div className="iq-code-meta">
               <span className="iq-language">{languageName(data.language)}</span>
-              <span>{new Date(data.submitted_at).toLocaleString()}</span>
+              <span>{formatApiTimestamp(data.submitted_at)}</span>
               <button className="ir-secondary" onClick={handleCopy}>{copied ? 'Copied' : 'Copy code'}</button>
             </div>
             <div role="status" className="iq-copy-status">{copyError ? 'Copy failed. You can select the code below and copy it manually.' : copied ? 'Code copied to clipboard.' : ''}</div>

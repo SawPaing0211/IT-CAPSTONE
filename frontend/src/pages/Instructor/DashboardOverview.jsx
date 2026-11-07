@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { API_BASE, authFetch } from '../../api/client'
+import { formatApiTimestamp } from '../../utils/apiTimestamp'
 import MobileSheet from '../../components/MobileSheet'
 import QuestButton from '../Student/components/QuestButton'
 import libraryBanner from '../../assets/instructor/library-banner.png'
@@ -24,9 +25,7 @@ async function readDashboard(path, signal) {
   return response.json()
 }
 function activityTime(value) {
-  const date = new Date(value)
-  if (!value || Number.isNaN(date.getTime())) return 'Time unavailable'
-  return date.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+  return formatApiTimestamp(value, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 }
 
 export default function DashboardOverview() {

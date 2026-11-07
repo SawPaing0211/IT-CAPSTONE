@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import StudentCodeModal from "./StudentCodeModal";
-import { API_BASE } from '../../api/client'
+import { API_BASE, authFetch } from '../../api/client'
+import { formatApiTimestamp } from '../../utils/apiTimestamp'
 import './InstructorQuestReview.css'
 import InstructorBackButton from '../../components/InstructorBackButton'
 
@@ -24,16 +25,13 @@ export default function ProblemSubmissions() {
     setLoading(true)
     setError(null)
     try {
-      const token = localStorage.getItem('token')
-      const res = await fetch(
-        `${API_BASE}/api/instructor/problems/${problemId}/submissions`,
-        { headers: { 'Authorization': `Bearer ${token}` } }
-      )
+      const res = await authFetch(`${API_BASE}/api/instructor/problems/${problemId}/submissions`)
       if (!res.ok) {
         const err = await res.json()
         throw new Error(err.error || 'Failed to fetch submissions')
       }
       const data = await res.json()
+      if (!data?.problem || !Array.isArray(data.students)) throw new Error('The submissions response is incomplete. Please retry.')
       setProblem(data.problem)
       setStudents(data.students)
     } catch (err) {
@@ -75,6 +73,7 @@ export default function ProblemSubmissions() {
     return (
       <div className="text-center py-20">
         <p className="text-red-400 mb-4">⚠️ {error}</p>
+        <button type="button" className="ir-secondary" onClick={fetchData}>Retry submissions</button>
         <InstructorBackButton onClick={goBack}>Back to Quests</InstructorBackButton>
       </div>
     )
@@ -254,7 +253,7 @@ export default function ProblemSubmissions() {
                     {student.submitted_at
                       ? <div className="flex flex-col gap-2">
                           {(student.submissions?.length ? student.submissions : [student]).map((row, i) => (
-                            <span key={i}>{new Date(row.submitted_at).toLocaleString()}</span>
+                            <span key={i}>{formatApiTimestamp(row.submitted_at)}</span>
                           ))}
                         </div>
                       : '—'}
