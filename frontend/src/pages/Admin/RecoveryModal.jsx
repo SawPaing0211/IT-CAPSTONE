@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { API_BASE } from '../../api/client'
+import { API_BASE, authFetch } from '../../api/client'
 
 // minimalist line-art eye icons for the password show/hide toggle
 function EyeIcon({ size = 18 }) {
@@ -41,17 +41,15 @@ export default function RecoveryModal({ user, onClose, onSuccess }) {
 
     setLoading(true)
     try {
-      const token = localStorage.getItem('token')
-      const res = await fetch(`${API_BASE}/api/admin/users/${user.id}/reset-password`, {
+      const res = await authFetch(`${API_BASE}/api/admin/users/${user.id}/reset-password`, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify(generate ? { generate: true } : { new_password: newPassword })
       })
-      const data = await res.json()
-      if (res.ok) {
+      const data = await res.json().catch(() => null)
+      if (res.ok && data) {
         setSuccess(`Password reset for ${user.username}. They must choose a new password the next time they sign in.`)
         if (data.temporary_password) {
           setIssued(data.temporary_password)       // admin hands this over in person; close = gone
@@ -59,9 +57,9 @@ export default function RecoveryModal({ user, onClose, onSuccess }) {
           setTimeout(() => { onSuccess() }, 1500)
         }
       } else {
-        setError(data.error || 'Failed to reset password.')
+        setError(data?.error || 'The server did not confirm the password reset.')
       }
-    } catch (err) {
+    } catch {
       setError('Network error. Please try again.')
     } finally {
       setLoading(false)
@@ -178,7 +176,7 @@ export default function RecoveryModal({ user, onClose, onSuccess }) {
             type="button"
             onClick={() => handleReset(true)}
             disabled={loading || !!issued}
-            className="w-full py-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 rounded-lg text-slate-200 text-sm transition"
+            className="admin-button w-full py-2 disabled:opacity-50 rounded-lg text-slate-200 text-sm transition"
           >
             Generate a temporary password instead
           </button>
@@ -189,14 +187,14 @@ export default function RecoveryModal({ user, onClose, onSuccess }) {
         <div className="flex gap-3 p-6 border-t border-purple-600/30">
           <button
             onClick={issued ? onSuccess : onClose}
-            className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 font-medium transition"
+            className="admin-button flex-1 py-2.5 rounded-lg text-slate-300 font-medium transition"
           >
             {issued ? 'Done' : 'Cancel'}
           </button>
           <button
             onClick={() => handleReset(false)}
             disabled={loading || !newPassword || !!issued}
-            className="flex-1 py-2.5 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-white font-black transition shadow-lg shadow-blue-600/30 flex items-center justify-center gap-2"
+            className="admin-button admin-button-primary flex-1 py-2.5 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-white font-black transition flex items-center justify-center gap-2"
           >
             {loading ? (
               <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Resetting...</>

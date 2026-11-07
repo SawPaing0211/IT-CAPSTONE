@@ -106,7 +106,7 @@ export default function EditUserModal({ user, sections = [], canCreateAdmins = f
             </span>
             <button
               onClick={onClose}
-              className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-500 hover:text-white hover:bg-slate-800 transition-colors"
+              className="admin-button w-8 h-8 flex items-center justify-center rounded-lg text-slate-500 transition-colors"
             >
               ✕
             </button>
@@ -305,8 +305,6 @@ export default function EditUserModal({ user, sections = [], canCreateAdmins = f
             )}
 
             {/* ── EMAIL (read-only) ────────────────────────────────────────── */}
-            {/* emails come from the school registrar CSV so we can't change them
-                the backend also rejects email changes via 403 anyway */}
             <div>
               <label className="block text-xs font-semibold text-slate-400 uppercase tracking-widest mb-2">
                 Email
@@ -316,7 +314,7 @@ export default function EditUserModal({ user, sections = [], canCreateAdmins = f
                 <span className="text-slate-600 text-sm">✉</span>
                 <span className="text-slate-500 text-sm truncate">{user.email}</span>
               </div>
-              <p className="text-slate-700 text-xs mt-1">Emails are assigned by the registrar and cannot be changed.</p>
+              <p className="text-slate-400 text-xs mt-1">This sign-in email is read-only here.</p>
             </div>
 
             {/* ── XP + LEVEL ──────────────────────────────────────────────── */}
@@ -391,14 +389,14 @@ export default function EditUserModal({ user, sections = [], canCreateAdmins = f
           <button
             type="button"
             onClick={onClose}
-            className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl text-slate-300 text-sm font-medium transition-colors"
+            className="admin-button flex-1 py-2.5 border rounded-xl text-slate-300 text-sm font-medium transition-colors"
           >
             Cancel
           </button>
           <button
             type="submit"
             form="manage-user-form"
-            className="flex-1 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-xl font-semibold text-white text-sm transition-all shadow-lg shadow-purple-600/20 active:scale-[0.98]"
+            className="admin-button admin-button-primary flex-1 py-2.5 rounded-xl font-semibold text-white text-sm transition-all active:scale-[0.98]"
           >
             Save Changes
           </button>

@@ -4473,6 +4473,19 @@ def admin_create_user(admin):
     if User.query.filter(db.or_(db.func.lower(User.email) == data['email'],
                                 db.func.lower(User.username) == data['email'])).first():
         return jsonify({"error": "Email already exists"}), 400
+    section_ids = data.get('section_ids', [])
+    if not isinstance(section_ids, list) or any(type(sid) is not int or sid <= 0 for sid in section_ids):
+        return jsonify({"error": "Select valid class codes."}), 400
+    if section_ids and role != 'student':
+        return jsonify({"error": "Only students can be enrolled during account creation."}), 400
+    section_ids = set(section_ids)
+    if section_ids:
+        sections = SubjectSection.query.filter(SubjectSection.id.in_(section_ids)).all()
+        if len(sections) != len(section_ids) or any(not section.is_active for section in sections):
+            return jsonify({"error": "One or more selected class codes no longer exist or are inactive."}), 400
+        for section in sections:
+            if subject_out_of_scope(db.session.get(Subject, section.subject_id)):
+                return jsonify({"error": f"Class code {section.section_no}: {OUT_OF_SCOPE_MSG}"}), 400
     new_user = User(
         username=data['username'],
         email=data['email'],
@@ -4482,24 +4495,15 @@ def admin_create_user(admin):
         must_change_password=True,          # the admin knows this password: replace at first sign-in
         xp=0, level=1
     )
-    db.session.add(new_user)
-    db.session.flush()
-    if data.get('section_ids') and data['role'] == 'student':
-        for sid in data['section_ids']:
-            section = SubjectSection.query.get(int(sid))
-            if section and subject_out_of_scope(Subject.query.get(section.subject_id)):
-                db.session.rollback()
-                return jsonify({"error": f"Class code {section.section_no}: {OUT_OF_SCOPE_MSG}"}), 400
-            if section:
-                existing = IrregularEnrollment.query.filter_by(
-                    student_id=new_user.id, section_id=int(sid)
-                ).first()
-                if not existing:
-                    db.session.add(IrregularEnrollment(
-                        student_id=new_user.id,
-                        section_id=int(sid)
-                    ))
-    db.session.commit()
+    try:
+        db.session.add(new_user)
+        db.session.flush()
+        for sid in section_ids:
+            db.session.add(IrregularEnrollment(student_id=new_user.id, section_id=sid))
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({"error": "The account or class enrollment could not be saved. Check for a duplicate account or a changed class code."}), 409
     log_admin_action(admin.id, "USER_CREATED",
         f"Created {data['role']} account: {data['username']} ({data['email']})",
         target_id=new_user.id)
@@ -5272,8 +5276,13 @@ def admin_generate_report(admin):
     end = request.args.get('end')
 
     q = Submission.query
-    if start: q = q.filter(Submission.submitted_at >= datetime.fromisoformat(start))
-    if end: q = q.filter(Submission.submitted_at <= datetime.fromisoformat(end))
+    try:
+        if start:
+            q = q.filter(Submission.submitted_at >= datetime.fromisoformat(start))
+        if end:
+            q = q.filter(Submission.submitted_at <= datetime.fromisoformat(end))
+    except ValueError:
+        return jsonify({"error": "Use ISO dates for the report start and end."}), 400
     subs = q.all()
 
     if fmt == 'csv':
@@ -5344,8 +5353,8 @@ def build_backup_sql(tables_to_export, who_label):
                 val_list = ', '.join(_sql_literal(row._mapping[c]) for c in columns)
                 buf.write(f"INSERT INTO `{table.name}` ({col_list}) VALUES ({val_list});\n")
             buf.write("\n")
-        except Exception as e:
-            buf.write(f"-- ERROR exporting {table.name}: {e}\n\n")
+        except Exception as exc:
+            raise RuntimeError(f"Could not export table {table.name}") from exc
 
     buf.write("SET FOREIGN_KEY_CHECKS=1;\n")
     buf.write(f"-- End of backup\n")
@@ -5368,22 +5377,31 @@ def admin_backup_database(admin):
     to mysqldump and stream the result; this pure-Python implementation
     works without mysqldump and avoids extra OS dependencies.
     """
-    import io
-
-    data = request.get_json(silent=True) or {}
+    data = request.get_json(silent=True) if request.get_data(cache=True) else {}
+    if not isinstance(data, dict):
+        return jsonify({"error": "Expected a JSON object with a tables selection."}), 400
     tables_param = data.get('tables', 'all')
 
     # ── Resolve which tables to export ────────────────────────────────
     # Every table the application defines is included (the old list left out enrollments,
     # lessons, files, achievements earned, drafts, submission slots ... so a restore lost them).
     all_tables = list(db.metadata.sorted_tables)          # parents before children
-    if tables_param == 'all' or not isinstance(tables_param, list):
+    if tables_param == 'all':
         tables_to_export = all_tables
     else:
+        if not isinstance(tables_param, list) or not tables_param or any(not isinstance(name, str) for name in tables_param):
+            return jsonify({"error": "Select at least one valid table or choose all tables."}), 400
         wanted = set(tables_param)
         tables_to_export = [t for t in all_tables if t.name in wanted]
+        if len(tables_to_export) != len(wanted):
+            return jsonify({"error": "The selection contains an unknown table."}), 400
 
-    sql_bytes = build_backup_sql(tables_to_export, f"{admin.username} (ID {admin.id})")
+    try:
+        sql_bytes = build_backup_sql(tables_to_export, f"{admin.username} (ID {admin.id})")
+    except RuntimeError as exc:
+        db.session.rollback()
+        app.logger.error("Database export failed: %s", exc)
+        return jsonify({"error": "Could not export all requested tables. No backup file was produced."}), 500
 
     # ── Log the action ────────────────────────────────────────────────
     log_admin_action(

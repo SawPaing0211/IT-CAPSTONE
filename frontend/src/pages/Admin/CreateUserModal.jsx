@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { API_BASE } from '../../api/client'
+import { API_BASE, authFetch } from '../../api/client'
 
 import PasswordField from '../../components/PasswordField'
 
@@ -160,7 +160,17 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
   // generate a secure random password — same pool as our backend
   const generatePassword = () => {
     const pool = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$%'
-    const pw = Array.from({ length: 14 }, () => pool[Math.floor(Math.random() * pool.length)]).join('')
+    const limit = 256 - (256 % pool.length)
+    let pw
+    do {
+      pw = ''
+      while (pw.length < 14) {
+        for (const byte of crypto.getRandomValues(new Uint8Array(16))) {
+          if (byte < limit) pw += pool[byte % pool.length]
+          if (pw.length === 14) break
+        }
+      }
+    } while (!/[A-Za-z]/.test(pw) || !/\d/.test(pw))
     setForm(f => ({ ...f, password: pw }))
     setPwStrength(scorePassword(pw))
   }
@@ -181,15 +191,14 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
     if (!validate()) return
     setLoading(true)
     try {
-      const token = localStorage.getItem('token')
-      const res = await fetch(`${API}/api/admin/users`, {
+      const res = await authFetch(`${API}/api/admin/users`, {
         method:  'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           username:    form.username.trim(),
           password:    form.password,
           role:        form.role,
-          section_ids: form.section_id ? [parseInt(form.section_id)] : [],
+          section_ids: form.role === 'student' && form.section_id ? [Number(form.section_id)] : [],
         }),
       })
       const data = await res.json()
@@ -337,7 +346,7 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
           </div>
           <button
             onClick={() => { onClose(); resetForm(); resetCsv() }}
-            className="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition text-xl leading-none"
+            className="admin-button w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 transition text-xl leading-none"
           >
             ×
           </button>
@@ -522,14 +531,14 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
                   <div className="flex gap-3 pt-1">
                     <button
                       onClick={() => { onClose(); resetForm() }}
-                      className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700/80 border border-slate-700/50 rounded-xl text-white font-semibold text-sm transition"
+                      className="admin-button flex-1 py-2.5 border rounded-xl text-white font-semibold text-sm transition"
                     >
                       Cancel
                     </button>
                     <button
                       onClick={handleSubmit}
                       disabled={loading}
-                      className="flex-1 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl text-white font-bold text-sm transition shadow-lg shadow-purple-600/25 flex items-center justify-center gap-2"
+                      className="admin-button admin-button-primary flex-1 py-2.5 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl text-white font-bold text-sm transition flex items-center justify-center gap-2"
                     >
                       {loading
                         ? <><span className="animate-spin">⟳</span> Creating…</>
@@ -575,13 +584,13 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
                   <div className="flex gap-3">
                     <button
                       onClick={resetForm}
-                      className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700/80 border border-slate-700/50 rounded-xl text-slate-300 font-semibold text-sm transition"
+                      className="admin-button flex-1 py-2.5 border rounded-xl text-slate-300 font-semibold text-sm transition"
                     >
                       + Create Another
                     </button>
                     <button
                       onClick={() => { onSuccess(); resetForm() }}
-                      className="flex-1 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-xl text-white font-bold text-sm transition"
+                      className="admin-button admin-button-primary flex-1 py-2.5 rounded-xl text-white font-bold text-sm transition"
                     >
                       Done
                     </button>
@@ -676,7 +685,7 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
                   {/* download sample template */}
                   <button
                     onClick={downloadSample}
-                    className="w-full py-2.5 bg-slate-800 hover:bg-slate-700/80 border border-slate-700/50 rounded-xl text-slate-300 text-sm font-semibold transition flex items-center justify-center gap-2"
+                    className="admin-button w-full py-2.5 border rounded-xl text-slate-300 text-sm font-semibold transition flex items-center justify-center gap-2"
                   >
                     <span>⬇️</span> Download Sample Template
                   </button>
@@ -738,13 +747,13 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
                   <div className="flex gap-3">
                     <button
                       onClick={resetCsv}
-                      className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700/80 border border-slate-700/50 rounded-xl text-white font-semibold text-sm transition"
+                      className="admin-button flex-1 py-2.5 border rounded-xl text-white font-semibold text-sm transition"
                     >
                       ← Back
                     </button>
                     <button
                       onClick={handleCsvUpload}
-                      className="flex-1 py-2.5 bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 rounded-xl text-white font-black text-sm transition shadow-lg shadow-emerald-600/25 flex items-center justify-center gap-2"
+                      className="admin-button admin-button-primary flex-1 py-2.5 rounded-xl text-white font-black text-sm transition flex items-center justify-center gap-2"
                     >
                       📤 Upload {csvParsed.rows.length} Rows
                     </button>
@@ -805,7 +814,7 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
                       </div>
                       <button
                         onClick={downloadCredentials}
-                        className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 rounded-lg text-white text-xs font-bold transition flex-shrink-0"
+                        className="admin-button admin-button-primary px-3 py-1.5 rounded-lg text-white text-xs font-bold transition flex-shrink-0"
                       >
                         ⬇️ Download
                       </button>
@@ -815,13 +824,13 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
                   <div className="flex gap-3">
                     <button
                       onClick={resetCsv}
-                      className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700/80 border border-slate-700/50 rounded-xl text-slate-300 font-semibold text-sm transition"
+                      className="admin-button flex-1 py-2.5 border rounded-xl text-slate-300 font-semibold text-sm transition"
                     >
                       Upload Another
                     </button>
                     <button
                       onClick={() => { onSuccess?.(); resetCsv() }}
-                      className="flex-1 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-xl text-white font-black text-sm transition"
+                      className="admin-button admin-button-primary flex-1 py-2.5 rounded-xl text-white font-black text-sm transition"
                     >
                       Done
                     </button>

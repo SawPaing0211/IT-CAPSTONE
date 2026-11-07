@@ -111,16 +111,15 @@ export default function UserManagement() {
     }
     setAddUserLoading(true)
     try {
-      const token = localStorage.getItem('token')
       const payload = {
         username: addUserForm.username,
         password: addUserForm.password,
         role: addUserForm.role,
-        section_ids: addUserForm.section_id ? [parseInt(addUserForm.section_id)] : []
+        section_ids: addUserForm.role === 'student' && addUserForm.section_id ? [Number(addUserForm.section_id)] : []
       }
-      const res = await fetch(`${API_BASE}/api/admin/users`, {
+      const res = await authFetch(`${API_BASE}/api/admin/users`, {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       })
       const data = await res.json()
@@ -191,18 +190,11 @@ export default function UserManagement() {
   // Send the edited user fields to the server
   const handleUpdateUser = async (userId, updates) => {
     try {
-      const token = localStorage.getItem('token')
-      const res = await fetch(`${API_BASE}/api/admin/users/${userId}`, {
+      const res = await authFetch(`${API_BASE}/api/admin/users/${userId}`, {
         method: 'PUT',
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updates)
       })
-      if (res.status === 401) {
-        showToast('Session expired — logging you out...', 'error')
-        localStorage.removeItem('token')
-        setTimeout(() => { window.location.href = '/' }, 1200)
-        return
-      }
       if (res.ok) {
         const data = await res.json()
         await fetchUsers()
@@ -242,10 +234,8 @@ export default function UserManagement() {
   const performDeleteUser = async (userId) => {
     setConfirmLoading(true)
     try {
-      const token = localStorage.getItem('token')
-      const res = await fetch(`${API_BASE}/api/admin/users/${userId}`, {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}` }
+      const res = await authFetch(`${API_BASE}/api/admin/users/${userId}`, {
+        method: 'DELETE'
       })
       if (res.ok) { await fetchUsers(); showToast('User deleted successfully!') }
       else { const error = await res.json(); showToast(`Failed to delete user: ${error.error}`, 'error') }
@@ -277,10 +267,8 @@ export default function UserManagement() {
   const performBulkDeleteStudents = async () => {
     setConfirmLoading(true)
     try {
-      const token = localStorage.getItem('token')
-      const res = await fetch(`${API_BASE}/api/admin/students/bulk-delete`, {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}` }
+      const res = await authFetch(`${API_BASE}/api/admin/students/bulk-delete`, {
+        method: 'DELETE'
       })
       if (res.ok) {
         const data = await res.json()
@@ -303,10 +291,8 @@ export default function UserManagement() {
   // Unlock a user account that was locked after failed login attempts
   const handleUnlockUser = async (userId, username) => {
     try {
-      const token = localStorage.getItem('token')
-      const res = await fetch(`${API_BASE}/api/admin/users/${userId}/unlock`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` }
+      const res = await authFetch(`${API_BASE}/api/admin/users/${userId}/unlock`, {
+        method: 'POST'
       })
       if (res.ok) { await fetchUsers(); showToast(`Account "${username}" has been unlocked.`) }
       else { const err = await res.json(); showToast(`Failed: ${err.error}`, 'error') }
@@ -371,14 +357,13 @@ export default function UserManagement() {
           {/* Header Actions */}
           <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
             <div className="flex gap-3 flex-wrap">
-              {/* Download a CSV report of all users */}
               <button
                 onClick={async () => {
-                  const token = localStorage.getItem('token')
-                  const res = await fetch(`${API_BASE}/api/admin/reports?format=csv`, {
-                    headers: { 'Authorization': `Bearer ${token}` }
-                  })
-                  if (res.ok) {
+                  try {
+                    const res = await authFetch(`${API_BASE}/api/admin/reports?format=csv`)
+                    if (!res.ok || !res.headers.get('Content-Type')?.startsWith('text/csv')) {
+                      throw new Error('The server did not return a submission CSV.')
+                    }
                     const blob = await res.blob()
                     const url = URL.createObjectURL(blob)
                     const a = document.createElement('a')
@@ -386,21 +371,23 @@ export default function UserManagement() {
                     a.download = `submissions_report_${new Date().toISOString().split('T')[0]}.csv`
                     a.click()
                     URL.revokeObjectURL(url)
+                  } catch {
+                    showToast('Could not export submissions. Please try again.', 'error')
                   }
                 }}
-                className="px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2 transition hover:opacity-85 hover:brightness-110 bg-white/5 border border-white/10 text-slate-300"
+                className="admin-button px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2 transition border text-slate-300"
               >
                 <Icon.Download size={14} /> Export submission CSV
               </button>
               <button
                 onClick={() => setCsvModal(true)}
-                className="px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2 transition hover:opacity-85 hover:brightness-110 bg-green-600/15 border border-green-400/30 text-green-400"
+                className="admin-button px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2 transition border text-green-400"
               >
-                <Icon.Upload size={14} /> Upload CSV
+                <Icon.Upload size={16} /> Bulk Enrollment Upload
               </button>
               <button
                 onClick={() => setAddUserModal(true)}
-                className="px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2 transition hover:opacity-85 hover:brightness-110 bg-violet-700 hover:bg-violet-600 text-white"
+                className="admin-button admin-button-primary px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2 transition text-white"
               >
                 <Icon.Users size={14} /> Add User
               </button>
@@ -408,7 +395,7 @@ export default function UserManagement() {
                 onClick={handleBulkDeleteStudents}
                 disabled={hasFilters || loading || !!usersError || groupedUsers.student.length === 0}
                 title={hasFilters ? 'Clear filters to access the global delete action' : undefined}
-                className="px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2 transition hover:opacity-85 hover:brightness-110 bg-red-600/15 border border-red-500/40 text-red-400 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:opacity-40"
+                className="admin-button admin-button-danger px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2 transition border text-red-400 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:opacity-40"
               >
                 🗑️ Delete All Students
               </button>
@@ -544,7 +531,6 @@ export default function UserManagement() {
           )}
           {csvModal && (
             <UploadCSVModal
-              sections={sections}
               onClose={() => setCsvModal(false)}
               onSuccess={() => { setCsvModal(false); fetchUsers() }}
             />
@@ -586,14 +572,14 @@ export default function UserManagement() {
                   <button
                     onClick={() => { setConfirmModal(null); setConfirmInput('') }}
                     disabled={confirmLoading}
-                    className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 rounded-lg text-slate-300 font-medium transition"
+                    className="admin-button flex-1 py-2.5 disabled:opacity-50 rounded-lg text-slate-300 font-medium transition"
                   >
                     Cancel
                   </button>
                   <button
                     onClick={confirmModal.onConfirm}
                     disabled={confirmInput !== confirmModal.requiredPhrase || confirmLoading}
-                    className="flex-1 py-2.5 bg-red-600 hover:bg-red-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg text-white font-black transition shadow-lg shadow-red-600/30 flex items-center justify-center gap-2"
+                    className="admin-button admin-button-danger flex-1 py-2.5 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg text-white font-black transition flex items-center justify-center gap-2"
                   >
                     {confirmLoading
                       ? <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Deleting...</>
@@ -714,14 +700,14 @@ export default function UserManagement() {
                 <div className="flex gap-3 p-6 border-t border-purple-600/30">
                   <button
                     onClick={() => { setAddUserModal(false); resetAddUserForm() }}
-                    className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 font-medium transition"
+                    className="admin-button flex-1 py-2.5 rounded-lg text-slate-300 font-medium transition"
                   >
                     Cancel
                   </button>
                   <button
                     onClick={handleAddUser}
                     disabled={addUserLoading}
-                    className="flex-1 py-2.5 bg-violet-700 hover:bg-violet-600 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-white font-semibold transition flex items-center justify-center gap-2"
+                    className="admin-button admin-button-primary flex-1 py-2.5 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-white font-semibold transition flex items-center justify-center gap-2"
                   >
                     {addUserLoading
                       ? <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Creating...</>
@@ -833,21 +819,21 @@ function UserSection({ title, icon, users, onManage, onRecover, onDelete, onUnlo
                         disabled={user.can_manage === false}
                         title={user.can_manage === false ? 'Administrator accounts are managed by the Head Admin; own-account editing is unavailable.' : undefined}
                         onClick={() => onManage(user)}
-                        className="flex-1 px-2 py-1.5 bg-purple-600 hover:bg-purple-500 rounded text-xs transition text-white font-bold whitespace-nowrap"
+                        className="admin-button admin-button-primary flex-1 px-2 py-1.5 rounded text-xs transition text-white font-bold whitespace-nowrap"
                       >
                         Manage
                       </button>
                       <button
                         disabled={user.can_manage === false}
                         onClick={() => onRecover(user)}
-                        className="flex-1 px-2 py-1.5 bg-blue-600 hover:bg-blue-500 rounded text-xs transition text-white font-bold whitespace-nowrap"
+                        className="admin-button flex-1 px-2 py-1.5 rounded text-xs transition text-white font-bold whitespace-nowrap"
                       >
                         Recover
                       </button>
                       <button
                         disabled={user.can_delete === false}
                         onClick={() => onDelete(user.id)}
-                        className="flex-1 px-2 py-1.5 bg-red-600/20 hover:bg-red-600 rounded text-xs transition text-red-400 hover:text-white font-bold border border-red-600/50 whitespace-nowrap"
+                        className="admin-button admin-button-danger flex-1 px-2 py-1.5 rounded text-xs transition text-red-400 font-bold border whitespace-nowrap"
                       >
                         Delete
                       </button>
@@ -855,7 +841,7 @@ function UserSection({ title, icon, users, onManage, onRecover, onDelete, onUnlo
                     {user.is_locked && user.can_manage !== false && (
                       <button
                         onClick={() => onUnlock(user.id, user.username)}
-                        className="w-full px-2 py-1.5 bg-orange-600 hover:bg-orange-500 rounded text-xs transition text-white font-black whitespace-nowrap flex items-center justify-center gap-1"
+                        className="admin-button w-full px-2 text-xs font-semibold flex items-center justify-center gap-1"
                       >
                         🔓 Unlock Account
                       </button>

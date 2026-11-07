@@ -175,7 +175,7 @@ export default function SystemSettingsModal({ onClose }) {
           </div>
           <div className="flex items-center gap-2">
             {dirty && <span className="text-amber-400 text-xs font-semibold px-2 py-0.5 bg-amber-400/10 border border-amber-400/30 rounded-full animate-pulse">Unsaved changes</span>}
-            <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition text-lg">×</button>
+            <button onClick={onClose} className="admin-button w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 transition text-lg">×</button>
           </div>
         </div>
 
@@ -268,9 +268,9 @@ export default function SystemSettingsModal({ onClose }) {
         </div>
 
         <div className="px-6 py-4 border-t border-slate-800 flex items-center justify-end gap-3 bg-slate-900 flex-shrink-0">
-          <button onClick={onClose} className="px-5 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-white font-bold transition text-sm">Close</button>
+          <button onClick={onClose} className="admin-button px-5 py-2 rounded-lg text-white font-bold transition text-sm">Close</button>
           <button onClick={handleSave} disabled={saving || !dirty}
-            className="px-6 py-2 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 disabled:opacity-40 rounded-lg text-white font-bold transition text-sm flex items-center gap-2">
+            className="admin-button admin-button-primary px-6 py-2 disabled:opacity-40 rounded-lg text-white font-bold transition text-sm flex items-center gap-2">
             {saving ? <><IconRotateCcw className="w-4 h-4 animate-spin" /> Saving…</> : <><IconSave className="w-4 h-4" /> Save maintenance flag</>}
           </button>
         </div>

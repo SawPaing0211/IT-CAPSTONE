@@ -1,3 +1,5 @@
+import partyShield from '../../assets/instructor/quest-party-shield.png'
+import courseBook from '../../assets/courses/course-book.webp'
 import { useState, useEffect, useCallback } from 'react'
 import CreateUserModal from './CreateUserModal'
 import BackupDatabaseModal from './BackupDatabaseModal'
@@ -368,14 +370,14 @@ export default function DashboardOverview({ onNavigate, stats, loading, healthEr
             </div>
             <div className="grid grid-cols-2 gap-2 p-3">
               <ActionBtn
-                icon="👤"
+                icon={<img src={partyShield} alt="" className="size-7 object-contain" />}
                 label="Create user"
                 sub="Student / instructor"
                 color="blue"
                 onClick={() => setShowCreateUser(true)}
               />
               <ActionBtn
-                icon="🗂️"
+                icon={<img src={courseBook} alt="" className="size-7 object-contain" />}
                 label="Class codes"
                 sub="Sections & enrollment"
                 color="purple"
@@ -537,13 +539,6 @@ function StatusRow({ label, value, ok }) {
 
 // Quick action button
 function ActionBtn({ icon, label, sub, color, onClick }) {
-  const palette = {
-    blue:   'hover:bg-blue-900/20 hover:border-blue-700/40 group-hover:bg-blue-900/20',
-    purple: 'hover:bg-purple-900/20 hover:border-purple-700/40',
-    green:  'hover:bg-emerald-900/20 hover:border-emerald-700/40',
-    orange: 'hover:bg-amber-900/20 hover:border-amber-700/40',
-  }[color] ?? ''
-
   const iconBg = {
     blue:   'bg-blue-900/30',
     purple: 'bg-purple-900/30',
@@ -554,16 +549,15 @@ function ActionBtn({ icon, label, sub, color, onClick }) {
   return (
     <button
       onClick={onClick}
-      className={`group flex items-center gap-2.5 p-3 rounded-xl border border-slate-800/60
-                  transition-all duration-150 text-left w-full ${palette}`}
+      className="admin-button group flex w-full items-center gap-2.5 p-3 text-left"
     >
       <div className={`w-8 h-8 ${iconBg} rounded-lg flex items-center justify-center text-base flex-shrink-0
                        group-hover:scale-105 transition-transform duration-150`}>
         {icon}
       </div>
       <div className="min-w-0">
-        <p className="text-xs font-semibold text-slate-300 truncate">{label}</p>
-        <p className="text-[10px] text-slate-600 truncate">{sub}</p>
+        <p className="text-sm font-semibold text-amber-100">{label}</p>
+        <p className="text-xs text-slate-300">{sub}</p>
       </div>
     </button>
   )

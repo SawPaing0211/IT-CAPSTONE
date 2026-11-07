@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react'
-import { API_BASE } from '../../api/client'
+import { API_BASE, authFetch } from '../../api/client'
 
 // our backend base url — change this if we ever move to prod
 const API = API_BASE
@@ -18,21 +18,6 @@ const TABLES = [
   { key: 'announcements',       label: 'Announcements', icon: '📢', desc: 'Instructor announcements'            },
   { key: 'system_config',       label: 'System Config', icon: '⚙️', desc: 'Platform configuration keys'        },
 ]
-
-// these are the fake progress steps we animate while the real request runs
-// purely cosmetic so it doesn't feel like nothing is happening
-const PROGRESS_STEPS = [
-  { label: 'Connecting to database…',         pct: 12  },
-  { label: 'Locking tables for consistency…', pct: 28  },
-  { label: 'Exporting schema definitions…',   pct: 44  },
-  { label: 'Dumping table data…',             pct: 65  },
-  { label: 'Compressing backup file…',        pct: 82  },
-  { label: 'Verifying data integrity…',       pct: 94  },
-  { label: 'Finalising…',                     pct: 100 },
-]
-
-// just a tiny helper so we don't have to write new Promise everywhere
-const delay = (ms) => new Promise(r => setTimeout(r, ms))
 
 // ── checkbox row for each table in the selective list ────────────────────────
 function TableRow({ table, checked, onToggle }) {
@@ -87,9 +72,6 @@ export default function BackupDatabaseModal({ onClose }) {
   // controls which screen we're showing: idle → running → done or error
   const [stage, setStage] = useState('idle')
 
-  // progress bar percentage and the current step label
-  const [progress,  setProgress]  = useState(0)
-  const [stepLabel, setStepLabel] = useState('')
 
   // we store the backup details here after success to show in the result card
   const [result,   setResult]   = useState(null)
@@ -113,23 +95,11 @@ export default function BackupDatabaseModal({ onClose }) {
     )
   }
 
-  // this runs the fake progress animation AND the real api call at the same time
-  // we use Promise.all so both have to finish before we move to the done screen
   const runBackup = async () => {
     if (mode === 'selective' && selectedTables.length === 0) return
 
     setStage('running')
-    setProgress(0)
     setErrorMsg('')
-
-    // animate the steps — purely cosmetic while the real request runs in background
-    const animateSteps = async () => {
-      for (const step of PROGRESS_STEPS) {
-        setStepLabel(step.label)
-        await delay(460)
-        setProgress(step.pct)
-      }
-    }
 
     // send 'all' for full backup or just the selected keys for selective
     const payload = {
@@ -137,21 +107,11 @@ export default function BackupDatabaseModal({ onClose }) {
     }
 
     try {
-      // using 'token' here — that's what our login flow saves it as in localStorage
-      const token = localStorage.getItem('token')
-
-      // run animation and fetch at the same time — animation usually finishes first
-      const [, res] = await Promise.all([
-        animateSteps(),
-        fetch(`${API}/api/admin/backup`, {
-          method:  'POST',
-          headers: {
-            Authorization:  `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(payload),
-        }),
-      ])
+      const res = await authFetch(`${API}/api/admin/backup`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
 
       // backend returned a non-ok status — read the error message and throw
       if (!res.ok) {
@@ -160,7 +120,11 @@ export default function BackupDatabaseModal({ onClose }) {
       }
 
       // convert the response body into a blob so we can make a download link
+      if (res.headers.get('Content-Type')?.split(';')[0].trim() !== 'application/sql') {
+        throw new Error('The server did not return a SQL export.')
+      }
       const blob = await res.blob()
+      if (!blob.size) throw new Error('The server returned an empty export.')
       const url  = URL.createObjectURL(blob)
       blobUrlRef.current = url // store it here so the download button can use it
 
@@ -173,7 +137,7 @@ export default function BackupDatabaseModal({ onClose }) {
           year: 'numeric', month: 'long', day: 'numeric',
           hour: '2-digit', minute: '2-digit',
         }),
-        tableCount: mode === 'full' ? TABLES.length : selectedTables.length,
+        tableScope: mode === 'full' ? 'All application tables' : `${selectedTables.length} selected tables`,
         // show a human-friendly size label (B / KB / MB)
         sizeLabel: blob.size < 1024
           ? `${blob.size} B`
@@ -251,7 +215,7 @@ export default function BackupDatabaseModal({ onClose }) {
           {stage !== 'running' && (
             <button
               onClick={handleClose}
-              className="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition text-xl leading-none"
+              className="admin-button w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 transition text-xl leading-none"
               aria-label="Close modal"
             >
               ×
@@ -285,7 +249,7 @@ export default function BackupDatabaseModal({ onClose }) {
                       Full Backup
                     </p>
                     <p className={`text-xs mt-0.5 ${mode === 'full' ? 'text-emerald-300/70' : 'text-slate-500'}`}>
-                      All {TABLES.length} tables included
+                      All application tables
                     </p>
                   </button>
 
@@ -362,7 +326,7 @@ export default function BackupDatabaseModal({ onClose }) {
               <div className="flex gap-3 pt-1">
                 <button
                   onClick={handleClose}
-                  className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700/80 border border-slate-700/50 rounded-xl text-white font-semibold text-sm transition"
+                  className="admin-button flex-1 py-2.5 border rounded-xl text-white font-semibold text-sm transition"
                 >
                   Cancel
                 </button>
@@ -370,7 +334,7 @@ export default function BackupDatabaseModal({ onClose }) {
                   onClick={runBackup}
                   // disable if selective mode has nothing selected
                   disabled={mode === 'selective' && selectedTables.length === 0}
-                  className="flex-1 py-2.5 bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl text-white font-bold text-sm transition shadow-lg shadow-emerald-700/30 flex items-center justify-center gap-2"
+                  className="admin-button admin-button-primary flex-1 py-2.5 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl text-white font-bold text-sm transition flex items-center justify-center gap-2"
                 >
                   <span>💾</span> Start Backup
                 </button>
@@ -394,21 +358,7 @@ export default function BackupDatabaseModal({ onClose }) {
 
               <div>
                 <p className="text-white font-bold text-base">Backup in Progress</p>
-                {/* step label updates as the animation runs */}
-                <p className="text-slate-400 text-sm mt-1 min-h-[20px]">{stepLabel}</p>
-              </div>
-
-              {/* progress bar */}
-              <div className="w-full bg-slate-800/80 rounded-full h-2.5 overflow-hidden">
-                <div
-                  className="bg-gradient-to-r from-emerald-500 to-green-400 h-full rounded-full transition-all duration-500 ease-out"
-                  style={{ width: `${progress}%` }}
-                />
-              </div>
-
-              <div className="flex items-center justify-between text-xs px-1">
-                <span className="text-slate-600 truncate mr-2">{stepLabel}</span>
-                <span className="text-emerald-400 font-mono font-bold flex-shrink-0">{progress}%</span>
+                <p className="text-slate-400 text-sm mt-1" role="status">Waiting for the SQL export…</p>
               </div>
 
               <p className="text-slate-600 text-xs">
@@ -426,8 +376,8 @@ export default function BackupDatabaseModal({ onClose }) {
                 <div className="w-16 h-16 mx-auto bg-emerald-600/15 border-2 border-emerald-500/40 rounded-full flex items-center justify-center text-3xl">
                   ✅
                 </div>
-                <h3 className="text-lg font-black text-white">Backup Complete!</h3>
-                <p className="text-slate-400 text-xs">Your database was exported successfully.</p>
+                <h3 className="text-lg font-black text-white">SQL export ready</h3>
+                <p className="text-slate-400 text-xs">This file contains table data. Uploaded lesson files are stored separately.</p>
               </div>
 
               {/* result detail card */}
@@ -436,14 +386,14 @@ export default function BackupDatabaseModal({ onClose }) {
                   <span className="font-mono text-[11px] text-emerald-300 break-all">{result.filename}</span>
                 </ResultRow>
                 <ResultRow icon="📅" label="Generated">{result.timestamp}</ResultRow>
-                <ResultRow icon="📊" label="Tables">{result.tableCount} tables</ResultRow>
+                <ResultRow icon="📊" label="Tables">{result.tableScope}</ResultRow>
                 <ResultRow icon="💽" label="File size">{result.sizeLabel}</ResultRow>
               </div>
 
               {/* this is what they actually want — download the .sql file */}
               <button
                 onClick={downloadFile}
-                className="w-full py-3 bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 rounded-xl text-white font-bold text-sm transition shadow-lg shadow-emerald-700/30 flex items-center justify-center gap-2"
+                className="admin-button admin-button-primary w-full py-3 rounded-xl text-white font-bold text-sm transition flex items-center justify-center gap-2"
               >
                 <span>⬇️</span> Download Backup File
               </button>
@@ -452,13 +402,13 @@ export default function BackupDatabaseModal({ onClose }) {
               <div className="flex gap-3">
                 <button
                   onClick={handleReset}
-                  className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700/80 border border-slate-700/50 rounded-xl text-slate-300 font-semibold text-sm transition"
+                  className="admin-button flex-1 py-2.5 border rounded-xl text-slate-300 font-semibold text-sm transition"
                 >
                   ↩ New Backup
                 </button>
                 <button
                   onClick={handleClose}
-                  className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700/80 border border-slate-700/50 rounded-xl text-slate-300 font-semibold text-sm transition"
+                  className="admin-button flex-1 py-2.5 border rounded-xl text-slate-300 font-semibold text-sm transition"
                 >
                   Close
                 </button>
@@ -492,13 +442,13 @@ export default function BackupDatabaseModal({ onClose }) {
               <div className="flex gap-3">
                 <button
                   onClick={handleReset}
-                  className="flex-1 py-2.5 bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 rounded-xl text-white font-bold text-sm transition"
+                  className="admin-button admin-button-primary flex-1 py-2.5 rounded-xl text-white font-bold text-sm transition"
                 >
                   ↩ Try Again
                 </button>
                 <button
                   onClick={handleClose}
-                  className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700/80 border border-slate-700/50 rounded-xl text-slate-300 font-semibold text-sm transition"
+                  className="admin-button flex-1 py-2.5 border rounded-xl text-slate-300 font-semibold text-sm transition"
                 >
                   Close
                 </button>

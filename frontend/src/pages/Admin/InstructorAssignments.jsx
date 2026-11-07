@@ -211,7 +211,7 @@ function InstructorPicker({ value, onChange, instructors }) {
         ref={triggerRef}
         type="button"
         onClick={handleOpen}
-        className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-left flex items-center justify-between outline-none focus:border-purple-500 transition-all hover:border-slate-600"
+        className="admin-button w-full border rounded-xl px-4 py-2.5 text-sm text-left flex items-center justify-between outline-none focus:border-purple-500 transition-all"
       >
         <span className={selected ? 'text-white' : 'text-slate-500'}>
           {selected ? (selected.full_name || selected.username) : 'Select Instructor'}
@@ -315,7 +315,7 @@ function SubjectPicker({ value, onChange, subjects }) {
         ref={triggerRef}
         type="button"
         onClick={handleOpen}
-        className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-left flex items-center justify-between outline-none focus:border-purple-500 transition-all hover:border-slate-600"
+        className="admin-button w-full border rounded-xl px-4 py-2.5 text-sm text-left flex items-center justify-between outline-none focus:border-purple-500 transition-all"
       >
         <span className={selected ? 'text-white' : 'text-slate-500'}>
           {selected ? (
@@ -621,7 +621,7 @@ function AssignmentModal({ mode, formData, setFormData, instructors, subjects, a
             </div>
           </div>
           <button onClick={onCancel}
-            className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-500 hover:text-white hover:bg-slate-800 transition-colors text-sm">
+            className="admin-button w-8 h-8 flex items-center justify-center rounded-lg text-slate-500 transition-colors text-sm">
             ✕
           </button>
         </div>
@@ -684,11 +684,11 @@ function AssignmentModal({ mode, formData, setFormData, instructors, subjects, a
         {/* Cancel / Submit buttons */}
         <div className="px-6 pb-5 flex gap-3">
           <button type="button" onClick={onCancel}
-            className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl text-slate-300 text-sm font-medium transition-colors">
+            className="admin-button flex-1 py-2.5 border rounded-xl text-slate-300 text-sm font-medium transition-colors">
             Cancel
           </button>
           <button type="button" onClick={onSubmit}
-            className="flex-1 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-xl font-semibold text-white text-sm transition-all shadow-lg shadow-purple-600/20 active:scale-[0.98]">
+            className="admin-button admin-button-primary flex-1 py-2.5 rounded-xl font-semibold text-white text-sm transition-all active:scale-[0.98]">
             {isEdit ? 'Save Changes' : 'Assign Instructor'}
           </button>
         </div>
@@ -714,11 +714,11 @@ function ConfirmDialog({ message, onConfirm, onCancel }) {
         <p className="text-slate-400 text-sm text-center mb-6">{message}</p>
         <div className="flex gap-3">
           <button onClick={onCancel}
-            className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl text-slate-300 text-sm font-medium transition-colors">
+            className="admin-button flex-1 py-2.5 border rounded-xl text-slate-300 text-sm font-medium transition-colors">
             Cancel
           </button>
           <button onClick={onConfirm}
-            className="flex-1 py-2.5 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 rounded-xl text-white text-sm font-semibold transition-all shadow-lg shadow-red-600/20 active:scale-[0.98]">
+            className="admin-button admin-button-danger flex-1 py-2.5 rounded-xl text-white text-sm font-semibold transition-all active:scale-[0.98]">
             Remove
           </button>
         </div>
@@ -824,7 +824,7 @@ function InstructorCard({ group, onEdit, onDelete }) {
                   <button
                     onClick={() => onEdit(a)}
                     title={`Edit ${a.section?.section_no}`}
-                    className="px-2.5 py-1.5 bg-slate-700/60 hover:bg-purple-600/30 hover:border-purple-500/40 text-slate-400 hover:text-purple-300 rounded-lg text-xs font-medium transition-all border border-slate-700/50 flex items-center gap-1"
+                    className="admin-button px-2.5 py-1.5 text-slate-400 rounded-lg text-xs font-medium transition-all border flex items-center gap-1"
                   >
                     <span>✏</span>
                     <span className="hidden sm:inline font-mono">{a.section?.section_no}</span>
@@ -832,7 +832,7 @@ function InstructorCard({ group, onEdit, onDelete }) {
                   <button
                     onClick={() => onDelete(a)}
                     title={`Remove ${a.section?.section_no}`}
-                    className="px-2 py-1.5 bg-slate-700/60 hover:bg-red-600/20 hover:border-red-500/40 text-slate-500 hover:text-red-400 rounded-lg text-xs transition-all border border-slate-700/50"
+                    className="admin-button admin-button-danger px-2 py-1.5 text-slate-500 rounded-lg text-xs transition-all border"
                   >
                     🗑
                   </button>
@@ -1125,14 +1125,14 @@ export default function InstructorAssignments() {
           <div className="flex items-center gap-2 flex-shrink-0">
             <button
               onClick={handleRefresh}
-              className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl text-slate-300 text-sm font-medium transition-all active:scale-95"
+              className="admin-button flex items-center gap-2 px-4 py-2 border rounded-xl text-slate-300 text-sm font-medium transition-all active:scale-95"
             >
               <span className={loading ? 'animate-spin' : ''}>↻</span>
               Refresh
             </button>
             <button
               onClick={() => { setFormData(EMPTY_FORM); setShowCreate(true) }}
-              className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-xl text-white text-sm font-semibold transition-all shadow-lg shadow-purple-600/20 active:scale-95"
+              className="admin-button admin-button-primary flex items-center gap-2 px-4 py-2 rounded-xl text-white text-sm font-semibold transition-all active:scale-95"
             >
               <span className="text-base leading-none">＋</span>
               Assign Instructor

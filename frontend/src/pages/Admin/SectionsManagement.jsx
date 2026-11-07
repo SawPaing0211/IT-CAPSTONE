@@ -193,27 +193,11 @@ function Spinner({ size = 24, color = '#7c3aed' }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Tiny icon button — used in the SectionRow actions cell
 // ─────────────────────────────────────────────────────────────────────────────
-function ActionBtn({ IconComponent, color, title, onClick }) {
-  const [hov, setHov] = useState(false)
+function ActionBtn({ IconComponent, title, onClick, destructive = false }) {
   return (
-    <button
-      title={title}
-      onClick={onClick}
-      onMouseEnter={() => setHov(true)}
-      onMouseLeave={() => setHov(false)}
-      style={{
-        width: 30, height: 30, borderRadius: 8,
-        background: hov ? `${color}35` : `${color}18`,
-        border: `1px solid ${color}50`,
-        color: hov ? '#f1f5f9' : '#94a3b8',
-        cursor: 'pointer',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        transition: 'all 0.15s',
-        flexShrink: 0,
-      }}
-      aria-label={title}
-    >
-      <IconComponent size={14} color={hov ? '#f1f5f9' : color} />
+    <button type="button" title={title} aria-label={title} onClick={onClick}
+      className={`admin-button inline-flex size-10 shrink-0 items-center justify-center ${destructive ? 'admin-button-danger' : ''}`}>
+      <IconComponent size={16} color="currentColor" />
     </button>
   )
 }
@@ -489,13 +473,11 @@ function SectionFormModal({ section, subjects, onClose, onSuccess }) {
         {/* Action buttons */}
         <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.25rem' }}>
           <button onClick={onClose}
-            style={{ flex: 1, padding: '0.625rem', borderRadius: 10, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: '#cbd5e1', cursor: 'pointer', fontWeight: 600, transition: 'background 0.15s' }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.1)' }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.05)' }}>
+            className="admin-button flex-1 inline-flex items-center justify-center gap-2 px-4 text-sm font-semibold">
             Cancel
           </button>
           <button onClick={handleSubmit} disabled={loading}
-            style={{ flex: 1, padding: '0.625rem', borderRadius: 10, background: 'linear-gradient(135deg, #7c3aed, #db2777)', border: 'none', color: '#fff', cursor: loading ? 'not-allowed' : 'pointer', fontWeight: 700, opacity: loading ? 0.6 : 1, transition: 'opacity 0.15s', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+            className="admin-button admin-button-primary flex-1 inline-flex items-center justify-center gap-2 px-4 text-sm font-semibold">
             {loading ? <><Spinner size={16} color="#fff" /> Saving…</> : isEdit ? 'Save Changes' : 'Create Section'}
           </button>
         </div>
@@ -650,9 +632,9 @@ function SectionRow({ section, onStudents, onEdit, onDelete }) {
       {/* Actions — only 2 buttons now: View Students + Edit + Delete */}
       <td style={{ padding: '0.625rem 0.75rem' }}>
         <div style={{ display: 'flex', gap: 6, opacity: hovered ? 1 : 0, transition: 'opacity 0.15s' }}>
-          <ActionBtn IconComponent={Icon.Users} color="#1d4ed8" title="View enrolled students" onClick={onStudents} />
-          <ActionBtn IconComponent={Icon.Edit}  color="#7c3aed" title="Edit section"           onClick={onEdit} />
-          <ActionBtn IconComponent={Icon.Trash} color="#b91c1c" title="Delete section"         onClick={onDelete} />
+          <ActionBtn IconComponent={Icon.Users} title="View enrolled students" onClick={onStudents} />
+          <ActionBtn IconComponent={Icon.Edit}  title="Edit section"           onClick={onEdit} />
+          <ActionBtn IconComponent={Icon.Trash} destructive title="Delete section"         onClick={onDelete} />
         </div>
       </td>
     </tr>
@@ -864,11 +846,11 @@ function CSVUploadModal({ onClose, onSuccess }) {
           </button>
 
           <div style={{ display: 'flex', gap: '0.75rem' }}>
-            <button onClick={onClose} style={{ flex: 1, padding: '0.625rem', borderRadius: 10, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: '#cbd5e1', cursor: 'pointer', fontWeight: 600 }}>
+            <button onClick={onClose} className="admin-button flex-1 inline-flex items-center justify-center gap-2 px-4 text-sm font-semibold">
               Cancel
             </button>
             <button onClick={handleUpload} disabled={!file || uploading}
-              style={{ flex: 1, padding: '0.625rem', borderRadius: 10, background: 'linear-gradient(135deg, #15803d, #166534)', border: 'none', color: '#fff', cursor: file && !uploading ? 'pointer' : 'not-allowed', fontWeight: 700, opacity: !file || uploading ? 0.6 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+              className="admin-button admin-button-primary flex-1 inline-flex items-center justify-center gap-2 px-4 text-sm font-semibold">
               {uploading ? <><Spinner size={16} color="#fff" /> Uploading…</> : 'Upload CSV'}
             </button>
           </div>
@@ -937,10 +919,10 @@ function CSVUploadModal({ onClose, onSuccess }) {
             </div>
           )}
           <div style={{ display: 'flex', gap: '0.75rem' }}>
-            <button onClick={() => { setResult(null); setFile(null) }} style={{ flex: 1, padding: '0.625rem', borderRadius: 10, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: '#cbd5e1', cursor: 'pointer', fontWeight: 600 }}>
+            <button onClick={() => { setResult(null); setFile(null) }} className="admin-button flex-1 inline-flex items-center justify-center gap-2 px-4 text-sm font-semibold">
               Upload Another
             </button>
-            <button onClick={() => { onSuccess(); onClose() }} style={{ flex: 1, padding: '0.625rem', borderRadius: 10, background: 'linear-gradient(135deg, #7c3aed, #db2777)', border: 'none', color: '#fff', cursor: 'pointer', fontWeight: 700 }}>
+            <button onClick={() => { onSuccess(); onClose() }} className="admin-button admin-button-primary flex-1 inline-flex items-center justify-center gap-2 px-4 text-sm font-semibold">
               Done
             </button>
           </div>
@@ -953,22 +935,11 @@ function CSVUploadModal({ onClose, onSuccess }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // HeaderBtn — top-right action buttons
 // ─────────────────────────────────────────────────────────────────────────────
-function HeaderBtn({ icon: IconComponent, label, onClick, bg = 'rgba(255,255,255,0.05)', border = '1px solid rgba(255,255,255,0.1)', color = '#cbd5e1' }) {
-  const [hov, setHov] = useState(false)
+function HeaderBtn({ icon: IconComponent, label, onClick, tone = '' }) {
   return (
-    <button onClick={onClick}
-      onMouseEnter={() => setHov(true)}
-      onMouseLeave={() => setHov(false)}
-      style={{
-        display: 'flex', alignItems: 'center', gap: 7,
-        padding: '0.5rem 1rem', borderRadius: 10,
-        background: bg, border, color,
-        cursor: 'pointer', fontWeight: 600, fontSize: '0.875rem',
-        transition: 'opacity 0.15s, filter 0.15s',
-        opacity: hov ? 0.85 : 1,
-        filter: hov ? 'brightness(1.1)' : 'none',
-      }}>
-      <IconComponent size={14} color={color} />
+    <button type="button" onClick={onClick}
+      className={`admin-button inline-flex items-center gap-2 px-4 text-sm font-semibold ${tone}`}>
+      <IconComponent size={16} color="currentColor" />
       {label}
     </button>
   )
@@ -1140,10 +1111,10 @@ export default function ClassCodesManagement() {
           </p>
         </div>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          <HeaderBtn icon={Icon.Refresh}  label="Refresh"        onClick={fetchSections}           bg="rgba(255,255,255,0.05)" />
-          <HeaderBtn icon={Icon.Upload}   label="Upload CSV"     onClick={() => setCSVModal(true)} bg="rgba(22,163,74,0.15)"  color="#4ade80" border="1px solid rgba(74,222,128,0.3)" />
-          <HeaderBtn icon={Icon.Plus}     label="Create Section" onClick={() => setCreateModal(true)} bg="linear-gradient(135deg,#7c3aed,#db2777)" border="none" color="#fff" />
-          <HeaderBtn icon={Icon.Trash}    label="Delete All"     onClick={() => setBulkDeleteModal(true)} bg="rgba(185,28,28,0.15)" color="#f87171" border="1px solid rgba(248,113,113,0.3)" />
+          <HeaderBtn icon={Icon.Refresh}  label="Refresh"        onClick={fetchSections} />
+          <HeaderBtn icon={Icon.Upload}   label="Import Class Codes" onClick={() => setCSVModal(true)} />
+          <HeaderBtn icon={Icon.Plus}     label="Create Section" onClick={() => setCreateModal(true)} tone="admin-button-primary" />
+          <HeaderBtn icon={Icon.Trash}    label="Delete All"     onClick={() => setBulkDeleteModal(true)} tone="admin-button-danger" />
         </div>
       </div>
 
@@ -1292,14 +1263,14 @@ export default function ClassCodesManagement() {
               <button
                 onClick={() => { setBulkDeleteModal(false); setBulkDeleteInput('') }}
                 disabled={bulkDeleting}
-                style={{ flex: 1, padding: '0.625rem', borderRadius: 10, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: '#cbd5e1', cursor: 'pointer', fontWeight: 600, opacity: bulkDeleting ? 0.5 : 1 }}
+                className="admin-button flex-1 inline-flex items-center justify-center gap-2 px-4 text-sm font-semibold"
               >
                 Cancel
               </button>
               <button
                 onClick={performBulkDelete}
                 disabled={bulkDeleteInput !== 'DELETE ALL CLASS CODES' || bulkDeleting}
-                style={{ flex: 1, padding: '0.625rem', borderRadius: 10, background: 'linear-gradient(135deg, #b91c1c, #7f1d1d)', border: 'none', color: '#fff', cursor: (bulkDeleteInput !== 'DELETE ALL CLASS CODES' || bulkDeleting) ? 'not-allowed' : 'pointer', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, opacity: (bulkDeleteInput !== 'DELETE ALL CLASS CODES' || bulkDeleting) ? 0.4 : 1 }}
+                className="admin-button admin-button-danger flex-1 inline-flex items-center justify-center gap-2 px-4 text-sm font-semibold"
               >
                 {bulkDeleting
                   ? <><Spinner size={14} /> Deleting…</>
@@ -1326,13 +1297,13 @@ export default function ClassCodesManagement() {
             <div style={{ display: 'flex', gap: '0.75rem' }}>
               <button
                 onClick={() => setDeleteTarget(null)}
-                style={{ flex: 1, padding: '0.625rem', borderRadius: 10, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: '#cbd5e1', cursor: 'pointer', fontWeight: 600 }}
+                className="admin-button flex-1 inline-flex items-center justify-center gap-2 px-4 text-sm font-semibold"
               >
                 Cancel
               </button>
               <button
                 onClick={confirmDelete}
-                style={{ flex: 1, padding: '0.625rem', borderRadius: 10, background: 'linear-gradient(135deg, #b91c1c, #7f1d1d)', border: 'none', color: '#fff', cursor: 'pointer', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+                className="admin-button admin-button-danger flex-1 inline-flex items-center justify-center gap-2 px-4 text-sm font-semibold"
               >
                 <Icon.Trash size={14} color="#fff" /> Delete
               </button>

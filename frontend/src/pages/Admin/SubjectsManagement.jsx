@@ -35,6 +35,7 @@ export default function SubjectsManagement() {
   const [createError, setCreateError] = useState('')
   const createDialog = useRef(null)
   const [showEditModal, setShowEditModal] = useState(false)
+  const [savingEdit, setSavingEdit] = useState(false)
   const [editingSubject, setEditingSubject] = useState(null)
   const [editForm, setEditForm] = useState({
     internal_subject_no: '',
@@ -153,16 +154,22 @@ export default function SubjectsManagement() {
 
   // Save the edited subject details to the server
   const handleSaveEdit = async () => {
+    if (savingEdit) return
     if (!editForm.name.trim()) {
       showToast('Subject name is required', 'error')
       return
     }
+    setSavingEdit(true)
     try {
       const res = await authFetch(`${API_BASE}/api/admin/subjects/${editingSubject.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          internal_subject_no: editForm.internal_subject_no.trim() || null,
+          // An untouched blank may come from a server that omitted this field.
+          // Only send the subject number when the admin actually changes it.
+          ...(editForm.internal_subject_no.trim() !== (editingSubject.internal_subject_no || '').trim()
+            ? { internal_subject_no: editForm.internal_subject_no.trim() || null }
+            : {}),
           name: editForm.name.trim(),
           description: editForm.description.trim(),
           subject_code: editForm.subject_code.trim() || null,
@@ -172,17 +179,21 @@ export default function SubjectsManagement() {
           subject_type: editForm.subject_type,
         })
       })
-      if (res.ok) {
+      const data = await res.json().catch(() => null)
+      if (!res.ok) {
+        showToast(data?.error || `Could not save changes (HTTP ${res.status}).`, 'error')
+      } else if (data?.subject?.id === editingSubject.id) {
         setShowEditModal(false)
         setEditingSubject(null)
         await fetchSubjects()
         showToast('Subject updated successfully!')
       } else {
-        const error = await res.json()
-        showToast(error.error || 'Failed to update subject', 'error')
+        showToast('The server did not confirm the save. Refresh the subject list before trying again.', 'error')
       }
-    } catch (err) {
-      showToast('Network error. Please try again.', 'error')
+    } catch {
+      showToast('Could not reach the server or read its response. Refresh the subject list before trying again.', 'error')
+    } finally {
+      setSavingEdit(false)
     }
   }
 
@@ -269,13 +280,13 @@ export default function SubjectsManagement() {
             <div className="flex gap-3 p-6 pt-0">
               <button
                 onClick={() => setDeleteTarget(null)}
-                className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 rounded-xl text-slate-300 font-bold transition text-sm"
+                className="admin-button flex-1 py-2.5 rounded-xl text-slate-300 font-bold transition text-sm"
               >
                 Cancel
               </button>
               <button
                 onClick={confirmDeleteSubject}
-                className="flex-1 py-2.5 bg-red-600 hover:bg-red-500 rounded-xl text-white font-bold transition text-sm"
+                className="admin-button admin-button-danger flex-1 py-2.5 rounded-xl text-white font-bold transition text-sm"
               >
                 🗑️ Delete
               </button>
@@ -296,7 +307,7 @@ export default function SubjectsManagement() {
                 </div>
               </div>
               <button onClick={() => { setShowEditModal(false); setEditingSubject(null) }}
-                className="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition text-lg">✕</button>
+                className="admin-button w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 transition text-lg">✕</button>
             </div>
             <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -375,12 +386,12 @@ export default function SubjectsManagement() {
               </div>
               <div className="flex gap-3 pt-1">
                 <button onClick={() => { setShowEditModal(false); setEditingSubject(null) }}
-                  className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 rounded-xl text-white font-bold transition border border-slate-700">
+                  className="admin-button flex-1 py-2.5 rounded-xl text-white font-bold transition border">
                   Cancel
                 </button>
-                <button onClick={handleSaveEdit}
-                  className="flex-1 py-2.5 bg-violet-700 hover:bg-violet-600 rounded-xl text-white font-bold transition shadow-lg shadow-purple-600/30 flex items-center justify-center gap-2">
-                  💾 Save Changes
+                <button onClick={handleSaveEdit} disabled={savingEdit}
+                  className="admin-button admin-button-primary flex-1 py-2.5 rounded-xl text-white font-bold transition flex items-center justify-center gap-2 disabled:opacity-60">
+                  {savingEdit ? 'Saving…' : '💾 Save Changes'}
                 </button>
               </div>
             </div>
@@ -396,7 +407,7 @@ export default function SubjectsManagement() {
         </div>
         <button
           onClick={() => setShowCreateModal(true)}
-          className="px-5 py-2.5 bg-violet-700 hover:bg-violet-600 rounded-xl text-white font-bold text-sm transition shadow-lg shadow-purple-600/20 flex items-center gap-2"
+          className="admin-button admin-button-primary px-5 py-2.5 rounded-xl text-white font-bold text-sm transition flex items-center gap-2"
         >
           <span>+</span> New Subject
         </button>
@@ -604,7 +615,7 @@ export default function SubjectsManagement() {
                 <button type="button" disabled={creating} onClick={closeCreateSubject}
                   className="min-h-11 rounded-lg border border-amber-300/45 px-4 text-sm font-semibold text-amber-100 hover:bg-amber-300/10 focus-visible:outline focus-visible:outline-violet-400 disabled:opacity-50">Cancel</button>
                 <button type="submit" disabled={creating}
-                  className="font-cinzel min-h-11 rounded-lg border border-violet-300/60 bg-violet-700 px-5 text-sm font-semibold text-white hover:bg-violet-600 focus-visible:outline focus-visible:outline-amber-300 disabled:opacity-70">{creating ? 'Creating…' : 'Create Subject'}</button>
+                  className="admin-button admin-button-primary font-cinzel min-h-11 rounded-lg border px-5 text-sm font-semibold text-white focus-visible:outline focus-visible:outline-amber-300 disabled:opacity-70">{creating ? 'Creating…' : 'Create Subject'}</button>
               </div>
             </footer>
           </form>

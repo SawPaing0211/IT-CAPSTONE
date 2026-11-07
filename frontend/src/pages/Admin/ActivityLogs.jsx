@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { Fragment, useState, useEffect, useRef, useCallback } from 'react'
 import { API_BASE } from '../../api/client'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -188,7 +188,7 @@ function MultiSelect({ options, selected, onChange, placeholder }) {
     <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-2 bg-slate-900/80 border border-slate-700 hover:border-slate-500 rounded-xl px-4 py-2.5 text-sm text-white transition min-w-[200px] justify-between"
+        className="admin-button flex items-center gap-2 border rounded-xl px-4 py-2.5 text-sm text-white transition min-w-[200px] justify-between"
       >
         <span className={selected.length ? 'text-white' : 'text-slate-400'}>{label}</span>
         <span className="text-slate-500 text-xs">{open ? '▲' : '▼'}</span>
@@ -488,7 +488,7 @@ export default function ActivityLogs() {
         {activeFilterCount > 0 && (
           <button
             onClick={() => applyQuickFilter('clear')}
-            className="px-3 py-2.5 bg-slate-800 border border-slate-600 text-slate-400 hover:text-white rounded-xl text-xs transition flex items-center gap-1"
+            className="admin-button px-3 py-2.5 border text-slate-400 rounded-xl text-xs transition flex items-center gap-1"
           >
             ✕ Clear filters <span className="bg-purple-600 text-white rounded-full w-4 h-4 flex items-center justify-center text-[10px]">{activeFilterCount}</span>
           </button>
@@ -498,7 +498,7 @@ export default function ActivityLogs() {
         <div className="ml-auto flex gap-2">
           <button
             onClick={exportCSV}
-            className="px-3 py-2.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white rounded-xl text-xs font-medium transition flex items-center gap-1.5"
+            className="admin-button px-3 py-2.5 border text-slate-300 rounded-xl text-xs font-medium transition flex items-center gap-1.5"
           >
             📥 Export CSV
           </button>
@@ -555,13 +555,11 @@ export default function ActivityLogs() {
                 {logs.map(log => {
                   const isExpanded = expandedId === log.id
                   const meta = getMeta(log.action)
-                  const tc = getTierColors(meta.tier)
                   const isCritical = meta.tier === 'critical'
 
                   return (
-                    <>
+                    <Fragment key={log.id}>
                       <tr
-                        key={log.id}
                         onClick={() => setExpandedId(isExpanded ? null : log.id)}
                         className={`cursor-pointer transition-colors ${
                           isExpanded
@@ -622,7 +620,7 @@ export default function ActivityLogs() {
                       {isExpanded && (
                         <ExpandedRow key={`${log.id}-expanded`} log={log} onClose={() => setExpandedId(null)} />
                       )}
-                    </>
+                    </Fragment>
                   )
                 })}
               </tbody>
@@ -640,14 +638,14 @@ export default function ActivityLogs() {
               <button
                 onClick={() => setPage(1)}
                 disabled={page === 1}
-                className="px-2 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 rounded-lg disabled:opacity-30 disabled:cursor-not-allowed transition"
+                className="admin-button px-2 py-1.5 text-xs rounded-lg disabled:opacity-30 disabled:cursor-not-allowed transition"
               >
                 «
               </button>
               <button
                 onClick={() => setPage(p => Math.max(1, p - 1))}
                 disabled={page === 1}
-                className="px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 rounded-lg disabled:opacity-30 disabled:cursor-not-allowed transition"
+                className="admin-button px-3 py-1.5 text-xs rounded-lg disabled:opacity-30 disabled:cursor-not-allowed transition"
               >
                 Prev
               </button>
@@ -673,14 +671,14 @@ export default function ActivityLogs() {
               <button
                 onClick={() => setPage(p => Math.min(totalPages, p + 1))}
                 disabled={page === totalPages}
-                className="px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 rounded-lg disabled:opacity-30 disabled:cursor-not-allowed transition"
+                className="admin-button px-3 py-1.5 text-xs rounded-lg disabled:opacity-30 disabled:cursor-not-allowed transition"
               >
                 Next
               </button>
               <button
                 onClick={() => setPage(totalPages)}
                 disabled={page === totalPages}
-                className="px-2 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 rounded-lg disabled:opacity-30 disabled:cursor-not-allowed transition"
+                className="admin-button px-2 py-1.5 text-xs rounded-lg disabled:opacity-30 disabled:cursor-not-allowed transition"
               >
                 »
               </button>

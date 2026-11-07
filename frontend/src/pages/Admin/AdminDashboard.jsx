@@ -1,3 +1,4 @@
+import './admin-controls.css'
 import passwordEmblem from '../../assets/account-password.png'
 import exitPortal from '../../assets/account-logout.png'
 import crystal from '../../assets/landing/forge-crystal-logo.webp'
@@ -51,7 +52,6 @@ const TAB_DEFS = [
       </svg>
     ),
     description: 'Manage class codes, schedules, and enrollment',
-    contextAction: { label: 'Export Enrollment', icon: '↓' },
     // Badge = students enrolled in a section that got set to inactive.
     // They exist in the DB but can't access any content until you reactivate
     // their section. Fix it in the Class Codes tab.
@@ -66,7 +66,6 @@ const TAB_DEFS = [
       </svg>
     ),
     description: 'Manage students, instructors, and administrators',
-    contextAction: { label: 'Bulk Import', icon: '↑' },
   },
   {
     id: 'assignments',
@@ -78,7 +77,6 @@ const TAB_DEFS = [
       </svg>
     ),
     description: 'Manage instructor subject and class code assignments',
-    contextAction: { label: 'Export Report', icon: '↓' },
   },
   {
     id: 'activity',
@@ -90,7 +88,6 @@ const TAB_DEFS = [
       </svg>
     ),
     description: 'Comprehensive audit trail of all administrative actions',
-    contextAction: { label: 'Export Logs', icon: '↓' },
     // Badge = audit log entries created today (from stats.today in the API).
   },
 ]
@@ -100,7 +97,7 @@ const TIPS = [
   'Press Alt+1–5 to jump to any tab instantly.',
   'Press Ctrl+K to open the command palette for quick navigation.',
   'The Activity Log records every admin action with full timestamps.',
-  'Bulk import users from CSV via User Management → Bulk Import.',
+  'Enroll students from CSV via User Management → Bulk Enrollment Upload.',
   'Enrollment alerts appear when students are stuck in inactive sections.',
 ]
 
@@ -186,7 +183,7 @@ function CommandPalette({ open, onClose, onNavigate, tabs }) {
             <li key={tab.id}>
               <button
                 onClick={() => { onNavigate(tab.id); onClose() }}
-                className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-purple-600/20 text-left transition-colors"
+                className="admin-button w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors"
               >
                 <span className="text-purple-400 flex-shrink-0">{tab.icon}</span>
                 <div className="min-w-0">
@@ -443,6 +440,7 @@ export default function AdminDashboard({ user, onLogout }) {
   // You can't override that without a browser extension. Alt+number is free.
   useEffect(() => {
     const handler = e => {
+      if (e.target instanceof Element && e.target.closest('dialog[open]')) return
       if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
         e.preventDefault()
         setCommandOpen(true)
@@ -530,7 +528,7 @@ export default function AdminDashboard({ user, onLogout }) {
 
   // ─────────────────────────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 text-white">
+    <div className="admin-workspace min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 text-white">
 
       <CommandPalette open={commandOpen} onClose={() => setCommandOpen(false)} onNavigate={handleTabChange} tabs={tabs} />
       <ShortcutsModal open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
@@ -557,7 +555,7 @@ export default function AdminDashboard({ user, onLogout }) {
                 <button
                   onClick={() => setCommandOpen(true)}
                   aria-label="Command palette"
-                  className="w-full p-2.5 rounded-xl bg-slate-800/50 hover:bg-slate-800 border border-slate-700/50 text-slate-400 hover:text-white transition flex items-center justify-center focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  className="admin-button w-full p-2.5 rounded-xl border text-slate-400 transition flex items-center justify-center focus:outline-none focus:ring-2 focus:ring-purple-500"
                 >
                   <svg viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
                     <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" />
@@ -568,7 +566,7 @@ export default function AdminDashboard({ user, onLogout }) {
               <button
                 onClick={() => setCommandOpen(true)}
                 aria-label="Command palette"
-                className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl bg-slate-800/50 hover:bg-slate-800 border border-slate-700/50 text-slate-400 hover:text-white transition focus:outline-none focus:ring-2 focus:ring-purple-500"
+                className="admin-button w-full flex items-center gap-2.5 px-3 py-2 rounded-xl border text-slate-400 transition focus:outline-none focus:ring-2 focus:ring-purple-500"
               >
                 <svg viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 flex-shrink-0">
                   <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" />
@@ -621,7 +619,7 @@ export default function AdminDashboard({ user, onLogout }) {
               <button
                 onClick={() => setSidebarCollapsed(c => !c)}
                 aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-                className="w-full flex items-center justify-center gap-2 py-2 rounded-xl text-slate-500 hover:text-slate-300 hover:bg-slate-800/50 transition text-xs focus:outline-none focus:ring-2 focus:ring-purple-500"
+                className="admin-button w-full flex items-center justify-center gap-2 py-2 rounded-xl text-slate-500 transition text-xs focus:outline-none focus:ring-2 focus:ring-purple-500"
               >
                 <svg viewBox="0 0 20 20" fill="currentColor" className={`w-4 h-4 transition-transform duration-300 ${sidebarCollapsed ? 'rotate-0' : 'rotate-180'}`}>
                   <path fillRule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clipRule="evenodd" />
@@ -641,7 +639,7 @@ export default function AdminDashboard({ user, onLogout }) {
         >
           <div className="flex items-center justify-between px-4 py-4 border-b border-slate-800/60">
             <AdminBrand />
-            <button onClick={() => setSidebarOpen(false)} className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400" aria-label="Close sidebar">
+            <button onClick={() => setSidebarOpen(false)} className="admin-button p-1.5 rounded-lg text-slate-400" aria-label="Close sidebar">
               <svg viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
                 <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
               </svg>
@@ -651,7 +649,7 @@ export default function AdminDashboard({ user, onLogout }) {
             {tabs.map(tab => <SidebarNavItem key={tab.id} tab={tab} />)}
           </nav>
           <div className="p-4 border-t border-slate-800/60">
-            <button onClick={onLogout} className="w-full flex items-center justify-center gap-2 py-2.5 bg-red-600/20 hover:bg-red-600/30 border border-red-600/40 rounded-xl text-sm text-red-400 transition">
+            <button onClick={onLogout} className="admin-button admin-button-danger w-full flex items-center justify-center gap-2 py-2.5 border rounded-xl text-sm text-red-400 transition">
               Sign Out
             </button>
           </div>
@@ -688,7 +686,7 @@ export default function AdminDashboard({ user, onLogout }) {
         <header className="bg-slate-900/80 backdrop-blur-xl border-b border-slate-800/60 px-4 sm:px-6 py-3 flex items-center justify-between sticky top-0 z-40 gap-3" role="banner">
           <div className="flex items-center gap-3 min-w-0">
             {isMobile && (
-              <button onClick={() => setSidebarOpen(true)} className="p-2 rounded-lg hover:bg-slate-800 text-slate-400 flex-shrink-0 focus:outline-none focus:ring-2 focus:ring-purple-500" aria-label="Open sidebar">
+              <button onClick={() => setSidebarOpen(true)} className="admin-button p-2 rounded-lg text-slate-400 flex-shrink-0 focus:outline-none focus:ring-2 focus:ring-purple-500" aria-label="Open sidebar">
                 <svg viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
                   <path fillRule="evenodd" d="M3 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 10a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 15a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd" />
                 </svg>
@@ -709,7 +707,7 @@ export default function AdminDashboard({ user, onLogout }) {
               </span>
             </div>
 
-            <button onClick={() => setCommandOpen(true)} className="hidden sm:flex p-2 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition focus:outline-none focus:ring-2 focus:ring-purple-500" aria-label="Open command palette (Ctrl+K)">
+            <button onClick={() => setCommandOpen(true)} className="admin-button hidden sm:flex p-2 rounded-lg text-slate-400 transition focus:outline-none focus:ring-2 focus:ring-purple-500" aria-label="Open command palette (Ctrl+K)">
               <svg viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
                 <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" />
               </svg>
@@ -719,8 +717,9 @@ export default function AdminDashboard({ user, onLogout }) {
             {activeTabData?.contextAction && (
               <button
                 onClick={handleSync}
+                aria-label="Sync metrics"
                 disabled={syncing}
-                className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 bg-purple-600/20 hover:bg-purple-600/30 border border-purple-600/40 rounded-lg text-xs text-purple-300 font-medium transition focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:opacity-60"
+                className="admin-button hidden sm:flex items-center gap-1.5 px-3 py-1.5 border rounded-lg text-xs text-purple-300 font-medium transition focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:opacity-60"
               >
                 <span className={syncing ? 'animate-spin inline-block' : ''}>{activeTabData.contextAction.icon}</span>
                 <span className="hidden md:inline">{activeTabData.contextAction.label}</span>

@@ -1,0 +1,51 @@
+.admin-workspace .admin-button {
+  min-height: 2.5rem;
+  border: 1px solid #796443;
+  border-radius: 0.625rem;
+  background: #141a30;
+  color: #f8e3ae;
+  transition: background-color 160ms ease, border-color 160ms ease;
+}
+
+.admin-workspace .admin-button:enabled:hover {
+  border-color: #dbb877;
+  background-color: #25203c;
+}
+
+.admin-workspace .admin-button-primary {
+  border-color: #bd8cff;
+  background: linear-gradient(180deg, #8543dd, #51209b);
+  color: #fff;
+}
+
+.admin-workspace .admin-button-primary:enabled:hover {
+  border-color: #f4d08e;
+  background: linear-gradient(180deg, #914bea, #6325ac);
+}
+
+.admin-workspace .admin-button-danger {
+  border-color: #9a5065;
+  background: #321925;
+  color: #ffd3de;
+}
+
+.admin-workspace .admin-button-danger:enabled:hover {
+  border-color: #e58aa2;
+  background-color: #512435;
+}
+
+.admin-workspace button:focus-visible {
+  outline: 2px solid #e5c089;
+  outline-offset: 2px;
+}
+
+.admin-workspace .admin-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .admin-workspace .admin-button {
+    transition: none;
+  }
+}
