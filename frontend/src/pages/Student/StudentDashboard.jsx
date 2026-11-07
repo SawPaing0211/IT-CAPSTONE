@@ -20,6 +20,9 @@ import BottomNav from '../../components/BottomNav'
 import StudentLessons from './StudentLessons'
 import StudentAnnouncements from './StudentAnnouncements'
 import crystalLogo from '../../assets/landing/forge-crystal-logo.webp'
+import passwordEmblem from '../../assets/account-password.png'
+import exitPortal from '../../assets/account-logout.png'
+import '../../components/AccountPanels.css'
 
 // ─── Spell templates per language ─────────────────────────────────────────
 const SPELL_TEMPLATES = {
@@ -623,8 +626,19 @@ export default function StudentDashboard({ user, onLogout }) {
   const [courseTab, setCourseTab] = useState('lessons')
 
   const profileRef      = useRef(null)
+  const profileTriggerRef = useRef(null)
+  const profileActionRef = useRef(null)
   const notificationRef = useRef(null)
   const backgroundRef   = useRef(null)
+
+  useEffect(() => {
+    if (showProfileMenu) profileActionRef.current?.focus({ preventScroll: true })
+  }, [showProfileMenu])
+
+  const closeProfile = () => {
+    setShowProfileMenu(false)
+    profileTriggerRef.current?.focus({ preventScroll: true })
+  }
 
   // Close menus on outside click
   useEffect(() => {
@@ -1017,30 +1031,39 @@ export default function StudentDashboard({ user, onLogout }) {
           </div>
 
           <div ref={profileRef}>
-            <button onClick={() => setShowProfileMenu(!showProfileMenu)} className="flex items-center gap-2.5 pl-1.5 pr-3.5 py-1.5 bg-[#0b1326] hover:bg-slate-800/80 border border-slate-700/70 hover:border-amber-300/50 rounded-full transition group focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-300">
+            <button ref={profileTriggerRef} type="button" aria-label="Account options" aria-expanded={showProfileMenu} aria-controls={showProfileMenu ? 'student-account-panel' : undefined} onClick={() => { setShowNotifications(false); setShowProfileMenu(!showProfileMenu) }} className="flex items-center gap-2.5 pl-1.5 pr-3.5 py-1.5 bg-[#0b1326] hover:bg-slate-800/80 border border-slate-700/70 hover:border-amber-300/50 rounded-full transition group focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-300">
               <div className="w-8 h-8 bg-gradient-to-br from-violet-500 to-fuchsia-600 rounded-full flex items-center justify-center font-bold text-sm text-white shadow-lg">{(user.full_name || user.username)?.[0]?.toUpperCase() || 'U'}</div>
               <div className="hidden sm:block text-left">
                 <p className="font-semibold text-sm text-white">{user.full_name || user.username}</p>
                 <p className="text-[10px] text-slate-400">{user.username}</p>
               </div>
-              <span className="text-slate-400 group-hover:text-white transition">▼</span>
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="text-amber-200"><path d="m4 6 4 4 4-4" /></svg>
             </button>
-            <MobileSheet show={showProfileMenu} onClose={() => setShowProfileMenu(false)} widthClass="sm:w-56" anchorRef={profileRef}>
-                <div className="p-4 border-b border-purple-600/30">
-                  <p className="font-bold text-white">{user.full_name || user.username}</p>
-                  <p className="text-xs text-purple-300 font-mono mt-0.5">🎓 {user.username}</p>
-                  <p className="text-xs text-slate-400 mt-0.5 truncate">📧 {user.email}</p>
-                  <div className="mt-2 flex items-center gap-2">
-                    <span className="px-2 py-0.5 bg-purple-600/30 text-purple-300 text-xs rounded-full">Lvl {heroStats?.level || 1}</span>
-                    <span className="px-2 py-0.5 bg-yellow-600/30 text-yellow-300 text-xs rounded-full">{heroStats?.total_xp || 0} XP</span>
+            <MobileSheet show={showProfileMenu} onClose={closeProfile} widthClass="sm:w-72" anchorRef={profileRef} panelClassName="forge-account-sheet">
+                <section id="student-account-panel" aria-labelledby="student-account-name" onKeyDown={e => {
+                  if (e.key === 'Escape') {
+                    e.stopPropagation()
+                    closeProfile()
+                  }
+                }}>
+                  <div className="forge-account-identity">
+                    <h2 id="student-account-name" className="font-cinzel">{user.full_name || user.username}</h2>
+                    <p><span className="forge-account-emblem forge-account-emblem-id" aria-hidden="true" /><span>{user.username}</span></p>
+                    {user.email && <p><span className="forge-account-emblem forge-account-emblem-mail" aria-hidden="true" /><span>{user.email}</span></p>}
+                    <div className="forge-account-stats">
+                      <span>Level {heroStats?.level || 1}</span>
+                      <span>{heroStats?.total_xp || 0} XP</span>
+                    </div>
                   </div>
-                </div>
-                <div className="py-2">
-                  <button onClick={handleGoToProgress} className="w-full px-4 py-2.5 text-left text-sm text-slate-300 hover:text-white hover:bg-slate-800/80 transition flex items-center gap-3"><span>📊</span> My Progress</button>
-                  <button onClick={() => { setShowProfileMenu(false); openChangePassword() }} className="w-full px-4 py-2.5 text-left text-sm text-slate-300 hover:text-white hover:bg-slate-800/80 transition flex items-center gap-3"><span>🔑</span> Change password</button>
-                  <div className="border-t border-purple-600/30 my-2" />
-                  <button onClick={handleLogoutClick} className="w-full px-4 py-2.5 text-left text-sm text-red-400 hover:text-red-300 hover:bg-red-600/10 transition flex items-center gap-3"><span>🚪</span> Logout</button>
-                </div>
+                  <div className="forge-account-actions">
+                    <button ref={profileActionRef} type="button" onClick={handleGoToProgress}>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3 4.5 6v5.5c0 4 3 7.4 7.5 9.5 4.5-2.1 7.5-5.5 7.5-9.5V6L12 3Z"/><path d="M8.5 13.5v-2m3.5 4V8.5m3.5 5V10"/></svg>
+                      My Progress
+                    </button>
+                    <button type="button" onClick={() => { closeProfile(); openChangePassword() }}><img src={passwordEmblem} alt="" />Change password</button>
+                    <button type="button" className="forge-account-sign-out" onClick={handleLogoutClick}><img src={exitPortal} alt="" />Logout</button>
+                  </div>
+                </section>
             </MobileSheet>
           </div>
         </div>

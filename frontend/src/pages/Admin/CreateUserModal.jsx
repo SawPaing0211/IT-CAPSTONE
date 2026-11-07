@@ -1,23 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { API_BASE } from '../../api/client'
 
-// minimalist line-art eye icons for the password show/hide toggle
-function EyeIcon({ size = 18 }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
-      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-      <circle cx="12" cy="12" r="3" />
-    </svg>
-  )
-}
-function EyeOffIcon({ size = 18 }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
-      <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
-      <line x1="1" y1="1" x2="23" y2="23" />
-    </svg>
-  )
-}
+import PasswordField from '../../components/PasswordField'
 
 const API = API_BASE
 
@@ -107,7 +91,6 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
   const [errors, setErrors]               = useState({})
   const [toast, setToast]                 = useState(null)
   const [createdUser, setCreatedUser]     = useState(null)
-  const [showPassword, setShowPassword]   = useState(false)
   const [pwStrength, setPwStrength]       = useState(0)
 
   const [form, setForm] = useState({
@@ -180,7 +163,6 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
     const pw = Array.from({ length: 14 }, () => pool[Math.floor(Math.random() * pool.length)]).join('')
     setForm(f => ({ ...f, password: pw }))
     setPwStrength(scorePassword(pw))
-    setShowPassword(true)
   }
 
   // ── single user validation ────────────────────────────────────────────────
@@ -487,7 +469,7 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
                   {/* password + strength bar */}
                   <div>
                     <div className="flex items-center justify-between mb-2">
-                      <label className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">
+                      <label htmlFor="create-user-password" className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">
                         Password *
                       </label>
                       <button
@@ -497,26 +479,18 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
                         ⚡ Auto-generate
                       </button>
                     </div>
-                    <div className="relative">
-                      <input
-                        type={showPassword ? 'text' : 'password'}
-                        value={form.password}
-                        onChange={e => {
-                          setForm(f => ({ ...f, password: e.target.value }))
-                          setPwStrength(scorePassword(e.target.value))
-                        }}
-                        placeholder="Min. 8 characters"
-                        className={`${inputCls(errors.password)} pr-10 font-mono`}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowPassword(v => !v)}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition"
-                        aria-label={showPassword ? 'Hide password' : 'Show password'}
-                      >
-                        {showPassword ? <EyeOffIcon /> : <EyeIcon />}
-                      </button>
-                    </div>
+                    <PasswordField
+                      key={form.role}
+                      id="create-user-password"
+                      autoComplete="new-password"
+                      value={form.password}
+                      onChange={e => {
+                        setForm(f => ({ ...f, password: e.target.value }))
+                        setPwStrength(scorePassword(e.target.value))
+                      }}
+                      placeholder="Min. 8 characters"
+                      className={`${inputCls(errors.password)} font-mono`}
+                    />
 
                     {/* strength indicator */}
                     {form.password && (

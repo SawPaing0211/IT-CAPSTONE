@@ -7,7 +7,10 @@ import crystal from '../../assets/landing/forge-crystal-logo.webp'
 import homeIcon from '../../assets/instructor/nav-home.svg'
 import bookIcon from '../../assets/instructor/nav-book.svg'
 import trophyIcon from '../../assets/instructor/nav-trophy.svg'
+import passwordEmblem from '../../assets/account-password.png'
+import exitPortal from '../../assets/account-logout.png'
 import './InstructorRefined.css'
+import '../../components/AccountPanels.css'
 
 const menuItems = [
   { path: '/instructor', label: 'Dashboard', shortLabel: 'Home', icon: homeIcon },
@@ -18,6 +21,8 @@ const menuItems = [
 export default function InstructorDashboard({ user, onLogout }) {
   const [showAccount, setShowAccount] = useState(false)
   const accountAnchor = useRef(null)
+  const accountTrigger = useRef(null)
+  const firstAccountAction = useRef(null)
   const backgroundRef = useRef(null)
   const navigate = useNavigate()
   const { pathname } = useLocation()
@@ -58,15 +63,21 @@ export default function InstructorDashboard({ user, onLogout }) {
 
   useEffect(() => {
     if (!showAccount) return
+    firstAccountAction.current?.focus({ preventScroll: true })
     const close = event => {
       if (event.key === 'Escape') {
         setShowAccount(false)
-        accountAnchor.current?.querySelector('button')?.focus()
+        accountTrigger.current?.focus({ preventScroll: true })
       }
     }
     document.addEventListener('keydown', close)
     return () => document.removeEventListener('keydown', close)
   }, [showAccount])
+
+  const closeAccount = () => {
+    setShowAccount(false)
+    accountTrigger.current?.focus({ preventScroll: true })
+  }
 
   return (
     <div className="instructor-shell">
@@ -97,13 +108,26 @@ export default function InstructorDashboard({ user, onLogout }) {
           <div className="ir-mobile-brand"><img src={crystal} alt="" /><span>FORGE.DEV</span></div>
           <div className="ir-identity"><strong>{name}</strong><span>Instructor workspace</span></div>
           <div ref={accountAnchor}>
-            <button className="ir-account-trigger" aria-label="Open instructor account menu" aria-expanded={showAccount} onClick={() => setShowAccount(value => !value)}>{name}<span aria-hidden="true">⌄</span></button>
-            <MobileSheet show={showAccount} onClose={() => setShowAccount(false)} anchorRef={accountAnchor} widthClass="sm:w-64" panelClassName="ir-account-panel">
-              <div className="p-4 border-b border-amber-200/20"><strong>{name}</strong><p className="text-xs text-slate-300 mt-1">Instructor</p></div>
-              <div className="p-2">
-                <button className="ir-menu-option" onClick={() => { setShowAccount(false); openChangePassword() }}>Change password</button>
-                <button className="ir-menu-option" onClick={() => { setShowAccount(false); onLogout() }}>Sign out</button>
-              </div>
+            <button ref={accountTrigger} type="button" className="ir-account-trigger focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-200" aria-label="Open instructor account menu" aria-expanded={showAccount}
+              aria-controls={showAccount ? 'instructor-account-panel' : undefined} onClick={() => setShowAccount(value => !value)}>
+              {name}
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0 text-amber-200"><path d="m4 6 4 4 4-4" /></svg>
+            </button>
+            <MobileSheet show={showAccount} onClose={closeAccount} anchorRef={accountAnchor} widthClass="sm:w-72" panelClassName="forge-account-sheet">
+              <section id="instructor-account-panel" aria-labelledby="instructor-account-name">
+                <div className="forge-account-identity">
+                  <h2 id="instructor-account-name" className="font-cinzel">{name}</h2>
+                  <p><span className="forge-account-emblem forge-account-emblem-id" aria-hidden="true" />Instructor</p>
+                </div>
+                <div className="forge-account-actions">
+                  <button ref={firstAccountAction} type="button" onClick={() => { closeAccount(); openChangePassword() }}>
+                    <img src={passwordEmblem} alt="" />Change password
+                  </button>
+                  <button type="button" className="forge-account-sign-out" onClick={() => { setShowAccount(false); onLogout() }}>
+                    <img src={exitPortal} alt="" />Sign out
+                  </button>
+                </div>
+              </section>
             </MobileSheet>
           </div>
         </header>

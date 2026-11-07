@@ -31,6 +31,12 @@ import { CHANGE_PASSWORD_EVENT } from './utils/accountEvents'
 import { achievementStore } from './utils/achievementStore'
 import AchievementCelebrations from './components/AchievementCelebrations'
 
+function ProtectedRoute({ user, children, allowedRoles }) {
+  if (!user) return <Navigate to="/auth" replace />
+  if (!allowedRoles.includes(user.role)) return <Navigate to="/" replace />
+  return children
+}
+
 // student/admin sub-pages are handled inside those dashboards themselves, not routed here
 
 function AppContent() {
@@ -99,13 +105,6 @@ function AppContent() {
     navigate('/')
   }
 
-  // Protected Route Component
-  const ProtectedRoute = ({ children, allowedRoles }) => {
-    if (!user) return <Navigate to="/auth" replace />
-    if (!allowedRoles.includes(user.role)) return <Navigate to="/" replace />
-    return children
-  }
-
   if (loading) {
     return (
       <div className="min-h-screen bg-slate-950 flex items-center justify-center">
@@ -150,7 +149,7 @@ function AppContent() {
       <Route
         path="/instructor/*"
         element={
-          <ProtectedRoute allowedRoles={['instructor']}>
+          <ProtectedRoute user={user} allowedRoles={['instructor']}>
             <InstructorDashboard user={user} onLogout={handleLogout} />
           </ProtectedRoute>
         }
@@ -173,7 +172,7 @@ function AppContent() {
       <Route
         path="/student/*"
         element={
-          <ProtectedRoute allowedRoles={['student']}>
+          <ProtectedRoute user={user} allowedRoles={['student']}>
             <StudentDashboard user={user} onLogout={handleLogout} />
           </ProtectedRoute>
         }
@@ -183,7 +182,7 @@ function AppContent() {
       <Route
         path="/admin/*"
         element={
-          <ProtectedRoute allowedRoles={['administrator']}>
+          <ProtectedRoute user={user} allowedRoles={['administrator']}>
             <AdminDashboard user={user} onLogout={handleLogout} />
           </ProtectedRoute>
         }

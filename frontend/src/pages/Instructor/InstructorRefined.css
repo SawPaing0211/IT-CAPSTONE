@@ -78,7 +78,7 @@
 .ir-load-error{display:flex;justify-content:space-between;align-items:center;gap:20px;border:1px solid #f4d57b77;border-radius:12px;padding:18px 20px;background:#251a26;font-size:13px;line-height:1.6}
 .ir-load-error p{color:#e4d7c8;margin-top:4px}
 .ir-loading{font-size:13px;color:var(--ir-muted);text-align:center;padding:8px}
-.ir-filter-panel,.ir-account-panel{background:#0f1836!important;color:#f8fafc!important;border:1px solid #f4d57b55!important}
+.ir-filter-panel{background:#0f1836!important;color:#f8fafc!important;border:1px solid #f4d57b55!important}
 .ir-menu-option{display:block;min-height:44px;width:100%;border-radius:8px;padding:12px;text-align:left;color:#d7dce9;font-size:13px}
 .ir-menu-option:hover,.ir-menu-option[aria-pressed=true]{background:#35215d;color:white}
 .ir-menu-option:focus-visible{outline:2px solid #c4b5fd;outline-offset:-2px}

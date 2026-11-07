@@ -1,6 +1,8 @@
-import { useState } from 'react'
+import { useId, useLayoutEffect, useRef, useState } from 'react'
 import { API_BASE } from '../api/client'
-import crystalIcon from '../assets/landing/forge-crystal-icon.webp'
+import passwordEmblem from '../assets/account-password.png'
+import PasswordField from './PasswordField'
+import './AccountPanels.css'
 
 // Same rule the server enforces (it is the one that decides).
 const ruleError = (pw) => {
@@ -17,9 +19,31 @@ export default function ChangePasswordModal({ forced = false, onClose, onChanged
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [done, setDone] = useState(false)
+  const dialogRef = useRef(null)
+  const titleId = useId()
+  const descriptionId = useId()
+  const rulesId = useId()
+  const currentId = useId()
+  const nextId = useId()
+  const confirmId = useId()
+  const currentLabel = forced ? 'Temporary password' : 'Current password'
+
+  useLayoutEffect(() => {
+    const dialog = dialogRef.current
+    const opener = document.activeElement
+    const overflow = document.body.style.overflow
+    dialog.showModal()
+    document.body.style.overflow = 'hidden'
+    return () => {
+      dialog.close()
+      document.body.style.overflow = overflow
+      if (opener?.isConnected) opener.focus({ preventScroll: true })
+    }
+  }, [])
 
   const submit = async (e) => {
     e.preventDefault()
+    if (loading || done) return
     setError('')
     const rule = ruleError(next)
     if (rule) return setError(rule)
@@ -48,49 +72,45 @@ export default function ChangePasswordModal({ forced = false, onClose, onChanged
     }
   }
 
-  const input = 'w-full bg-slate-800 border border-slate-700 focus:border-purple-500 rounded-lg px-4 py-2.5 text-white outline-none'
-
   return (
-    <div className="fixed inset-0 bg-black/85 backdrop-blur-sm flex items-center justify-center z-[100] p-4" role="dialog" aria-modal="true">
-      <form onSubmit={submit} className="relative bg-gradient-to-b from-slate-900 to-slate-950 border border-purple-600/50 rounded-2xl w-full max-w-md p-6 space-y-4 shadow-2xl shadow-purple-950/60 overflow-hidden">
-        <div className="pointer-events-none absolute -top-16 -right-16 w-48 h-48 rounded-full bg-purple-700/20 blur-[80px]" />
-        <div className="relative flex items-center gap-3">
-          <div className="w-10 h-10 shrink-0 bg-gradient-to-br from-purple-600 to-pink-600 rounded-lg flex items-center justify-center shadow-lg shadow-purple-600/30 p-1.5">
-            <img src={crystalIcon} alt="" className="w-full h-full object-contain drop-shadow" />
-          </div>
+    <dialog ref={dialogRef} className="forge-password-dialog" aria-labelledby={titleId} aria-describedby={descriptionId}
+      onCancel={e => { e.preventDefault(); if (!forced && !loading) onClose?.() }}>
+      <form onSubmit={submit}>
+        <header className="forge-password-header">
+          <img src={passwordEmblem} alt="" />
           <div>
-            <h2 className="text-xl font-black bg-gradient-to-r from-purple-300 via-pink-300 to-purple-300 bg-clip-text text-transparent drop-shadow">{forced ? 'Choose a new password' : 'Change password'}</h2>
-            <p className="text-slate-400 text-sm mt-0.5">
+            <h2 id={titleId} className="font-cinzel">{forced ? 'Choose a new password' : 'Change password'}</h2>
+            <p id={descriptionId}>
               {forced
                 ? 'You are using a temporary password. Set your own to continue.'
                 : 'Changing it signs you out of your other devices.'}
             </p>
           </div>
+        </header>
+        <div className="forge-password-fields">
+          {error && <div role="alert" className="rounded-lg border border-red-600/40 bg-red-600/20 p-3 text-sm text-red-200">{error}</div>}
+          {done && <div role="status" className="rounded-lg border border-green-600/40 bg-green-600/20 p-3 text-sm text-green-200">Password changed.</div>}
+          <div>
+            <label htmlFor={currentId}>{currentLabel}</label>
+            <PasswordField id={currentId} visibilityLabel={currentLabel.toLowerCase()} autoComplete="current-password" value={current} onChange={e => setCurrent(e.target.value)} />
+          </div>
+          <div>
+            <label htmlFor={nextId}>New password</label>
+            <PasswordField id={nextId} visibilityLabel="new password" autoComplete="new-password" value={next} onChange={e => setNext(e.target.value)} aria-describedby={rulesId} />
+            <span id={rulesId} className="forge-password-hint">8+ characters with a letter and a number.</span>
+          </div>
+          <div>
+            <label htmlFor={confirmId}>Confirm new password</label>
+            <PasswordField id={confirmId} visibilityLabel="password confirmation" autoComplete="new-password" value={confirm} onChange={e => setConfirm(e.target.value)} />
+          </div>
         </div>
-        {error && <div role="alert" className="relative p-3 bg-red-600/20 border border-red-600/40 rounded-lg text-red-300 text-sm">{error}</div>}
-        {done && <div className="relative p-3 bg-green-600/20 border border-green-600/40 rounded-lg text-green-300 text-sm">Password changed.</div>}
-        <label className="relative block text-sm text-slate-400">{forced ? 'Temporary password' : 'Current password'}
-          <input type="password" autoComplete="current-password" value={current} onChange={e => setCurrent(e.target.value)} className={`${input} mt-1`} />
-        </label>
-        <label className="relative block text-sm text-slate-400">New password
-          <input type="password" autoComplete="new-password" value={next} onChange={e => setNext(e.target.value)} className={`${input} mt-1`} />
-          <span className="text-xs text-slate-500">8+ characters with a letter and a number.</span>
-        </label>
-        <label className="relative block text-sm text-slate-400">Confirm new password
-          <input type="password" autoComplete="new-password" value={confirm} onChange={e => setConfirm(e.target.value)} className={`${input} mt-1`} />
-        </label>
-        <div className="relative flex gap-3 pt-2">
-          {forced ? (
-            <button type="button" onClick={onLogout} className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 border border-purple-600/20 rounded-lg text-slate-300 transition">Sign out</button>
-          ) : (
-            <button type="button" onClick={onClose} className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 border border-purple-600/20 rounded-lg text-slate-300 transition">Cancel</button>
-          )}
-          <button type="submit" disabled={loading || !current || !next || !confirm}
-            className="flex-1 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 disabled:opacity-50 rounded-lg text-white font-black shadow-lg shadow-purple-600/30 transition">
+        <footer className="forge-password-actions">
+          <button type="button" disabled={loading} onClick={forced ? onLogout : onClose}>{forced ? 'Sign out' : 'Cancel'}</button>
+          <button type="submit" disabled={loading || done || !current || !next || !confirm}>
             {loading ? 'Saving…' : 'Change password'}
           </button>
-        </div>
+        </footer>
       </form>
-    </div>
+    </dialog>
   )
 }

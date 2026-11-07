@@ -10,6 +10,9 @@ import { splitAchievements, isUnavailable } from '../../../utils/achievementView
 import MedalArt from '../../../components/MedalArt'
 import MobileSheet from '../../../components/MobileSheet'
 import { API_BASE, authFetch } from '../../../api/client'
+import pythonEmblem from '../../../assets/instructor/quest-language-python.png'
+import javaEmblem from '../../../assets/instructor/quest-language-java.png'
+import csharpEmblem from '../../../assets/instructor/quest-language-csharp.png'
 
 const ico = { fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round' }
 const BookIcon = () => <svg viewBox="0 0 24 24" width="22" height="22" {...ico} aria-hidden="true"><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H11v15H5.5A1.5 1.5 0 0 0 4 20.5zM20 5.5A1.5 1.5 0 0 0 18.5 4H13v15h5.500a1.500 1.500 0 0 1 1.500 1.500z" /></svg>
@@ -102,9 +105,9 @@ export default function ProgressStats({ stats, username, fullName, onOpenQuests 
   const name = fullName || username
 
   const languages = [
-    { name: 'Python', key: 'python', dot: 'bg-emerald-400', txt: 'text-emerald-300' },
-    { name: 'Java', key: 'java', dot: 'bg-orange-400', txt: 'text-orange-300' },
-    { name: 'C#', key: 'csharp', dot: 'bg-violet-400', txt: 'text-violet-300' },
+    { name: 'Python', key: 'python', emblem: pythonEmblem, dot: 'bg-emerald-400', txt: 'text-emerald-300' },
+    { name: 'Java', key: 'java', emblem: javaEmblem, dot: 'bg-orange-400', txt: 'text-orange-300' },
+    { name: 'C#', key: 'csharp', emblem: csharpEmblem, dot: 'bg-violet-400', txt: 'text-violet-300' },
   ].map(l => {
     const total = recentSubmissions.filter(s => s.language === l.key).length
     const solved = recentSubmissions.filter(s => s.language === l.key && s.status === 'accepted').length
@@ -352,16 +355,18 @@ export default function ProgressStats({ stats, username, fullName, onOpenQuests 
           <Head>Language Skills</Head>
           <Panel className="space-y-5 p-5">
             {languages.map(l => (
-              <div key={l.key}>
-                <div className="flex items-baseline justify-between text-sm">
-                  <span className="font-bold text-white" title="Accepted submissions out of all submissions in this language">{l.name}</span>
-                  <span className={`text-xs font-bold ${l.txt}`}>{l.pct}%</span>
+              <div key={l.key} className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3">
+                <img src={l.emblem} alt="" width="40" height="40" className="h-10 w-10 object-contain" />
+                <div>
+                  <div className="flex items-baseline justify-between gap-2 text-sm">
+                    <span className="font-bold text-white" title="Accepted submissions out of all submissions in this language">{l.name}</span>
+                    <span className={`text-xs font-bold tabular-nums ${l.txt}`}>{l.pct}%</span>
+                  </div>
+                  <div className="mt-2 h-1.5 rounded-full bg-[#070b18]" aria-hidden="true">
+                    <div className={`h-full rounded-full ${l.dot}`} style={{ width: `${l.pct}%` }} />
+                  </div>
+                  <p className="mt-1 text-xs text-slate-400">{l.solved} of {l.total} {l.total === 1 ? 'submission' : 'submissions'} accepted</p>
                 </div>
-                <div className="relative mt-2 h-1.5 rounded-full bg-[#070b18]">
-                  <div className={`h-full rounded-full ${l.dot}`} style={{ width: `${Math.max(l.pct, l.total > 0 ? 2 : 0)}%` }} />
-                  {l.pct === 0 && <span className={`absolute -top-[1px] left-0 h-2 w-2 rounded-full ${l.dot}`} aria-hidden="true" />}
-                </div>
-                <p className="mt-1 text-[10px] text-slate-500">{l.solved} of {l.total} {l.total === 1 ? 'submission' : 'submissions'} accepted</p>
               </div>
             ))}
           </Panel>
