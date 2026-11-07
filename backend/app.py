@@ -5443,10 +5443,10 @@ def admin_backup_database(admin):
 @admin_required
 def admin_create_subject(admin):
     """Create a new subject with full university metadata."""
-    data = request.get_json()
+    data = request.get_json(silent=True)
 
     # ── Basic validation ───────────────────────────────────────────────
-    if not data or not data.get('name', '').strip():
+    if not isinstance(data, dict) or not isinstance(data.get('name'), str) or not data['name'].strip():
         return jsonify({"error": "Subject name is required"}), 400
 
     name = data['name'].strip()
@@ -5454,7 +5454,10 @@ def admin_create_subject(admin):
         return jsonify({"error": "Subject name must be 200 characters or fewer"}), 400
 
     # ── subject_code: alphanumeric + hyphens only, no regex needed ────
-    subject_code = data.get('subject_code', '').strip().upper() or None
+    for field in ('subject_code', 'internal_subject_no', 'description', 'department'):
+        if data.get(field) is not None and not isinstance(data[field], str):
+            return jsonify({"error": f"{field} must be text"}), 400
+    subject_code = (data.get('subject_code') or '').strip().upper() or None
     if subject_code:
         if len(subject_code) > 20:
             return jsonify({"error": "Subject code must be 20 characters or fewer"}), 400
@@ -5465,12 +5468,10 @@ def admin_create_subject(admin):
     # ── units ─────────────────────────────────────────────────────────
     units = data.get('units')
     if units is not None:
-        try:
+        if isinstance(units, str) and units in ('1', '2', '3'):
             units = int(units)
-            if units < 1 or units > 12:
-                return jsonify({"error": "Units must be between 1 and 12"}), 400
-        except (ValueError, TypeError):
-            return jsonify({"error": "Units must be a valid integer"}), 400
+        if type(units) is not int or not 1 <= units <= 3:
+            return jsonify({"error": "Units must be a whole number from 1 to 3"}), 400
 
     # ── year_level ────────────────────────────────────────────────────
     year_level = data.get('year_level')
@@ -5495,7 +5496,10 @@ def admin_create_subject(admin):
         return jsonify({"error": f"subject_type must be one of: {', '.join(sorted(allowed_types))}. Note: 'lecture' type is no longer accepted for new subjects."}), 400
 
     # ── department ────────────────────────────────────────────────────
-    department = data.get('department', '').strip() or None
+    internal_subject_no = (data.get('internal_subject_no') or '').strip() or None
+    if internal_subject_no and len(internal_subject_no) > 10:
+        return jsonify({"error": "Subject number must be 10 characters or fewer"}), 400
+    department = (data.get('department') or '').strip() or None
     if department and len(department) > 100:
         return jsonify({"error": "Department must be 100 characters or fewer"}), 400
 
@@ -5503,12 +5507,15 @@ def admin_create_subject(admin):
     existing = Subject.query.filter_by(name=name).first()
     if existing:
         return jsonify({"error": "A subject with this name already exists"}), 409
+    if subject_code and Subject.query.filter_by(subject_code=subject_code).first():
+        return jsonify({"error": f"Subject code '{subject_code}' is already in use"}), 409
 
     # ── Persist ───────────────────────────────────────────────────────
     subject = Subject(
         name=name,
-        description=data.get('description', '').strip() or None,
+        description=(data.get('description') or '').strip() or None,
         subject_code=subject_code,
+        internal_subject_no=internal_subject_no,
         units=units,
         department=department,
         year_level=year_level,
@@ -5532,6 +5539,7 @@ def admin_create_subject(admin):
             "name":         subject.name,
             "description":  subject.description,
             "subject_code": subject.subject_code,
+            "internal_subject_no": subject.internal_subject_no,
             "units":        subject.units,
             "department":   subject.department,
             "year_level":   subject.year_level,
@@ -5560,6 +5568,7 @@ def admin_get_subjects(admin):
             "name":         s.name,
             "description":  s.description,
             "subject_code": s.subject_code,
+            "internal_subject_no": s.internal_subject_no,
             "units":        s.units,
             "department":   s.department,
             "year_level":   s.year_level,
@@ -5657,7 +5666,10 @@ def admin_update_subject(admin, subject_id):
 
     # ── internal_subject_no ───────────────────────────────────────────
     if 'internal_subject_no' in data:
-        subject.internal_subject_no = data['internal_subject_no'].strip() or None
+        internal_no = data['internal_subject_no']
+        if internal_no is not None and (not isinstance(internal_no, str) or len(internal_no.strip()) > 10):
+            return jsonify({"error": "Subject number must be text of at most 10 characters"}), 400
+        subject.internal_subject_no = (internal_no or '').strip() or None
         changes.append("internal_subject_no updated")
 
     # ── description ───────────────────────────────────────────────────
@@ -5822,6 +5834,8 @@ def admin_create_instructor_assignment(admin):
     section = SubjectSection.query.get(section_id)
     if not section:
         return jsonify({"error": "Invalid section_id — Class Code not found"}), 400
+    if section.subject_id != subject.id:
+        return jsonify({"error": "Class code does not belong to the selected subject"}), 400
 
     existing = TeacherAssignment.query.filter_by(
         instructor_id=instructor_id,
@@ -5923,6 +5937,8 @@ def admin_update_instructor_assignment(admin, assignment_id):
     section = SubjectSection.query.get(section_id)
     if not section:
         return jsonify({"error": "Invalid section_id — Class Code not found"}), 400
+    if section.subject_id != subject.id:
+        return jsonify({"error": "Class code does not belong to the selected subject"}), 400
 
     old_instructor = User.query.get(assignment.instructor_id)
     old_subject = Subject.query.get(assignment.subject_id)

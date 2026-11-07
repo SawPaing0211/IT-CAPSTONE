@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react'
-import { API_BASE } from '../../api/client'
+import { useState, useEffect, useLayoutEffect, useRef } from 'react'
+import { API_BASE, authFetch } from '../../api/client'
 
 // Accent per year level so the list reads as four cohorts instead of one
 // repeated card — year is the one piece of structure every subject has.
@@ -12,11 +12,26 @@ const YEAR_ACCENT = {
 }
 const NO_YEAR_ACCENT = { grad: 'from-slate-500 to-slate-600', bar: 'bg-slate-500', border: 'border-slate-700', hoverBorder: 'hover:border-slate-500/60', text: 'text-slate-300', chip: 'bg-slate-700/40 text-slate-300 border-slate-600/40', label: 'No Year Set' }
 const accentFor = (year) => YEAR_ACCENT[year] || NO_YEAR_ACCENT
+const INITIAL_SUBJECT = { internal_subject_no: '', subject_code: '', name: '', description: '', units: '', department: '' }
+const DEPARTMENTS = [
+  ['CCIT', 'College of Computing and Information Technology (CCIT)'],
+  ['CCS', 'College of Computer Studies (CCS)'],
+  ['COE', 'College of Engineering (COE)'],
+  ['CAS', 'College of Arts & Sciences (CAS)'],
+  ['COB', 'College of Business (COB)'],
+  ['CED', 'College of Education (CED)'],
+  ['GE', 'General Education'],
+]
+const subjectField = 'block w-full min-h-11 rounded-lg border border-slate-600 bg-slate-950 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-400'
 
 export default function SubjectsManagement() {
   const [subjects, setSubjects] = useState([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
   const [showCreateModal, setShowCreateModal] = useState(false)
+  const [creating, setCreating] = useState(false)
+  const [createError, setCreateError] = useState('')
+  const createDialog = useRef(null)
   const [showEditModal, setShowEditModal] = useState(false)
   const [editingSubject, setEditingSubject] = useState(null)
   const [editForm, setEditForm] = useState({
@@ -31,16 +46,14 @@ export default function SubjectsManagement() {
   })
   const [toast, setToast] = useState(null)
   const [deleteTarget, setDeleteTarget] = useState(null) // { id, name } of the subject pending deletion
-  const [newSubject, setNewSubject] = useState({
-    internal_subject_no: '',
-    name: '',
-    description: '',
-    subject_code: '',
-    units: '',
-    department: '',
-    year_level: '1',
-    subject_type: 'lab',
-  })
+  const [newSubject, setNewSubject] = useState(INITIAL_SUBJECT)
+
+  useLayoutEffect(() => {
+    if (!showCreateModal) return
+    const dialog = createDialog.current
+    dialog.showModal()
+    return () => dialog.close()
+  }, [showCreateModal])
 
   // Load all subjects when the page mounts
   useEffect(() => {
@@ -49,35 +62,41 @@ export default function SubjectsManagement() {
 
   // Fetch the list of subjects from the server
   const fetchSubjects = async () => {
+    setLoadError('')
     try {
-      const token = localStorage.getItem('token')
-      const res = await fetch(`${API_BASE}/api/admin/subjects`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      })
-      if (res.ok) {
-        const data = await res.json()
-        setSubjects(Array.isArray(data) ? data : [])
-      }
-    } catch (err) {
-      console.error('Failed to fetch subjects:', err)
+      const res = await authFetch(`${API_BASE}/api/admin/subjects`)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const data = await res.json()
+      if (!Array.isArray(data)) throw new Error('Unexpected subject list')
+      setSubjects(data)
+    } catch {
+      setLoadError('Could not load subjects. Try again before making changes.')
     } finally {
       setLoading(false)
     }
   }
 
   // Send the new subject to the server and refresh the list
-  const handleCreateSubject = async () => {
+  const closeCreateSubject = () => {
+    setShowCreateModal(false)
+    setNewSubject(INITIAL_SUBJECT)
+    setCreateError('')
+  }
+
+  const handleCreateSubject = async (event) => {
+    event.preventDefault()
+    if (creating) return
     if (!newSubject.name.trim()) {
-      showToast('Subject name is required', 'error')
+      setCreateError('Enter a subject name.')
       return
     }
 
+    setCreating(true)
+    setCreateError('')
     try {
-      const token = localStorage.getItem('token')
-      const res = await fetch(`${API_BASE}/api/admin/subjects`, {
+      const res = await authFetch(`${API_BASE}/api/admin/subjects`, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
@@ -88,32 +107,23 @@ export default function SubjectsManagement() {
           subject_code: newSubject.subject_code.trim() || null,
           units: newSubject.units ? parseInt(newSubject.units) : null,
           department: newSubject.department,
-          year_level: newSubject.year_level ? parseInt(newSubject.year_level) : null,
-          subject_type: newSubject.subject_type,
+          year_level: 1,
+          subject_type: 'lab',
         })
       })
 
       if (res.ok) {
-        setShowCreateModal(false)
-        setNewSubject({ 
-          internal_subject_no: '',
-          name: '', 
-          description: '', 
-          subject_code: '', 
-          units: '', 
-          department: '', 
-          year_level: '1', 
-          subject_type: 'lab' 
-        })
+        closeCreateSubject()
         await fetchSubjects()
         showToast('Subject created successfully!')
       } else {
-        const error = await res.json()
-        showToast(`Failed to create subject: ${error.error}`, 'error')
+        const error = await res.json().catch(() => ({}))
+        setCreateError(error.error || 'Could not create the subject. Try again.')
       }
-    } catch (err) {
-      console.error('Failed to create subject:', err)
-      showToast('Failed to create subject', 'error')
+    } catch {
+      setCreateError('Could not create the subject. Check your connection and try again.')
+    } finally {
+      setCreating(false)
     }
   }
 
@@ -146,10 +156,9 @@ export default function SubjectsManagement() {
       return
     }
     try {
-      const token = localStorage.getItem('token')
-      const res = await fetch(`${API_BASE}/api/admin/subjects/${editingSubject.id}`, {
+      const res = await authFetch(`${API_BASE}/api/admin/subjects/${editingSubject.id}`, {
         method: 'PUT',
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           internal_subject_no: editForm.internal_subject_no.trim() || null,
           name: editForm.name.trim(),
@@ -185,10 +194,8 @@ export default function SubjectsManagement() {
   const confirmDeleteSubject = async () => {
     if (!deleteTarget) return
     try {
-      const token = localStorage.getItem('token')
-      const res = await fetch(`${API_BASE}/api/admin/subjects/${deleteTarget.id}`, {
+      const res = await authFetch(`${API_BASE}/api/admin/subjects/${deleteTarget.id}`, {
         method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}` }
       })
 
       if (res.ok) {
@@ -211,6 +218,15 @@ export default function SubjectsManagement() {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
         <div className="animate-spin rounded-full h-12 w-12 border-4 border-purple-600 border-t-transparent"></div>
+      </div>
+    )
+  }
+
+  if (loadError) {
+    return (
+      <div role="alert" className="rounded-xl border border-amber-400/35 bg-slate-900 p-5 text-slate-100">
+        <p>{loadError}</p>
+        <button type="button" className="mt-3 min-h-11 rounded-lg border border-amber-300/50 px-4 text-amber-200 focus-visible:outline focus-visible:outline-violet-400" onClick={() => { setLoading(true); fetchSubjects() }}>Retry</button>
       </div>
     )
   }
@@ -508,214 +524,75 @@ export default function SubjectsManagement() {
         </div>
       )}
 
-      {/* Create Subject Modal */}
       {showCreateModal && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-slate-900 border-2 border-purple-600/50 rounded-2xl w-full max-w-lg shadow-2xl shadow-purple-900/40 overflow-hidden">
-
-            {/* Header */}
-            <div className="bg-gradient-to-r from-purple-900/60 to-pink-900/40 px-6 py-5 border-b border-purple-600/30 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-gradient-to-br from-purple-500 to-pink-500 rounded-xl flex items-center justify-center text-xl">📚</div>
-                <div>
-                  <h2 className="text-xl font-black text-white">Create Subject</h2>
-                  <p className="text-purple-300/70 text-xs">Add a new course subject to the system</p>
-                </div>
-              </div>
-              <button
-                onClick={() => setShowCreateModal(false)}
-                className="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition text-lg"
-              >✕</button>
-            </div>
-
-            {/* Body */}
-            <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
-
-              {/* subject number, code, and name */}
-              <div className="grid grid-cols-3 gap-3">
-                {/* Internal subject number */}
-                <div>
-                  <label className="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">
-                    Subject Number
-                  </label>
-                  <input
-                    type="text"
-                    value={newSubject.internal_subject_no}
-                    onChange={(e) => setNewSubject({...newSubject, internal_subject_no: e.target.value})}
-                    placeholder="e.g., 290007"
-                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-white placeholder-slate-500 outline-none focus:border-purple-500 transition font-mono tracking-widest text-sm"
-                  />
-                  <p className="text-slate-500 text-[10px] mt-1">Internal subject ID</p>
-                </div>
-                
-                {/* Subject Code */}
-                <div>
-                  <label className="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">
-                    Subject Code
-                  </label>
-                  <input
-                    type="text"
-                    value={newSubject.subject_code}
-                    onChange={(e) => setNewSubject({...newSubject, subject_code: e.target.value.toUpperCase()})}
-                    placeholder="e.g., IT115"
-                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-white placeholder-slate-500 outline-none focus:border-purple-500 transition font-mono tracking-widest text-sm"
-                  />
-                </div>
-                
-                {/* Subject Name */}
-                <div className="col-span-1">
-                  <label className="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">
-                    Subject Name *
-                  </label>
-                  <input
-                    type="text"
-                    value={newSubject.name}
-                    onChange={(e) => setNewSubject({...newSubject, name: e.target.value})}
-                    placeholder="e.g., Intro to Computing"
-                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-white placeholder-slate-500 outline-none focus:border-purple-500 transition text-sm"
-                  />
-                </div>
-              </div>
-
-              {/* Description */}
-              <div>
-                <label className="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">
-                  Description <span className="text-slate-600 normal-case font-normal">(optional)</span>
+        <dialog
+          ref={createDialog}
+          aria-labelledby="create-subject-title"
+          aria-describedby="create-subject-description"
+          onCancel={(event) => { event.preventDefault(); if (!creating) closeCreateSubject() }}
+          className="m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-xl overflow-hidden rounded-2xl border border-amber-300/35 bg-slate-900 p-0 text-slate-100 backdrop:bg-slate-950/80"
+        >
+          <form onSubmit={handleCreateSubject} className="flex max-h-[calc(100dvh-2rem)] flex-col">
+            <header className="border-b border-amber-300/20 bg-violet-950/30 px-5 py-5 sm:px-7">
+              <h2 id="create-subject-title" className="font-cinzel text-2xl font-semibold">Create Subject</h2>
+              <p id="create-subject-description" className="mt-1 text-sm text-slate-300">Add a first-year lab subject to the course catalog.</p>
+            </header>
+            <fieldset disabled={creating} className="min-h-0 min-w-0 space-y-4 overflow-y-auto px-5 py-5 sm:px-7">
+              <label className="block space-y-2 text-sm font-medium">
+                <span>Subject name <span className="text-amber-300" aria-hidden="true">*</span></span>
+                <input className={subjectField} required maxLength={200} autoFocus value={newSubject.name}
+                  onChange={event => setNewSubject({ ...newSubject, name: event.target.value })} placeholder="e.g. Intermediate Programming" />
+              </label>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="block space-y-2 text-sm font-medium">
+                  <span>Subject number</span>
+                  <input className={subjectField} maxLength={10} value={newSubject.internal_subject_no}
+                    onChange={event => setNewSubject({ ...newSubject, internal_subject_no: event.target.value })} placeholder="e.g. 290007" />
                 </label>
-                <textarea
-                  value={newSubject.description}
-                  onChange={(e) => setNewSubject({...newSubject, description: e.target.value})}
-                  placeholder="Brief description of what this subject covers..."
-                  rows="2"
-                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white placeholder-slate-500 outline-none focus:border-purple-500 resize-none transition text-sm"
-                />
+                <label className="block space-y-2 text-sm font-medium">
+                  <span>Subject code</span>
+                  <input className={subjectField} maxLength={20} value={newSubject.subject_code}
+                    onChange={event => setNewSubject({ ...newSubject, subject_code: event.target.value.toUpperCase() })} placeholder="e.g. IT115L" />
+                </label>
               </div>
-
-              {/* Units + Year Level + Type */}
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <label className="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">Units</label>
-                  <select
-                    value={newSubject.units}
-                    onChange={(e) => setNewSubject({...newSubject, units: e.target.value})}
-                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-white outline-none focus:border-purple-500 transition text-sm"
-                  >
-                    <option value="">—</option>
-                    {[1,2,3,4,5,6].map(u => <option key={u} value={u}>{u} {u === 1 ? 'unit' : 'units'}</option>)}
+              <label className="block space-y-2 text-sm font-medium">
+                <span>Description <span className="font-normal text-slate-400">(optional)</span></span>
+                <textarea className={subjectField} rows={3} value={newSubject.description}
+                  onChange={event => setNewSubject({ ...newSubject, description: event.target.value })} />
+              </label>
+              <div className="grid gap-4 sm:grid-cols-[8rem_minmax(0,1fr)]">
+                <label className="block space-y-2 text-sm font-medium">
+                  <span>Units</span>
+                  <select className={subjectField} value={newSubject.units}
+                    onChange={event => setNewSubject({ ...newSubject, units: event.target.value })}>
+                    <option value="">Not set</option>
+                    <option value="1">1 unit</option>
+                    <option value="2">2 units</option>
+                    <option value="3">3 units</option>
                   </select>
-                </div>
-                <div>
-                  <label className="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">Curriculum Year</label>
-                  <select
-                    value={newSubject.year_level}
-                    onChange={(e) => setNewSubject({...newSubject, year_level: e.target.value})}
-                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-white outline-none focus:border-purple-500 transition text-sm"
-                  >
-                    <option value="1">First-year subject</option>
+                </label>
+                <label className="block min-w-0 space-y-2 text-sm font-medium">
+                  <span>Department / college</span>
+                  <select className={subjectField} value={newSubject.department}
+                    onChange={event => setNewSubject({ ...newSubject, department: event.target.value })}>
+                    <option value="">Select department</option>
+                    {DEPARTMENTS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                   </select>
-                </div>
-                <div>
-                  <label className="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">Type</label>
-                  {/* forge.dev is a coding platform — every subject here has
-                      to be hands-on lab work, so this is fixed, not a choice */}
-                  <div className="w-full bg-slate-800/60 border border-slate-700 rounded-xl px-3 py-2.5 text-emerald-400 text-sm font-semibold flex items-center gap-2">
-                    🧪 Lab
-                  </div>
-                  <p className="text-slate-500 text-[10px] mt-1">This platform is lab-only</p>
-                </div>
+                </label>
               </div>
-
-              {/* Department */}
-              <div>
-                <label className="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">Department / College</label>
-                <select
-                  value={newSubject.department}
-                  onChange={(e) => setNewSubject({...newSubject, department: e.target.value})}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2.5 text-white outline-none focus:border-purple-500 transition text-sm"
-                >
-                  <option value="">— Select Department —</option>
-                  <option value="CCIT">College of Computing and Information Technology (CCIT)</option>
-                  <option value="CCS">College of Computer Studies (CCS)</option>
-                  <option value="COE">College of Engineering (COE)</option>
-                  <option value="CAS">College of Arts & Sciences (CAS)</option>
-                  <option value="COB">College of Business (COB)</option>
-                  <option value="CED">College of Education (CED)</option>
-                  <option value="GE">General Education</option>
-                </select>
+              <p className="border-t border-slate-700 pt-3 text-sm text-slate-300">Curriculum year: <strong>First year</strong> <span className="mx-2 text-slate-500" aria-hidden="true">·</span> Type: <strong>Lab</strong></p>
+            </fieldset>
+            <footer className="shrink-0 border-t border-amber-300/20 bg-slate-950/50 px-5 py-4 sm:px-7">
+              {createError && <p role="alert" className="mb-3 text-sm text-rose-200">{createError}</p>}
+              <div className="flex flex-wrap justify-end gap-3">
+                <button type="button" disabled={creating} onClick={closeCreateSubject}
+                  className="min-h-11 rounded-lg border border-amber-300/45 px-4 text-sm font-semibold text-amber-100 hover:bg-amber-300/10 focus-visible:outline focus-visible:outline-violet-400 disabled:opacity-50">Cancel</button>
+                <button type="submit" disabled={creating}
+                  className="font-cinzel min-h-11 rounded-lg border border-violet-300/60 bg-violet-700 px-5 text-sm font-semibold text-white hover:bg-violet-600 focus-visible:outline focus-visible:outline-amber-300 disabled:opacity-70">{creating ? 'Creating…' : 'Create Subject'}</button>
               </div>
-
-              {/* Live Preview */}
-              {newSubject.name.trim() && (
-                <div className="bg-slate-800/60 border border-purple-600/20 rounded-xl p-4">
-                  <p className="text-slate-500 text-xs uppercase tracking-wider font-semibold mb-3">Preview</p>
-                  <div className="flex items-start gap-3">
-                    <div className="w-10 h-10 bg-gradient-to-br from-purple-600 to-pink-600 rounded-xl flex items-center justify-center text-lg flex-shrink-0">💻</div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        {/* preview so you can see both numbers before saving */}
-                        {newSubject.internal_subject_no && (
-                          <span className="font-mono text-xs font-bold bg-slate-700 text-yellow-300 px-2 py-0.5 rounded">
-                            {newSubject.internal_subject_no}
-                          </span>
-                        )}
-                        {newSubject.subject_code && (
-                          <span className="font-mono text-xs font-bold bg-slate-700 text-purple-300 px-2 py-0.5 rounded">
-                            {newSubject.subject_code}
-                          </span>
-                        )}
-                        <p className="text-white font-bold text-sm">{newSubject.name}</p>
-                      </div>
-                      <p className="text-slate-500 text-xs mt-0.5 truncate">{newSubject.description || 'No description'}</p>
-                      <div className="flex items-center gap-2 mt-2 flex-wrap">
-                        {newSubject.units && (
-                          <span className="text-xs bg-blue-600/20 text-blue-300 border border-blue-600/30 px-2 py-0.5 rounded-full">{newSubject.units} units</span>
-                        )}
-                        {newSubject.year_level && (
-                          <span className="text-xs bg-green-600/20 text-green-300 border border-green-600/30 px-2 py-0.5 rounded-full">Year {newSubject.year_level}</span>
-                        )}
-                        {newSubject.subject_type && (
-                          <span className="text-xs bg-orange-600/20 text-orange-300 border border-orange-600/30 px-2 py-0.5 rounded-full capitalize">{newSubject.subject_type.replace('_', ' + ')}</span>
-                        )}
-                        {newSubject.department && (
-                          <span className="text-xs bg-purple-600/20 text-purple-300 border border-purple-600/30 px-2 py-0.5 rounded-full">{newSubject.department}</span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Actions */}
-              <div className="flex gap-3 pt-1">
-                <button
-                  onClick={() => {
-                    setShowCreateModal(false)
-                    setNewSubject({ 
-                      internal_subject_no: '',
-                      name: '', 
-                      description: '', 
-                      subject_code: '', 
-                      units: '', 
-                      department: '', 
-                      year_level: '1', 
-                      subject_type: 'lab' 
-                    })
-                  }}
-                  className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 rounded-xl text-white font-bold transition border border-slate-700"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleCreateSubject}
-                  className="flex-1 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-xl text-white font-bold transition shadow-lg shadow-purple-600/30 flex items-center justify-center gap-2"
-                >
-                  📚 Create Subject
-                </button>
-              </div>
-
-            </div>
-          </div>
-        </div>
+            </footer>
+          </form>
+        </dialog>
       )}
     </div>
   )
