@@ -21,6 +21,7 @@ import StudentLessons from './StudentLessons'
 import StudentAnnouncements from './StudentAnnouncements'
 import crystalLogo from '../../assets/landing/forge-crystal-logo.webp'
 import passwordEmblem from '../../assets/account-password.png'
+import progressEmblem from '../../assets/account-progress.png'
 import exitPortal from '../../assets/account-logout.png'
 import '../../components/AccountPanels.css'
 
@@ -1057,7 +1058,7 @@ export default function StudentDashboard({ user, onLogout }) {
                   </div>
                   <div className="forge-account-actions">
                     <button ref={profileActionRef} type="button" onClick={handleGoToProgress}>
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3 4.5 6v5.5c0 4 3 7.4 7.5 9.5 4.5-2.1 7.5-5.5 7.5-9.5V6L12 3Z"/><path d="M8.5 13.5v-2m3.5 4V8.5m3.5 5V10"/></svg>
+                      <img src={progressEmblem} alt="" />
                       My Progress
                     </button>
                     <button type="button" onClick={() => { closeProfile(); openChangePassword() }}><img src={passwordEmblem} alt="" />Change password</button>
