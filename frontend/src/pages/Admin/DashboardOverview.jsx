@@ -2,15 +2,11 @@ import { useState, useEffect, useCallback } from 'react'
 import CreateUserModal from './CreateUserModal'
 import BackupDatabaseModal from './BackupDatabaseModal'
 import SystemSettingsModal from './SystemSettingsModal'
-import { API_BASE } from '../../api/client'
+import { API_BASE, authFetch } from '../../api/client'
 
 const API = API_BASE
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
-
-function getToken() {
-  return localStorage.getItem('token')
-}
 
 function relativeTime(iso) {
   if (!iso) return 'N/A'
@@ -39,14 +35,12 @@ function actionColor(action = '') {
 
 // ─── Main Component ──────────────────────────────────────────────────────────
 
-export default function DashboardOverview({ onNavigate }) {
-  const [stats, setStats]             = useState(null)
-  const [sections, setSections]       = useState([])
-  const [loading, setLoading]         = useState(true)
+export default function DashboardOverview({ onNavigate, stats, loading, healthError, fetchStats }) {
+  const [sections, setSections]       = useState(null)
+  const [maintenanceError, setMaintenanceError] = useState(false)
+  const maintMode = stats?.maintenance_mode ?? false
   const [maintLoading, setMaintLoading] = useState(false)
-  const [maintMode, setMaintMode]     = useState(false)
   const [alertDismissed, setAlertDismissed] = useState(false)
-  const [healthError, setHealthError] = useState(false)
 
   const [showCreateUser,  setShowCreateUser]  = useState(false)
   const [showBackup,      setShowBackup]      = useState(false)
@@ -54,30 +48,10 @@ export default function DashboardOverview({ onNavigate }) {
 
   // ── Data fetching ────────────────────────────────────────────────────────
 
-  // Fetch the dashboard stats and maintenance mode state
-  const fetchStats = useCallback(async () => {
-    try {
-      const res = await fetch(`${API}/api/admin/dashboard-stats`, {
-        headers: { Authorization: `Bearer ${getToken()}` },
-      })
-      if (!res.ok) throw new Error('Stats fetch failed')
-      const data = await res.json()
-      setStats(data)
-      setMaintMode(data.maintenance_mode ?? false)
-      setHealthError(false)
-    } catch {
-      setHealthError(true)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
   // Fetch class code sections for the enrollment totals
   const fetchSections = useCallback(async () => {
     try {
-      const res = await fetch(`${API}/api/admin/sections`, {
-        headers: { Authorization: `Bearer ${getToken()}` },
-      })
+      const res = await authFetch(`${API}/api/admin/sections`)
       if (res.ok) {
         const data = await res.json()
         setSections(Array.isArray(data) ? data : [])
@@ -88,11 +62,8 @@ export default function DashboardOverview({ onNavigate }) {
   }, [])
 
   useEffect(() => {
-    fetchStats()
     fetchSections()
-    const interval = setInterval(fetchStats, 30_000)
-    return () => clearInterval(interval)
-  }, [fetchStats, fetchSections])
+  }, [fetchSections])
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -115,23 +86,21 @@ export default function DashboardOverview({ onNavigate }) {
   // ── Maintenance toggle ────────────────────────────────────────────────────
 
   const toggleMaintenance = async () => {
+    setMaintenanceError(false)
     setMaintLoading(true)
     const next = !maintMode
     try {
-      const res = await fetch(`${API}/api/admin/config`, {
+      const res = await authFetch(`${API}/api/admin/config`, {
         method:  'PUT',
         headers: {
-          Authorization:  `Bearer ${getToken()}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ maintenance_mode: next ? 'true' : 'false' }),
       })
-      if (res.ok) {
-        setMaintMode(next)
-        await fetchStats()
-      }
+      if (!res.ok) throw new Error("Maintenance update failed")
+      await fetchStats()
     } catch {
-      // revert optimistic update silently — fetchStats will reconcile
+      setMaintenanceError(true)
     } finally {
       setMaintLoading(false)
     }
@@ -143,10 +112,10 @@ export default function DashboardOverview({ onNavigate }) {
   const activeToday      = stats?.active_users_today ?? stats?.today_logins ?? 0
   const systemOk         = !healthError && (stats?.system_health !== 'degraded') && (stats?.system_health !== 'down')
 
-  const totalSections  = stats?.total_sections  ?? sections.length
-  const activeSections = sections.filter((s) => s.is_active).length || totalSections
+  const totalSections = sections?.length ?? '—'
+  const activeSections = stats?.total_sections ?? sections?.filter(section => section.is_active).length ?? '—'
   const totalEnrolled  = stats?.total_enrolled  ??
-    sections.reduce((sum, s) => sum + (s.current_count || s.student_count || 0), 0)
+    sections?.filter(section => section.is_active).reduce((sum, section) => sum + (section.current_count ?? section.student_count ?? 0), 0) ?? '—'
 
   // ── Loading state ─────────────────────────────────────────────────────────
 
@@ -162,7 +131,13 @@ export default function DashboardOverview({ onNavigate }) {
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
+      {healthError && (
+        <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-300/30 bg-[#141a30] px-4 py-3 text-sm text-amber-100">
+          <p>{stats ? "Could not refresh dashboard. Showing the last available data." : "Could not load dashboard metrics."}</p>
+          <button type="button" onClick={() => fetchStats(true)} className="min-h-10 rounded-lg border border-amber-300/35 px-4 font-semibold focus-visible:outline focus-visible:outline-amber-300">Retry</button>
+        </div>
+      )}
 
       {/* ── Maintenance Mode Banner ── */}
       {maintMode && (
@@ -178,7 +153,7 @@ export default function DashboardOverview({ onNavigate }) {
           </p>
           <button
             onClick={toggleMaintenance}
-            disabled={maintLoading}
+            disabled={maintLoading || !stats}
             className="text-xs text-red-400 hover:text-red-200 underline transition flex-shrink-0"
           >
             Turn off
@@ -216,9 +191,9 @@ export default function DashboardOverview({ onNavigate }) {
       ════════════════════════════════════════════════════════════ */}
 
       <div>
-        <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest mb-3">
+        <h3 className="font-cinzel text-lg font-semibold text-white mb-3">
           System health
-        </p>
+        </h3>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
 
@@ -234,7 +209,6 @@ export default function DashboardOverview({ onNavigate }) {
               </span>
             }
             subLabel="Result of the last database connection check. Sandbox and uptime are not monitored here."
-            accentColor={systemOk ? 'emerald' : 'red'}
             action={healthError ? { label: 'View activity logs →', onClick: () => onNavigate?.('activity') } : null}
           />
 
@@ -244,25 +218,23 @@ export default function DashboardOverview({ onNavigate }) {
             badge="Today"
             badgeVariant="ok"
             statusLine={
-              <span className="text-4xl font-black text-white tracking-tight">{activeToday}</span>
+              <span className="text-4xl font-black text-white tracking-tight">{stats ? activeToday : "—"}</span>
             }
-            subLabel={`of ${stats?.total_students ?? 0} students · ${stats?.total_instructors ?? 0} instructors`}
-            accentColor="purple"
+            subLabel={stats ? `of ${stats.total_students ?? 0} students · ${stats.total_instructors ?? 0} instructors` : "User totals unavailable"}
             action={{ label: 'View login history →', onClick: () => onNavigate?.('activity') }}
           />
 
           {/* Enrollment Alerts */}
           <PrimaryCard
             label="Enrollment alerts"
-            badge={enrollmentAlerts > 0 ? 'Needs review' : 'All clear'}
+            badge={!stats ? "Unavailable" : enrollmentAlerts > 0 ? 'Needs review' : 'All clear'}
             badgeVariant={enrollmentAlerts > 0 ? 'warn' : 'ok'}
             statusLine={
               <span className={`text-4xl font-black tracking-tight ${enrollmentAlerts > 0 ? 'text-amber-400' : 'text-emerald-400'}`}>
-                {enrollmentAlerts}
+                {stats ? enrollmentAlerts : "—"}
               </span>
             }
             subLabel="Students without active class codes"
-            accentColor={enrollmentAlerts > 0 ? 'amber' : 'emerald'}
             action={enrollmentAlerts > 0
               ? { label: 'Go to class codes →', onClick: () => onNavigate?.('sections') }
               : null}
@@ -275,26 +247,26 @@ export default function DashboardOverview({ onNavigate }) {
       ════════════════════════════════════════════════════════════ */}
 
       <div>
-        <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest mb-3">
+        <h3 className="font-cinzel text-lg font-semibold text-white mb-3">
           Platform overview
-        </p>
+        </h3>
 
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 divide-amber-300/20 rounded-xl border border-amber-300/25 bg-[#111832] p-1 md:grid-cols-4 md:divide-x">
           <MiniCard
             label="Total students"
-            value={stats?.total_students ?? 0}
+            value={stats?.total_students ?? "—"}
             trend={null}
             onClick={() => onNavigate?.('users')}
           />
           <MiniCard
             label="Instructors"
-            value={stats?.total_instructors ?? 0}
+            value={stats?.total_instructors ?? "—"}
             trend={null}
             onClick={() => onNavigate?.('users')}
           />
           <MiniCard
-            label="Class codes"
-            value={totalSections}
+            label="Active class codes"
+            value={activeSections}
             trend={null}
             onClick={() => onNavigate?.('sections')}
           />
@@ -306,9 +278,6 @@ export default function DashboardOverview({ onNavigate }) {
           />
         </div>
 
-        <p className="text-[10px] text-slate-600 mt-2 pl-1">
-          ↳ Submission metrics, success rates, and avg response time are instructor-level analytics — not shown here.
-        </p>
       </div>
 
       {/* ════════════════════════════════════════════════════════════
@@ -320,14 +289,15 @@ export default function DashboardOverview({ onNavigate }) {
                       bg-slate-900/60 border border-slate-700/40">
         <div>
           <p className="text-sm font-medium text-slate-300">Maintenance mode</p>
+          {maintenanceError && <p role="alert" className="mt-1 text-sm text-rose-300">Could not update maintenance mode. Try again.</p>}
           <p className="text-xs text-slate-500 mt-0.5">
             When ON, a Maintenance status is shown. It is a status flag only and does not block sign-in.
           </p>
         </div>
         <button
           onClick={toggleMaintenance}
-          disabled={maintLoading}
-          aria-pressed={maintMode}
+          disabled={maintLoading || !stats}
+          aria-label="Maintenance mode" aria-pressed={maintMode}
           className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200
                       focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2
                       focus:ring-offset-slate-900 disabled:opacity-50
@@ -350,9 +320,9 @@ export default function DashboardOverview({ onNavigate }) {
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-5">
 
         {/* Left — Recent Activity (unchanged, it works well) */}
-        <div className="bg-slate-900/80 rounded-2xl border border-slate-700/40 overflow-hidden">
+        <div className="bg-[#111832] rounded-xl border border-amber-300/20 overflow-hidden">
           <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800/60">
-            <h3 className="text-sm font-semibold text-slate-200">Recent activity</h3>
+            <h3 className="font-cinzel text-base font-semibold text-white">Recent activity</h3>
             <button
               onClick={() => onNavigate?.('activity')}
               className="text-xs text-purple-400 hover:text-purple-300 transition"
@@ -368,8 +338,7 @@ export default function DashboardOverview({ onNavigate }) {
                 ))
               : (
                 <div className="flex flex-col items-center justify-center py-12 text-slate-600">
-                  <span className="text-3xl mb-2">📭</span>
-                  <span className="text-sm">No recent activity</span>
+                          <span className="text-sm text-slate-300">{stats ? "No recent activity" : "Activity unavailable"}</span>
                 </div>
               )
             }
@@ -380,9 +349,9 @@ export default function DashboardOverview({ onNavigate }) {
         <div className="flex flex-col gap-4">
 
           {/* System Status */}
-          <div className="bg-slate-900/80 rounded-2xl border border-slate-700/40 overflow-hidden">
+          <div className="bg-[#111832] rounded-xl border border-amber-300/20 overflow-hidden">
             <div className="px-5 py-3.5 border-b border-slate-800/60">
-              <h3 className="text-sm font-semibold text-slate-200">System status</h3>
+              <h3 className="font-cinzel text-base font-semibold text-white">System status</h3>
             </div>
             <div className="divide-y divide-slate-800/50 px-5">
               <StatusRow label="Database"    value={systemOk ? 'Connected' : 'Check failed'} ok={systemOk} />
@@ -392,9 +361,9 @@ export default function DashboardOverview({ onNavigate }) {
           </div>
 
           {/* Quick Actions */}
-          <div className="bg-slate-900/80 rounded-2xl border border-slate-700/40 overflow-hidden">
+          <div className="bg-[#111832] rounded-xl border border-amber-300/20 overflow-hidden">
             <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-800/60">
-              <h3 className="text-sm font-semibold text-slate-200">Quick actions</h3>
+              <h3 className="font-cinzel text-base font-semibold text-white">Quick actions</h3>
               <span className="text-[10px] text-slate-600 hidden sm:block">Ctrl+U · Ctrl+S</span>
             </div>
             <div className="grid grid-cols-2 gap-2 p-3">
@@ -444,7 +413,7 @@ export default function DashboardOverview({ onNavigate }) {
       {/* ── Modals ── */}
       {showCreateUser && (
         <CreateUserModal
-          sections={sections}
+          sections={sections ?? []}
           onClose={() => setShowCreateUser(false)}
           onSuccess={() => { setShowCreateUser(false); fetchStats() }}
         />
@@ -458,14 +427,7 @@ export default function DashboardOverview({ onNavigate }) {
 // ─── Sub-components ──────────────────────────────────────────────────────────
 
 // Primary metric card
-function PrimaryCard({ label, badge, badgeVariant, statusLine, subLabel, accentColor, action }) {
-  const accentBorder = {
-    emerald: 'border-l-emerald-500',
-    purple:  'border-l-purple-500',
-    amber:   'border-l-amber-500',
-    red:     'border-l-red-500',
-  }[accentColor] ?? 'border-l-slate-600'
-
+function PrimaryCard({ label, badge, badgeVariant, statusLine, subLabel, action }) {
   const badgeStyle = {
     ok:    'bg-emerald-900/40 text-emerald-300 border-emerald-700/40',
     warn:  'bg-amber-900/40 text-amber-300 border-amber-700/40',
@@ -473,11 +435,9 @@ function PrimaryCard({ label, badge, badgeVariant, statusLine, subLabel, accentC
   }[badgeVariant] ?? 'bg-slate-800 text-slate-400 border-slate-700/40'
 
   return (
-    <div className={`group bg-slate-900/80 rounded-2xl border border-slate-700/40
-                     border-l-2 ${accentBorder} p-5
-                     hover:border-slate-600/60 transition-all duration-200`}>
+    <div className="rounded-xl border border-amber-300/20 bg-[#111832] p-5">
       <div className="flex items-start justify-between mb-3">
-        <p className="text-xs text-slate-500 font-medium">{label}</p>
+        <p className="text-sm text-slate-200 font-medium">{label}</p>
         <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${badgeStyle}`}>
           {badge}
         </span>
@@ -485,13 +445,12 @@ function PrimaryCard({ label, badge, badgeVariant, statusLine, subLabel, accentC
 
       <div className="mb-1">{statusLine}</div>
 
-      <p className="text-xs text-slate-600 mt-1">{subLabel}</p>
+      <p className="text-xs leading-relaxed text-slate-300 mt-1">{subLabel}</p>
 
       {action && (
         <button
           onClick={action.onClick}
-          className="mt-3 text-[11px] text-purple-400 hover:text-purple-300 transition
-                     opacity-0 group-hover:opacity-100 duration-150 flex items-center gap-1"
+          className="mt-3 min-h-9 rounded text-sm text-amber-200 hover:text-amber-100 focus-visible:outline focus-visible:outline-amber-300"
         >
           {action.label}
         </button>
@@ -505,12 +464,10 @@ function MiniCard({ label, value, trend, onClick }) {
   return (
     <button
       onClick={onClick}
-      className="group bg-slate-900/60 border border-slate-800/60 rounded-xl p-4
-                 hover:border-slate-700/60 hover:bg-slate-800/40 transition-all duration-150
-                 text-left w-full"
+      className="w-full rounded-lg p-4 text-left hover:bg-violet-950/45 focus-visible:outline focus-visible:outline-amber-300"
     >
-      <p className="text-[10px] text-slate-600 mb-1.5 font-medium">{label}</p>
-      <p className="text-2xl font-black text-slate-200 leading-none">{value.toLocaleString()}</p>
+      <p className="text-xs text-slate-300 mb-2 font-medium">{label}</p>
+      <p className="text-2xl font-semibold tabular-nums text-amber-100 leading-none">{value.toLocaleString()}</p>
       {trend && (
         <p className="text-[10px] text-emerald-400 mt-1.5 font-medium">↑ {trend}</p>
       )}
@@ -552,10 +509,10 @@ function ActivityRow({ activity }) {
         </div>
       </div>
       <div className="text-right flex-shrink-0 ml-2">
-        <p className="text-[10px] text-slate-600 max-w-[140px] truncate text-right">
+        <p className="text-xs text-slate-300 max-w-56 break-words text-right">
           {activity.details}
         </p>
-        <p className="text-[10px] text-slate-700 mt-0.5">
+        <p className="text-xs text-slate-300 mt-0.5">
           {relativeTime(activity.created_at)}
         </p>
       </div>
@@ -616,13 +573,14 @@ function ActionBtn({ icon, label, sub, color, onClick }) {
 function CollapsiblePanel({ title, children }) {
   const [open, setOpen] = useState(false)
   return (
-    <div className="bg-slate-900/80 rounded-2xl border border-slate-700/40 overflow-hidden">
+    <div className="bg-[#111832] rounded-xl border border-amber-300/20 overflow-hidden">
       <button
+        aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
         className="flex items-center justify-between w-full px-5 py-3.5
                    hover:bg-slate-800/30 transition"
       >
-        <h3 className="text-sm font-semibold text-slate-300">{title}</h3>
+        <h3 className="font-cinzel text-base font-semibold text-white">{title}</h3>
         <span className={`text-slate-600 text-xs transition-transform duration-200 ${open ? 'rotate-180' : ''}`}>
           ▼
         </span>

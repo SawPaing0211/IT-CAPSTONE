@@ -1,3 +1,5 @@
+import passwordEmblem from '../../assets/account-password.png'
+import exitPortal from '../../assets/account-logout.png'
 import crystal from '../../assets/landing/forge-crystal-logo.webp'
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { openChangePassword } from '../../utils/accountEvents'
@@ -7,13 +9,11 @@ import InstructorAssignments from './InstructorAssignments'
 import ActivityLogs from './ActivityLogs'
 import SubjectsManagement from './SubjectsManagement'
 import SectionsManagement from './SectionsManagement'
-import { API_BASE } from '../../api/client'
+import { API_BASE, authFetch } from '../../api/client'
 
 // Backend lives here. Change this if we are about to deploy to a real server.  
 const API = `${API_BASE}/api`
 
-// Reads the login token from localStorage and adds it to every API request.
-// Also Without this the backend rejects requests with 401 Unauthorized.
 function AdminBrand({ collapsed = false }) {
   return <div className="flex min-w-0 items-center gap-3">
     <img src={crystal} alt={collapsed ? "Forge.dev" : ""} width="28" height="42" className="h-[42px] w-7 shrink-0 object-contain" />
@@ -22,14 +22,6 @@ function AdminBrand({ collapsed = false }) {
       <span className="block text-xs text-slate-400">Administration</span>
     </div>}
   </div>
-}
-
-function authHeaders() {
-  const token = localStorage.getItem('token')
-  return {
-    'Content-Type': 'application/json',
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-  }
 }
 
 // ─── TAB LIST ────────────────────────────────────────────────────────────────
@@ -238,69 +230,73 @@ function TabSkeleton() {
 // Click it to see your username, open keyboard shortcuts, or sign out.
 function ProfileDropdown({ user, onLogout, onShortcuts }) {
   const [open, setOpen] = useState(false)
-  const ref = useRef(null)
+  const root = useRef(null)
+  const trigger = useRef(null)
+  const name = user?.full_name || user?.username || 'Admin'
+  const item = 'flex min-h-11 w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-medium text-slate-100 hover:bg-violet-950/70 focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-300'
 
-  // Close when clicking anywhere outside this component
   useEffect(() => {
-    const handler = e => {
-      if (ref.current && !ref.current.contains(e.target)) setOpen(false)
+    if (!open) return
+    const closeOutside = event => {
+      if (!root.current?.contains(event.target)) setOpen(false)
     }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [])
+    document.addEventListener('pointerdown', closeOutside)
+    return () => document.removeEventListener('pointerdown', closeOutside)
+  }, [open])
+
+  const choose = action => {
+    setOpen(false)
+    trigger.current?.focus()
+    action()
+  }
 
   return (
-    <div ref={ref} className="relative">
-      <button
-        onClick={() => setOpen(o => !o)}
-        className="flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-slate-800/70 transition-colors border border-transparent hover:border-purple-600/30 focus:outline-none focus:ring-2 focus:ring-purple-500"
-        aria-label="User menu"
-        aria-expanded={open}
-      >
-        {/* Circle avatar — shows the first letter of the username */}
-        <div className="w-8 h-8 bg-gradient-to-br from-purple-500 to-pink-500 rounded-full flex items-center justify-center font-bold text-sm shadow-md flex-shrink-0">
-          {user?.username?.[0]?.toUpperCase() || 'A'}
-        </div>
-        <div className="hidden sm:block text-left">
-          <p className="text-sm font-semibold text-white leading-none">{user?.username || 'Admin'}</p>
-          <p className="text-xs text-slate-400 mt-0.5">Administrator</p>
-        </div>
-        <svg viewBox="0 0 20 20" fill="currentColor" className={`w-4 h-4 text-slate-400 transition-transform ${open ? 'rotate-180' : ''}`}>
-          <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+    <div ref={root} className="relative" onBlur={event => {
+      if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false)
+    }} onKeyDown={event => {
+      if (open && event.key === 'Escape') {
+        event.preventDefault()
+        event.stopPropagation()
+        setOpen(false)
+        trigger.current?.focus()
+      }
+    }}>
+      <button type="button" ref={trigger} onClick={() => setOpen(value => !value)}
+        className={`flex min-h-11 items-center gap-2.5 rounded-xl border px-2.5 py-1.5 text-slate-100 hover:bg-violet-950/50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-300 ${open ? 'border-amber-300/60 bg-violet-950/50' : 'border-amber-300/25'}`}
+        aria-label="Admin account options" aria-expanded={open} aria-controls={open ? 'admin-account-panel' : undefined}>
+        <span aria-hidden="true" className="grid size-8 shrink-0 place-items-center rounded-full border border-amber-300/50 bg-violet-950 font-cinzel font-bold text-amber-100">
+          {name[0].toUpperCase()}
+        </span>
+        <span className="hidden max-w-32 truncate text-sm font-semibold sm:block">{name}</span>
+        <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" className={`size-4 text-amber-200 ${open ? 'rotate-180' : ''}`}>
+          <path d="m4 6 4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-2 w-52 bg-slate-900 border border-purple-600/30 rounded-xl shadow-2xl shadow-purple-900/40 overflow-hidden z-50">
-          <div className="px-4 py-3 border-b border-slate-700/50">
-            <p className="text-xs text-slate-500">Signed in as</p>
-            <p className="text-sm font-semibold text-white truncate">{user?.username || 'Admin'}</p>
-            {user?.email && <p className="text-xs text-slate-500 truncate">{user.email}</p>}
+        <section id="admin-account-panel" aria-label="Admin account" className="absolute right-0 top-full z-50 mt-2 w-72 max-w-[calc(100vw-2rem)] rounded-xl border border-amber-300/35 bg-[#10162b] shadow-xl shadow-black/35">
+          <div className="border-b border-amber-300/20 px-4 py-4">
+            <h3 className="break-words font-cinzel text-lg font-semibold text-white">{name}</h3>
+            <p className="mt-1 text-xs font-medium text-amber-200">Administrator</p>
+            {user?.email && <p className="mt-1 break-all text-sm text-slate-300">{user.email}</p>}
           </div>
-          <button
-            onClick={() => { onShortcuts(); setOpen(false) }}
-            className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
-          >
-            <span>⌨️</span> Keyboard Shortcuts
-          </button>
-          <button
-            onClick={() => { openChangePassword(); setOpen(false) }}
-            className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
-          >
-            <span>🔑</span> Change password
-          </button>
-          <div className="border-t border-slate-700/50">
-            <button
-              onClick={onLogout}
-              className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-red-400 hover:text-red-300 hover:bg-red-600/10 transition-colors"
-            >
-              <svg viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
-                <path fillRule="evenodd" d="M3 3a1 1 0 00-1 1v12a1 1 0 102 0V4a1 1 0 00-1-1zm10.293 9.293a1 1 0 001.414 1.414l3-3a1 1 0 000-1.414l-3-3a1 1 0 10-1.414 1.414L14.586 9H7a1 1 0 100 2h7.586l-1.293 1.293z" clipRule="evenodd" />
-              </svg>
-              Sign Out
+          <div className="space-y-1 p-2">
+            <button type="button" onClick={() => choose(onShortcuts)} className={item}>
+              <svg aria-hidden="true" className="size-6 shrink-0 text-amber-200" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><rect x="3" y="6" width="18" height="12" rx="2" /><path d="M7 10h.01m3.3 0h.01m3.3 0h.01m3.3 0h.01M8 14h8" /></svg>
+              Keyboard shortcuts
+            </button>
+            <button type="button" onClick={() => choose(openChangePassword)} className={item}>
+              <img src={passwordEmblem} alt="" className="size-6 shrink-0 object-contain" />
+              Change password
             </button>
           </div>
-        </div>
+          <div className="border-t border-amber-300/20 p-2">
+            <button type="button" onClick={onLogout} className={item + ' text-rose-200 hover:bg-rose-950/40'}>
+              <img src={exitPortal} alt="" className="size-6 shrink-0 object-contain" />
+              Sign out
+            </button>
+          </div>
+        </section>
       )}
     </div>
   )
@@ -310,11 +306,20 @@ function ProfileDropdown({ user, onLogout, onShortcuts }) {
 // Simple popup listing all keyboard shortcuts.
 // Open it from: Profile menu → "Keyboard Shortcuts"
 function ShortcutsModal({ open, onClose }) {
+  const dialog = useRef(null)
+  useEffect(() => {
+    if (!open) return
+    const element = dialog.current
+    element.showModal()
+    return () => element.close()
+  }, [open])
   if (!open) return null
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm px-4" onClick={onClose}>
-      <div className="bg-slate-900 border border-purple-500/40 rounded-2xl shadow-2xl p-6 w-full max-w-sm" onClick={e => e.stopPropagation()}>
-        <h3 className="text-white font-bold text-lg mb-4">⌨️ Keyboard Shortcuts</h3>
+    <dialog ref={dialog} aria-labelledby="admin-shortcuts-title" onCancel={event => { event.preventDefault(); onClose() }}
+      onClick={event => { if (event.target === event.currentTarget) onClose() }}
+      className="m-auto w-[calc(100%-2rem)] max-w-sm rounded-xl border border-amber-300/35 bg-[#10162b] p-0 text-slate-100 backdrop:bg-black/65">
+      <div className="p-5 sm:p-6">
+        <h3 id="admin-shortcuts-title" className="mb-4 font-cinzel text-lg font-semibold text-white">Keyboard shortcuts</h3>
         <ul className="space-y-2.5">
           {[
             { keys: ['Ctrl', 'K'],   desc: 'Open command palette'   },
@@ -333,11 +338,11 @@ function ShortcutsModal({ open, onClose }) {
             </li>
           ))}
         </ul>
-        <button onClick={onClose} className="mt-5 w-full py-2 bg-purple-600/30 hover:bg-purple-600/50 border border-purple-500/40 rounded-xl text-sm text-purple-300 transition-colors">
+        <button onClick={onClose} className="mt-5 min-h-11 w-full rounded-lg border border-amber-300/35 text-sm text-amber-100 hover:bg-amber-300/10 focus-visible:outline focus-visible:outline-amber-300">
           Close
         </button>
       </div>
-    </div>
+    </dialog>
   )
 }
 
@@ -377,7 +382,7 @@ export default function AdminDashboard({ user, onLogout }) {
     if (showSpinner) setSyncing(true)
     setStatsError(null)
     try {
-      const res = await fetch(`${API}/admin/dashboard-stats`, { headers: authHeaders() })
+      const res = await authFetch(API + '/admin/dashboard-stats')
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data = await res.json()
       setDashStats(data)
@@ -690,7 +695,7 @@ export default function AdminDashboard({ user, onLogout }) {
               </button>
             )}
             <div className="min-w-0">
-              <h2 className="text-base sm:text-xl font-black text-white truncate leading-tight">{activeTabData?.label}</h2>
+              <h2 className="font-cinzel text-base sm:text-xl font-semibold text-white truncate leading-tight">{activeTabData?.label}</h2>
               <p className="text-[11px] sm:text-xs text-slate-500 truncate hidden sm:block mt-0.5">{activeTabData?.description}</p>
             </div>
           </div>
@@ -728,33 +733,16 @@ export default function AdminDashboard({ user, onLogout }) {
 
         {/* Role banner — who is logged in + system health at a glance */}
         <div className="px-4 sm:px-6 pt-5">
-          <div className="rounded-2xl bg-gradient-to-r from-purple-900/50 via-pink-900/30 to-purple-900/50 border border-purple-500/30 shadow-lg shadow-purple-900/20 overflow-hidden">
+          <div className="rounded-xl border border-amber-300/25 bg-[#111832] overflow-hidden">
             <div className="flex items-center gap-4 px-5 py-4 flex-wrap">
-              <div className="w-10 h-10 bg-gradient-to-br from-purple-500 to-pink-500 rounded-xl flex items-center justify-center text-xl shadow-md flex-shrink-0">🛡️</div>
+              <img src={crystal} alt="" className="h-11 w-7 shrink-0 object-contain" />
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <h3 className="font-black text-white text-sm">Administrator</h3>
-                  <span className="text-[10px] bg-purple-600/30 border border-purple-500/40 px-2 py-0.5 rounded-full text-purple-300">Full Access</span>
+                  <h3 className="font-cinzel text-lg font-semibold text-white">Administration</h3>
                 </div>
-                <p className="text-purple-300/70 text-xs mt-0.5 hidden sm:block">
+                <p className="text-slate-300 text-xs mt-1">
                   User management · Academic structure · System configuration · Audit logs
                 </p>
-              </div>
-              <div className="flex items-center gap-3 flex-shrink-0">
-                {lastSync && (
-                  <div className="hidden sm:block text-right">
-                    <p className="text-[10px] text-slate-500">Last sync</p>
-                    <p className="text-[11px] text-slate-400 font-medium">
-                      {lastSync.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </p>
-                  </div>
-                )}
-                <div className={`flex items-center gap-1.5 px-2.5 py-1 ${health.bg} border ${health.border} rounded-lg`}>
-                  <span className={`w-1.5 h-1.5 ${health.color} rounded-full ${health.pulse ? 'animate-pulse' : ''}`} />
-                  <span className={`text-[10px] ${health.textColor} font-bold hidden sm:inline`}>
-                    {statsLoading ? '…' : health.text}
-                  </span>
-                </div>
               </div>
             </div>
 
@@ -774,7 +762,7 @@ export default function AdminDashboard({ user, onLogout }) {
 
           {/* Tiny timestamp + manual refresh */}
           <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2 text-[11px] text-slate-600">
+            <div className="flex items-center gap-2 text-xs text-slate-300">
               <svg viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3">
                 <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
               </svg>
@@ -786,7 +774,7 @@ export default function AdminDashboard({ user, onLogout }) {
             <button
               onClick={handleSync}
               disabled={syncing}
-              className="flex items-center gap-1.5 text-[11px] text-slate-500 hover:text-slate-300 transition disabled:opacity-50 focus:outline-none"
+              className={`flex items-center gap-1.5 text-xs text-slate-300 hover:text-white transition disabled:opacity-50 focus-visible:outline focus-visible:outline-amber-300 ${activeTabData?.contextAction ? 'sm:hidden' : ''}`}
               aria-label="Refresh data"
             >
               <span className={syncing ? 'animate-spin inline-block' : ''}>↻</span>
@@ -800,7 +788,7 @@ export default function AdminDashboard({ user, onLogout }) {
               <TabSkeleton />
             ) : (
               <>
-                {activeTab === 'dashboard'   && <DashboardOverview onNavigate={tab => handleTabChange(tab)} />}
+                {activeTab === 'dashboard'   && <DashboardOverview onNavigate={handleTabChange} stats={dashStats} loading={statsLoading} healthError={Boolean(statsError)} fetchStats={fetchStats} />}
                 {activeTab === 'users'       && <UserManagement />}
                 {activeTab === 'assignments' && <InstructorAssignments />}
                 {activeTab === 'subjects'    && <SubjectsManagement />}
