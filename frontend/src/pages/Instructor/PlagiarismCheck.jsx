@@ -1,347 +1,76 @@
-// plagiarism check — AI-powered code similarity scanner using Gemini Flash (free).
-//
-// how it works:
-//   1. instructor picks a problem from the class
-//   2. clicks "Run AI Scan"
-//   3. backend fetches all student submissions for that problem
-//   4. compares every pair using jaccard token similarity
-//      (strips comments, lowercases, removes keywords, checks token overlap)
-//   5. pairs above the threshold get sent to Gemini Flash which writes a
-//      plain-english verdict explaining what looks suspicious
-//   6. results show similarity %, both code previews, and the AI verdict
-
-import { useState, useEffect, useRef } from 'react'
-import MobileSheet from '../../components/MobileSheet'
-import { API_BASE } from '../../api/client'
-
-const API = API_BASE
-
-const THRESHOLD_OPTIONS = [
-  { value: '75', label: '75% — High Sensitivity', desc: 'More results, some false positives' },
-  { value: '85', label: '85% — Balanced', desc: 'Recommended' },
-  { value: '90', label: '90% — Low Sensitivity', desc: 'Only obvious cases' },
-]
+import { useEffect, useRef, useState } from 'react'
+import { API_BASE, authFetch } from '../../api/client'
+import ModuleIcon from './ModuleIcon'
+import { displayNumber, scanSummary } from './instructorReviewData'
+import './InstructorInsights.css'
 
 export default function PlagiarismCheck({ classId }) {
-  const [problems, setProblems]               = useState([])
-  const [selectedProblem, setSelectedProblem] = useState('')
-  const [threshold, setThreshold]             = useState('85')
-  const [isScanning, setIsScanning]           = useState(false)
-  const [results, setResults]                 = useState(null)
-  const [error, setError]                     = useState(null)
-  const [expandedPair, setExpandedPair]       = useState(null)
-  const [loadingProblems, setLoadingProblems] = useState(true)
-  const [showProblemMenu, setShowProblemMenu]   = useState(false)
-  const [showThresholdMenu, setShowThresholdMenu] = useState(false)
-  const problemMenuRef   = useRef(null)
-  const thresholdMenuRef = useRef(null)
-
-  // Fetch problems available for scanning, scoped to the class if one is given
+  const [problems, setProblems] = useState([])
+  const [selected, setSelected] = useState('')
+  const [threshold, setThreshold] = useState('85')
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
+  const [error, setError] = useState('')
+  const [reload, setReload] = useState(0)
+  const [scanning, setScanning] = useState(false)
+  const [result, setResult] = useState(null)
+  const busy = useRef(false)
+  const scanRequest = useRef(null)
   useEffect(() => {
-    const fetchProblems = async () => {
+    const controller = new AbortController()
+    let current = true
+    async function load() {
+      setLoading(true); setLoadError('')
       try {
-        const token = localStorage.getItem('token')
-        const url = classId
-          ? `${API}/api/instructor/classes/${classId}/problems`
-          : `${API}/api/instructor/problems`
-        const res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } })
-        if (res.ok) setProblems(await res.json())
-      } catch (err) {
-        console.error('Failed to fetch problems:', err)
-      } finally {
-        setLoadingProblems(false)
-      }
+        const res = await authFetch(`${API_BASE}/api/instructor/classes/${classId}/problems`, { signal: controller.signal })
+        if (!res.ok) throw new Error('Unable to load quests for this class.')
+        const data = await res.json()
+        if (!Array.isArray(data)) throw new Error('The quest list is incomplete.')
+        if (current) setProblems(data)
+      } catch (err) { if (current) setLoadError(err.message) }
+      finally { if (current) setLoading(false) }
     }
-    fetchProblems()
-  }, [classId])
+    load()
+    return () => { current = false; controller.abort(); scanRequest.current?.abort() }
+  }, [classId, reload])
 
-  // Run the plagiarism scan for the selected problem and threshold
-  const handleScan = async () => {
-    if (!selectedProblem) { setError('Please select a problem first.'); return }
-    setIsScanning(true)
-    setError(null)
-    setResults(null)
-    setExpandedPair(null)
+  async function scan(e) {
+    e.preventDefault()
+    if (busy.current || !problems.some(p => String(p.id) === selected)) return
+    busy.current = true; setScanning(true); setError(''); setResult(null)
+    const controller = new AbortController()
+    scanRequest.current = controller
     try {
-      const token = localStorage.getItem('token')
-      const res = await fetch(`${API}/api/instructor/plagiarism/scan`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          problem_id: parseInt(selectedProblem),
-          class_id:   classId ? parseInt(classId) : null,
-          threshold:  parseInt(threshold),
-        })
+      const res = await authFetch(`${API_BASE}/api/instructor/plagiarism/scan`, {
+        method: 'POST', signal: controller.signal, headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({problem_id:Number(selected), class_id:Number(classId), threshold:Number(threshold)}),
       })
-      if (!res.ok) {
-        const err = await res.json()
-        throw new Error(err.error || 'Scan failed')
-      }
-      setResults(await res.json())
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setIsScanning(false)
-    }
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'The scan could not be completed. Try again when ready.')
+      scanSummary(data)
+      if (!controller.signal.aborted) setResult({...data, questTitle:problems.find(p => String(p.id) === selected)?.title})
+    } catch (err) { if (!controller.signal.aborted) setError(err.message || 'The scan could not be completed.') }
+    finally { busy.current = false; if (!controller.signal.aborted) setScanning(false) }
   }
-
-  const selectedProblemName = problems.find(p => p.id === parseInt(selectedProblem))?.title
-
-  return (
-    <div className="space-y-6">
-
-      {/* Header */}
-      <div className="flex items-start justify-between flex-wrap gap-3">
-        <div>
-          <h2 className="text-2xl font-black text-white tracking-tight">Plagiarism Detection</h2>
-          <p className="text-slate-400 mt-0.5 text-sm">
-            AI-powered code similarity scanner — reduces manual review workload
-          </p>
-        </div>
-        {results && (
-          <div className={`px-3 py-1.5 rounded-lg text-xs font-bold border ${
-            results.flagged > 0
-              ? 'bg-red-500/10 text-red-400 border-red-500/20'
-              : 'bg-green-500/10 text-green-400 border-green-500/20'
-          }`}>
-            {results.flagged > 0 ? `⚠️ ${results.flagged} pairs flagged` : '✅ No plagiarism detected'}
-          </div>
-        )}
-      </div>
-
-      {/* Stat strip */}
-      <div className="grid grid-cols-3 gap-2 sm:gap-4">
-        {[
-          { label: 'Cases Found', value: results ? results.flagged : '—', icon: '⚠️', border: results?.flagged > 0 ? 'border-l-red-500' : 'border-l-slate-600', text: results?.flagged > 0 ? 'text-red-400' : 'text-slate-400' },
-          { label: 'Compared',    value: results ? `${results.total_compared} students` : '—', icon: '👥', border: 'border-l-blue-500', text: 'text-blue-400' },
-          { label: 'Threshold',   value: `${threshold}%`, icon: '🎯', border: 'border-l-purple-500', text: 'text-purple-400' },
-        ].map(c => (
-          <div key={c.label} className={`bg-slate-900 border border-slate-800 border-l-4 ${c.border} rounded-xl p-2.5 sm:p-4`}>
-            <p className={`text-lg sm:text-2xl font-black ${c.text} tabular-nums truncate`}>{c.value}</p>
-            <p className="text-slate-500 text-[10px] sm:text-xs mt-0.5 sm:mt-1 flex items-center gap-1 truncate"><span>{c.icon}</span> {c.label}</p>
-          </div>
-        ))}
-      </div>
-
-      {/* Scan Panel */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
-        <div className="px-4 sm:px-6 py-4 border-b border-slate-800">
-          <h3 className="text-white font-bold text-sm flex items-center gap-2">🔍 Scan Setup</h3>
-        </div>
-        <div className="p-4 sm:p-6 space-y-5">
-
-          {/* Problem selector */}
-          <div>
-            <label className="block text-slate-400 text-xs font-medium uppercase tracking-wider mb-2">Select Problem *</label>
-            {loadingProblems ? (
-              <div className="flex items-center gap-2 text-slate-500 text-sm py-2">
-                <div className="animate-spin rounded-full h-4 w-4 border-2 border-purple-500 border-t-transparent" />
-                Loading problems...
-              </div>
-            ) : problems.length === 0 ? (
-              <p className="text-slate-500 text-sm py-2">No problems created for this class yet</p>
-            ) : (
-              <div ref={problemMenuRef} className="relative">
-                <button
-                  type="button"
-                  onClick={() => setShowProblemMenu(v => !v)}
-                  className="w-full flex items-center justify-between gap-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl px-4 py-3 text-white text-sm transition text-left"
-                >
-                  <span className="truncate">
-                    {selectedProblem
-                      ? (() => { const p = problems.find(p => String(p.id) === String(selectedProblem)); return p ? `${p.title} (${p.difficulty}) — ${p.problem_type}` : 'Choose a problem...' })()
-                      : 'Choose a problem...'}
-                  </span>
-                  <span className="text-slate-500 text-[10px] shrink-0">▼</span>
-                </button>
-                <MobileSheet show={showProblemMenu} onClose={() => setShowProblemMenu(false)} widthClass="sm:w-96" anchorRef={problemMenuRef}>
-                  <div className="py-2">
-                    {problems.map(p => (
-                      <button
-                        key={p.id}
-                        type="button"
-                        onClick={() => { setSelectedProblem(String(p.id)); setResults(null); setError(null); setShowProblemMenu(false) }}
-                        className={`w-full px-4 py-2.5 text-left text-sm transition truncate ${
-                          String(selectedProblem) === String(p.id) ? 'text-purple-300 bg-purple-600/10 font-semibold' : 'text-slate-300 hover:text-white hover:bg-slate-800/80'
-                        }`}
-                      >
-                        {p.title} ({p.difficulty}) — {p.problem_type}
-                      </button>
-                    ))}
-                  </div>
-                </MobileSheet>
-              </div>
-            )}
-          </div>
-
-          {/* Threshold */}
-          <div>
-            <label className="block text-slate-400 text-xs font-medium uppercase tracking-wider mb-2">Similarity Threshold</label>
-            <div ref={thresholdMenuRef} className="relative">
-              <button
-                type="button"
-                onClick={() => setShowThresholdMenu(v => !v)}
-                className="w-full flex items-center justify-between gap-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl px-4 py-3 text-white text-sm transition text-left"
-              >
-                <span className="truncate">{THRESHOLD_OPTIONS.find(o => o.value === threshold)?.label}</span>
-                <span className="text-slate-500 text-[10px] shrink-0">▼</span>
-              </button>
-              <MobileSheet show={showThresholdMenu} onClose={() => setShowThresholdMenu(false)} widthClass="sm:w-72" anchorRef={thresholdMenuRef}>
-                <div className="py-2">
-                  {THRESHOLD_OPTIONS.map(opt => (
-                    <button
-                      key={opt.value}
-                      type="button"
-                      onClick={() => { setThreshold(opt.value); setShowThresholdMenu(false) }}
-                      className={`w-full px-4 py-2.5 text-left text-sm transition ${
-                        threshold === opt.value ? 'text-purple-300 bg-purple-600/10 font-semibold' : 'text-slate-300 hover:text-white hover:bg-slate-800/80'
-                      }`}
-                    >
-                      <div>{opt.label}</div>
-                      <div className="text-xs text-slate-500">{opt.desc}</div>
-                    </button>
-                  ))}
-                </div>
-              </MobileSheet>
-            </div>
-            <div className="mt-3 h-2 bg-slate-800 rounded-full overflow-hidden">
-              <div className="h-full bg-gradient-to-r from-green-500 via-yellow-500 to-red-500 rounded-full transition-all duration-500" style={{ width: `${threshold}%` }} />
-            </div>
-            <p className="text-slate-600 text-xs mt-1">Pairs with ≥{threshold}% token overlap will be flagged and reviewed by Gemini AI</p>
-          </div>
-
-          {error && (
-            <div className="p-3 bg-red-900/30 border border-red-600/40 rounded-lg text-red-300 text-sm">❌ {error}</div>
-          )}
-
-          <button
-            onClick={handleScan}
-            disabled={isScanning || !selectedProblem}
-            className="w-full py-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 disabled:from-slate-700 disabled:to-slate-700 disabled:cursor-not-allowed rounded-xl text-white font-bold transition shadow-lg shadow-purple-600/20 flex items-center justify-center gap-2"
-          >
-            {isScanning ? (
-              <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Scanning + running Gemini AI analysis...</>
-            ) : (
-              <>🤖 Run AI Plagiarism Scan{selectedProblemName ? ` — ${selectedProblemName}` : ''}</>
-            )}
-          </button>
-
-          {isScanning && (
-            <div className="text-center space-y-2">
-              <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                <div className="h-full bg-gradient-to-r from-purple-600 to-pink-500 rounded-full animate-pulse" style={{ width: '70%' }} />
-              </div>
-              <p className="text-slate-500 text-xs">
-                Fetching submissions → comparing code pairs → Gemini AI writing verdicts...
-                <br />This may take 10–30 seconds depending on submission count.
-              </p>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Results */}
-      {results && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-white font-bold">
-              {results.flagged === 0 ? '✅ No suspicious pairs found' : `⚠️ ${results.flagged} suspicious pair${results.flagged > 1 ? 's' : ''} found`}
-            </h3>
-            <p className="text-slate-500 text-xs">Compared {results.total_compared} students · threshold {results.threshold}%</p>
-          </div>
-
-          {results.flagged === 0 && (
-            <div className="bg-green-900/10 border border-green-600/20 rounded-2xl p-8 text-center">
-              <span className="text-5xl block mb-3">✅</span>
-              <p className="text-green-400 font-bold text-lg">All Clear</p>
-              <p className="text-slate-400 text-sm mt-1">No student pairs exceeded the {results.threshold}% similarity threshold.</p>
-            </div>
-          )}
-
-          {results.pairs.map((pair, i) => {
-            const isExpanded = expandedPair === i
-            // Color-code the similarity badge by how severe the overlap is
-            const simColor =
-              pair.similarity >= 95 ? 'text-red-400 bg-red-500/10 border-red-500/20' :
-              pair.similarity >= 85 ? 'text-orange-400 bg-orange-500/10 border-orange-500/20' :
-              'text-yellow-400 bg-yellow-500/10 border-yellow-500/20'
-
-            return (
-              <div key={i} className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
-                <div className="flex items-center gap-4 p-5 cursor-pointer hover:bg-slate-800/30 transition" onClick={() => setExpandedPair(isExpanded ? null : i)}>
-                  <span className={`px-3 py-1.5 rounded-lg text-sm font-black border tabular-nums shrink-0 ${simColor}`}>{pair.similarity}%</span>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-white font-semibold text-sm">
-                      {pair.student1.name}<span className="text-slate-500 mx-2">↔</span>{pair.student2.name}
-                    </p>
-                    <p className="text-slate-500 text-xs mt-0.5">
-                      {pair.student1.username} · {pair.student2.username} · {pair.student1.language}
-                      {pair.ai_verdict && <span className="ml-2 text-purple-400">· Gemini verdict available</span>}
-                    </p>
-                  </div>
-                  <span className={`text-slate-500 transition-transform ${isExpanded ? 'rotate-180' : ''}`}>▾</span>
-                </div>
-
-                {isExpanded && (
-                  <div className="border-t border-slate-800 p-5 space-y-4">
-                    {pair.ai_verdict ? (
-                      <div className="p-4 bg-purple-900/20 border border-purple-600/30 rounded-xl">
-                        <p className="text-purple-300 text-xs font-bold uppercase tracking-wider mb-2">🤖 Gemini AI Verdict</p>
-                        <p className="text-slate-300 text-sm leading-relaxed">{pair.ai_verdict}</p>
-                      </div>
-                    ) : (
-                      <div className="p-3 bg-slate-800/50 border border-slate-700 rounded-xl">
-                        <p className="text-slate-500 text-xs">AI verdict unavailable — {pair.similarity}% token overlap detected.</p>
-                      </div>
-                    )}
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {[
-                        { label: pair.student1.name, code: pair.code_preview1, status: pair.student1.status },
-                        { label: pair.student2.name, code: pair.code_preview2, status: pair.student2.status },
-                      ].map((s, si) => (
-                        <div key={si} className="space-y-1">
-                          <div className="flex items-center justify-between">
-                            <p className="text-slate-400 text-xs font-medium">{s.label}</p>
-                            <span className={`px-1.5 py-0.5 rounded text-xs font-bold ${s.status === 'accepted' ? 'bg-green-500/10 text-green-400' : 'bg-slate-700 text-slate-400'}`}>{s.status}</span>
-                          </div>
-                          <pre className="bg-slate-950 border border-slate-800 rounded-lg p-3 text-xs text-slate-300 overflow-auto max-h-48 font-mono leading-relaxed whitespace-pre-wrap">
-                            {s.code || '(no code preview)'}
-                          </pre>
-                          <p className="text-slate-600 text-xs">First 600 chars shown</p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )
-          })}
-        </div>
-      )}
-
-      {/* How it works */}
-      {!results && !isScanning && (
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
-          <h3 className="text-white font-bold text-sm mb-3 flex items-center gap-2">⚙️ How the Scanner Works</h3>
-          <div className="space-y-3">
-            {[
-              { step: '1', title: 'Fetches all submissions',          desc: "Gets the latest submission from each student for the selected problem" },
-              { step: '2', title: 'Token similarity analysis',        desc: "Strips comments and keywords, checks what fraction of code tokens overlap — same approach as Stanford's MOSS tool" },
-              { step: '3', title: 'Flags pairs above threshold',      desc: "Any pair exceeding your similarity threshold is sent to Gemini AI for deeper analysis" },
-              { step: '4', title: 'Gemini AI writes plain verdict',   desc: "Gemini Flash explains what looks suspicious and what to check — saves you from reading raw code diffs" },
-            ].map(s => (
-              <div key={s.step} className="flex items-start gap-3">
-                <div className="w-6 h-6 bg-purple-600/20 border border-purple-600/30 rounded-full flex items-center justify-center text-xs text-purple-400 font-bold shrink-0 mt-0.5">{s.step}</div>
-                <div>
-                  <p className="text-white text-sm font-medium">{s.title}</p>
-                  <p className="text-slate-500 text-xs mt-0.5">{s.desc}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+  const summary = result ? scanSummary(result) : null
+  return <section className="ii" aria-label="Plagiarism review">
+    <header className="ii-heading"><div><h2>Plagiarism review</h2><p>Compare submitted code and review similarities in context.</p></div><span className="ii-label"><ModuleIcon name="search" />Instructor review tool</span></header>
+    <div className="ii-scan-layout">
+      <form className="ii-panel ii-scan-form" onSubmit={scan}>
+        <h3><ModuleIcon name="search" />Scan setup</h3>
+        {loading ? <p role="status">Loading class quests…</p> : loadError ? <div className="ii-error" role="alert"><p>{loadError}</p><button type="button" className="ir-secondary" onClick={() => setReload(n => n + 1)}>Retry quest list</button></div> : !problems.length ? <div className="ii-empty"><h4>No quests available to scan</h4><p>The current scan list includes quests you created and made visible to this class. Create or assign one through Activities.</p></div> : <>
+          <label className="ii-field">Quest<select required value={selected} disabled={scanning} onChange={e => {setSelected(e.target.value);setResult(null);setError('')}}><option value="">Choose a quest…</option>{problems.map(p => <option key={p.id} value={p.id}>{p.title} · {p.difficulty} · {p.problem_type}</option>)}</select></label>
+          <label className="ii-field">Similarity threshold<select value={threshold} disabled={scanning} onChange={e => {setThreshold(e.target.value);setResult(null);setError('')}}><option value="75">75% — Higher sensitivity</option><option value="85">85% — Balanced</option><option value="90">90% — Lower sensitivity</option></select><small>Lower thresholds flag more pairs and can include more coincidental similarities.</small></label>
+          <p className="ii-disclosure">Flagged code previews and student names may be sent to the configured Gemini service for an optional explanation. Similarity results remain available when AI is unavailable.</p>
+          {error && <p className="ii-error" role="alert">{error}</p>}
+          <button className="ii-primary" type="submit" disabled={scanning || !selected}><ModuleIcon name="search" />{scanning ? 'Scanning submissions…' : 'Run similarity scan'}</button>
+          {scanning && <p role="status">Comparing submissions and requesting available AI explanations. Please wait; leaving this tab does not guarantee the server scan stops.</p>}
+        </>}
+      </form>
+      <aside className="ii-guide"><h3>Read similarities carefully</h3><ol><li><strong>Latest work per student</strong><p>The scanner uses each student’s latest submission for this quest within the selected class.</p></li><li><strong>Token overlap</strong><p>Comments and selected keywords are removed before comparing token sets. Short introductory answers can naturally resemble each other.</p></li><li><strong>Review, not an accusation</strong><p>Open flagged pairs to inspect both previews and any AI explanation. This scan does not change grades, XP or attempt status.</p></li></ol></aside>
     </div>
-  )
+    {result && <section className="ii-results" aria-label="Similarity scan results"><header className="ii-heading"><div><h3>{summary.title}</h3><p>{summary.detail}</p></div></header><p className="ii-result-context">{result.questTitle} · {displayNumber(result.total_compared)} students with submissions · {result.threshold}% threshold</p>
+      {result.pairs.map((pair,i) => <details className="ii-panel ii-pair" key={`${pair.student1.id}-${pair.student2.id}-${i}`}><summary><span className="ii-similarity">{pair.similarity}%<small>code similarity</small></span><span><strong>{pair.student1.name} &amp; {pair.student2.name}</strong><small>{pair.student1.language} / {pair.student2.language} · {pair.ai_verdict ? 'AI explanation available' : 'AI explanation unavailable'}</small></span><span className="ii-pair-open">Review pair</span></summary><div className="ii-pair-body"><h4>AI-assisted explanation</h4><p className="ii-disclosure">{pair.ai_verdict || 'No AI explanation was returned. Review the code previews and similarity score yourself.'}</p><div className="ii-code-grid">{[pair.student1,pair.student2].map((s,index)=><div key={s.id}><h4>{s.name}</h4><p>{s.username} · {s.language} · {s.status}</p><pre>{(index ? pair.code_preview2 : pair.code_preview1) || '(No code preview)'}</pre><small>Preview only · first 600 characters supplied by the server</small></div>)}</div></div></details>)}
+    </section>}
+  </section>
 }

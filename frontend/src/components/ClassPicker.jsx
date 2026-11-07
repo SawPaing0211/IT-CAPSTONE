@@ -1,277 +1,99 @@
-// Reusable "pick one of your classes" flow — two steps: pick the subject,
-// then pick which class/section you teach it in. An instructor can teach the
-// same subject across several sections, or teach a handful of unrelated
-// subjects, so a single flat list of classes gets confusing fast. If there's
-// only one subject, or only one class overall, we skip straight past
-// whichever step has nothing to pick.
-//
-// Extracted from SelectClassForQuest.jsx (the quest-creation "pick a class
-// first" screen) so the same safeguard — "you must pick a specific class
-// before you can continue" — can be reused anywhere else that has the same
-// problem, e.g. Announcements.jsx's standalone route.
-//
-// Presentational only: it doesn't navigate anywhere. The caller supplies
-// onSelect(cls) and decides what happens next (navigate, set state, etc).
-
-import { useState, useEffect, useMemo } from 'react'
-import { API_BASE } from '../api/client'
+import { useState, useEffect, useMemo, useRef } from 'react'
+import { API_BASE, authFetch } from '../api/client'
 import InstructorBackButton from './InstructorBackButton'
+import QuestButton from '../pages/Student/components/QuestButton'
+import bookIcon from '../assets/instructor/nav-book.svg'
+import searchIcon from '../assets/instructor/search.svg'
+import { normalizeAssignedClasses, groupAssignedClasses, enrollmentTotal } from './classPickerData'
+import './ClassPicker.css'
 
-const GRADIENTS = [
-  'from-purple-600 to-pink-600',
-  'from-blue-600 to-purple-600',
-  'from-emerald-600 to-teal-600',
-  'from-rose-600 to-orange-600',
-  'from-amber-600 to-yellow-600',
-  'from-cyan-600 to-blue-600',
-]
-const SUBJECT_ICONS = ['📐', '🧪', '🌐', '💻', '📊', '🎨', '🔬', '📚']
+const number = value => Number.isFinite(value) ? value.toLocaleString() : '—'
 
-// Stable-ish pick based on an id, so a subject/class keeps its color even
-// if the list re-sorts between renders.
-const pickFrom = (arr, id) => arr[Math.abs(Number(id) || 0) % arr.length]
-
-export default function ClassPicker({
-  onSelect,
-  onCancel,
-  actionLabel = 'Choose a Class',
-  actionIcon = '🏫',
-  prompt = 'Which class is this for?',
-}) {
+// Shared by the two dashboard quick actions. Selection never creates content.
+export default function ClassPicker({ onSelect, onCancel, actionLabel = 'Continue', prompt = 'Choose the class this is for.' }) {
   const [classes, setClasses] = useState([])
   const [loading, setLoading] = useState(true)
-  const [selectedSubjectId, setSelectedSubjectId] = useState(null)
-  const [searchTerm, setSearchTerm] = useState('')
+  const [error, setError] = useState(false)
+  const [reload, setReload] = useState(0)
+  const [selectedKey, setSelectedKey] = useState(null)
+  const [search, setSearch] = useState('')
+  const selectionMade = useRef(false)
+  const onSelectRef = useRef(onSelect)
+  useEffect(() => { onSelectRef.current = onSelect }, [onSelect])
 
-  // Fetch and normalize the instructor's classes on mount
   useEffect(() => {
-    const fetchClasses = async () => {
+    const controller = new AbortController()
+    let current = true
+    async function load() {
+      setLoading(true)
+      setError(false)
       try {
-        const token = localStorage.getItem('token')
-        const res = await fetch(`${API_BASE}/api/instructor/classes`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        })
-        const data = await res.json()
-        setClasses(data.map(c => ({
-          id:         c.id,
-          subjectId:  c.subject_id,
-          name:       c.section_no,
-          title:      c.subjects?.length > 0 ? c.subjects.join(' · ') : c.name,
-          subjectName: c.subjects?.length > 0 ? c.subjects[0] : (c.name || 'Untitled Subject'),
-          semester:   c.semester || 'Current Semester',
-          students:   c.student_count || 0,
-          problems:   c.problem_count || 0,
-        })))
-      } catch (err) {
-        console.error('Failed to fetch classes:', err)
+        const res = await authFetch(`${API_BASE}/api/instructor/classes`, { signal: controller.signal })
+        if (!res.ok) throw new Error('Classes unavailable')
+        const next = normalizeAssignedClasses(await res.json())
+        if (current) setClasses(next)
+      } catch {
+        if (current) setError(true)
       } finally {
-        setLoading(false)
+        if (current) setLoading(false)
       }
     }
-    fetchClasses()
-  }, [])
+    load()
+    return () => { current = false; controller.abort() }
+  }, [reload])
 
-  // Group classes by subject, so step 1 can show "one card per subject"
-  const subjectGroups = useMemo(() => {
-    const bySubject = new Map()
-    for (const cls of classes) {
-      const key = cls.subjectId ?? `unassigned-${cls.id}`
-      if (!bySubject.has(key)) {
-        bySubject.set(key, {
-          subjectId: cls.subjectId,
-          name: cls.subjectName,
-          classes: [],
-        })
-      }
-      bySubject.get(key).classes.push(cls)
-    }
-    return Array.from(bySubject.values())
-  }, [classes])
-
-  const onlyOneSubject = subjectGroups.length <= 1
-  // Nothing to pick between subjects — treat the only one as already chosen
-  const effectiveSubjectId = selectedSubjectId ?? (onlyOneSubject ? subjectGroups[0]?.subjectId : null)
-  const step = effectiveSubjectId != null || onlyOneSubject ? 'class' : 'subject'
-  const selectedGroup = subjectGroups.find(g => g.subjectId === effectiveSubjectId) || subjectGroups[0]
-
-  // Nothing to choose between at all — skip both steps and hand back the one
-  // class that exists.
+  const groups = useMemo(() => groupAssignedClasses(classes), [classes])
+  const oneCourse = groups.length === 1
+  const activeGroup = groups.find(g => g.key === selectedKey) || (oneCourse ? groups[0] : null)
+  const showingClasses = Boolean(activeGroup)
   useEffect(() => {
-    if (!loading && subjectGroups.length === 1 && subjectGroups[0].classes.length === 1) {
-      onSelect(subjectGroups[0].classes[0], { auto: true })
+    if (!loading && !error && classes.length === 1 && !selectionMade.current) {
+      selectionMade.current = true
+      onSelectRef.current(classes[0], { auto: true })
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, subjectGroups])
+  }, [loading, error, classes])
 
-  const handleBack = () => {
-    if (step === 'class' && !onlyOneSubject) {
-      setSelectedSubjectId(null)
-      setSearchTerm('')
-    } else if (onCancel) {
-      onCancel()
-    }
+  const chooseClass = cls => {
+    if (selectionMade.current) return
+    selectionMade.current = true
+    onSelect(cls)
+  }
+  const chooseCourse = group => {
+    setSearch('')
+    // Once a course is explicitly chosen, skip a redundant one-class choice.
+    if (group.classes.length === 1) chooseClass(group.classes[0])
+    else setSelectedKey(group.key)
+  }
+  const term = search.trim().toLowerCase()
+  const visibleGroups = groups.filter(g => g.name.toLowerCase().includes(term))
+  const visibleClasses = (activeGroup?.classes || []).filter(c => [c.name, c.title, c.semester].some(v => v.toLowerCase().includes(term)))
+  const back = () => {
+    if (showingClasses && !oneCourse) { setSelectedKey(null); setSearch('') }
+    else onCancel?.()
   }
 
-  const filteredSubjects = subjectGroups.filter(g =>
-    g.name.toLowerCase().includes(searchTerm.toLowerCase())
-  )
-  const filteredClasses = (selectedGroup?.classes || []).filter(c =>
-    c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    c.title.toLowerCase().includes(searchTerm.toLowerCase())
-  )
-
-  return (
-    <div className="space-y-6 max-w-5xl mx-auto">
-      {/* Header */}
-      <div className="flex items-center gap-4">
-        {(step === 'class' && !onlyOneSubject) || onCancel ? (
-          <InstructorBackButton onClick={handleBack} />
-        ) : null}
-        <div className="min-w-0">
-          <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight flex items-center gap-2">
-            {step === 'subject' ? (
-              <>{actionIcon} {actionLabel} — Choose a Subject</>
-            ) : (
-              <>{actionIcon} {actionLabel}</>
-            )}
-          </h1>
-          {step === 'subject' ? (
-            <p className="text-slate-400 mt-0.5 text-sm">
-              Which subject is this for?
-            </p>
-          ) : (
-            <p className="text-slate-400 mt-0.5 text-sm flex items-center gap-1.5 flex-wrap">
-              {!onlyOneSubject && (
-                <button
-                  onClick={() => { setSelectedSubjectId(null); setSearchTerm('') }}
-                  className="text-purple-400 hover:text-purple-300 font-semibold transition"
-                >
-                  {selectedGroup?.name}
-                </button>
-              )}
-              {!onlyOneSubject && <span className="text-slate-600">/</span>}
-              <span>{prompt}</span>
-            </p>
-          )}
-        </div>
-      </div>
-
-      {/* Search */}
-      {!loading && (step === 'subject' ? filteredSubjects.length > 3 : (selectedGroup?.classes.length || 0) > 3) && (
-        <div className="relative">
-          <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 text-sm pointer-events-none">🔍</span>
-          <input
-            type="text"
-            placeholder={step === 'subject' ? 'Search subjects...' : 'Search by class code...'}
-            value={searchTerm}
-            onChange={e => setSearchTerm(e.target.value)}
-            className="w-full bg-slate-900 border border-slate-800 rounded-xl px-5 py-3 pl-12 text-white placeholder-slate-600 focus:border-purple-500/60 focus:outline-none transition text-sm min-h-[44px]"
-          />
-        </div>
-      )}
-
-      {loading ? (
-        <div className="flex items-center justify-center py-20">
-          <div className="flex flex-col items-center gap-4">
-            <div className="animate-spin rounded-full h-10 w-10 border-4 border-purple-500 border-t-transparent" />
-            <p className="text-slate-500 text-sm animate-pulse">Loading your classes...</p>
-          </div>
-        </div>
-      ) : subjectGroups.length === 0 ? (
-        <div className="text-center py-14 bg-slate-900 border border-slate-800 rounded-2xl">
-          <div className="text-5xl mb-4">🏫</div>
-          <p className="text-slate-300 text-lg font-semibold mb-1">No classes assigned yet</p>
-          <p className="text-slate-500 text-sm">Contact your admin to get assigned to a class first.</p>
-        </div>
-
-      ) : step === 'subject' ? (
-        filteredSubjects.length === 0 ? (
-          <div className="text-center py-14 bg-slate-900 border border-slate-800 rounded-2xl">
-            <div className="text-5xl mb-4">🔍</div>
-            <p className="text-slate-300 text-lg font-semibold mb-1">No subjects match your search</p>
-            <p className="text-slate-500 text-sm">Try a different search.</p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filteredSubjects.map((group, idx) => {
-              const gradient = pickFrom(GRADIENTS, group.subjectId ?? idx)
-              const icon = pickFrom(SUBJECT_ICONS, group.subjectId ?? idx)
-              const totalStudents = group.classes.reduce((sum, c) => sum + c.students, 0)
-              return (
-                <button
-                  key={group.subjectId ?? `unassigned-${idx}`}
-                  onClick={() => { setSelectedSubjectId(group.subjectId); setSearchTerm('') }}
-                  style={{ animationDelay: `${idx * 60}ms`, animation: 'fadeSlideUp 0.4s ease-out both' }}
-                  className="text-left bg-gradient-to-br from-slate-900 to-slate-800 border border-slate-700 rounded-2xl overflow-hidden hover:border-purple-500 hover:shadow-lg hover:shadow-purple-600/20 transition-all duration-300 group hover:scale-[1.02] min-h-[44px]"
-                >
-                  <div className="p-5">
-                    <div className="flex items-start justify-between mb-4">
-                      <div className={`w-14 h-14 bg-gradient-to-br ${gradient} rounded-xl flex items-center justify-center text-2xl shadow-lg group-hover:scale-110 transition-transform`}>
-                        {icon}
-                      </div>
-                      <span className="px-3 py-1 bg-purple-600/20 border border-purple-600/40 rounded-full text-xs font-bold text-purple-300 whitespace-nowrap">
-                        {group.classes.length} {group.classes.length === 1 ? 'class' : 'classes'}
-                      </span>
-                    </div>
-                    <h3 className="text-lg font-bold text-white mb-3 group-hover:text-purple-300 transition truncate">
-                      {group.name}
-                    </h3>
-                    <div className="flex items-center gap-2 pt-3 border-t border-slate-700 text-xs text-slate-500">
-                      <span>👥 {totalStudents} students total</span>
-                    </div>
-                  </div>
-                </button>
-              )
-            })}
-          </div>
-        )
-
-      ) : filteredClasses.length === 0 ? (
-        <div className="text-center py-14 bg-slate-900 border border-slate-800 rounded-2xl">
-          <div className="text-5xl mb-4">🏫</div>
-          <p className="text-slate-300 text-lg font-semibold mb-1">No classes match your search</p>
-          <p className="text-slate-500 text-sm">Try a different search.</p>
-        </div>
-
-      ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredClasses.map((cls, idx) => {
-            const gradient = pickFrom(GRADIENTS, cls.id)
-            return (
-              <button
-                key={cls.id}
-                onClick={() => onSelect(cls)}
-                style={{ animationDelay: `${idx * 60}ms`, animation: 'fadeSlideUp 0.4s ease-out both' }}
-                className="text-left bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden hover:border-purple-600/40 hover:shadow-xl hover:shadow-purple-900/10 transition-all duration-300 group hover:scale-[1.02] min-h-[44px]"
-              >
-                <div className={`h-1.5 bg-gradient-to-r ${gradient}`} />
-                <div className="p-5">
-                  <div className="flex items-start gap-3 mb-3">
-                    <div className={`w-11 h-11 bg-gradient-to-br ${gradient} rounded-xl flex items-center justify-center text-lg shadow-lg group-hover:scale-105 transition-transform shrink-0`}>
-                      🏫
-                    </div>
-                    <div className="min-w-0">
-                      <h3 className="text-white font-bold group-hover:text-purple-300 transition truncate">{cls.name}</h3>
-                      <p className="text-slate-400 text-xs truncate">{cls.title}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-4 text-xs text-slate-500 pt-3 border-t border-slate-800">
-                    <span>👥 {cls.students} students</span>
-                    <span>📝 {cls.problems} quests</span>
-                  </div>
-                </div>
-              </button>
-            )
-          })}
-        </div>
-      )}
-
-      <style>{`
-        @keyframes fadeSlideUp {
-          from { opacity: 0; transform: translateY(12px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-      `}</style>
-    </div>
-  )
+  return <section className="icp" aria-label={`${actionLabel} class selection`}>
+    <div className="icp-back">{(onCancel || (showingClasses && !oneCourse)) && <InstructorBackButton onClick={back}>{showingClasses && !oneCourse ? 'All courses' : 'Back'}</InstructorBackButton>}<span>{actionLabel}</span></div>
+    <header className="icp-heading"><div><h1>{showingClasses ? 'Choose a class' : 'Choose a course'}</h1><p>{showingClasses ? prompt : 'Choose an assigned course, then the class you want to work with.'}</p></div>
+      {!loading && !error && groups.length > 0 && <span className="icp-count">{showingClasses ? `${activeGroup.classes.length} class codes` : `${groups.length} assigned courses`}</span>}
+    </header>
+    {showingClasses && <div className="icp-context"><img src={bookIcon} alt="" width="26" height="26" /><strong>{activeGroup.name}</strong><span>{actionLabel} for one assigned class</span></div>}
+    {!loading && !error && classes.length > 0 && <label className="icp-search"><img src={searchIcon} alt="" width="22" height="22" /><span className="sr-only">{showingClasses ? 'Search class codes' : 'Search courses'}</span><input type="search" value={search} onChange={e => setSearch(e.target.value)} placeholder={showingClasses ? 'Search by class code or semester…' : 'Search assigned courses…'} /></label>}
+    {loading ? <div className="icp-state" role="status"><h2>Loading your assigned classes…</h2></div>
+      : error ? <div className="icp-state" role="alert"><h2>Unable to load your classes</h2><p>We could not confirm your assignments. Check your connection and try again.</p><button className="ir-secondary" onClick={() => setReload(n => n + 1)}>Try again</button></div>
+      : groups.length === 0 ? <div className="icp-state"><img src={bookIcon} alt="" width="48" height="48" /><h2>No assigned classes yet</h2><p>Contact your administrator to get assigned to a class before continuing.</p></div>
+      : <>
+        <div className="icp-grid">{showingClasses ? visibleClasses.map(cls => <article className="icp-card" key={cls.id}>
+          <div className="icp-card-heading"><span className="icp-emblem"><img src={bookIcon} alt="" width="32" height="32" /></span><div><h2>Class {cls.name}</h2><p>{cls.semester}</p></div></div>
+          <dl className="icp-class-stats"><div><dt>Students</dt><dd>{number(cls.students)}</dd></div><div><dt>Quests</dt><dd>{number(cls.problems)}</dd></div></dl>
+          <QuestButton className="icp-action" ariaLabel={`${actionLabel} for class ${cls.name}`} onClick={() => chooseClass(cls)}>{actionLabel}</QuestButton>
+        </article>) : visibleGroups.map(group => <article className="icp-card" key={group.key}>
+          <div className="icp-card-heading"><span className="icp-emblem"><img src={bookIcon} alt="" width="32" height="32" /></span><h2>{group.name}</h2></div>
+          <div className="icp-course-stats"><span>{group.classes.length} class {group.classes.length === 1 ? 'code' : 'codes'}</span><span title="Student enrollments across the assigned class codes"><strong>{number(enrollmentTotal(group.classes))}</strong> student enrollments</span></div>
+          <QuestButton className="icp-action" ariaLabel={`Choose course ${group.name}`} onClick={() => chooseCourse(group)}>Choose course</QuestButton>
+        </article>)}</div>
+        {(showingClasses ? visibleClasses : visibleGroups).length === 0 && <div className="icp-state"><h2>No matching {showingClasses ? 'class codes' : 'courses'}</h2><p>Try another search.</p><button className="ir-secondary" onClick={() => setSearch('')}>Clear search</button></div>}
+        <p className="icp-note">Only your assigned courses and classes are listed. Selecting a class opens the workspace; nothing is posted or published here.</p>
+      </>}
+  </section>
 }

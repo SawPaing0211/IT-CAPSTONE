@@ -16,6 +16,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { API_BASE, authFetch } from '../../api/client'
 import QuestButton from '../Student/components/QuestButton'
+import InstructorBackButton from '../../components/InstructorBackButton'
 import bookIcon from '../../assets/instructor/nav-book.svg'
 import searchIcon from '../../assets/instructor/search.svg'
 import './InstructorRefined.css'
@@ -188,9 +189,9 @@ export default function MyClasses() {
 
   return <div className="ir-my-classes">
     {studentsModal && <StudentsModal cls={studentsModal} onClose={() => setStudentsModal(null)} />}
-    {showingClasses && !oneSubject && <nav aria-label="Class selection"><button className="ir-text-action" onClick={() => { setSelectedKey(null); setSearch('') }}>← All assigned subjects</button></nav>}
+    {showingClasses && !oneSubject && <nav aria-label="Class selection"><InstructorBackButton onClick={() => { setSelectedKey(null); setSearch('') }}>All courses</InstructorBackButton></nav>}
     <header className="ir-classes-heading">
-      <div><h1>{showingClasses && !oneSubject ? activeGroup.name : 'My Classes'}</h1>
+      <div><h1>{showingClasses ? activeGroup.name : 'My Classes'}</h1>
         <p>{showingClasses ? 'Choose a class code to open its workspace.' : 'Choose an assigned subject to view its class codes.'}</p></div>
       {!loading && !error && <span className="ir-assigned-count">{showingClasses ? `${activeGroup.classes.length} class ${activeGroup.classes.length === 1 ? 'code' : 'codes'}` : `${groups.length} assigned ${groups.length === 1 ? 'subject' : 'subjects'}`}</span>}
     </header>

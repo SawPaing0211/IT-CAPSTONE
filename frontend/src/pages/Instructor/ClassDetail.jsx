@@ -60,7 +60,7 @@ export default function ClassDetail() {
   return <div className="im-class-detail">
     {!editing && <>
       <nav className="im-breadcrumb" aria-label="Class location"><button onClick={() => navigate('/instructor/classes')}>My Classes</button><span>/</span><span>{classInfo.section_no}</span></nav>
-      <header className="im-class-heading"><InstructorBackButton onClick={() => navigate('/instructor/classes')} /><div><h1>{classInfo.subjects?.join(' · ') || classInfo.name}</h1><p>Class {classInfo.section_no} · {classInfo.semester || 'Semester not specified'}{typeof classInfo.is_active === 'boolean' && <span className={`im-status ${classInfo.is_active ? 'published' : 'draft'}`}>{classInfo.is_active ? 'Active' : 'Inactive'}</span>}</p></div><button className="ir-secondary" onClick={() => setActiveTab('analytics')}><ModuleIcon name="chart" />View Analytics</button></header>
+      <header className="im-class-heading"><InstructorBackButton onClick={() => navigate('/instructor/classes')} /><div><h1>{classInfo.subjects?.join(' · ') || classInfo.name}</h1><p>Class {classInfo.section_no} · {classInfo.semester || 'Semester not specified'}{typeof classInfo.is_active === 'boolean' && <span className={`im-status ${classInfo.is_active ? 'published' : 'draft'}`}>{classInfo.is_active ? 'Active' : 'Inactive'}</span>}</p></div></header>
       <dl className="ir-surface im-summary-strip">{[
         { label: classInfo.student_count === 1 ? 'Student' : 'Students', value: classInfo.student_count, icon: 'users' },
         { label: classInfo.problem_count === 1 ? 'Quest' : 'Quests', value: classInfo.problem_count, icon: 'file' },
@@ -70,9 +70,9 @@ export default function ClassDetail() {
       <nav className="im-class-tabs" aria-label="Class workspace">{tabs.map(tab => <button key={tab.id} aria-current={activeTab === tab.id ? 'page' : undefined} onClick={() => setActiveTab(tab.id)}><ModuleIcon name={tab.icon} />{tab.label}</button>)}</nav>
     </>}
     {activeTab === 'lessons' && <CourseMaterials key={id} classId={id} subjectId={classInfo.subject_id} classInfo={classInfo} onEditingChange={setEditing} />}
-    {activeTab === 'problems' && <ProblemManagement classId={id} subjectId={classInfo.subject_id} />}
-    {activeTab === 'announcements' && <Announcements classId={id} />}
-    {activeTab === 'plagiarism' && <PlagiarismCheck classId={id} />}
-    {activeTab === 'analytics' && <Analytics classId={id} />}
+    {activeTab === 'problems' && <ProblemManagement key={id} classId={id} subjectId={classInfo.subject_id} />}
+    {activeTab === 'announcements' && <Announcements classId={id} classInfo={classInfo} onEditingChange={setEditing} />}
+    {activeTab === 'plagiarism' && <PlagiarismCheck key={id} classId={id} />}
+    {activeTab === 'analytics' && <Analytics key={id} classId={id} />}
   </div>
 }

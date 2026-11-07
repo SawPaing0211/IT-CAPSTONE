@@ -29,8 +29,7 @@ export default function SelectClassForQuest() {
     <ClassPicker
       onSelect={pickClass}
       onCancel={() => navigate(-1)}
-      actionLabel="Create Quest — Choose a Class"
-      actionIcon="⚔️"
+      actionLabel="Create quest"
       prompt="Which class is this for?"
     />
   )

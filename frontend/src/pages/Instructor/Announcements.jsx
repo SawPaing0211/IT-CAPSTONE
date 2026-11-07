@@ -1,466 +1,188 @@
-// announcements — instructor posts updates, students see them.
-// reused in two places: inside a class tab (classId passed in), and the
-// standalone /instructor/announcements route (Dashboard Quick Actions →
-// "Post Announcement"), which has no class context of its own — that route
-// makes the instructor pick one of their classes first (via the shared
-// ClassPicker) before showing the composer, so every announcement always
-// ends up scoped to a real class. There used to be a "no class_id" global
-// path here that broadcast to every student on the platform; nothing
-// legitimately used it, so it's gone — pickedClass below is what replaces it.
-//
-// priority = low/medium/high/urgent, just a colored label, no real logic
-// tied to it. is_pinned just floats it to the top of the list.
-//
-// the Type filter dropdown used to bind to the wrong variable so filtering
-// never worked, uses typeFilter now. also removed an unused statusFilter state.
-//
-// edit re-uses the same create form, just pre-filled, sends PUT instead of POST
-
-import { useState, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import ClassPicker from '../../components/ClassPicker'
-import MobileSheet from '../../components/MobileSheet'
-import { API_BASE } from '../../api/client'
+import { API_BASE, authFetch } from '../../api/client'
+import ModuleIcon from './ModuleIcon'
+import './InstructorAnnouncements.css'
 
-export default function Announcements({ classId }) {
+const EMPTY = { title: '', content: '', priority: 'medium', is_pinned: false }
+const PRIORITIES = { low: 'Low', medium: 'Medium', high: 'High', urgent: 'Urgent' }
+const timestamp = value => {
+  if (!value) return 'Date unavailable'
+  // The API serializes UTC datetimes without an offset.
+  const date = new Date(/(?:Z|[+-]\d{2}:\d{2})$/.test(value) ? value : `${value}Z`)
+  return Number.isNaN(date.getTime()) ? 'Date unavailable' : date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+}
+async function responseError(res) {
+  const body = await res.json().catch(() => ({}))
+  return body.error || body.message || body.msg || `Request failed (HTTP ${res.status}). Please try again.`
+}
+
+export default function Announcements({ classId, classInfo, onEditingChange }) {
   const navigate = useNavigate()
-  // only used on the standalone route (no classId prop) — the class the
-  // instructor picked before the composer/list is shown
   const [pickedClass, setPickedClass] = useState(null)
-  const effectiveClassId = classId ?? pickedClass?.id
+  if (classId == null && !pickedClass) return <ClassPicker onSelect={setPickedClass} onCancel={() => navigate(-1)} actionLabel="Post announcement" prompt="Which class is this announcement for?" />
+  const id = classId ?? pickedClass.id
+  // A new class gets a fresh workspace, so a message can never follow a class switch.
+  return <AnnouncementWorkspace key={id} classId={id} className={classInfo?.section_no || pickedClass?.name} subjectName={classInfo?.subjects?.join(' · ') || classInfo?.name || pickedClass?.subjectName} onEditingChange={onEditingChange} onChangeClass={classId == null ? () => setPickedClass(null) : null} />
+}
 
-  const [showCreateForm, setShowCreateForm] = useState(false)
-  const [editingId, setEditingId]           = useState(null)
-  const [announcements, setAnnouncements]   = useState([])
-  const [loading, setLoading]               = useState(true)
-  const [submitting, setSubmitting]         = useState(false)
-  const [error, setError]                   = useState(null)
-  const [success, setSuccess]               = useState(null)
-  const [searchTerm, setSearchTerm]         = useState('')
-  const [typeFilter, setTypeFilter]         = useState('all')
-  const [showTypeFilter, setShowTypeFilter] = useState(false)
-  const typeFilterRef = useRef(null)
-  const [deleteTarget, setDeleteTarget]     = useState(null)
+function AnnouncementWorkspace({ classId, className, subjectName, onChangeClass, onEditingChange }) {
+  const [items, setItems] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [loaded, setLoaded] = useState(false)
+  const [loadError, setLoadError] = useState('')
+  const [error, setError] = useState('')
+  const [success, setSuccess] = useState('')
+  const [editor, setEditor] = useState(false)
+  const [editingId, setEditingId] = useState(null)
+  const [form, setForm] = useState({ ...EMPTY })
+  const [original, setOriginal] = useState({ ...EMPTY })
+  const [saving, setSaving] = useState(false)
+  const [uncertain, setUncertain] = useState(false)
+  const [search, setSearch] = useState('')
+  const [priority, setPriority] = useState('all')
+  const [deleteTarget, setDeleteTarget] = useState(null)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
+  const [discardAction, setDiscardAction] = useState(null)
+  const mutation = useRef(false)
+  const requestId = useRef(0)
+  const titleRef = useRef(null)
+  const newButton = useRef(null)
+  const dirty = JSON.stringify(form) !== JSON.stringify(original)
+  const audience = className ? `Class ${className}` : 'Selected class'
 
-  const [form, setForm] = useState({
-    title: '',
-    content: '',
-    priority: 'medium',
-    is_pinned: false,
-  })
-
-  // Fetch announcements for the effective class
-  const fetchAnnouncements = async () => {
+  const load = useCallback(async signal => {
+    const sequence = ++requestId.current
+    setLoading(true)
+    setLoadError('')
     try {
-      const token = localStorage.getItem('token')
-      const res = await fetch(`${API_BASE}/api/announcements?class_id=${effectiveClassId}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      })
-      if (res.ok) setAnnouncements(await res.json())
+      const res = await authFetch(`${API_BASE}/api/announcements?class_id=${encodeURIComponent(classId)}`, { signal })
+      if (!res.ok) throw new Error(await responseError(res))
+      const data = await res.json()
+      if (!Array.isArray(data)) throw new Error('The announcement list could not be read.')
+      if (sequence !== requestId.current || signal?.aborted) return
+      setItems(data)
+      setLoaded(true)
     } catch (err) {
-      console.error('Failed to fetch announcements:', err)
+      if (sequence === requestId.current && !signal?.aborted) setLoadError(err.message || 'Unable to load announcements.')
     } finally {
-      setLoading(false)
+      if (sequence === requestId.current && !signal?.aborted) setLoading(false)
     }
-  }
-
-  // Re-fetch announcements whenever the effective class changes. On the
-  // standalone route there's nothing to fetch yet until a class is picked.
+  }, [classId])
+  // These are remote-resource loading states, reset when the class changes.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { const controller = new AbortController(); load(controller.signal); return () => { controller.abort() } }, [load])
+  useEffect(() => { if (editor) titleRef.current?.focus() }, [editor, editingId])
+  useEffect(() => { onEditingChange?.(editor); return () => onEditingChange?.(false) }, [editor, onEditingChange])
   useEffect(() => {
-    if (effectiveClassId != null) fetchAnnouncements()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [effectiveClassId])
+    if (!editor || !dirty) return
+    const warn = e => { e.preventDefault(); e.returnValue = '' }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [editor, dirty])
 
-  // Sync a form field's value or checked state into state
-  const handleChange = (e) => {
-    const { name, value, type, checked } = e.target
-    setForm(prev => ({ ...prev, [name]: type === 'checkbox' ? checked : value }))
+  const begin = item => {
+    const next = item ? { title: item.title, content: item.content, priority: item.priority || 'medium', is_pinned: !!item.is_pinned } : { ...EMPTY }
+    setForm(next); setOriginal(next); setEditingId(item?.id ?? null); setError(''); setSuccess(''); setUncertain(false); setEditor(true)
   }
-
-  // Open the form in create mode with a blank announcement
-  const openCreate = () => {
-    setEditingId(null)
-    setForm({ title: '', content: '', priority: 'medium', is_pinned: false })
-    setError(null)
-    setShowCreateForm(true)
+  const finishCancel = () => {
+    setEditor(false); setError(''); setUncertain(false); newButton.current?.focus()
   }
-
-  // Open the form pre-filled with an existing announcement's data
-  const openEdit = (ann) => {
-    setEditingId(ann.id)
-    setForm({ title: ann.title, content: ann.content, priority: ann.priority, is_pinned: ann.is_pinned })
-    setError(null)
-    setShowCreateForm(true)
+  const start = item => {
+    if (mutation.current) return
+    if (editor && dirty) { setDiscardAction({ kind: 'start', item }); return }
+    begin(item)
   }
-
-  // Close the create/edit form and reset it
-  const closeForm = () => {
-    setShowCreateForm(false)
-    setEditingId(null)
-    setError(null)
-    setForm({ title: '', content: '', priority: 'medium', is_pinned: false })
+  const cancel = () => {
+    if (mutation.current) return
+    if (dirty) { setDiscardAction({ kind: 'close' }); return }
+    finishCancel()
   }
-
-  // Create or update the announcement depending on which mode the form is in
-  const handleSubmit = async () => {
-    if (!form.title.trim() || !form.content.trim()) {
-      setError('Title and content are required.')
-      return
-    }
-    setSubmitting(true)
-    setError(null)
+  const confirmDiscard = () => {
+    const action = discardAction
+    setDiscardAction(null)
+    if (action?.kind === 'close') finishCancel()
+    else begin(action?.item)
+  }
+  const submit = async e => {
+    e.preventDefault()
+    if (mutation.current || uncertain) return
+    if (!form.title.trim() || !form.content.trim()) { setError('Enter both a title and a message before posting.'); titleRef.current?.focus(); return }
+    if (!classId) { setError('Choose an assigned class before posting.'); return }
+    mutation.current = true; setSaving(true); setError(''); setSuccess('')
+    let received = false
     try {
-      const token = localStorage.getItem('token')
-      const url = editingId
-        ? `${API_BASE}/api/announcements/${editingId}`
-        : `${API_BASE}/api/announcements`
-      const method = editingId ? 'PUT' : 'POST'
-
-      const res = await fetch(url, {
-        method,
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title:     form.title,
-          content:   form.content,
-          priority:  form.priority,
-          is_pinned: form.is_pinned,
-          class_id:  effectiveClassId,
-        }),
+      const res = await authFetch(`${API_BASE}/api/announcements${editingId ? `/${editingId}` : ''}`, {
+        method: editingId ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...form, title: form.title.trim(), content: form.content.trim(), class_id: classId }),
       })
-      if (!res.ok) {
-        const err = await res.json()
-        throw new Error(err.error || 'Failed to save announcement')
-      }
-      setSuccess(editingId ? 'Announcement updated!' : 'Announcement posted!')
-      closeForm()
-      await fetchAnnouncements()
-      setTimeout(() => setSuccess(null), 3000)
+      received = true
+      if (!res.ok) throw new Error(await responseError(res))
+      // A successful save is separate from the following list refresh.
+      setEditor(false); setSuccess(editingId ? 'Announcement updated.' : 'Announcement posted to this class.'); setForm({ ...EMPTY }); setOriginal({ ...EMPTY })
+      setSearch(''); setPriority('all')
+      await load()
+      newButton.current?.focus()
     } catch (err) {
-      setError(err.message)
-    } finally {
-      setSubmitting(false)
-    }
+      if (!received) { setUncertain(true); setError('We could not confirm whether this announcement was saved. Your text is preserved. Refresh the list below and check it before closing and starting another post.') }
+      else setError(err.message || 'Unable to save. Your changes are still here.')
+    } finally { mutation.current = false; setSaving(false) }
   }
-
-  // Open the delete confirmation modal for an announcement
-  const handleDelete = (ann) => {
-    setDeleteTarget(ann)
-  }
-
-  // Delete the announcement pending confirmation
-  const confirmDelete = async () => {
-    if (!deleteTarget) return
+  const remove = async () => {
+    if (!deleteTarget || mutation.current) return
+    mutation.current = true; setDeleting(true); setDeleteError('')
     try {
-      const token = localStorage.getItem('token')
-      const res = await fetch(`${API_BASE}/api/announcements/${deleteTarget.id}`, {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}` }
-      })
-      if (res.ok) {
-        setAnnouncements(prev => prev.filter(a => a.id !== deleteTarget.id))
-        setSuccess('Announcement deleted.')
-        setTimeout(() => setSuccess(null), 3000)
-      }
-    } catch (err) {
-      console.error('Failed to delete:', err)
-    } finally {
-      setDeleteTarget(null)
-    }
+      const res = await authFetch(`${API_BASE}/api/announcements/${deleteTarget.id}`, { method: 'DELETE' })
+      if (!res.ok) throw new Error(await responseError(res))
+      setItems(prev => prev.filter(a => a.id !== deleteTarget.id)); setDeleteTarget(null); setSuccess('Announcement deleted.')
+    } catch (err) { setDeleteError(`${err.message || 'Unable to confirm deletion.'} Refresh the list before trying again.`) }
+    finally { mutation.current = false; setDeleting(false) }
   }
+  const filtered = items.filter(a => (priority === 'all' || a.priority === priority) && `${a.title}\n${a.content}`.toLowerCase().includes(search.toLowerCase()))
+  const pinned = filtered.filter(a => a.is_pinned)
+  const regular = filtered.filter(a => !a.is_pinned)
+  const cards = entries => entries.map(a => <article key={a.id} className={`ia-card ${a.is_pinned ? 'ia-pinned' : ''}`}>
+    <header><div><div className="ia-card-badges">{a.is_pinned && <span className="ia-pin-badge"><PinIcon />Pinned</span>}<span className={`ia-priority-badge ia-${a.priority}`}>{PRIORITIES[a.priority] || 'Medium'} priority</span></div><h3>{a.title}</h3><p className="ia-meta">{a.instructor || 'Instructor'}<span aria-hidden="true"> · </span><time>{timestamp(a.created_at)}</time></p></div><div className="ia-card-actions"><button type="button" className="ia-icon-button" aria-label={`Edit announcement: ${a.title}`} onClick={() => start(a)} disabled={saving || deleting}><ModuleIcon name="edit" size={18} /></button><button type="button" className="ia-icon-button ia-delete" aria-label={`Delete announcement: ${a.title}`} onClick={() => { setDeleteError(''); setDeleteTarget(a) }} disabled={saving || deleting}><ModuleIcon name="trash" size={18} /></button></div></header>
+    <p className="ia-message-body">{a.content}</p>
+  </article>)
 
-  const priorityConfig = {
-    low:    { label: 'Low',    color: 'text-slate-400',  bg: 'bg-slate-700/40',  border: 'border-slate-600',     selectedBorder: 'border-slate-400' },
-    medium: { label: 'Medium', color: 'text-blue-400',   bg: 'bg-blue-500/10',   border: 'border-blue-500/20',   selectedBorder: 'border-blue-500' },
-    high:   { label: 'High',   color: 'text-orange-400', bg: 'bg-orange-500/10', border: 'border-orange-500/20', selectedBorder: 'border-orange-500' },
-    urgent: { label: 'Urgent', color: 'text-red-400',    bg: 'bg-red-500/10',    border: 'border-red-500/20',    selectedBorder: 'border-red-500' },
-  }
+  return <section className="ia-workspace" aria-label="Class announcements">
+    <header className="ia-heading"><div><h2>Announcements</h2><p>Keep your class informed, one clear update at a time.</p></div><button ref={newButton} type="button" className="ia-primary" disabled={saving || deleting} onClick={() => start(null)}><ModuleIcon name="plus" size={18} />New announcement</button></header>
+    <div className="ia-audience"><ModuleIcon name="users" size={18} /><span>{audience}{subjectName && ` · ${subjectName}`}</span><span className="ia-audience-note">Visible to students in this class</span>{onChangeClass && <button type="button" disabled={editor || saving} onClick={onChangeClass}>Change class</button>}</div>
+    {success && <div role="status" className="ia-feedback ia-success">{success}<button type="button" aria-label="Dismiss success message" onClick={() => setSuccess('')}>×</button></div>}
+    {editor && <form className="ia-composer" onSubmit={submit} noValidate>
+      <header className="ia-composer-heading"><div><h3>{editingId ? 'Edit announcement' : 'Write an announcement'}</h3><p>Share lesson reminders, schedule changes or important class news.</p></div><button type="button" className="ia-icon-button" aria-label="Close announcement editor" disabled={saving} onClick={cancel}>×</button></header>
+      {error && <div className="ia-feedback ia-error" role="alert">{error}</div>}
+      <div className="ia-editor-layout"><fieldset disabled={saving} className="ia-fields">
+        <label className="ia-field"><span>Title <span aria-hidden="true">*</span></span><input ref={titleRef} name="title" required value={form.title} onChange={e => setForm(p => ({ ...p, title: e.target.value }))} placeholder="e.g. What to prepare for our next class" /></label>
+        <label className="ia-field"><span>Message <span aria-hidden="true">*</span></span><textarea name="content" rows={8} required value={form.content} onChange={e => setForm(p => ({ ...p, content: e.target.value }))} placeholder="Write your update. Include the details your students need." /><small>Line breaks are preserved. Your message is posted as plain text.</small></label>
+        <fieldset className="ia-priorities"><legend>Priority</legend><div>{Object.entries(PRIORITIES).map(([value,label]) => <label key={value} className={`ia-priority-option ia-${value}`}><input type="radio" name="priority" value={value} checked={form.priority === value} onChange={() => setForm(p => ({ ...p, priority: value }))} /><span>{label}</span></label>)}</div><p>Priority adds a label; it does not schedule delivery.</p></fieldset>
+        <label className="ia-pin-control"><PinIcon /><span><strong>Pin to the top</strong><small>Keep this update above unpinned announcements.</small></span><input type="checkbox" name="is_pinned" checked={form.is_pinned} onChange={e => setForm(p => ({ ...p, is_pinned: e.target.checked }))} /></label>
+      </fieldset><aside className="ia-preview" aria-label="Announcement preview"><h4>Student preview</h4><div className="ia-card-badges">{form.is_pinned && <span className="ia-pin-badge"><PinIcon />Pinned</span>}<span className={`ia-priority-badge ia-${form.priority}`}>{PRIORITIES[form.priority]} priority</span></div><h3>{form.title.trim() || 'Your announcement title'}</h3><p className="ia-message-body">{form.content.trim() || 'Your message will appear here as you write.'}</p><p className="ia-preview-note"><ModuleIcon name="eye" size={16} />{audience} · Posted only when you confirm</p></aside></div>
+      <footer className="ia-savebar"><p>{saving ? 'Saving your announcement…' : dirty ? 'Unsaved changes' : 'Nothing posted yet'}{uncertain && ' · Save status unconfirmed'}</p><div><button type="button" className="ia-secondary" disabled={saving} onClick={cancel}>Cancel</button><button type="submit" className="ia-primary" disabled={saving || uncertain}>{saving ? 'Saving…' : editingId ? 'Save changes' : 'Post announcement'}<ModuleIcon name="announcement" size={17} /></button></div></footer>
+    </form>}
+    <div className="ia-toolbar"><label className="ia-search"><ModuleIcon name="search" size={18} /><input type="search" aria-label="Search announcements" placeholder="Search announcements" value={search} onChange={e => setSearch(e.target.value)} /></label><label className="ia-filter"><span>Priority</span><select aria-label="Filter announcements by priority" value={priority} onChange={e => setPriority(e.target.value)}><option value="all">All priorities</option>{Object.entries(PRIORITIES).map(([v,t]) => <option key={v} value={v}>{t}</option>)}</select></label><button type="button" className="ia-secondary" disabled={loading || saving || deleting} onClick={() => load()}>Refresh</button></div>
+    {loadError && <div className="ia-feedback ia-error" role="alert"><span>{loadError}{loaded && ' Previously loaded announcements remain visible.'}</span><button type="button" onClick={() => load()} disabled={loading}>Retry</button></div>}
+    {loading && <p role="status" className="ia-loading">Loading announcements…</p>}
+    {loaded && <div className="ia-list" aria-busy={loading}>{pinned.length > 0 && <section aria-label="Pinned announcements"><h3 className="ia-list-label"><PinIcon />Pinned <span>{pinned.length}</span></h3>{cards(pinned)}</section>}{regular.length > 0 && <section aria-label="Other announcements">{pinned.length > 0 && <h3 className="ia-list-label">Latest updates</h3>}{cards(regular)}</section>}
+      {!loading && !loadError && filtered.length === 0 && <div className="ia-empty"><ModuleIcon name={search || priority !== 'all' ? 'search' : 'announcement'} size={40} /><h3>{search || priority !== 'all' ? 'No matching announcements' : 'Your next class update starts here'}</h3><p>{search || priority !== 'all' ? 'Try another search or clear your filters.' : 'Post a reminder or share something your students should know.'}</p>{search || priority !== 'all' ? <button type="button" className="ia-secondary" onClick={() => { setSearch(''); setPriority('all') }}>Clear filters</button> : !editor && <button type="button" className="ia-primary" onClick={() => start(null)}>Create announcement</button>}</div>}
+    </div>}
+    {discardAction && <DiscardAnnouncement onCancel={() => setDiscardAction(null)} onConfirm={confirmDiscard} />}
+    {deleteTarget && <DeleteAnnouncement announcement={deleteTarget} busy={deleting} error={deleteError} onCancel={() => { if (!deleting) setDeleteTarget(null) }} onConfirm={remove} />}
+  </section>
+}
 
-  // Filter announcements by search term and priority
-  const filtered = announcements.filter(a => {
-    const matchesSearch = a.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          a.content.toLowerCase().includes(searchTerm.toLowerCase())
-    const matchesType   = typeFilter === 'all' || a.priority === typeFilter
-    return matchesSearch && matchesType
-  })
+function PinIcon() { return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m16 3 5 5-4 2-3 5-5-5 5-3 2-4ZM9 10l-4 4 5 5 4-4M7 17l-5 5" /></svg> }
+function DeleteAnnouncement({ announcement, busy, error, onCancel, onConfirm }) {
+  const dialog = useRef(null)
+  useEffect(() => { const node = dialog.current; node.showModal(); return () => node.close() }, [])
+  return <dialog ref={dialog} className="ia-delete-dialog" aria-labelledby="ia-delete-title" onCancel={e => { e.preventDefault(); if (!busy) onCancel() }}><h2 id="ia-delete-title">Delete announcement?</h2><p>Delete “{announcement.title}”? Students will no longer see this update. This cannot be undone.</p>{error && <p role="alert" className="ia-feedback ia-error">{error}</p>}<div><button type="button" className="ia-secondary" disabled={busy} onClick={onCancel} autoFocus>Keep announcement</button><button type="button" className="ia-danger" disabled={busy} onClick={onConfirm}>{busy ? 'Deleting…' : 'Delete announcement'}</button></div></dialog>
+}
 
-  // Standalone route (no classId prop) and no class picked yet — make the
-  // instructor choose one of their classes before anything else renders.
-  // This is what keeps class_id from ever being sent as null.
-  if (classId == null && !pickedClass) {
-    return (
-      <ClassPicker
-        onSelect={(cls) => setPickedClass(cls)}
-        onCancel={() => navigate(-1)}
-        actionLabel="Post Announcement — Choose a Class"
-        actionIcon="📢"
-        prompt="Which class is this announcement for?"
-      />
-    )
-  }
-
-  return (
-    <div className="space-y-6">
-
-      <div className="flex justify-between items-start gap-4 flex-wrap">
-        <div>
-          <h2 className="text-2xl font-black text-white tracking-tight">Announcements</h2>
-          <p className="text-slate-400 mt-0.5 text-sm flex items-center gap-1.5 flex-wrap">
-            <span>Communicate important updates to your students</span>
-            {/* only shown on the standalone route — classId prop already pins the tab to one class */}
-            {classId == null && pickedClass && (
-              <>
-                <span className="text-slate-700">·</span>
-                <button
-                  onClick={() => { setPickedClass(null); setAnnouncements([]); setLoading(true) }}
-                  className="text-purple-400 hover:text-purple-300 font-semibold transition"
-                >
-                  {pickedClass.name} (change)
-                </button>
-              </>
-            )}
-          </p>
-        </div>
-        <button
-          onClick={openCreate}
-          className="px-4 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white rounded-xl font-bold transition shadow-lg shadow-purple-600/20 flex items-center gap-2 text-sm"
-        >
-          📢 New Announcement
-        </button>
-      </div>
-
-      {success && (
-        <div className="p-4 bg-green-900/30 border border-green-600/40 rounded-xl text-green-300 text-sm flex items-center gap-2">
-          ✅ {success}
-        </div>
-      )}
-      {error && !showCreateForm && (
-        <div className="p-4 bg-red-900/30 border border-red-600/40 rounded-xl text-red-300 text-sm flex items-center gap-2">
-          ❌ {error}
-        </div>
-      )}
-
-      {/* create + edit reuse the same form — editingId tells us which mode */}
-      {showCreateForm && (
-        <div className="bg-slate-900 border border-purple-600/20 rounded-2xl p-4 sm:p-6 space-y-5">
-          <div className="flex items-center justify-between">
-            <h3 className="text-lg font-bold text-white flex items-center gap-2">
-              <span>{editingId ? '✏️' : '📢'}</span>
-              {editingId ? 'Edit Announcement' : 'New Announcement'}
-            </h3>
-            <button onClick={closeForm} className="w-9 h-9 flex items-center justify-center rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition">
-              ✕
-            </button>
-          </div>
-
-          {error && (
-            <div className="p-3 bg-red-900/30 border border-red-600/40 rounded-lg text-red-300 text-sm">❌ {error}</div>
-          )}
-
-          <div>
-            <label className="block text-slate-400 text-xs font-medium uppercase tracking-wider mb-2">Title *</label>
-            <input
-              type="text" name="title" value={form.title} onChange={handleChange}
-              placeholder="Enter announcement title"
-              className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:border-purple-500/60 outline-none transition text-sm"
-            />
-          </div>
-
-          <div>
-            <label className="block text-slate-400 text-xs font-medium uppercase tracking-wider mb-2">Priority</label>
-            <div className="grid grid-cols-4 gap-2">
-              {Object.entries(priorityConfig).map(([key, pc]) => (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => setForm(prev => ({ ...prev, priority: key }))}
-                  className={`py-2.5 rounded-xl text-sm font-bold border-2 transition ${
-                    form.priority === key
-                      ? `${pc.bg} ${pc.color} ${pc.selectedBorder}`
-                      : 'bg-slate-800 border-slate-700 text-slate-500 hover:text-slate-300 hover:border-slate-600'
-                  }`}
-                >
-                  {pc.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className={`p-4 border rounded-xl transition ${
-            form.is_pinned
-              ? 'bg-gradient-to-r from-purple-900/20 to-pink-900/20 border-purple-600/30'
-              : 'bg-slate-800/40 border-slate-700'
-          }`}>
-            <label className="flex items-center justify-between cursor-pointer">
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xl">📌</span>
-                  <span className="text-white font-bold text-sm">Pin announcement</span>
-                </div>
-                <p className="text-slate-400 text-xs mt-1">Shows at the top of the list</p>
-              </div>
-              <input
-                type="checkbox" name="is_pinned" checked={form.is_pinned} onChange={handleChange}
-                className="w-6 h-6 rounded border-slate-600 text-purple-600 focus:ring-purple-500 cursor-pointer"
-              />
-            </label>
-          </div>
-
-          <div>
-            <label className="block text-slate-400 text-xs font-medium uppercase tracking-wider mb-2">Content *</label>
-            <textarea
-              name="content" value={form.content} onChange={handleChange} rows="5"
-              placeholder="Write your announcement here..."
-              className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:border-purple-500/60 outline-none resize-none transition text-sm"
-            />
-          </div>
-
-          <div className="flex gap-3 pt-2 border-t border-slate-800">
-            <button onClick={closeForm} disabled={submitting} className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 rounded-xl text-slate-300 font-bold transition disabled:opacity-50 text-sm">
-              Cancel
-            </button>
-            <button
-              onClick={handleSubmit} disabled={submitting}
-              className="flex-1 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 disabled:from-slate-700 disabled:to-slate-700 disabled:cursor-not-allowed rounded-xl text-white font-bold transition flex items-center justify-center gap-2 text-sm"
-            >
-              {submitting
-                ? <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Saving...</>
-                : editingId ? '💾 Save Changes' : '📢 Post Announcement'
-              }
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Search + Filter */}
-      <div className="flex gap-3 flex-wrap">
-        <div className="relative flex-1 min-w-[200px]">
-          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm pointer-events-none">🔍</span>
-          <input
-            type="text" placeholder="Search announcements..." value={searchTerm}
-            onChange={e => setSearchTerm(e.target.value)}
-            className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-9 pr-4 py-2.5 text-white placeholder-slate-600 outline-none focus:border-purple-500/60 transition text-sm"
-          />
-        </div>
-        <div ref={typeFilterRef} className="relative shrink-0">
-          <button
-            onClick={() => setShowTypeFilter(v => !v)}
-            className="flex items-center gap-2 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-xl px-4 py-2.5 text-slate-300 text-sm transition"
-          >
-            <span>{typeFilter === 'all' ? 'All Priorities' : priorityConfig[typeFilter]?.label}</span>
-            <span className="text-slate-500 text-[10px]">▼</span>
-          </button>
-          <MobileSheet show={showTypeFilter} onClose={() => setShowTypeFilter(false)} widthClass="sm:w-48" anchorRef={typeFilterRef}>
-            <div className="py-2">
-              {[{ key: 'all', label: 'All Priorities' }, ...Object.entries(priorityConfig).map(([key, pc]) => ({ key, label: pc.label }))].map(opt => (
-                <button
-                  key={opt.key}
-                  onClick={() => { setTypeFilter(opt.key); setShowTypeFilter(false) }}
-                  className={`w-full px-4 py-2.5 text-left text-sm transition ${
-                    typeFilter === opt.key ? 'text-purple-300 bg-purple-600/10 font-semibold' : 'text-slate-300 hover:text-white hover:bg-slate-800/80'
-                  }`}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
-          </MobileSheet>
-        </div>
-      </div>
-
-      {/* List */}
-      {loading ? (
-        <div className="flex items-center justify-center py-16">
-          <div className="animate-spin rounded-full h-10 w-10 border-4 border-purple-500 border-t-transparent" />
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {filtered.map(ann => {
-            const pc = priorityConfig[ann.priority] || priorityConfig.medium
-            return (
-              <div
-                key={ann.id}
-                className={`bg-slate-900 border rounded-2xl p-5 hover:border-slate-700 transition ${
-                  ann.is_pinned ? 'border-purple-500/30' : 'border-slate-800'
-                }`}
-              >
-                <div className="flex items-start justify-between gap-4 mb-3">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap mb-2">
-                      {ann.is_pinned && <span className="text-purple-400 text-xs font-bold">📌 PINNED</span>}
-                      <h3 className="text-base font-bold text-white">{ann.title}</h3>
-                    </div>
-                    <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold border ${pc.bg} ${pc.color} ${pc.border}`}>
-                      {pc.label}
-                    </span>
-                  </div>
-                  <div className="flex items-start gap-2 shrink-0">
-                    <div className="text-right">
-                      <p className="text-slate-400 text-xs">
-                        {new Date(ann.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                      </p>
-                      <p className="text-slate-500 text-xs mt-0.5">by {ann.instructor}</p>
-                    </div>
-                    {/* always visible — not hover-only so it works on mobile too */}
-                    <div className="flex gap-1">
-                      <button onClick={() => openEdit(ann)} title="Edit" className="p-1.5 rounded-lg hover:bg-purple-500/10 text-slate-500 hover:text-purple-400 transition">✏️</button>
-                      <button onClick={() => handleDelete(ann)} title="Delete" className="p-1.5 rounded-lg hover:bg-red-500/10 text-slate-500 hover:text-red-400 transition">🗑️</button>
-                    </div>
-                  </div>
-                </div>
-                <p className="text-slate-300 text-sm leading-relaxed">{ann.content}</p>
-              </div>
-            )
-          })}
-
-          {filtered.length === 0 && (
-            <div className="text-center py-14 bg-slate-900 border border-slate-800 rounded-2xl">
-              <div className="text-5xl mb-4">📢</div>
-              <p className="text-slate-300 text-lg font-semibold mb-1">
-                {searchTerm || typeFilter !== 'all' ? 'No announcements match your filters' : 'No announcements yet'}
-              </p>
-              <p className="text-slate-500 text-sm mb-6">
-                {searchTerm || typeFilter !== 'all' ? 'Try adjusting your search or filter' : 'Create your first announcement to communicate with students'}
-              </p>
-              {!searchTerm && typeFilter === 'all' && (
-                <button onClick={openCreate} className="px-5 py-2.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl font-bold transition text-sm">
-                  Create Announcement
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Delete confirmation modal */}
-      {deleteTarget && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-slate-900 border-2 border-red-600/40 rounded-2xl w-full max-w-sm shadow-2xl shadow-red-900/30 overflow-hidden">
-            <div className="p-6 text-center">
-              <div className="w-14 h-14 mx-auto mb-4 rounded-full bg-red-500/10 border border-red-500/20 flex items-center justify-center text-2xl">
-                📢
-              </div>
-              <h3 className="text-lg font-bold text-white mb-2">Delete Announcement?</h3>
-              <p className="text-slate-400 text-sm">
-                Delete <span className="text-white font-semibold">"{deleteTarget.title}"</span>? Students will no longer see it.
-              </p>
-            </div>
-            <div className="flex gap-3 p-4 pt-0">
-              <button
-                onClick={() => setDeleteTarget(null)}
-                className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 rounded-xl text-slate-300 font-bold transition text-sm"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={confirmDelete}
-                className="flex-1 py-2.5 bg-red-600 hover:bg-red-500 rounded-xl text-white font-bold transition text-sm"
-              >
-                Delete
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  )
+function DiscardAnnouncement({ onCancel, onConfirm }) {
+  const dialog = useRef(null)
+  useEffect(() => { const node = dialog.current; node.showModal(); return () => node.close() }, [])
+  return <dialog ref={dialog} className="ia-delete-dialog" aria-labelledby="ia-discard-title" onCancel={e => { e.preventDefault(); onCancel() }}><h2 id="ia-discard-title">Discard unsaved changes?</h2><p>Your announcement has not been saved. Keep editing to preserve your message.</p><div><button type="button" className="ia-secondary" onClick={onCancel} autoFocus>Keep editing</button><button type="button" className="ia-danger" onClick={onConfirm}>Discard changes</button></div></dialog>
 }

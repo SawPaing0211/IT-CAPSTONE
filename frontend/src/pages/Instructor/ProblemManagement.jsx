@@ -8,8 +8,9 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { API_BASE } from '../../api/client'
+import { API_BASE, authFetch } from '../../api/client'
 import ModuleIcon from './ModuleIcon'
+import emptyQuestScroll from '../../assets/instructor/quest-empty-scroll.png'
 import './InstructorQuestReview.css'
 
 export default function ProblemManagement({ classId, subjectId }) {
@@ -45,13 +46,14 @@ export default function ProblemManagement({ classId, subjectId }) {
     setLoading(true)
     setLoadError(null)
     try {
-      const token = localStorage.getItem('token')
       const url = classId
         ? `${API_BASE}/api/instructor/classes/${classId}/problems`
         : `${API_BASE}/api/instructor/problems`
-      const res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } })
+      const res = await authFetch(url)
       if (!res.ok) throw new Error('Unable to load quests. Please try again.')
-      setProblems(await res.json())
+      const data = await res.json()
+      if (!Array.isArray(data)) throw new Error('The quest list is incomplete.')
+      setProblems(data)
     } catch (err) {
       console.error('Failed to fetch problems:', err)
       setLoadError('Unable to load quests. Check your connection and try again.')
@@ -90,13 +92,11 @@ export default function ProblemManagement({ classId, subjectId }) {
 
   const doDelete = async (target, force) => {
     try {
-      const token = localStorage.getItem('token')
-      const res = await fetch(`${API_BASE}/api/problems/${target.id}${force ? '?force=true' : ''}`, {
+      const res = await authFetch(`${API_BASE}/api/problems/${target.id}${force ? '?force=true' : ''}`, {
         method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}` }
       })
       if (res.ok) {
-        setProblems(problems.filter(p => p.id !== target.id))
+        setProblems(current => current.filter(p => p.id !== target.id))
         setSuccess('Quest deleted.')
         setTimeout(() => setSuccess(null), 3000)
         return
@@ -206,8 +206,8 @@ export default function ProblemManagement({ classId, subjectId }) {
       {loadError && <div className="iq-empty" role="alert"><ModuleIcon name="warning" size={28} /><h3>Quests unavailable</h3><p>{loadError}</p><button className="ir-secondary" onClick={fetchProblems}>Try again</button></div>}
       {/* Table */}
       {!loadError && <div className="iq-table-wrap" role="region" aria-label="Quest list. Scroll horizontally on small screens." tabIndex={0}>
-        <table className="w-full text-left text-sm min-w-[640px]">
-          <thead>
+        <table className={`w-full text-left text-sm ${filtered.length ? 'min-w-[640px]' : ''}`}>
+          {filtered.length > 0 && <thead>
             <tr className="bg-slate-800/60 text-slate-500 text-xs uppercase tracking-wider border-b border-slate-800">
               <th className="px-3 sm:px-5 py-3.5 font-semibold">Quest</th>
               <th className="px-3 sm:px-5 py-3.5 font-semibold">Type</th>
@@ -217,20 +217,20 @@ export default function ProblemManagement({ classId, subjectId }) {
               <th className="px-3 sm:px-5 py-3.5 font-semibold">Status</th>
               <th className="px-3 sm:px-5 py-3.5 font-semibold text-right">Actions</th>
             </tr>
-          </thead>
+          </thead>}
           <tbody className="divide-y divide-slate-800/60">
             {filtered.length === 0 ? (
               <tr>
-                <td colSpan="7" className="py-16 text-center">
-                  <div className="flex flex-col items-center gap-3 text-slate-500">
-                    <span className="text-5xl">📝</span>
-                    <p className="font-medium text-slate-300">
+                <td colSpan="7" className="text-center">
+                  <div className="iq-quest-empty">
+                    {search ? <ModuleIcon name="search" size={36} /> : <img src={emptyQuestScroll} alt="" className="iq-quest-empty-art" />}
+                    <h3>
                       {search ? 'No quests match your search' : 'No quests yet'}
-                    </p>
+                    </h3>
                     {!search && (
                       <button
                         onClick={goToCreateQuest}
-                        className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-sm font-bold transition mt-1"
+                        className="ir-primary"
                       >
                         Create Your First Quest
                       </button>
