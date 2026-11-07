@@ -95,7 +95,6 @@ const TAB_DEFS = [
 // One tip shown per day in the banner strip. Rotates based on today's date.
 const TIPS = [
   'Press Alt+1–5 to jump to any tab instantly.',
-  'Press Ctrl+K to open the command palette for quick navigation.',
   'The Activity Log records every admin action with full timestamps.',
   'Enroll students from CSV via User Management → Bulk Enrollment Upload.',
   'Enrollment alerts appear when students are stuck in inactive sections.',
@@ -125,85 +124,6 @@ function Tooltip({ text, children }) {
         </span>
       )}
     </span>
-  )
-}
-
-// ─── COMMAND PALETTE ─────────────────────────────────────────────────────────
-// Search popup that opens with Ctrl+K.
-// Type to filter tabs, press Enter to jump to the first result.
-function CommandPalette({ open, onClose, onNavigate, tabs }) {
-  const [query, setQuery] = useState('')
-  const inputRef = useRef(null)
-
-  // Auto-focus the text input every time the palette opens
-  useEffect(() => {
-    if (open) {
-      setQuery('')
-      setTimeout(() => inputRef.current?.focus(), 50)
-    }
-  }, [open])
-
-  // Re-filter the list on every keystroke
-  const filtered = useMemo(() => {
-    const q = query.toLowerCase()
-    return tabs.filter(t =>
-      t.label.toLowerCase().includes(q) ||
-      t.description.toLowerCase().includes(q)
-    )
-  }, [query, tabs])
-
-  if (!open) return null
-
-  return (
-    // Clicking the dark backdrop closes the palette
-    <div className="fixed inset-0 z-[200] flex items-start justify-center pt-28 px-4" onClick={onClose}>
-      <div
-        className="w-full max-w-lg bg-slate-900 border border-purple-500/50 rounded-2xl shadow-2xl shadow-purple-900/50 overflow-hidden"
-        onClick={e => e.stopPropagation()}
-      >
-        <div className="flex items-center gap-3 px-4 py-3 border-b border-slate-700/60">
-          <svg viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5 text-slate-400 flex-shrink-0">
-            <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" />
-          </svg>
-          <input
-            ref={inputRef}
-            value={query}
-            onChange={e => setQuery(e.target.value)}
-            placeholder="Search tabs, actions…"
-            className="flex-1 bg-transparent text-white placeholder-slate-500 outline-none text-sm"
-            onKeyDown={e => {
-              if (e.key === 'Escape') onClose()
-              if (e.key === 'Enter' && filtered[0]) { onNavigate(filtered[0].id); onClose() }
-            }}
-          />
-          <kbd className="px-2 py-0.5 bg-slate-700 text-slate-400 text-xs rounded-md">Esc</kbd>
-        </div>
-        <ul className="py-2 max-h-72 overflow-y-auto">
-          {filtered.map(tab => (
-            <li key={tab.id}>
-              <button
-                onClick={() => { onNavigate(tab.id); onClose() }}
-                className="admin-button w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors"
-              >
-                <span className="text-purple-400 flex-shrink-0">{tab.icon}</span>
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-white">{tab.label}</p>
-                  <p className="text-xs text-slate-500 truncate">{tab.description}</p>
-                </div>
-                {tab.badge > 0 && (
-                  <span className="ml-auto text-xs bg-amber-300 text-slate-950 font-bold rounded-full px-1.5 py-0.5 leading-none flex-shrink-0">
-                    {tab.badge}
-                  </span>
-                )}
-              </button>
-            </li>
-          ))}
-          {filtered.length === 0 && (
-            <li className="px-4 py-6 text-center text-slate-500 text-sm">No results found.</li>
-          )}
-        </ul>
-      </div>
-    </div>
   )
 }
 
@@ -319,7 +239,6 @@ function ShortcutsModal({ open, onClose }) {
         <h3 id="admin-shortcuts-title" className="mb-4 font-cinzel text-lg font-semibold text-white">Keyboard shortcuts</h3>
         <ul className="space-y-2.5">
           {[
-            { keys: ['Ctrl', 'K'],   desc: 'Open command palette'   },
             { keys: ['Alt',  '1–5'], desc: 'Switch to tab 1–5'      },
             { keys: ['Esc'],         desc: 'Close any open popup'   },
             { keys: ['Tab'],         desc: 'Navigate sidebar items' },
@@ -352,7 +271,6 @@ export default function AdminDashboard({ user, onLogout }) {
   const [sidebarOpen,      setSidebarOpen]      = useState(true)   // mobile drawer toggle
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)  // desktop icon-only mode
   const [isMobile,         setIsMobile]         = useState(false)
-  const [commandOpen,      setCommandOpen]      = useState(false)
   const [shortcutsOpen,    setShortcutsOpen]    = useState(false)
   const [tipDismissed,     setTipDismissed]     = useState(false)
   const [transitioning,    setTransitioning]    = useState(false)  // true during tab fade
@@ -432,7 +350,6 @@ export default function AdminDashboard({ user, onLogout }) {
 
   // ── KEYBOARD SHORTCUTS ────────────────────────────────────────────────────
   // Alt+1–5  →  jump to that tab
-  // Ctrl+K   →  open command palette
   // Escape   →  close any open popup
   //
   // WHY Alt and not Ctrl:
@@ -441,11 +358,6 @@ export default function AdminDashboard({ user, onLogout }) {
   useEffect(() => {
     const handler = e => {
       if (e.target instanceof Element && e.target.closest('dialog[open]')) return
-      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
-        e.preventDefault()
-        setCommandOpen(true)
-        return
-      }
       if (e.altKey) {
         const idx = parseInt(e.key, 10) - 1  // Alt+1 → index 0, Alt+2 → index 1, etc.
         if (!isNaN(idx) && idx >= 0 && idx < tabs.length) {
@@ -455,7 +367,6 @@ export default function AdminDashboard({ user, onLogout }) {
         return
       }
       if (e.key === 'Escape') {
-        setCommandOpen(false)
         setShortcutsOpen(false)
       }
     }
@@ -530,7 +441,6 @@ export default function AdminDashboard({ user, onLogout }) {
   return (
     <div className="admin-workspace min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 text-white">
 
-      <CommandPalette open={commandOpen} onClose={() => setCommandOpen(false)} onNavigate={handleTabChange} tabs={tabs} />
       <ShortcutsModal open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
 
       {/* Dark overlay behind the mobile slide-in drawer */}
@@ -546,35 +456,6 @@ export default function AdminDashboard({ user, onLogout }) {
         >
           <div className="flex min-h-[82px] items-center border-b border-amber-300/15 px-5 py-3">
             <AdminBrand collapsed={sidebarCollapsed} />
-          </div>
-
-          {/* Ctrl+K search button */}
-          <div className="px-3 pt-4 pb-2 flex-shrink-0">
-            {sidebarCollapsed ? (
-              <Tooltip text="Command Palette (Ctrl+K)">
-                <button
-                  onClick={() => setCommandOpen(true)}
-                  aria-label="Command palette"
-                  className="admin-button w-full p-2.5 rounded-xl border text-slate-400 transition flex items-center justify-center focus:outline-none focus:ring-2 focus:ring-purple-500"
-                >
-                  <svg viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
-                    <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" />
-                  </svg>
-                </button>
-              </Tooltip>
-            ) : (
-              <button
-                onClick={() => setCommandOpen(true)}
-                aria-label="Command palette"
-                className="admin-button w-full flex items-center gap-2.5 px-3 py-2 rounded-xl border text-slate-400 transition focus:outline-none focus:ring-2 focus:ring-purple-500"
-              >
-                <svg viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 flex-shrink-0">
-                  <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" />
-                </svg>
-                <span className="text-xs flex-1 text-left">Search or jump to…</span>
-                <kbd className="text-[10px] bg-slate-700 px-1.5 py-0.5 rounded text-slate-400">Ctrl+K</kbd>
-              </button>
-            )}
           </div>
 
           {/* Tab links */}
@@ -706,12 +587,6 @@ export default function AdminDashboard({ user, onLogout }) {
                 {statsLoading ? 'Checking…' : health.text}
               </span>
             </div>
-
-            <button onClick={() => setCommandOpen(true)} className="admin-button hidden sm:flex p-2 rounded-lg text-slate-400 transition focus:outline-none focus:ring-2 focus:ring-purple-500" aria-label="Open command palette (Ctrl+K)">
-              <svg viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
-                <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" />
-              </svg>
-            </button>
 
             {/* Per-tab action button — label comes from TAB_DEFS.contextAction */}
             {activeTabData?.contextAction && (
