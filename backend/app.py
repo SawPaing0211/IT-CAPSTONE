@@ -6908,6 +6908,16 @@ def admin_delete_section(admin, section_id):
             "error": f"Cannot delete — {assigned_instructors} instructor assignment(s) reference this section. Remove those assignments first."
         }), 400
 
+    # Submissions and drafts belong to quests, even after students move sections.
+    for quest in Problem.query.filter(Problem.visible_to_sections.isnot(None)).all():
+        if set(quest.visible_to_sections or []) != {section_id}:
+            continue
+        if any(model.query.filter_by(problem_id=quest.id).first() is not None
+               for model in (Submission, SubmissionSlot, CodeDraft)):
+            return jsonify({
+                "error": "This class has saved student work. Set it inactive to preserve its quests and history."
+            }), 409
+
     section_no = section.section_no
     content = _cascade_delete_section_content(section_id)
     db.session.delete(section)
@@ -6923,37 +6933,39 @@ def admin_delete_section(admin, section_id):
 @app.route('/api/admin/sections/bulk-delete', methods=['DELETE'])
 @admin_required
 def admin_bulk_delete_sections(admin):
-    """
-    Deletes every EMPTY class code (section) in one action — for clearing
-    out accumulated test data (duplicate uploads, old test runs) before a
-    real demo/defense. Mirrors the single-section delete's safety rules:
-    a section with enrolled students OR an instructor assignment is left
-    alone and reported back as skipped, never force-deleted.
-    """
+    """Delete only class codes with no enrollments, assignments or class content."""
     sections = SubjectSection.query.all()
+    quest_section_ids = {
+        section_id
+        for (scope,) in db.session.query(Problem.visible_to_sections)
+        for section_id in (scope or [])
+    }
     deleted = 0
     skipped = []
 
     for s in sections:
         enrolled = IrregularEnrollment.query.filter_by(section_id=s.id).count()
-        if enrolled > 0:
-            skipped.append({
-                "section_no": s.section_no,
-                "reason": f"{enrolled} student(s) enrolled",
-            })
+        if enrolled:
+            reason = f"{enrolled} student(s) enrolled"
+        elif TeacherAssignment.query.filter_by(section_id=s.id).first():
+            reason = "instructor assigned"
+        elif (s.id in quest_section_ids
+              or Lesson.query.filter_by(section_id=s.id).first()
+              or Announcement.query.filter_by(class_id=s.id).first()):
+            reason = "class content exists"
+        else:
+            reason = None
+
+        if reason:
+            skipped.append({"section_no": s.section_no, "reason": reason})
             continue
-        # No students in this class code — safe to clear it out entirely,
-        # including any leftover instructor assignment. Unlike enrollment
-        # data, reassigning an instructor is a 2-click fix, so it doesn't
-        # need to block a test-data reset the way real enrollment does.
-        TeacherAssignment.query.filter_by(section_id=s.id).delete()
-        _cascade_delete_section_content(s.id)
+
         db.session.delete(s)
         deleted += 1
 
     db.session.commit()
     log_admin_action(admin.id, "BULK_SECTIONS_DELETED",
-        f"Deleted {deleted} empty class code(s), skipped {len(skipped)} with active enrollment/assignments.")
+        f"Deleted {deleted} empty class code(s), skipped {len(skipped)} with enrollments, assignments or class content.")
 
     return jsonify({
         "message": f"Deleted {deleted} class code(s)",

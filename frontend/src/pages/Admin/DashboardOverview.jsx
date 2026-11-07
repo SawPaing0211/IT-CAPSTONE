@@ -67,24 +67,6 @@ export default function DashboardOverview({ onNavigate, stats, loading, healthEr
     fetchSections()
   }, [fetchSections])
 
-  // Keyboard shortcuts
-  useEffect(() => {
-    const handler = (e) => {
-      if (!(e.ctrlKey || e.metaKey)) return
-      if (e.key === 'u') { e.preventDefault(); setShowCreateUser(true) }
-      if (e.key === 's') { e.preventDefault(); onNavigate?.('sections') }
-    }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [onNavigate])
-
-  // Listen for navigate-tab events (backwards-compat with existing code)
-  useEffect(() => {
-    const handler = (e) => onNavigate?.(e.detail)
-    window.addEventListener('navigate-tab', handler)
-    return () => window.removeEventListener('navigate-tab', handler)
-  }, [onNavigate])
-
   // ── Maintenance toggle ────────────────────────────────────────────────────
 
   const toggleMaintenance = async () => {
@@ -273,7 +255,7 @@ export default function DashboardOverview({ onNavigate, stats, loading, healthEr
             onClick={() => onNavigate?.('sections')}
           />
           <MiniCard
-            label="Total enrolled"
+            label="Class enrollments"
             value={totalEnrolled}
             trend={null}
             onClick={() => onNavigate?.('sections')}
@@ -364,11 +346,10 @@ export default function DashboardOverview({ onNavigate, stats, loading, healthEr
 
           {/* Quick Actions */}
           <div className="bg-[#111832] rounded-xl border border-amber-300/20 overflow-hidden">
-            <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-800/60">
+            <div className="px-5 py-3.5 border-b border-amber-300/15">
               <h3 className="font-cinzel text-base font-semibold text-white">Quick actions</h3>
-              <span className="text-[10px] text-slate-600 hidden sm:block">Ctrl+U · Ctrl+S</span>
             </div>
-            <div className="grid grid-cols-2 gap-2 p-3">
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,10rem),1fr))] gap-2 p-3">
               <ActionBtn
                 icon={<img src={partyShield} alt="" className="size-7 object-contain" />}
                 label="Create user"
@@ -384,16 +365,22 @@ export default function DashboardOverview({ onNavigate, stats, loading, healthEr
                 onClick={() => onNavigate?.('sections')}
               />
               <ActionBtn
-                icon="💾"
-                label="Backup DB"
-                sub="Export snapshot"
+                icon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true" className="size-5">
+                  <path d="M4 9h16v11H4zM3 5h18v4H3zM9 13h6" strokeLinejoin="round" strokeLinecap="round" />
+                </svg>}
+                label="Database backup"
+                sub="Export SQL"
                 color="green"
                 onClick={() => setShowBackup(true)}
               />
               <ActionBtn
-                icon="⚙️"
-                label="Settings"
-                sub="System config"
+                icon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true" className="size-5">
+                  <path d="M4 7h4m4 0h8M4 17h8m4 0h4" strokeLinecap="round" />
+                  <circle cx="10" cy="7" r="2" />
+                  <circle cx="14" cy="17" r="2" />
+                </svg>}
+                label="System settings"
+                sub="Platform configuration"
                 color="orange"
                 onClick={() => setShowSettings(true)}
               />
@@ -405,7 +392,7 @@ export default function DashboardOverview({ onNavigate, stats, loading, healthEr
             <div className="space-y-2 px-5 pb-4 pt-1">
               <SummaryRow label="Total sections"  value={totalSections}    color="text-slate-200" />
               <SummaryRow label="Active sections" value={activeSections}   color="text-emerald-400" />
-              <SummaryRow label="Total enrolled"  value={totalEnrolled}    color="text-blue-400" />
+              <SummaryRow label="Class enrollments"  value={totalEnrolled}    color="text-blue-400" />
             </div>
           </CollapsiblePanel>
 
@@ -549,10 +536,10 @@ function ActionBtn({ icon, label, sub, color, onClick }) {
   return (
     <button
       onClick={onClick}
-      className="admin-button group flex w-full items-center gap-2.5 p-3 text-left"
+      type="button"
+      className="admin-button flex min-w-0 w-full items-start gap-3 p-3 text-left"
     >
-      <div className={`w-8 h-8 ${iconBg} rounded-lg flex items-center justify-center text-base flex-shrink-0
-                       group-hover:scale-105 transition-transform duration-150`}>
+      <div className={`w-8 h-8 ${iconBg} rounded-lg flex items-center justify-center shrink-0`}>
         {icon}
       </div>
       <div className="min-w-0">

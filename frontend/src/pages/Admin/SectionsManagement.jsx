@@ -997,7 +997,7 @@ export default function ClassCodesManagement() {
 
   useEffect(() => { fetchSections(); fetchSubjects() }, [fetchSections, fetchSubjects])
 
-  // ── Single delete (only delete path — no bulk) ───────────────────────────
+  // ── Single class code deletion ────────────────────────────────────────
   const handleDelete = (section) => {
     setDeleteTarget(section)
   }
@@ -1016,10 +1016,9 @@ export default function ClassCodesManagement() {
     finally { setDeleteTarget(null) }
   }
 
-  // ── Bulk delete — clears every EMPTY class code in one go (dev/test-data
-  // reset before a demo). Sections with real enrollments or an instructor
-  // assignment are left alone by the backend and reported back as skipped.
+  // The server skips class codes that still have people or class content.
   const performBulkDelete = async () => {
+    if (bulkDeleting || bulkDeleteInput !== 'DELETE EMPTY CLASS CODES') return
     setBulkDeleting(true)
     try {
       const res  = await fetch(`${API}/api/admin/sections/bulk-delete`, {
@@ -1027,9 +1026,9 @@ export default function ClassCodesManagement() {
       })
       const data = await res.json()
       if (res.ok) {
-        const skippedMsg = data.skipped?.length ? ` (${data.skipped.length} skipped — still enrolled)` : ''
+        const skippedMsg = data.skipped?.length ? ` (${data.skipped.length} protected)` : ''
         if (data.deleted === 0 && data.skipped?.length) {
-          showToast(`Nothing deleted — all ${data.skipped.length} class code(s) still have enrolled students`, 'warning')
+          showToast('Nothing deleted. All class codes still have enrollments, assignments, or content.', 'warning')
         } else {
           showToast(`Deleted ${data.deleted} class code(s)${skippedMsg}`)
         }
@@ -1114,7 +1113,7 @@ export default function ClassCodesManagement() {
           <HeaderBtn icon={Icon.Refresh}  label="Refresh"        onClick={fetchSections} />
           <HeaderBtn icon={Icon.Upload}   label="Import Class Codes" onClick={() => setCSVModal(true)} />
           <HeaderBtn icon={Icon.Plus}     label="Create Section" onClick={() => setCreateModal(true)} tone="admin-button-primary" />
-          <HeaderBtn icon={Icon.Trash}    label="Delete All"     onClick={() => setBulkDeleteModal(true)} tone="admin-button-danger" />
+          <HeaderBtn icon={Icon.Trash}    label="Delete Empty Class Codes"     onClick={() => setBulkDeleteModal(true)} tone="admin-button-danger" />
         </div>
       </div>
 
@@ -1241,13 +1240,11 @@ export default function ClassCodesManagement() {
         >
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             <p style={{ margin: 0, fontSize: '0.875rem', color: '#cbd5e1', lineHeight: 1.6 }}>
-              This permanently deletes every class code that has <strong style={{ color: '#f1f5f9' }}>zero enrolled students</strong> —
-              useful for clearing out duplicate or leftover test class codes before a demo.
-              Any class code with real enrollments or an instructor assignment is left untouched.
+              This permanently deletes class codes only when they have no enrolled students, instructor assignment, quests, modules, or announcements.
             </p>
             <div>
               <label style={{ display: 'block', fontSize: '0.8rem', color: '#94a3b8', marginBottom: 6 }}>
-                Type <span style={{ fontFamily: 'monospace', color: '#f87171', fontWeight: 700 }}>DELETE ALL CLASS CODES</span> to confirm
+                Type <span style={{ fontFamily: 'monospace', color: '#f87171', fontWeight: 700 }}>DELETE EMPTY CLASS CODES</span> to confirm
               </label>
               <input
                 type="text"
@@ -1255,7 +1252,7 @@ export default function ClassCodesManagement() {
                 onChange={(e) => setBulkDeleteInput(e.target.value)}
                 autoFocus
                 autoComplete="off"
-                placeholder="DELETE ALL CLASS CODES"
+                placeholder="DELETE EMPTY CLASS CODES"
                 style={{ width: '100%', background: '#1e293b', border: '1px solid rgba(248,113,113,0.4)', borderRadius: 8, padding: '0.625rem 0.75rem', color: '#f1f5f9', fontSize: '0.875rem', outline: 'none', fontFamily: 'monospace' }}
               />
             </div>
@@ -1269,7 +1266,7 @@ export default function ClassCodesManagement() {
               </button>
               <button
                 onClick={performBulkDelete}
-                disabled={bulkDeleteInput !== 'DELETE ALL CLASS CODES' || bulkDeleting}
+                disabled={bulkDeleteInput !== 'DELETE EMPTY CLASS CODES' || bulkDeleting}
                 className="admin-button admin-button-danger flex-1 inline-flex items-center justify-center gap-2 px-4 text-sm font-semibold"
               >
                 {bulkDeleting

@@ -339,15 +339,6 @@ export default function AdminDashboard({ user, onLogout }) {
     return () => window.removeEventListener('resize', check)
   }, [])
 
-  // ── CROSS-COMPONENT NAVIGATION ────────────────────────────────────────────
-  // Any child component can switch tabs by firing:
-  //   window.dispatchEvent(new CustomEvent('navigate-tab', { detail: 'users' }))
-  useEffect(() => {
-    const handler = e => handleTabChange(e.detail)
-    window.addEventListener('navigate-tab', handler)
-    return () => window.removeEventListener('navigate-tab', handler)
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
-
   // ── KEYBOARD SHORTCUTS ────────────────────────────────────────────────────
   // Alt+1–5  →  jump to that tab
   // Escape   →  close any open popup

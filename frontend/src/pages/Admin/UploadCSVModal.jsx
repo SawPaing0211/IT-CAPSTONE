@@ -349,7 +349,6 @@ export default function UploadCSVModal({ onClose, onSuccess }) {
                 <p className="text-slate-400 text-xs leading-relaxed">
                   Set <code className="text-purple-300">student_type=regular</code> and fill <code className="text-purple-300">section_no</code> with their class code.
                   Account is created and student is enrolled in that class.
-                  Class auto-closes when full.
                 </p>
               </div>
               <div className="bg-slate-800/60 rounded-xl p-4 border border-blue-600/20">
