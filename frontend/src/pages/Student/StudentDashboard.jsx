@@ -8,6 +8,7 @@ import QuestLog from './QuestLog'
 import MySubjects from './MySubjects'
 import { api } from '../../api/client'
 import StudentLessons from './StudentLessons'
+import progressEmblem from '../../assets/account-progress.png'
 
 // ─── Spell templates per language ─────────────────────────────────────────
 const SPELL_TEMPLATES = {
@@ -800,7 +801,7 @@ export default function StudentDashboard({ user, onLogout }) {
                 <div className="py-2">
                   <button className="w-full px-4 py-2.5 text-left text-sm text-slate-300 hover:text-white hover:bg-slate-800/80 transition flex items-center gap-3"><span>👤</span> View Profile</button>
                   <button className="w-full px-4 py-2.5 text-left text-sm text-slate-300 hover:text-white hover:bg-slate-800/80 transition flex items-center gap-3"><span>⚙️</span> Settings</button>
-                  <button className="w-full px-4 py-2.5 text-left text-sm text-slate-300 hover:text-white hover:bg-slate-800/80 transition flex items-center gap-3"><span>📊</span> My Progress</button>
+                  <button type="button" onClick={() => { setShowProfileMenu(false); setSelectedBlock(null); setActiveTab('hero') }} className="w-full px-4 py-2.5 text-left text-sm text-slate-300 hover:text-white hover:bg-slate-800/80 transition flex items-center gap-3"><img src={progressEmblem} alt="" className="h-7 w-7 shrink-0 object-contain" /> My Progress</button>
                   <div className="border-t border-purple-600/30 my-2" />
                   <button onClick={handleLogoutClick} className="w-full px-4 py-2.5 text-left text-sm text-red-400 hover:text-red-300 hover:bg-red-600/10 transition flex items-center gap-3"><span>🚪</span> Logout</button>
                 </div>
