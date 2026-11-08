@@ -49,3 +49,64 @@
     transition: none;
   }
 }
+
+.admin-action-dialog {
+  width: min(46rem, calc(100% - 1.5rem));
+  max-width: none;
+  max-height: calc(100dvh - 1.5rem);
+  margin: auto;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid #796443;
+  border-radius: 1rem;
+  background: #10162b;
+  color: #f1f5f9;
+  color-scheme: dark;
+}
+
+.admin-action-dialog::backdrop {
+  background: rgb(4 6 16 / 78%);
+  backdrop-filter: blur(3px);
+}
+
+.admin-action-panel {
+  display: flex;
+  max-height: calc(100dvh - 1.5rem - 2px);
+  flex-direction: column;
+}
+
+.admin-action-header {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: clamp(0.625rem, 2vw, 1rem);
+  padding: clamp(0.75rem, 3vw, 1.5rem);
+  border-bottom: 1px solid #796443;
+  background: linear-gradient(110deg, #1a1835, #11172b);
+}
+
+.admin-action-header img {
+  width: clamp(2.5rem, 7vw, 3.5rem);
+  height: auto;
+  flex: none;
+}
+
+.admin-action-close {
+  display: grid;
+  width: 2.75rem;
+  height: 2.75rem;
+  flex: none;
+  place-items: center;
+}
+
+.admin-action-scroll {
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-color: #67517b #10162b;
+}
+
+.admin-action-dialog :is(input, select, [tabindex]):focus-visible {
+  outline: 2px solid #e5c089;
+  outline-offset: 2px;
+}

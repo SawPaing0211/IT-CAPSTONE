@@ -1,4 +1,7 @@
-import { useState, useRef } from 'react'
+import AdminActionDialog from './AdminActionDialog'
+import backupEmblem from '../../assets/admin/database-backup.png'
+import selectedDiamond from '../../assets/instructor/quest-selected-diamond.png'
+import { useEffect, useState, useRef } from 'react'
 import { API_BASE, authFetch } from '../../api/client'
 
 // our backend base url — change this if we ever move to prod
@@ -7,7 +10,7 @@ const API = API_BASE
 // these match the exact tables our backend /api/admin/backup exports
 // added subject_sections, announcements, system_config because they're in our schema too
 const TABLES = [
-  { key: 'users',               label: 'Users',         icon: '👥', desc: 'All user accounts & credentials'  },
+  { key: 'users',               label: 'Users',         icon: '👥', desc: 'User records and password hashes'  },
   { key: 'subjects',            label: 'Subjects',      icon: '📖', desc: 'IT course subjects'                },
   { key: 'subject_sections',    label: 'Class Codes',   icon: '🗂️', desc: 'Section schedules & capacity'      },
   { key: 'problems',            label: 'Activities',    icon: '🧩', desc: 'Coding quests & test cases'         },
@@ -24,25 +27,16 @@ function TableRow({ table, checked, onToggle }) {
   return (
     <label
       className="flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-slate-700/40 cursor-pointer transition-colors group select-none"
-      onClick={onToggle}
     >
-      {/* custom checkbox because the default html one looks bad in dark mode */}
-      <div className={`
-        w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0 transition-all
-        ${checked
-          ? 'bg-emerald-500 border-emerald-500 shadow-sm shadow-emerald-500/40'
-          : 'border-slate-600 group-hover:border-slate-400'}
-      `}>
-        {checked && (
-          <svg viewBox="0 0 10 8" fill="none" className="w-2.5 h-2.5">
-            <path d="M1 4L3.5 6.5L9 1" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        )}
-      </div>
+      <input type="checkbox" checked={checked} onChange={onToggle} className="peer sr-only" />
+      <span aria-hidden="true" className="grid size-6 shrink-0 place-items-center rounded-sm peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-amber-300">
+        {checked ? <img src={selectedDiamond} alt="" className="size-6 object-contain" />
+          : <span className="size-3 rotate-45 rounded-[1px] border border-amber-200" />}
+      </span>
       <span className="text-base leading-none flex-shrink-0">{table.icon}</span>
       <div className="flex-1 min-w-0">
         <p className="text-sm text-white font-medium leading-tight">{table.label}</p>
-        <p className="text-[11px] text-slate-500 mt-0.5 truncate">{table.desc}</p>
+        <p className="text-[11px] text-slate-400 mt-0.5 truncate">{table.desc}</p>
       </div>
     </label>
   )
@@ -52,10 +46,10 @@ function TableRow({ table, checked, onToggle }) {
 function ResultRow({ icon, label, children }) {
   return (
     <div className="flex items-start justify-between gap-3 py-2.5 border-b border-slate-700/30 last:border-0">
-      <span className="flex items-center gap-1.5 text-xs text-slate-500 flex-shrink-0">
+      <span className="flex items-center gap-1.5 text-xs text-slate-400 flex-shrink-0">
         <span>{icon}</span>{label}
       </span>
-      <span className="text-xs text-right text-white">{children}</span>
+      <span className="min-w-0 break-words text-xs text-right text-white">{children}</span>
     </div>
   )
 }
@@ -80,6 +74,9 @@ export default function BackupDatabaseModal({ onClose }) {
   // keeping the blob url in a ref so it doesn't cause extra re-renders
   // we need this for the download button to work
   const blobUrlRef = useRef(null)
+  useEffect(() => () => {
+    if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current)
+  }, [])
 
   // toggle one table key in or out of our selected list
   const toggleTable = (key) => {
@@ -96,7 +93,7 @@ export default function BackupDatabaseModal({ onClose }) {
   }
 
   const runBackup = async () => {
-    if (mode === 'selective' && selectedTables.length === 0) return
+    if (stage !== 'idle' || (mode === 'selective' && selectedTables.length === 0)) return
 
     setStage('running')
     setErrorMsg('')
@@ -182,90 +179,64 @@ export default function BackupDatabaseModal({ onClose }) {
       blobUrlRef.current = null
     }
     setStage('idle')
-    setProgress(0)
     setResult(null)
     setErrorMsg('')
   }
 
   // ── render ──────────────────────────────────────────────────────────────────
   return (
-    // dark backdrop — click outside to close (disabled while running)
-    <div
-      className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4"
-      onClick={stage !== 'running' ? handleClose : undefined}
+    <AdminActionDialog
+      title="Database Backup"
+      description="Export application data as a SQL file."
+      emblem={backupEmblem}
+      onClose={handleClose}
+      busy={stage === 'running'}
     >
-      <div
-        className="bg-slate-900 border border-emerald-600/30 rounded-2xl w-full max-w-md shadow-2xl shadow-emerald-900/20 overflow-hidden flex flex-col max-h-[90vh]"
-        onClick={e => e.stopPropagation()} // prevent backdrop click from firing inside
-      >
-
-        {/* ── header ── */}
-        <div className="bg-gradient-to-r from-emerald-900/50 to-green-900/30 px-6 py-5 border-b border-emerald-600/25 flex items-center justify-between flex-shrink-0">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-gradient-to-br from-emerald-500 to-green-600 rounded-xl flex items-center justify-center text-xl shadow-lg shadow-emerald-600/30">
-              💾
-            </div>
-            <div>
-              <h2 className="text-lg font-black text-white tracking-tight">Database Backup</h2>
-              <p className="text-emerald-300/60 text-xs mt-0.5">Export all platform data securely</p>
-            </div>
-          </div>
-
-          {/* we hide this while running so they can't accidentally dismiss the modal */}
-          {stage !== 'running' && (
-            <button
-              onClick={handleClose}
-              className="admin-button w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 transition text-xl leading-none"
-              aria-label="Close modal"
-            >
-              ×
-            </button>
-          )}
-        </div>
-
         {/* ── scrollable content area ── */}
-        <div className="p-6 space-y-5 overflow-y-auto flex-1 overscroll-contain scroll-smooth [transform:translatez(0)]">
+        <div className="admin-action-scroll flex-1 space-y-5 p-4 sm:p-6">
 
           {/* ════ IDLE — the selection / config screen ════ */}
           {stage === 'idle' && (
             <>
               {/* backup type toggle */}
               <div>
-                <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-3">
+                <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-3">
                   Backup Type
                 </p>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid gap-3 sm:grid-cols-2">
 
                   <button
+                    type="button"
+                    aria-pressed={mode === 'full'}
                     onClick={() => setMode('full')}
                     className={`p-4 rounded-xl border-2 text-left transition-all ${
                       mode === 'full'
-                        ? 'bg-emerald-600/15 border-emerald-500/60 shadow-sm shadow-emerald-500/10'
+                        ? 'bg-violet-950/60 border-amber-300/75'
                         : 'bg-slate-800/50 border-slate-700/60 hover:border-slate-600'
                     }`}
                   >
-                    <div className="text-2xl mb-2">🗄️</div>
                     <p className={`font-bold text-sm ${mode === 'full' ? 'text-white' : 'text-slate-300'}`}>
                       Full Backup
                     </p>
-                    <p className={`text-xs mt-0.5 ${mode === 'full' ? 'text-emerald-300/70' : 'text-slate-500'}`}>
+                    <p className={`text-xs mt-0.5 ${mode === 'full' ? 'text-amber-100' : 'text-slate-400'}`}>
                       All application tables
                     </p>
                   </button>
 
                   <button
+                    type="button"
+                    aria-pressed={mode === 'selective'}
                     onClick={() => setMode('selective')}
                     className={`p-4 rounded-xl border-2 text-left transition-all ${
                       mode === 'selective'
-                        ? 'bg-emerald-600/15 border-emerald-500/60 shadow-sm shadow-emerald-500/10'
+                        ? 'bg-violet-950/60 border-amber-300/75'
                         : 'bg-slate-800/50 border-slate-700/60 hover:border-slate-600'
                     }`}
                   >
-                    <div className="text-2xl mb-2">🗂️</div>
                     <p className={`font-bold text-sm ${mode === 'selective' ? 'text-white' : 'text-slate-300'}`}>
                       Selective
                     </p>
-                    <p className={`text-xs mt-0.5 ${mode === 'selective' ? 'text-emerald-300/70' : 'text-slate-500'}`}>
+                    <p className={`text-xs mt-0.5 ${mode === 'selective' ? 'text-amber-100' : 'text-slate-400'}`}>
                       Choose specific tables
                     </p>
                   </button>
@@ -277,7 +248,7 @@ export default function BackupDatabaseModal({ onClose }) {
               {mode === 'selective' && (
                 <div>
                   <div className="flex items-center justify-between mb-2">
-                    <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">
+                    <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">
                       Select Tables
                       {/* live count so they know how many are picked */}
                       <span className="ml-2 text-emerald-400 normal-case font-semibold">
@@ -457,7 +428,6 @@ export default function BackupDatabaseModal({ onClose }) {
           )}
 
         </div>
-      </div>
-    </div>
+    </AdminActionDialog>
   )
 }

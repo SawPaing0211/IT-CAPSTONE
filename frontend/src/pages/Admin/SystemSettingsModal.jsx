@@ -1,5 +1,7 @@
+import AdminActionDialog from './AdminActionDialog'
+import settingsEmblem from '../../assets/admin/system-settings.png'
 import { useState, useEffect } from 'react'
-import { API_BASE } from '../../api/client'
+import { API_BASE, authFetch } from '../../api/client'
 
 const API = API_BASE
 
@@ -12,10 +14,6 @@ function Icon({ children, className = 'w-4 h-4', fill = 'none' }) {
     </svg>
   )
 }
-const IconSettings = (p) => (
-  <Icon {...p}><circle cx="12" cy="12" r="3" />
-    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></Icon>
-)
 const IconSchool = (p) => (
   <Icon {...p}><path d="M22 10 12 5 2 10l10 5 10-5Z" /><path d="M6 12v5c0 1.5 2.5 3 6 3s6-1.5 6-3v-5" /></Icon>
 )
@@ -82,14 +80,15 @@ function ReadOnlyNote() {
   )
 }
 
-export default function SystemSettingsModal({ onClose }) {
+export default function SystemSettingsModal({ onClose, onSaved }) {
   const [activeTab, setActiveTab] = useState('access')
   const [maintenance, setMaintenance] = useState(false)
   const [effective, setEffective] = useState(null)
   const [effectiveFailed, setEffectiveFailed] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [dirty, setDirty] = useState(false)
+  const [savedMaintenance, setSavedMaintenance] = useState(null)
+  const dirty = savedMaintenance !== null && maintenance !== savedMaintenance
   const [toast, setToast] = useState(null)
 
   const showToast = (message, type = 'success') => {
@@ -100,12 +99,15 @@ export default function SystemSettingsModal({ onClose }) {
   useEffect(() => {
     let cancelled = false
     const load = async () => {
-      const headers = { Authorization: `Bearer ${localStorage.getItem('token') || ''}` }
       try {
-        const res = await fetch(`${API}/api/admin/config`, { headers })
+        const res = await authFetch(`${API}/api/admin/config`)
         if (res.ok) {
           const data = await res.json()
-          if (!cancelled) setMaintenance(data.maintenance_mode === 'true')
+          if (!cancelled) {
+            const enabled = data.maintenance_mode === 'true'
+            setMaintenance(enabled)
+            setSavedMaintenance(enabled)
+          }
         } else if (res.status === 401) {
           showToast('Your session has expired. Please log in again.', 'error')
         } else {
@@ -115,7 +117,7 @@ export default function SystemSettingsModal({ onClose }) {
         showToast('Network error while loading settings', 'error')
       }
       try {
-        const res = await fetch(`${API}/api/admin/effective-settings`, { headers })
+        const res = await authFetch(`${API}/api/admin/effective-settings`)
         if (res.ok) { const d = await res.json(); if (!cancelled) setEffective(d) }
         else if (!cancelled) setEffectiveFailed(true)
       } catch {
@@ -128,16 +130,18 @@ export default function SystemSettingsModal({ onClose }) {
   }, [])
 
   const handleSave = async () => {
+    if (saving || !dirty) return
     setSaving(true)
     try {
-      const res = await fetch(`${API}/api/admin/config`, {
+      const res = await authFetch(`${API}/api/admin/config`, {
         method: 'PUT',
-        headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}`, 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ maintenance_mode: maintenance ? 'true' : 'false' }),
       })
       if (res.ok) {
         showToast('Maintenance flag saved')
-        setDirty(false)
+        setSavedMaintenance(maintenance)
+        void onSaved?.()
       } else {
         const err = await res.json().catch(() => ({}))
         showToast(err.error || 'Failed to save', 'error')
@@ -156,7 +160,7 @@ export default function SystemSettingsModal({ onClose }) {
   }
 
   return (
-    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+    <AdminActionDialog title="System Settings" description="Change the maintenance status or review the platform’s current rules." emblem={settingsEmblem} onClose={onClose} busy={saving}>
       {toast && (
         <div className={`fixed top-6 right-6 z-[9999] px-5 py-3 rounded-xl font-semibold text-white shadow-xl flex items-center gap-2 ${toast.type === 'error' ? 'bg-red-600' : 'bg-green-600'}`}>
           {toast.type === 'error' ? <IconXCircle className="w-4 h-4 flex-shrink-0" /> : <IconCheckCircle className="w-4 h-4 flex-shrink-0" />}
@@ -164,27 +168,12 @@ export default function SystemSettingsModal({ onClose }) {
         </div>
       )}
 
-      <div className="bg-slate-900 border-2 border-purple-600/40 rounded-2xl w-full max-w-2xl shadow-2xl shadow-purple-900/30 overflow-hidden flex flex-col" style={{ maxHeight: '90vh' }}>
-        <div className="bg-gradient-to-r from-purple-900/60 to-pink-900/40 px-6 py-5 border-b border-purple-600/30 flex items-center justify-between flex-shrink-0">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-gradient-to-br from-orange-500 to-red-500 rounded-xl flex items-center justify-center"><IconSettings className="w-5 h-5 text-white" /></div>
-            <div>
-              <h2 className="text-xl font-black text-white">System Settings</h2>
-              <p className="text-purple-300/70 text-xs">Only the maintenance status flag is adjustable; other values are shown for reference</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            {dirty && <span className="text-amber-400 text-xs font-semibold px-2 py-0.5 bg-amber-400/10 border border-amber-400/30 rounded-full animate-pulse">Unsaved changes</span>}
-            <button onClick={onClose} className="admin-button w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 transition text-lg">×</button>
-          </div>
-        </div>
-
-        <div className="flex flex-1 min-h-0">
-          <div className="w-40 bg-slate-900/80 border-r border-slate-800 p-2 flex-shrink-0">
+        <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
+          <div className="grid shrink-0 grid-cols-2 gap-1 border-b border-amber-300/20 p-2 sm:block sm:w-40 sm:border-b-0 sm:border-r">
             {TABS.map(t => {
               const TabIcon = t.icon
               return (
-                <button key={t.id} onClick={() => setActiveTab(t.id)}
+                <button key={t.id} type="button" aria-pressed={activeTab === t.id} onClick={() => setActiveTab(t.id)}
                   className={`w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-semibold transition mb-1 ${activeTab === t.id ? 'bg-purple-600/30 text-white border border-purple-600/50' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}>
                   <TabIcon className="w-4 h-4 flex-shrink-0" />{t.label}
                 </button>
@@ -192,7 +181,7 @@ export default function SystemSettingsModal({ onClose }) {
             })}
           </div>
 
-          <div className="flex-1 p-6 overflow-y-auto space-y-5">
+          <div className="admin-action-scroll flex-1 space-y-5 p-4 sm:p-6">
             {loading ? (
               <div className="flex items-center justify-center h-40">
                 <div className="animate-spin rounded-full h-8 w-8 border-4 border-purple-600 border-t-transparent"></div>
@@ -207,8 +196,9 @@ export default function SystemSettingsModal({ onClose }) {
                           <p className="text-white text-sm font-semibold">Maintenance Mode</p>
                           <p className="text-slate-500 text-xs mt-1">Shows a Maintenance status on the administrator dashboard. It is a status flag only and does not block anyone from signing in.</p>
                         </div>
-                        <Toggle value={maintenance} onChange={v => { setMaintenance(v); setDirty(true) }} />
+                        <Toggle value={maintenance} disabled={saving || savedMaintenance === null} onChange={setMaintenance} />
                       </div>
+                      {savedMaintenance === null && <p role="status" className="text-sm text-rose-300">Maintenance status is unavailable. Reopen settings to try again.</p>}
                     </SettingsSection>
                     {effective && (
                       <SettingsSection title="Sign-in sessions (read-only)" icon={IconLock}>
@@ -267,22 +257,22 @@ export default function SystemSettingsModal({ onClose }) {
           </div>
         </div>
 
-        <div className="px-6 py-4 border-t border-slate-800 flex items-center justify-end gap-3 bg-slate-900 flex-shrink-0">
-          <button onClick={onClose} className="admin-button px-5 py-2 rounded-lg text-white font-bold transition text-sm">Close</button>
-          <button onClick={handleSave} disabled={saving || !dirty}
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-amber-300/20 bg-[#10162b] p-3 sm:px-6">
+          <button type="button" onClick={onClose} disabled={saving} className="admin-button px-5 py-2 rounded-lg text-white font-bold transition text-sm">Close</button>
+          {dirty && <span className="mr-auto text-xs text-amber-200">Unsaved changes</span>}
+          <button type="button" onClick={handleSave} disabled={saving || !dirty}
             className="admin-button admin-button-primary px-6 py-2 disabled:opacity-40 rounded-lg text-white font-bold transition text-sm flex items-center gap-2">
             {saving ? <><IconRotateCcw className="w-4 h-4 animate-spin" /> Saving…</> : <><IconSave className="w-4 h-4" /> Save maintenance flag</>}
           </button>
         </div>
-      </div>
-    </div>
+    </AdminActionDialog>
   )
 }
 
 function SettingsSection({ title, icon: SectionIcon, children }) {
   return (
     <div className="space-y-4">
-      <h3 className="text-white font-bold text-base flex items-center gap-2 pb-2 border-b border-slate-800">
+      <h3 className="font-cinzel text-white font-semibold text-base flex items-center gap-2 pb-2 border-b border-slate-800">
         {SectionIcon && <SectionIcon className="w-4 h-4 text-purple-300 flex-shrink-0" />}{title}
       </h3>
       <div className="space-y-4">{children}</div>
@@ -290,10 +280,10 @@ function SettingsSection({ title, icon: SectionIcon, children }) {
   )
 }
 
-function Toggle({ value, onChange }) {
+function Toggle({ value, disabled, onChange }) {
   return (
-    <button onClick={() => onChange(!value)}
-      className={`relative w-14 h-7 rounded-full transition-colors ${value ? 'bg-purple-600' : 'bg-slate-700'}`}>
+    <button type="button" role="switch" aria-label="Maintenance mode" aria-checked={value} disabled={disabled} onClick={() => onChange(!value)}
+      className={`relative w-14 h-7 shrink-0 rounded-full transition-colors disabled:opacity-50 ${value ? 'bg-purple-600' : 'bg-slate-700'}`}>
       <span className={`absolute top-0.5 left-0.5 w-6 h-6 bg-white rounded-full transition-transform shadow ${value ? 'translate-x-7' : ''}`} />
     </button>
   )

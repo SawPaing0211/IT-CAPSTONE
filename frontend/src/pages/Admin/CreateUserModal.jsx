@@ -1,4 +1,10 @@
-import { useState, useRef, useCallback, useEffect } from 'react'
+import AdminActionDialog from './AdminActionDialog'
+import createUsers from '../../assets/admin/create-users.png'
+import classCodes from '../../assets/admin/class-codes.png'
+import studentRole from '../../assets/admin/role-student.png'
+import instructorRole from '../../assets/admin/role-instructor.png'
+import adminRole from '../../assets/admin/role-admin.png'
+import { useState, useEffect } from 'react'
 import { API_BASE, authFetch } from '../../api/client'
 
 import PasswordField from '../../components/PasswordField'
@@ -100,19 +106,18 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
   })
 
   // ── BULK CSV STATE ────────────────────────────────────────────────────────
-  const fileRef                             = useRef(null)
   const [csvFile, setCsvFile]               = useState(null)
   const [csvParsed, setCsvParsed]           = useState(null)
   const [csvStep, setCsvStep]               = useState('select') // select | preview | uploading | done
   const [csvResult, setCsvResult]           = useState(null)
   const [isDragging, setIsDragging]         = useState(false)
   const [csvToast, setCsvToast]             = useState(null)
-  const blobUrlRef                          = useRef(null)
 
   // Institution settings come from the server, so nothing here hardcodes a school.
   // The server enforces both rules; this only decides what the form offers.
   const [policy, setPolicy] = useState({ student_email_domain: 'laconsolacion.edu', can_create_admins: false })
   const headAdmin = policy.can_create_admins
+  const busy = loading || csvStep === 'uploading'
   const emailLocal = form.username.trim().toLowerCase()
   const generatedEmailLocal = form.role === 'student' ? emailLocal : emailLocal.replace(/[^a-z0-9]+/g, '.').replace(/^\.|\.$/g, '')
   useEffect(() => {
@@ -150,7 +155,6 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
 
   // Clear the csv upload state back to the select step
   const resetCsv = () => {
-    if (blobUrlRef.current) { URL.revokeObjectURL(blobUrlRef.current); blobUrlRef.current = null }
     setCsvFile(null)
     setCsvParsed(null)
     setCsvStep('select')
@@ -188,7 +192,7 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
 
   // ── create single user — hits our backend POST /api/admin/users ───────────
   const handleSubmit = async () => {
-    if (!validate()) return
+    if (loading || !validate()) return
     setLoading(true)
     try {
       const res = await authFetch(`${API}/api/admin/users`, {
@@ -240,21 +244,20 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
   }
 
   // Read the file dropped onto the drop zone
-  const onDrop = useCallback((e) => {
+  const onDrop = (e) => {
     e.preventDefault(); setIsDragging(false)
     readCsvFile(e.dataTransfer.files[0])
-  }, [])
+  }
 
   // ── bulk upload — same endpoint as UploadCSVModal ─────────────────────────
   const handleCsvUpload = async () => {
+    if (csvStep !== 'preview' || !csvFile) return
     setCsvStep('uploading')
     try {
-      const token = localStorage.getItem('token')
       const fd = new FormData()
       fd.append('file', csvFile)
-      const res  = await fetch(`${API}/api/admin/enrollment/bulk-upload`, {
+      const res  = await authFetch(`${API}/api/admin/enrollment/bulk-upload`, {
         method:  'POST',
-        headers: { Authorization: `Bearer ${token}` },
         body:    fd,
       })
       const data = await res.json()
@@ -272,15 +275,14 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
 
   // ── download the credential csv the backend returns after bulk upload ──────
   const downloadCredentials = () => {
-    const bytes = atob(csvResult.credential_csv)
+    const bytes = Uint8Array.from(atob(csvResult.credential_csv), char => char.charCodeAt(0))
     const blob  = new Blob([bytes], { type: 'text/csv' })
     const url   = URL.createObjectURL(blob)
-    blobUrlRef.current = url
     const a = document.createElement('a')
     a.href = url
     a.download = `credentials_${new Date().toISOString().slice(0, 10)}.csv`
     a.click()
-    URL.revokeObjectURL(url)
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
   }
 
   // download the sample template so admins know the exact column format
@@ -289,7 +291,7 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
     const url  = URL.createObjectURL(blob)
     const a    = document.createElement('a')
     a.href = url; a.download = 'enrollment_template.csv'; a.click()
-    URL.revokeObjectURL(url)
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
   }
 
   // ── group sections by subject for the dropdown — way easier to scan ────────
@@ -313,10 +315,7 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
 
   // ─────────────────────────────────────────────────────────────────────────
   return (
-    <div
-      className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4"
-      onClick={onClose}
-    >
+    <AdminActionDialog title="Create / Enroll Users" description="Create one account or enroll students from a CSV." emblem={createUsers} onClose={onClose} busy={busy}>
       {/* global toast */}
       {toast && (
         <div className={`fixed top-5 right-5 z-[9999] px-5 py-3 rounded-xl font-semibold text-sm text-white shadow-2xl flex items-center gap-2 ${
@@ -326,53 +325,33 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
         </div>
       )}
 
-      <div
-        className="bg-slate-900 border border-purple-600/40 rounded-2xl w-full max-w-lg shadow-2xl shadow-purple-900/30 overflow-hidden flex flex-col max-h-[92vh]"
-        onClick={e => e.stopPropagation()}
-      >
-
-        {/* ── header ── */}
-        <div className="bg-gradient-to-r from-purple-900/60 to-pink-900/40 px-6 py-5 border-b border-purple-600/25 flex items-center justify-between flex-shrink-0">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-cyan-500 rounded-xl flex items-center justify-center text-xl shadow-lg">
-              👤
-            </div>
-            <div>
-              <h2 className="text-lg font-black text-white tracking-tight">Create / Enroll Users</h2>
-              <p className="text-purple-300/60 text-xs mt-0.5">
-                Single account or bulk CSV enrollment
-              </p>
-            </div>
-          </div>
-          <button
-            onClick={() => { onClose(); resetForm(); resetCsv() }}
-            className="admin-button w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 transition text-xl leading-none"
-          >
-            ×
-          </button>
-        </div>
-
         {/* ── tab switcher ── */}
-        <div className="flex gap-1 px-6 pt-4 flex-shrink-0">
+        <div className="grid shrink-0 grid-cols-2 gap-2 border-b border-amber-300/20 px-3 py-3 sm:px-6">
           <button
+            type="button"
+            disabled={busy}
+            aria-pressed={activeTab === 'single'}
             onClick={() => setActiveTab('single')}
             className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold transition-all ${
               activeTab === 'single'
                 ? 'bg-purple-600/30 border border-purple-500/60 text-white'
-                : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800/50'
+                : 'text-slate-300 hover:text-white hover:bg-slate-800/50'
             }`}
           >
-            <span>👤</span> Single User
+            <img src={createUsers} alt="" className="size-6" /> Single User
           </button>
           <button
+            type="button"
+            disabled={busy}
+            aria-pressed={activeTab === 'bulk'}
             onClick={() => setActiveTab('bulk')}
             className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold transition-all ${
               activeTab === 'bulk'
-                ? 'bg-emerald-600/25 border border-emerald-500/50 text-white'
-                : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800/50'
+                ? 'bg-purple-600/30 border border-purple-500/60 text-white'
+                : 'text-slate-300 hover:text-white hover:bg-slate-800/50'
             }`}
           >
-            <span>📤</span> Bulk CSV
+            <img src={classCodes} alt="" className="size-6" /> Bulk CSV
           </button>
         </div>
 
@@ -380,8 +359,8 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
             TAB: SINGLE USER
         ════════════════════════════════════════════════════════════ */}
         {activeTab === 'single' && (
-          <div className="overflow-y-auto flex-1 overscroll-contain [transform:translateZ(0)]">
-            <div className="p-6 space-y-4">
+          <div className="admin-action-scroll flex-1">
+            <div className="space-y-5 p-4 sm:p-6">
 
               {step === 1 && (
                 <>
@@ -392,13 +371,16 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
                     </p>
                     <div className={`grid gap-2 ${headAdmin ? 'grid-cols-3' : 'grid-cols-2'}`}>
                       {[
-                        { val: 'student',       label: 'Student',     icon: '🎓', desc: 'Enrolled learner'    },
-                        { val: 'instructor',    label: 'Instructor',  icon: '👨‍🏫', desc: 'Course facilitator' },
+                        { val: 'student',       label: 'Student',     icon: studentRole, desc: 'Enrolled learner'    },
+                        { val: 'instructor',    label: 'Instructor',  icon: instructorRole, desc: 'Course facilitator' },
                         // only the head admin can create other admins (decided by the server)
-                        ...(headAdmin ? [{ val: 'administrator', label: 'Admin', icon: '🛡️', desc: 'Full access' }] : []),
+                        ...(headAdmin ? [{ val: 'administrator', label: 'Admin', icon: adminRole, desc: 'Full access' }] : []),
                       ].map(r => (
                         <button
                           key={r.val}
+                          type="button"
+                          aria-pressed={form.role === r.val}
+                          disabled={loading}
                           onClick={() => setForm(f => ({ ...f, role: r.val }))}
                           className={`flex flex-col items-center gap-1 p-3 rounded-xl border-2 transition-all text-sm ${
                             form.role === r.val
@@ -408,15 +390,15 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
                               : 'bg-slate-800/50 border-slate-700/60 text-slate-400 hover:border-slate-600'
                           }`}
                         >
-                          <span className="text-xl">{r.icon}</span>
+                          <img src={r.icon} alt="" className="size-11 object-contain" width="44" height="44" />
                           <span className="font-bold leading-tight">{r.label}</span>
-                          <span className="text-[10px] text-slate-500">{r.desc}</span>
+                          <span className="text-xs text-slate-300">{r.desc}</span>
                         </button>
                       ))}
                     </div>
                     {/* reminder for non-head admins so they know why admin option is missing */}
                     {!headAdmin && (
-                      <p className="text-[11px] text-slate-600 mt-2 flex items-center gap-1.5">
+                      <p className="text-xs text-slate-400 mt-2 flex items-center gap-1.5">
                         <span>🔒</span> Administrator accounts can only be created by the Head Administrator.
                       </p>
                     )}
@@ -424,11 +406,13 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
 
                   {/* username */}
                   <div>
-                    <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-2">
+                    <label htmlFor="create-user-username" className="mb-2 block text-xs font-semibold text-slate-300">
                       Username *
                     </label>
                     <input
+                      id="create-user-username"
                       type="text"
+                      disabled={loading}
                       value={form.username}
                       onChange={e => setForm(f => ({ ...f, username: e.target.value }))}
                       placeholder="e.g., john_doe or 2024-00001"
@@ -452,6 +436,7 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
                       </label>
                       <button
                         onClick={generatePassword}
+                        disabled={loading}
                         className="text-xs text-purple-400 hover:text-purple-300 transition font-semibold flex items-center gap-1"
                       >
                         ⚡ Auto-generate
@@ -460,6 +445,7 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
                     <PasswordField
                       key={form.role}
                       id="create-user-password"
+                      disabled={loading}
                       autoComplete="new-password"
                       value={form.password}
                       onChange={e => {
@@ -493,13 +479,15 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
                   {/* class code dropdown — only for students, grouped by subject */}
                   {form.role === 'student' && (
                     <div>
-                      <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-2">
+                      <label htmlFor="create-user-class-code" className="mb-2 block text-xs font-semibold text-slate-300">
                         Assign to Class Code
                         <span className="ml-1 normal-case font-normal text-slate-600">(optional)</span>
                       </label>
 
                       {/* grouped select — way more readable than the old flat list */}
                       <select
+                        id="create-user-class-code"
+                        disabled={loading}
                         value={form.section_id}
                         onChange={e => setForm(f => ({ ...f, section_id: e.target.value }))}
                         className="w-full bg-slate-800/80 border border-slate-700/60 rounded-xl px-4 py-2.5 text-white outline-none focus:border-purple-500 transition text-sm"
@@ -507,7 +495,7 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
                       >
                         <option value="">— None / Assign Later —</option>
                         {Object.entries(groupedSections).map(([subjectName, secs]) => (
-                          <optgroup key={subjectName} label={`📖 ${subjectName}`}>
+                          <optgroup key={subjectName} label={subjectName}>
                             {secs.map(s => (
                               <option key={s.id} value={s.id}>
                                 {/* format: CODE — Schedule (Semester) so you can scan fast */}
@@ -530,7 +518,8 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
                   {/* action buttons */}
                   <div className="flex gap-3 pt-1">
                     <button
-                      onClick={() => { onClose(); resetForm() }}
+                      onClick={onClose}
+                      disabled={loading}
                       className="admin-button flex-1 py-2.5 border rounded-xl text-white font-semibold text-sm transition"
                     >
                       Cancel
@@ -542,7 +531,7 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
                     >
                       {loading
                         ? <><span className="animate-spin">⟳</span> Creating…</>
-                        : '✅ Create Account'
+                        : 'Create Account'
                       }
                     </button>
                   </div>
@@ -607,8 +596,8 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
             so admins don't have to go to User Management for quick uploads
         ════════════════════════════════════════════════════════════ */}
         {activeTab === 'bulk' && (
-          <div className="overflow-y-auto flex-1 overscroll-contain [transform:translateZ(0)]">
-            <div className="p-6 space-y-4">
+          <div className="admin-action-scroll flex-1">
+            <div className="space-y-5 p-4 sm:p-6">
 
               {/* csv toast */}
               {csvToast && (
@@ -625,33 +614,32 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
               {csvStep === 'select' && (
                 <>
                   {/* drag and drop zone */}
-                  <div
+                  <label
                     onDragOver={e => { e.preventDefault(); setIsDragging(true) }}
                     onDragLeave={() => setIsDragging(false)}
                     onDrop={onDrop}
-                    onClick={() => fileRef.current?.click()}
-                    className={`border-2 border-dashed rounded-2xl p-8 text-center cursor-pointer transition-all ${
+                    className={`block border border-dashed rounded-xl p-6 focus-within:outline focus-within:outline-2 focus-within:outline-amber-300 text-center cursor-pointer transition-all ${
                       isDragging
                         ? 'border-purple-400 bg-purple-600/10 scale-[1.01]'
                         : 'border-slate-600 hover:border-purple-500 hover:bg-purple-600/5'
                     }`}
                   >
                     <input
-                      ref={fileRef}
                       type="file"
                       accept=".csv"
-                      className="hidden"
+                      className="sr-only"
+                      aria-label="Choose enrollment CSV"
                       onChange={e => readCsvFile(e.target.files[0])}
                     />
-                    <div className="text-4xl mb-2">📂</div>
+                    <img src={classCodes} alt="" className="mx-auto mb-3 size-14 object-contain" />
                     <p className="text-white font-bold text-sm">
                       {isDragging ? 'Drop it!' : 'Drop your enrollment CSV here'}
                     </p>
-                    <p className="text-slate-500 text-xs mt-1">or click to browse · max 5 MB · max 2000 rows</p>
-                  </div>
+                    <p className="text-slate-300 text-xs mt-1">or browse for a file · max 5 MB · max 2,000 rows</p>
+                  </label>
 
                   {/* two-column explainer */}
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid gap-2 sm:grid-cols-2">
                     <div className="bg-slate-800/60 rounded-xl p-3 border border-emerald-600/20">
                       <p className="text-emerald-400 font-bold text-xs mb-1">🏫 Regular</p>
                       <p className="text-slate-400 text-[11px] leading-relaxed">
@@ -842,7 +830,6 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
           </div>
         )}
 
-      </div>
-    </div>
+    </AdminActionDialog>
   )
 }

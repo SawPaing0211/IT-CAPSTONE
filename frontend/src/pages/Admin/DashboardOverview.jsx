@@ -1,5 +1,7 @@
-import partyShield from '../../assets/instructor/quest-party-shield.png'
-import courseBook from '../../assets/courses/course-book.webp'
+import createUsers from '../../assets/admin/create-users.png'
+import classCodes from '../../assets/admin/class-codes.png'
+import databaseBackup from '../../assets/admin/database-backup.png'
+import systemSettings from '../../assets/admin/system-settings.png'
 import { useState, useEffect, useCallback } from 'react'
 import CreateUserModal from './CreateUserModal'
 import BackupDatabaseModal from './BackupDatabaseModal'
@@ -351,37 +353,27 @@ export default function DashboardOverview({ onNavigate, stats, loading, healthEr
             </div>
             <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,10rem),1fr))] gap-2 p-3">
               <ActionBtn
-                icon={<img src={partyShield} alt="" className="size-7 object-contain" />}
+                emblem={createUsers}
                 label="Create user"
                 sub="Student / instructor"
-                color="blue"
                 onClick={() => setShowCreateUser(true)}
               />
               <ActionBtn
-                icon={<img src={courseBook} alt="" className="size-7 object-contain" />}
+                emblem={classCodes}
                 label="Class codes"
                 sub="Sections & enrollment"
-                color="purple"
                 onClick={() => onNavigate?.('sections')}
               />
               <ActionBtn
-                icon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true" className="size-5">
-                  <path d="M4 9h16v11H4zM3 5h18v4H3zM9 13h6" strokeLinejoin="round" strokeLinecap="round" />
-                </svg>}
+                emblem={databaseBackup}
                 label="Database backup"
                 sub="Export SQL"
-                color="green"
                 onClick={() => setShowBackup(true)}
               />
               <ActionBtn
-                icon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true" className="size-5">
-                  <path d="M4 7h4m4 0h8M4 17h8m4 0h4" strokeLinecap="round" />
-                  <circle cx="10" cy="7" r="2" />
-                  <circle cx="14" cy="17" r="2" />
-                </svg>}
+                emblem={systemSettings}
                 label="System settings"
                 sub="Platform configuration"
-                color="orange"
                 onClick={() => setShowSettings(true)}
               />
             </div>
@@ -408,7 +400,7 @@ export default function DashboardOverview({ onNavigate, stats, loading, healthEr
         />
       )}
       {showBackup   && <BackupDatabaseModal onClose={() => setShowBackup(false)} />}
-      {showSettings && <SystemSettingsModal onClose={() => setShowSettings(false)} />}
+      {showSettings && <SystemSettingsModal onClose={() => setShowSettings(false)} onSaved={fetchStats} />}
     </div>
   )
 }
@@ -525,23 +517,14 @@ function StatusRow({ label, value, ok }) {
 }
 
 // Quick action button
-function ActionBtn({ icon, label, sub, color, onClick }) {
-  const iconBg = {
-    blue:   'bg-blue-900/30',
-    purple: 'bg-purple-900/30',
-    green:  'bg-emerald-900/30',
-    orange: 'bg-amber-900/30',
-  }[color] ?? 'bg-slate-800'
-
+function ActionBtn({ emblem, label, sub, onClick }) {
   return (
     <button
       onClick={onClick}
       type="button"
-      className="admin-button flex min-w-0 w-full items-start gap-3 p-3 text-left"
+      className="admin-button flex min-w-0 w-full items-center gap-3 p-3 text-left"
     >
-      <div className={`w-8 h-8 ${iconBg} rounded-lg flex items-center justify-center shrink-0`}>
-        {icon}
-      </div>
+      <img src={emblem} alt="" className="size-11 shrink-0 object-contain" width="44" height="44" />
       <div className="min-w-0">
         <p className="text-sm font-semibold text-amber-100">{label}</p>
         <p className="text-xs text-slate-300">{sub}</p>
