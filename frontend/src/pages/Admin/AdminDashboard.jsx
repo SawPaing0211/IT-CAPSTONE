@@ -1,6 +1,7 @@
 import './admin-controls.css'
 import passwordEmblem from '../../assets/account-password.png'
 import exitPortal from '../../assets/account-logout.png'
+import adminEmblem from '../../assets/admin/role-admin.png'
 import crystal from '../../assets/landing/forge-crystal-logo.webp'
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { openChangePassword } from '../../utils/accountEvents'
@@ -600,7 +601,7 @@ export default function AdminDashboard({ user, onLogout }) {
         <div className="px-4 sm:px-6 pt-5">
           <div className="rounded-xl border border-amber-300/25 bg-[#111832] overflow-hidden">
             <div className="flex items-center gap-4 px-5 py-4 flex-wrap">
-              <img src={crystal} alt="" className="h-11 w-7 shrink-0 object-contain" />
+              <img src={adminEmblem} alt="" className="h-11 w-11 shrink-0 object-contain" />
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <h3 className="font-cinzel text-lg font-semibold text-white">Administration</h3>
