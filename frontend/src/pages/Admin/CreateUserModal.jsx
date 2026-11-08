@@ -415,7 +415,7 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
                       disabled={loading}
                       value={form.username}
                       onChange={e => setForm(f => ({ ...f, username: e.target.value }))}
-                      placeholder="e.g., john_doe or 2024-00001"
+                      placeholder="Your Username or Student ID number"
                       autoComplete="off"
                       className={inputCls(errors.username)}
                     />
