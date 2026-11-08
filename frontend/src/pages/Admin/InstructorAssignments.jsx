@@ -1,24 +1,17 @@
 // admin page for assigning an instructor to teach a subject in a class code.
 // picking a subject filters the class code list down to sections for just that subject.
 //
-// dropdowns render through a portal straight onto <body> so they don't get
-// clipped by the modal's overflow:hidden, positioned using the button's own
-// bounding rect.
+// Dropdowns are positioned against their triggers and stay inside the modal's
+// focus boundary while rendering outside its scrolling content.
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
-import { API_BASE } from '../../api/client'
+import { API_BASE, authFetch } from '../../api/client'
 
 // The backend base URL — change this when deploying to a real server
 const API = API_BASE
 
-// Attaches the JWT token from localStorage to every fetch call.
-// Without this, the backend returns 401 Unauthorized on every request.
-const authHeader = () => ({
-  'Authorization': `Bearer ${localStorage.getItem('token')}`,
-  'Content-Type': 'application/json',
-})
-
+const jsonHeaders = { 'Content-Type': 'application/json' }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TOAST
@@ -52,34 +45,11 @@ function Toast({ message, type, onDone }) {
 
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ANIMATED NUMBER
-// Counts up from 0 to the target value like a slot machine.
-// Used in the stat cards at the top of the page.
-// ─────────────────────────────────────────────────────────────────────────────
-function AnimatedNumber({ value }) {
-  const [display, setDisplay] = useState(0)
-  useEffect(() => {
-    let start = 0
-    const end = Number(value) || 0
-    if (end === 0) { setDisplay(0); return }
-    const step = Math.max(1, Math.floor(end / 20))
-    const t = setInterval(() => {
-      start = Math.min(start + step, end)
-      setDisplay(start)
-      if (start >= end) clearInterval(t)
-    }, 30)
-    return () => clearInterval(t)
-  }, [value])
-  return <>{display}</>
-}
-
-
-// ─────────────────────────────────────────────────────────────────────────────
 // PORTAL DROPDOWN
 // The core fix for dropdowns getting clipped by overflow:hidden on the modal.
 //
 // HOW IT WORKS:
-//   - Renders its children directly on document.body via createPortal().
+//   - Portals into the enclosing dialog when there is one.
 //   - Uses the trigger button's getBoundingClientRect() to position itself
 //     in the exact right spot on screen.
 //   - Auto-flips upward if there isn't enough space below the trigger.
@@ -94,32 +64,43 @@ function AnimatedNumber({ value }) {
 //   minWidth    — minimum width of the panel in px (default 320)
 // ─────────────────────────────────────────────────────────────────────────────
 function PortalDropdown({ triggerRef, open, onClose, children, minWidth = 320 }) {
-  const [pos, setPos] = useState({ top: 0, left: 0, width: 0 })
+  const [pos, setPos] = useState(null)
 
   // Recalculate position every time the dropdown opens or the window changes
   useEffect(() => {
     if (!open || !triggerRef.current) return
     const update = () => {
-      const rect = triggerRef.current.getBoundingClientRect()
-      const spaceBelow = window.innerHeight - rect.bottom
-      const dropHeight = 380
-      const showAbove = spaceBelow < dropHeight && rect.top > dropHeight
-      const panelWidth = Math.max(rect.width, minWidth)
-      const leftRaw = rect.left
-      const maxLeft = window.innerWidth - panelWidth - 8
-      const left = Math.min(leftRaw, Math.max(0, maxLeft))
+      const trigger = triggerRef.current
+      if (!trigger) return
+      const rect = trigger.getBoundingClientRect()
+      const viewport = window.visualViewport
+      const leftEdge = (viewport?.offsetLeft ?? 0) + 8
+      const topEdge = (viewport?.offsetTop ?? 0) + 8
+      const rightEdge = (viewport?.offsetLeft ?? 0) + (viewport?.width ?? window.innerWidth) - 8
+      const bottomEdge = (viewport?.offsetTop ?? 0) + (viewport?.height ?? window.innerHeight) - 8
+      const below = Math.max(0, bottomEdge - rect.bottom - 4)
+      const above = Math.max(0, rect.top - topEdge - 4)
+      const showAbove = below < 380 && above > below
+      const height = Math.min(380, showAbove ? above : below)
+      const width = Math.min(Math.max(rect.width, minWidth), rightEdge - leftEdge)
       setPos({
-        top: showAbove ? rect.top - dropHeight - 4 : rect.bottom + 4,
-        left,
-        width: panelWidth,
+        top: showAbove ? Math.max(topEdge, rect.top - height - 4) : Math.min(bottomEdge, rect.bottom + 4),
+        left: Math.max(leftEdge, Math.min(rect.left, rightEdge - width)),
+        width,
+        height,
+        host: trigger.closest('dialog') ?? document.body,
       })
     }
     update()
     window.addEventListener('scroll', update, true)
     window.addEventListener('resize', update)
+    window.visualViewport?.addEventListener('resize', update)
+    window.visualViewport?.addEventListener('scroll', update)
     return () => {
       window.removeEventListener('scroll', update, true)
       window.removeEventListener('resize', update)
+      window.visualViewport?.removeEventListener('resize', update)
+      window.visualViewport?.removeEventListener('scroll', update)
     }
   }, [open, triggerRef, minWidth])
 
@@ -130,30 +111,42 @@ function PortalDropdown({ triggerRef, open, onClose, children, minWidth = 320 })
       if (triggerRef.current && triggerRef.current.contains(e.target)) return
       onClose()
     }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
+    const onEscape = event => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        onClose()
+        triggerRef.current?.focus()
+      }
+    }
+    document.addEventListener('pointerdown', handler)
+    document.addEventListener('keydown', onEscape)
+    return () => {
+      document.removeEventListener('pointerdown', handler)
+      document.removeEventListener('keydown', onEscape)
+    }
   }, [open, onClose, triggerRef])
 
-  if (!open) return null
+  if (!open || !pos) return null
 
   return createPortal(
     <div
       // stopPropagation here means clicks inside the panel NEVER reach the
       // document listener above — no accidental closures, no race conditions
-      onMouseDown={e => e.stopPropagation()}
+      onPointerDown={e => e.stopPropagation()}
       style={{
         position: 'fixed',
         top: pos.top,
         left: pos.left,
         width: pos.width,
+        maxHeight: pos.height,
         zIndex: 99999,
         animation: 'dropIn 0.15s ease-out',
       }}
-      className="bg-slate-800 border border-slate-600 rounded-xl shadow-2xl overflow-hidden"
+      className="bg-slate-800 border border-slate-600 rounded-xl shadow-2xl overflow-y-auto overscroll-contain"
     >
       {children}
     </div>,
-    document.body
+    pos.host
   )
 }
 
@@ -202,6 +195,7 @@ function InstructorPicker({ value, onChange, instructors }) {
     e.preventDefault()
     onChange(id)
     setOpen(false)
+    triggerRef.current?.focus()
   }
 
   return (
@@ -211,6 +205,7 @@ function InstructorPicker({ value, onChange, instructors }) {
         ref={triggerRef}
         type="button"
         onClick={handleOpen}
+        aria-expanded={open}
         className="admin-button w-full border rounded-xl px-4 py-2.5 text-sm text-left flex items-center justify-between outline-none focus:border-purple-500 transition-all"
       >
         <span className={selected ? 'text-white' : 'text-slate-500'}>
@@ -219,7 +214,6 @@ function InstructorPicker({ value, onChange, instructors }) {
         <span className={`text-slate-500 text-xs transition-transform duration-200 ${open ? 'rotate-180' : ''}`}>▼</span>
       </button>
 
-      {/* Dropdown panel rendered on <body> via PortalDropdown */}
       <PortalDropdown triggerRef={triggerRef} open={open} onClose={() => setOpen(false)}>
         {/* Search box at the top */}
         <div className="p-2 border-b border-slate-700">
@@ -303,10 +297,11 @@ function SubjectPicker({ value, onChange, subjects }) {
     setTimeout(() => inputRef.current?.focus(), 50)
   }
 
-  const handleSelect = (e, id) => {
+  const handleSelect = (e) => {
     e.preventDefault()
-    onChange(id)
+    onChange(Number(e.currentTarget.dataset.subjectId))
     setOpen(false)
+    triggerRef.current?.focus()
   }
 
   return (
@@ -315,6 +310,7 @@ function SubjectPicker({ value, onChange, subjects }) {
         ref={triggerRef}
         type="button"
         onClick={handleOpen}
+        aria-expanded={open}
         className="admin-button w-full border rounded-xl px-4 py-2.5 text-sm text-left flex items-center justify-between outline-none focus:border-purple-500 transition-all"
       >
         <span className={selected ? 'text-white' : 'text-slate-500'}>
@@ -355,7 +351,8 @@ function SubjectPicker({ value, onChange, subjects }) {
                 <button
                   key={s.id}
                   type="button"
-                  onClick={e => handleSelect(e, s.id)}
+                  data-subject-id={s.id}
+                  onClick={handleSelect}
                   className={`w-full px-3 py-2.5 text-left text-sm flex items-center gap-2 hover:bg-slate-700/50 transition-colors ${value == s.id ? 'bg-purple-900/30' : ''}`}
                 >
                   {s.subject_code && (
@@ -431,6 +428,7 @@ function ClassCodePicker({ value, onChange, sectionsBySubject, subjectSelected }
     e.preventDefault()
     onChange(id)
     setOpen(false)
+    triggerRef.current?.focus()
   }
 
   return (
@@ -439,6 +437,7 @@ function ClassCodePicker({ value, onChange, sectionsBySubject, subjectSelected }
         ref={triggerRef}
         type="button"
         onClick={handleOpen}
+        aria-expanded={open}
         disabled={!subjectSelected}
         className={`w-full bg-slate-800 border rounded-xl px-4 py-2.5 text-sm text-left flex items-center justify-between outline-none transition-all ${
           !subjectSelected
@@ -571,8 +570,19 @@ function ClassCodePicker({ value, onChange, sectionsBySubject, subjectSelected }
 // mode = 'create' | 'edit'
 // allSections = ALL sections from the backend (we filter here)
 // ─────────────────────────────────────────────────────────────────────────────
-function AssignmentModal({ mode, formData, setFormData, instructors, subjects, allSections, onSubmit, onCancel }) {
+function AssignmentModal({ mode, formData, setFormData, instructors, subjects, allSections, onSubmit, onCancel, saving, error }) {
   const isEdit = mode === 'edit'
+  const dialogRef = useRef(null)
+
+  useLayoutEffect(() => {
+    const dialog = dialogRef.current
+    const trigger = document.activeElement
+    dialog.showModal()
+    return () => {
+      dialog.close()
+      if (trigger instanceof HTMLElement && trigger.isConnected) trigger.focus()
+    }
+  }, [])
 
   // Filter sections to only those belonging to the currently selected subject.
   // This is the CORE FIX — before, ClassCodePicker received all sections.
@@ -592,13 +602,15 @@ function AssignmentModal({ mode, formData, setFormData, instructors, subjects, a
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ background: 'rgba(0,0,0,0.80)', backdropFilter: 'blur(6px)' }}
+    <dialog
+      ref={dialogRef}
+      aria-labelledby="assignment-title"
+      className="m-auto w-[calc(100%-2rem)] max-w-md overflow-visible rounded-2xl bg-transparent p-0 text-slate-100 backdrop:bg-black/80"
+      onCancel={event => { event.preventDefault(); if (!saving) onCancel() }}
     >
-      {/* Modal card — deliberately NO overflow:hidden so portal dropdowns can escape */}
+      {/* The dropdown portal is a sibling of this scrolling card. */}
       <div
-        className="bg-slate-900 border border-slate-700/60 rounded-2xl w-full max-w-md shadow-2xl"
+        className="bg-slate-900 border border-slate-700/60 rounded-2xl w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain shadow-2xl"
         style={{ animation: 'modalIn 0.2s ease-out' }}
       >
         {/* Header */}
@@ -612,7 +624,7 @@ function AssignmentModal({ mode, formData, setFormData, instructors, subjects, a
               {isEdit ? '✏️' : '＋'}
             </div>
             <div>
-              <h2 className="text-base font-semibold text-white">
+              <h2 id="assignment-title" className="font-cinzel text-base font-semibold text-white">
                 {isEdit ? 'Edit Assignment' : 'Assign Instructor'}
               </h2>
               <p className="text-xs text-slate-500">
@@ -620,14 +632,14 @@ function AssignmentModal({ mode, formData, setFormData, instructors, subjects, a
               </p>
             </div>
           </div>
-          <button onClick={onCancel}
+          <button type="button" aria-label="Close assignment" disabled={saving} onClick={onCancel}
             className="admin-button w-8 h-8 flex items-center justify-center rounded-lg text-slate-500 transition-colors text-sm">
             ✕
           </button>
         </div>
 
         {/* Form fields */}
-        <div className="px-6 py-5 space-y-4">
+        <fieldset disabled={saving} className="min-w-0 space-y-4 px-4 py-5 sm:px-6">
 
           {/* INSTRUCTOR — now uses InstructorPicker instead of native <select> */}
           <div>
@@ -679,21 +691,23 @@ function AssignmentModal({ mode, formData, setFormData, instructors, subjects, a
               </p>
             )}
           </div>
-        </div>
+        </fieldset>
+
+        {error && <p role="alert" className="px-4 pb-4 text-sm text-rose-200 sm:px-6">{error}</p>}
 
         {/* Cancel / Submit buttons */}
         <div className="px-6 pb-5 flex gap-3">
-          <button type="button" onClick={onCancel}
+          <button type="button" onClick={onCancel} disabled={saving}
             className="admin-button flex-1 py-2.5 border rounded-xl text-slate-300 text-sm font-medium transition-colors">
             Cancel
           </button>
-          <button type="button" onClick={onSubmit}
+          <button type="button" onClick={onSubmit} disabled={saving || !formData.instructor_id || !formData.subject_id || !formData.section_id}
             className="admin-button admin-button-primary flex-1 py-2.5 rounded-xl font-semibold text-white text-sm transition-all active:scale-[0.98]">
-            {isEdit ? 'Save Changes' : 'Assign Instructor'}
+            {saving ? 'Saving…' : isEdit ? 'Save Changes' : 'Assign Instructor'}
           </button>
         </div>
       </div>
-    </div>
+    </dialog>
   )
 }
 
@@ -731,7 +745,6 @@ function ConfirmDialog({ message, onConfirm, onCancel }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // STAT CARD
 // One of the four count boxes at the top of the page.
-// The number inside counts up with AnimatedNumber for a nice effect on load.
 // ─────────────────────────────────────────────────────────────────────────────
 function StatCard({ label, value, color, icon }) {
   const colorMap = {
@@ -747,7 +760,7 @@ function StatCard({ label, value, color, icon }) {
         <span className="text-lg opacity-60">{icon}</span>
       </div>
       <p className="text-4xl font-bold mt-2">
-        <AnimatedNumber value={value} />
+        {value}
       </p>
     </div>
   )
@@ -797,7 +810,7 @@ function InstructorCard({ group, onEdit, onDelete }) {
         {Object.values(bySubject).map(({ subject, rows }) => (
           <div
             key={subject?.id || 'unknown'}
-            className="flex flex-col sm:flex-row sm:items-center gap-3 px-5 py-3.5 hover:bg-slate-800/20 transition-colors group/row"
+            className="flex flex-col xl:flex-row xl:flex-wrap xl:items-center gap-3 px-5 py-3.5 hover:bg-slate-800/20 transition-colors group/row"
           >
             {/* Subject badge */}
             <div className="flex items-center gap-2 flex-shrink-0">
@@ -818,20 +831,20 @@ function InstructorCard({ group, onEdit, onDelete }) {
             </div>
 
             {/* Edit/Delete buttons — appear on row hover */}
-            <div className="flex gap-1.5 sm:ml-auto opacity-100 sm:opacity-0 sm:group-hover/row:opacity-100 transition-opacity flex-shrink-0">
+            <div className="flex flex-wrap gap-2 xl:ml-auto">
               {rows.map(a => (
                 <div key={a.id} className="flex gap-1">
                   <button
                     onClick={() => onEdit(a)}
-                    title={`Edit ${a.section?.section_no}`}
+                    aria-label={`Edit assignment for ${a.section?.section_no}`}
                     className="admin-button px-2.5 py-1.5 text-slate-400 rounded-lg text-xs font-medium transition-all border flex items-center gap-1"
                   >
                     <span>✏</span>
-                    <span className="hidden sm:inline font-mono">{a.section?.section_no}</span>
+                    <span className="font-mono">{a.section?.section_no}</span>
                   </button>
                   <button
                     onClick={() => onDelete(a)}
-                    title={`Remove ${a.section?.section_no}`}
+                    aria-label={`Remove assignment for ${a.section?.section_no}`}
                     className="admin-button admin-button-danger px-2 py-1.5 text-slate-500 rounded-lg text-xs transition-all border"
                   >
                     🗑
@@ -879,6 +892,9 @@ export default function InstructorAssignments() {
   const [allSections,      setAllSections]      = useState([])  // all sections, unfiltered
 
   const [loading,          setLoading]          = useState(true)
+  const [loadError, setLoadError] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState('')
   const [showCreate,       setShowCreate]       = useState(false)
   const [editingId,        setEditingId]        = useState(null)
   const [deleteTarget,     setDeleteTarget]     = useState(null)
@@ -897,80 +913,82 @@ export default function InstructorAssignments() {
   const notify = (message, type = 'success') => setToast({ message, type })
 
 
-  // ── Fetch everything in parallel on mount ─────────────────────────────────
-  // Promise.all fires all 4 fetches at once — faster than one at a time.
-  // .finally() always runs setLoading(false) even if one fetch fails.
-  useEffect(() => {
-    Promise.all([fetchAssignments(), fetchInstructors(), fetchSubjects(), fetchSections()])
-      .finally(() => setLoading(false))
+  const fetchAssignments = useCallback(async () => {
+    const response = await authFetch(`${API}/api/admin/instructor-assignments`)
+    if (!response.ok) throw new Error()
+    setAssignments(await response.json())
   }, [])
 
-
-  // ── Data fetchers ─────────────────────────────────────────────────────────
-
-  const fetchAssignments = async () => {
+  const loadPage = useCallback(async () => {
+    setLoading(true)
+    setLoadError(false)
     try {
-      const res = await fetch(`${API}/api/admin/instructor-assignments`, { headers: authHeader() })
-      if (res.ok) setAssignments(await res.json())
-    } catch (err) { console.error('assignments fetch failed:', err) }
-  }
-
-  const fetchInstructors = async () => {
-    // ?role=instructor filters to only instructor accounts — no students or admins
-    try {
-      const res = await fetch(`${API}/api/admin/users?role=instructor`, { headers: authHeader() })
-      if (res.ok) setInstructors(await res.json())
-    } catch (err) { console.error('instructors fetch failed:', err) }
-  }
-
-  const fetchSubjects = async () => {
-    try {
-      const res = await fetch(`${API}/api/admin/subjects`, { headers: authHeader() })
-      if (res.ok) setSubjects(await res.json())
-    } catch (err) { console.error('subjects fetch failed:', err) }
-  }
-
-  const fetchSections = async () => {
-    // /sections-list includes subject_id, subject_name, subject_code — needed for filtering
-    try {
-      const res = await fetch(`${API}/api/admin/sections-list`, { headers: authHeader() })
-      if (res.ok) {
-        const data = await res.json()
-        setAllSections(Array.isArray(data) ? data : [])
+      const read = async path => {
+        const response = await authFetch(`${API}/api/admin/${path}`)
+        if (!response.ok) throw new Error()
+        return response.json()
       }
-    } catch (err) { console.error('sections fetch failed:', err) }
-  }
+      const [instructorList, subjectList, sectionList] = await Promise.all([
+        read('users?role=instructor'), read('subjects'), read('sections-list'), fetchAssignments(),
+      ])
+      setInstructors(instructorList)
+      setSubjects(subjectList)
+      setAllSections(sectionList)
+    } catch {
+      setLoadError(true)
+    } finally {
+      setLoading(false)
+    }
+  }, [fetchAssignments])
 
+  useEffect(() => {
+    const timer = setTimeout(loadPage, 0)
+    return () => clearTimeout(timer)
+  }, [loadPage])
+
+  const refreshAfterSave = async () => {
+    try {
+      await fetchAssignments()
+    } catch {
+      setLoadError(true)
+    }
+  }
 
   // ── Create ────────────────────────────────────────────────────────────────
   const handleCreate = async () => {
+    if (saving) return
     if (!formData.instructor_id || !formData.subject_id || !formData.section_id) {
       notify('Please fill in all three fields', 'warning')
       return
     }
+    setSaveError('')
+    setSaving(true)
     try {
-      const res = await fetch(`${API}/api/admin/instructor-assignments`, {
+      const res = await authFetch(`${API}/api/admin/instructor-assignments`, {
         method: 'POST',
-        headers: authHeader(),
+        headers: jsonHeaders,
         body: JSON.stringify(formData),
       })
       const data = await res.json()
       if (res.ok) {
         setShowCreate(false)
         setFormData(EMPTY_FORM)
-        await fetchAssignments()
+        await refreshAfterSave()
         notify('Instructor assigned successfully!')
       } else {
-        notify(data.error || 'Failed to assign instructor', 'error')
+        setSaveError(data.error || 'Failed to assign instructor')
       }
     } catch {
-      notify('Network error — could not assign instructor', 'error')
+      setSaveError('Network error. Check the connection and try again.')
+    } finally {
+      setSaving(false)
     }
   }
 
 
   // ── Open edit modal pre-filled with existing values ───────────────────────
   const openEdit = (assignment) => {
+    setSaveError('')
     setEditingId(assignment.id)
     setFormData({
       instructor_id: assignment.instructor?.id || '',
@@ -982,27 +1000,32 @@ export default function InstructorAssignments() {
 
   // ── Save edited assignment ────────────────────────────────────────────────
   const handleUpdate = async () => {
+    if (saving) return
     if (!formData.instructor_id || !formData.subject_id || !formData.section_id) {
       notify('Please fill in all three fields', 'warning')
       return
     }
+    setSaveError('')
+    setSaving(true)
     try {
-      const res = await fetch(`${API}/api/admin/instructor-assignments/${editingId}`, {
+      const res = await authFetch(`${API}/api/admin/instructor-assignments/${editingId}`, {
         method: 'PUT',
-        headers: authHeader(),
+        headers: jsonHeaders,
         body: JSON.stringify(formData),
       })
       const data = await res.json()
       if (res.ok) {
         setEditingId(null)
         setFormData(EMPTY_FORM)
-        await fetchAssignments()
+        await refreshAfterSave()
         notify('Assignment updated!')
       } else {
-        notify(data.error || 'Update failed', 'error')
+        setSaveError(data.error || 'Could not update the assignment')
       }
     } catch {
-      notify('Network error — update failed', 'error')
+      setSaveError('Network error. Check the connection and try again.')
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -1011,13 +1034,13 @@ export default function InstructorAssignments() {
   const handleDelete = async () => {
     if (!deleteTarget) return
     try {
-      const res = await fetch(`${API}/api/admin/instructor-assignments/${deleteTarget.id}`, {
+      const res = await authFetch(`${API}/api/admin/instructor-assignments/${deleteTarget.id}`, {
         method: 'DELETE',
-        headers: authHeader(),
+        headers: jsonHeaders,
       })
       if (res.ok) {
         setDeleteTarget(null)
-        await fetchAssignments()
+        await refreshAfterSave()
         notify('Assignment removed')
       } else {
         const data = await res.json()
@@ -1032,14 +1055,6 @@ export default function InstructorAssignments() {
 
 
   // ── Manual refresh button ─────────────────────────────────────────────────
-  const handleRefresh = async () => {
-    setLoading(true)
-    await fetchAssignments()
-    setLoading(false)
-    notify('Refreshed')
-  }
-
-
   // ── Client-side filtering ─────────────────────────────────────────────────
   // All four conditions must pass for an assignment to appear.
   // Runs on every render — fine because the list is typically < 100 items.
@@ -1097,6 +1112,13 @@ export default function InstructorAssignments() {
 
 
   // ── RENDER ────────────────────────────────────────────────────────────────
+  if (loadError) {
+    return <div role="alert" className="flex flex-wrap items-center gap-3 rounded-xl border border-amber-300/25 bg-slate-900 p-4 text-sm text-amber-100">
+      <span>Instructor assignments could not be loaded.</span>
+      <button type="button" className="admin-button px-4" onClick={loadPage}>Retry</button>
+    </div>
+  }
+
   return (
     <>
       {/* CSS keyframe animations */}
@@ -1124,14 +1146,14 @@ export default function InstructorAssignments() {
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
             <button
-              onClick={handleRefresh}
+              onClick={loadPage}
               className="admin-button flex items-center gap-2 px-4 py-2 border rounded-xl text-slate-300 text-sm font-medium transition-all active:scale-95"
             >
               <span className={loading ? 'animate-spin' : ''}>↻</span>
               Refresh
             </button>
             <button
-              onClick={() => { setFormData(EMPTY_FORM); setShowCreate(true) }}
+              onClick={() => { setSaveError(''); setFormData(EMPTY_FORM); setShowCreate(true) }}
               className="admin-button admin-button-primary flex items-center gap-2 px-4 py-2 rounded-xl text-white text-sm font-semibold transition-all active:scale-95"
             >
               <span className="text-base leading-none">＋</span>
@@ -1150,12 +1172,13 @@ export default function InstructorAssignments() {
 
         {/* Filter bar */}
         <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-4 space-y-3">
-          <div className="flex flex-col lg:flex-row gap-3">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(0,2fr)_repeat(3,minmax(0,1fr))] [&>*]:min-w-0">
             {/* Text search */}
             <div className="relative flex-1">
               <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm pointer-events-none">🔍</span>
               <input
                 type="text"
+                aria-label="Search instructor assignments"
                 placeholder="Search instructor, subject, or class code..."
                 value={searchTerm}
                 onChange={e => setSearchTerm(e.target.value)}
@@ -1165,19 +1188,19 @@ export default function InstructorAssignments() {
 
             {/* These filter dropdowns are plain <select> — they're on the main page
                 (no overflow:hidden parent) so they don't need the portal trick */}
-            <select value={filterInstructor} onChange={e => setFilterInstructor(e.target.value)}
+            <select aria-label="Filter by instructor" value={filterInstructor} onChange={e => setFilterInstructor(e.target.value)}
               className="bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-white text-sm outline-none focus:border-purple-500 transition-all cursor-pointer min-w-[160px]">
               <option value="all">All Instructors</option>
               {instructors.map(i => <option key={i.id} value={i.id}>{i.full_name || i.username}</option>)}
             </select>
 
-            <select value={filterSubject} onChange={e => setFilterSubject(e.target.value)}
+            <select aria-label="Filter by subject" value={filterSubject} onChange={e => setFilterSubject(e.target.value)}
               className="bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-white text-sm outline-none focus:border-purple-500 transition-all cursor-pointer min-w-[160px]">
               <option value="all">All Subjects</option>
               {subjects.map(s => <option key={s.id} value={s.id}>{s.subject_code ? `[${s.subject_code}] ` : ''}{s.name}</option>)}
             </select>
 
-            <select value={filterSection} onChange={e => setFilterSection(e.target.value)}
+            <select aria-label="Filter by class code" value={filterSection} onChange={e => setFilterSection(e.target.value)}
               className="bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-white text-sm outline-none focus:border-purple-500 transition-all cursor-pointer min-w-[140px]">
               <option value="all">All Class Codes</option>
               {allSections.map(s => <option key={s.id} value={s.id}>{s.section_no}</option>)}
@@ -1241,6 +1264,8 @@ export default function InstructorAssignments() {
           subjects={subjects}
           allSections={allSections}
           onSubmit={handleCreate}
+          saving={saving}
+          error={saveError}
           onCancel={() => { setShowCreate(false); setFormData(EMPTY_FORM) }}
         />
       )}
@@ -1255,6 +1280,8 @@ export default function InstructorAssignments() {
           subjects={subjects}
           allSections={allSections}
           onSubmit={handleUpdate}
+          saving={saving}
+          error={saveError}
           onCancel={() => { setEditingId(null); setFormData(EMPTY_FORM) }}
         />
       )}

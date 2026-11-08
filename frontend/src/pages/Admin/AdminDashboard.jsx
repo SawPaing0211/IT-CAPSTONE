@@ -5,11 +5,11 @@ import adminEmblem from '../../assets/admin/role-admin.png'
 import crystal from '../../assets/landing/forge-crystal-logo.webp'
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { openChangePassword } from '../../utils/accountEvents'
+import AdminNavIcon from './AdminNavIcon'
 import DashboardOverview from './DashboardOverview'
 import UserManagement from './UserManagement'
 import InstructorAssignments from './InstructorAssignments'
 import ActivityLogs from './ActivityLogs'
-import SubjectsManagement from './SubjectsManagement'
 import SectionsManagement from './SectionsManagement'
 import { API_BASE, authFetch } from '../../api/client'
 
@@ -35,23 +35,12 @@ const TAB_DEFS = [
     id: 'dashboard',
     label: 'Dashboard',
     shortLabel: 'Home',
-    icon: (
-      <svg viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
-        <path d="M2 10a8 8 0 1116 0 8 8 0 01-16 0zm8-3a1 1 0 00-.867.5L7.469 10H6a1 1 0 000 2h2a1 1 0 00.867-.5L10 9.732l1.633 2.768A1 1 0 0012.535 13l1.932-3.866A1 1 0 1012.6 8.268L11.07 11.4 9.4 8.5A1 1 0 0010 8V7a1 1 0 00-1-1H7a1 1 0 000 2h1z" />
-      </svg>
-    ),
     description: 'System overview and quick actions',
-    contextAction: { label: 'Sync Metrics', icon: '↻' },
   },
   {
     id: 'sections',
     label: 'Class Codes',
     shortLabel: 'Classes',
-    icon: (
-      <svg viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
-        <path d="M7 3a1 1 0 000 2h6a1 1 0 100-2H7zM4 7a1 1 0 011-1h10a1 1 0 110 2H5a1 1 0 01-1-1zM2 11a2 2 0 012-2h12a2 2 0 012 2v4a2 2 0 01-2 2H4a2 2 0 01-2-2v-4z" />
-      </svg>
-    ),
     description: 'Manage class codes, schedules, and enrollment',
     // Badge = students enrolled in a section that got set to inactive.
     // They exist in the DB but can't access any content until you reactivate
@@ -61,33 +50,18 @@ const TAB_DEFS = [
     id: 'users',
     label: 'User Management',
     shortLabel: 'Users',
-    icon: (
-      <svg viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
-        <path d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 17c.046-.327.07-.66.07-1a6.97 6.97 0 00-1.5-4.33A5 5 0 0119 16v1h-6.07zM6 11a5 5 0 015 5v1H1v-1a5 5 0 015-5z" />
-      </svg>
-    ),
     description: 'Manage students, instructors, and administrators',
   },
   {
     id: 'assignments',
     label: 'Instructor Assignments',
     shortLabel: 'Assign',
-    icon: (
-      <svg viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
-        <path d="M10.394 2.08a1 1 0 00-.788 0l-7 3a1 1 0 000 1.84L5.25 8.051a.999.999 0 01.356-.257l4-1.714a1 1 0 11.788 1.838L7.667 9.088l1.94.831a1 1 0 00.787 0l7-3a1 1 0 000-1.838l-7-3zM3.31 9.397L5 10.12v4.102a8.969 8.969 0 00-1.05-.174 1 1 0 01-.89-.89 11.115 11.115 0 01.25-3.762zM9.3 16.573A9.026 9.026 0 007 14.935v-3.957l1.818.78a3 3 0 002.364 0l5.508-2.361a11.026 11.026 0 01.25 3.762 1 1 0 01-.89.89 8.968 8.968 0 00-5.35 2.524 1 1 0 01-1.4 0zM6 18a1 1 0 001-1v-2.065a8.935 8.935 0 00-2-.712V17a1 1 0 001 1z" />
-      </svg>
-    ),
     description: 'Manage instructor subject and class code assignments',
   },
   {
     id: 'activity',
     label: 'Activity Logs',
     shortLabel: 'Logs',
-    icon: (
-      <svg viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
-        <path fillRule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h4a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd" />
-      </svg>
-    ),
     description: 'Comprehensive audit trail of all administrative actions',
     // Badge = audit log entries created today (from stats.today in the API).
   },
@@ -96,8 +70,8 @@ const TAB_DEFS = [
 // One tip shown per day in the banner strip. Rotates based on today's date.
 const TIPS = [
   'Press Alt+1–5 to jump to any tab instantly.',
-  'The Activity Log records every admin action with full timestamps.',
-  'Enroll students from CSV via User Management → Bulk Enrollment Upload.',
+  'Open Activity Logs to review recorded administrative actions.',
+  'Find Bulk Enrollment Upload in User Management.',
   'Enrollment alerts appear when students are stuck in inactive sections.',
 ]
 
@@ -108,6 +82,7 @@ function healthDisplay(health, maintenanceMode) {
   if (maintenanceMode)          return { color: 'bg-amber-400',  text: 'Maintenance',    textColor: 'text-amber-400',  border: 'border-amber-600/20',  bg: 'bg-amber-600/10',  pulse: false }
   if (health === 'operational') return { color: 'bg-green-400',  text: 'Database connected', textColor: 'text-green-400',  border: 'border-green-600/20',  bg: 'bg-green-600/10',  pulse: true  }
   if (health === 'degraded')    return { color: 'bg-yellow-400', text: 'Database degraded', textColor: 'text-yellow-400', border: 'border-yellow-600/20', bg: 'bg-yellow-600/10', pulse: false }
+  if (!health) return { color: 'bg-slate-400', text: 'Database status unavailable', textColor: 'text-slate-300', border: 'border-slate-600/40', bg: 'bg-slate-800/30', pulse: false }
   return                               { color: 'bg-red-400',    text: 'Database unreachable', textColor: 'text-red-400',    border: 'border-red-600/20',    bg: 'bg-red-600/10',    pulse: false }
 }
 
@@ -125,21 +100,6 @@ function Tooltip({ text, children }) {
         </span>
       )}
     </span>
-  )
-}
-
-// ─── LOADING SKELETON ─────────────────────────────────────────────────────────
-// Gray animated placeholder shown for 150ms during tab switches.
-// Prevents a blank white flash between tabs.
-function TabSkeleton() {
-  return (
-    <div className="animate-pulse space-y-4">
-      <div className="h-8 bg-slate-800/60 rounded-xl w-1/3" />
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        {[...Array(3)].map((_, i) => <div key={i} className="h-28 bg-slate-800/40 rounded-2xl" />)}
-      </div>
-      <div className="h-48 bg-slate-800/30 rounded-2xl" />
-    </div>
   )
 }
 
@@ -192,7 +152,7 @@ function ProfileDropdown({ user, onLogout, onShortcuts }) {
       </button>
 
       {open && (
-        <section id="admin-account-panel" aria-label="Admin account" className="absolute right-0 top-full z-50 mt-2 w-72 max-w-[calc(100vw-2rem)] rounded-xl border border-amber-300/35 bg-[#10162b] shadow-xl shadow-black/35">
+        <section id="admin-account-panel" aria-label="Admin account" className="absolute right-0 top-full z-50 mt-2 w-72 max-w-[calc(100vw-2rem)] max-h-[calc(100dvh-5rem)] overflow-y-auto rounded-xl border border-amber-300/35 bg-[#10162b] shadow-xl shadow-black/35">
           <div className="border-b border-amber-300/20 px-4 py-4">
             <h3 className="break-words font-cinzel text-lg font-semibold text-white">{name}</h3>
             <p className="mt-1 text-xs font-medium text-amber-200">Administrator</p>
@@ -269,12 +229,9 @@ function ShortcutsModal({ open, onClose }) {
 export default function AdminDashboard({ user, onLogout }) {
 
   const [activeTab,        setActiveTab]        = useState('dashboard')
-  const [sidebarOpen,      setSidebarOpen]      = useState(true)   // mobile drawer toggle
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)  // desktop icon-only mode
-  const [isMobile,         setIsMobile]         = useState(false)
   const [shortcutsOpen,    setShortcutsOpen]    = useState(false)
   const [tipDismissed,     setTipDismissed]     = useState(false)
-  const [transitioning,    setTransitioning]    = useState(false)  // true during tab fade
 
   // Stats fetched from the backend
   const [dashStats,    setDashStats]    = useState(null)
@@ -284,7 +241,7 @@ export default function AdminDashboard({ user, onLogout }) {
   const [syncing,      setSyncing]      = useState(false) // true while manually refreshing
 
   const mainRef  = useRef(null)
-  const tipIndex = useMemo(() => Math.floor(Date.now() / 86400000) % TIPS.length, [])
+  const [tipIndex] = useState(() => Math.floor(Date.now() / 86400000) % TIPS.length)
 
   // ── FETCH STATS ──────────────────────────────────────────────────────────
   // Hits GET /api/admin/dashboard-stats and saves the result.
@@ -312,9 +269,9 @@ export default function AdminDashboard({ user, onLogout }) {
   }, [])
 
   useEffect(() => {
-    fetchStats()
+    const initial = setTimeout(fetchStats, 0)
     const timer = setInterval(() => fetchStats(), 60_000)
-    return () => clearInterval(timer)
+    return () => { clearTimeout(initial); clearInterval(timer) }
   }, [fetchStats])
 
   // ── TAB BADGES ───────────────────────────────────────────────────────────
@@ -328,80 +285,49 @@ export default function AdminDashboard({ user, onLogout }) {
     }
   }), [dashStats])
 
-  // ── RESPONSIVE ───────────────────────────────────────────────────────────
-  useEffect(() => {
-    const check = () => {
-      const mobile = window.innerWidth < 768
-      setIsMobile(mobile)
-      setSidebarOpen(!mobile)
-    }
-    check()
-    window.addEventListener('resize', check)
-    return () => window.removeEventListener('resize', check)
+  const handleTabChange = useCallback((tabId) => {
+    setActiveTab(tabId)
   }, [])
 
-  // ── KEYBOARD SHORTCUTS ────────────────────────────────────────────────────
-  // Alt+1–5  →  jump to that tab
-  // Escape   →  close any open popup
-  //
-  // WHY Alt and not Ctrl:
-  // Browsers already use Ctrl+1 through Ctrl+8 to switch between browser tabs.
-  // You can't override that without a browser extension. Alt+number is free.
   useEffect(() => {
-    const handler = e => {
-      if (e.target instanceof Element && e.target.closest('dialog[open]')) return
-      if (e.altKey) {
-        const idx = parseInt(e.key, 10) - 1  // Alt+1 → index 0, Alt+2 → index 1, etc.
-        if (!isNaN(idx) && idx >= 0 && idx < tabs.length) {
-          e.preventDefault()
-          handleTabChange(tabs[idx].id)
-        }
-        return
-      }
-      if (e.key === 'Escape') {
-        setShortcutsOpen(false)
-      }
+    window.scrollTo({ top: 0 })
+  }, [activeTab])
+
+  useEffect(() => {
+    const handler = event => {
+      if (!event.altKey || event.ctrlKey || event.metaKey || event.repeat || event.defaultPrevented) return
+      if (document.querySelector('dialog[open], [aria-modal="true"]')) return
+      if (event.target instanceof Element && event.target.closest('input, textarea, select, [contenteditable]')) return
+      const tab = TAB_DEFS[Number(event.key) - 1]
+      if (!tab) return
+      event.preventDefault()
+      handleTabChange(tab.id)
+      requestAnimationFrame(() => mainRef.current?.focus({ preventScroll: true }))
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [tabs]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // ── TAB SWITCH ───────────────────────────────────────────────────────────
-  // Fades the content area out (150ms), swaps to the new tab, fades back in.
-  const handleTabChange = useCallback((tabId) => {
-    if (tabId === activeTab) return
-    setTransitioning(true)
-    setTimeout(() => {
-      setActiveTab(tabId)
-      setTransitioning(false)
-      // Move keyboard focus to the first interactive element in the new tab
-      setTimeout(() => {
-        const first = mainRef.current?.querySelector('button, a, input, [tabindex="0"]')
-        first?.focus({ preventScroll: true })
-      }, 50)
-    }, 150)
-    if (isMobile) setSidebarOpen(false)
-  }, [activeTab, isMobile])
+  }, [handleTabChange])
 
   // Manually re-fetch stats and show the syncing spinner
   const handleSync = useCallback(() => fetchStats(true), [fetchStats])
 
   const activeTabData = useMemo(() => tabs.find(t => t.id === activeTab), [tabs, activeTab])
   const sidebarWidth  = sidebarCollapsed ? 'w-[72px]' : 'w-64'
-  const mainMargin    = isMobile ? 'ml-0 mb-16' : sidebarCollapsed ? 'ml-[72px]' : 'ml-64'
+  const mainMargin = sidebarCollapsed ? 'lg:ml-[72px]' : 'lg:ml-64'
   const health        = healthDisplay(dashStats?.system_health, dashStats?.maintenance_mode)
 
   // ── SIDEBAR NAV ITEM ─────────────────────────────────────────────────────
   // Single button in the sidebar list. Wraps in Tooltip when collapsed.
-  const SidebarNavItem = useCallback(({ tab }) => {
+  const renderSidebarNavItem = tab => {
     const isActive = activeTab === tab.id
     const btn = (
       <button
+        key={tab.id}
         onClick={() => handleTabChange(tab.id)}
-        aria-label={tab.label}
+        aria-label={tab.badge ? `${tab.label}, ${tab.badge}` : tab.label}
         aria-current={isActive ? 'page' : undefined}
         className={`
-          relative w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200
+          relative min-h-11 w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200
           focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-1 focus:ring-offset-slate-900
           ${isActive
             ? 'bg-violet-950 text-amber-50 ring-1 ring-inset ring-violet-400/45'
@@ -412,7 +338,7 @@ export default function AdminDashboard({ user, onLogout }) {
         {isActive && (
           <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 bg-amber-300 rounded-full" />
         )}
-        <span className="flex-shrink-0">{tab.icon}</span>
+        <span className="flex-shrink-0"><AdminNavIcon name={tab.id} className="size-6" /></span>
         {!sidebarCollapsed && (
           <span className="font-medium text-sm whitespace-nowrap flex-1 text-left">{tab.label}</span>
         )}
@@ -426,8 +352,8 @@ export default function AdminDashboard({ user, onLogout }) {
         )}
       </button>
     )
-    return sidebarCollapsed ? <Tooltip text={tab.label}>{btn}</Tooltip> : btn
-  }, [activeTab, sidebarCollapsed, handleTabChange])
+    return sidebarCollapsed ? <Tooltip key={tab.id} text={tab.label}>{btn}</Tooltip> : btn
+  }
 
   // ─────────────────────────────────────────────────────────────────────────
   return (
@@ -435,15 +361,8 @@ export default function AdminDashboard({ user, onLogout }) {
 
       <ShortcutsModal open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
 
-      {/* Dark overlay behind the mobile slide-in drawer */}
-      {isMobile && sidebarOpen && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40" onClick={() => setSidebarOpen(false)} aria-hidden="true" />
-      )}
-
-      {/* ── DESKTOP SIDEBAR ────────────────────────────────────────────── */}
-      {!isMobile && (
         <aside
-          className={`fixed left-0 top-0 h-full bg-[#080b1d] border-r border-amber-300/20 z-50 flex flex-col transition-all duration-300 ease-in-out ${sidebarWidth}`}
+          className={`fixed left-0 top-0 h-full bg-[#080b1d] border-r border-amber-300/20 z-50 hidden flex-col lg:flex ${sidebarWidth}`}
           aria-label="Sidebar navigation"
         >
           <div className="flex min-h-[82px] items-center border-b border-amber-300/15 px-5 py-3">
@@ -452,7 +371,7 @@ export default function AdminDashboard({ user, onLogout }) {
 
           {/* Tab links */}
           <nav className="flex-1 px-3 py-2 space-y-1 overflow-y-auto" role="navigation" aria-label="Main navigation">
-            {tabs.map(tab => <SidebarNavItem key={tab.id} tab={tab} />)}
+            {tabs.map(renderSidebarNavItem)}
           </nav>
 
           {/* 4-number stats grid at the bottom of the expanded sidebar.
@@ -476,7 +395,7 @@ export default function AdminDashboard({ user, onLogout }) {
                     {statsLoading
                       ? <div className="h-4 w-8 bg-slate-700 rounded animate-pulse mx-auto mb-0.5" />
                       : <p className={`text-sm font-bold ${highlight && (dashStats?.[key] ?? 0) > 0 ? 'text-pink-400' : 'text-white'}`}>
-                          {(dashStats?.[key] ?? 0).toLocaleString()}
+                          {dashStats?.[key]?.toLocaleString() ?? '—'}
                         </p>
                     }
                     <p className="text-[9px] text-slate-500">{label}</p>
@@ -502,103 +421,52 @@ export default function AdminDashboard({ user, onLogout }) {
             </Tooltip>
           </div>
         </aside>
-      )}
-
-      {/* ── MOBILE SLIDE-IN DRAWER ──────────────────────────────────────── */}
-      {isMobile && (
-        <aside
-          className={`fixed left-0 top-0 h-full w-72 bg-[#080b1d] border-r border-amber-300/20 z-50 flex flex-col transition-transform duration-300 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}
-          aria-label="Sidebar navigation"
-        >
-          <div className="flex items-center justify-between px-4 py-4 border-b border-slate-800/60">
-            <AdminBrand />
-            <button onClick={() => setSidebarOpen(false)} className="admin-button p-1.5 rounded-lg text-slate-400" aria-label="Close sidebar">
-              <svg viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
-                <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-              </svg>
-            </button>
-          </div>
-          <nav className="flex-1 px-3 py-4 space-y-2 overflow-y-auto">
-            {tabs.map(tab => <SidebarNavItem key={tab.id} tab={tab} />)}
-          </nav>
-          <div className="p-4 border-t border-slate-800/60">
-            <button onClick={onLogout} className="admin-button admin-button-danger w-full flex items-center justify-center gap-2 py-2.5 border rounded-xl text-sm text-red-400 transition">
-              Sign Out
-            </button>
-          </div>
-        </aside>
-      )}
-
-      {/* ── MOBILE BOTTOM NAV ───────────────────────────────────────────── */}
-      {isMobile && (
-        <nav className="fixed bottom-0 left-0 right-0 z-50 bg-slate-900/95 backdrop-blur-xl border-t border-purple-600/20 flex" role="navigation" aria-label="Bottom navigation">
+        <nav className="admin-mobile-nav fixed inset-x-0 bottom-0 z-30 flex border-t border-amber-300/25 bg-[#080b1d] lg:hidden" role="navigation" aria-label="Bottom navigation">
           {tabs.map(tab => (
             <button
               key={tab.id}
               onClick={() => handleTabChange(tab.id)}
+              aria-label={tab.badge ? `${tab.label}, ${tab.badge}` : tab.label}
               aria-current={activeTab === tab.id ? 'page' : undefined}
-              className={`flex-1 flex flex-col items-center justify-center gap-0.5 py-2 min-h-[56px] transition-colors relative ${activeTab === tab.id ? 'text-purple-400' : 'text-slate-500'}`}
+              className={`relative flex min-h-[58px] min-w-0 flex-1 flex-col items-center justify-center gap-0.5 py-2 transition-colors ${activeTab === tab.id ? 'bg-violet-950/70 text-amber-100' : 'text-slate-300'}`}
             >
               {activeTab === tab.id && (
-                <span className="absolute top-0 left-1/2 -translate-x-1/2 w-6 h-0.5 bg-gradient-to-r from-purple-500 to-pink-500 rounded-full" />
+                <span className="absolute top-0 left-1/2 -translate-x-1/2 w-6 h-0.5 bg-amber-300 rounded-full" />
               )}
-              {tab.icon}
+              <AdminNavIcon name={tab.id} className="size-6" />
               <span className="text-[10px] font-medium">{tab.shortLabel}</span>
               {tab.badge > 0 && (
-                <span className="absolute top-2 right-[calc(50%-10px)] w-1.5 h-1.5 bg-pink-500 rounded-full" />
+                <span className="absolute top-1 right-1 rounded-full bg-violet-700 px-1 text-[10px] font-bold leading-4 text-white" aria-hidden="true">{tab.badge > 99 ? '99+' : tab.badge}</span>
               )}
             </button>
           ))}
         </nav>
-      )}
-
-      {/* ── MAIN CONTENT ────────────────────────────────────────────────── */}
-      <main className={`transition-all duration-300 ${mainMargin} min-h-screen flex flex-col`}>
-
+      <main className={`admin-main ${mainMargin} min-h-screen min-w-0 flex flex-col`}>
         {/* Sticky header bar */}
         <header className="bg-slate-900/80 backdrop-blur-xl border-b border-slate-800/60 px-4 sm:px-6 py-3 flex items-center justify-between sticky top-0 z-40 gap-3" role="banner">
           <div className="flex items-center gap-3 min-w-0">
-            {isMobile && (
-              <button onClick={() => setSidebarOpen(true)} className="admin-button p-2 rounded-lg text-slate-400 flex-shrink-0 focus:outline-none focus:ring-2 focus:ring-purple-500" aria-label="Open sidebar">
-                <svg viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
-                  <path fillRule="evenodd" d="M3 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 10a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 15a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd" />
-                </svg>
-              </button>
-            )}
+            <img src={crystal} alt="Forge.dev" width="19" height="30" className="h-[30px] w-[19px] shrink-0 object-contain lg:hidden" />
             <div className="min-w-0">
-              <h2 className="font-cinzel text-base sm:text-xl font-semibold text-white truncate leading-tight">{activeTabData?.label}</h2>
+              <h1 className="font-cinzel text-base sm:text-xl font-semibold text-white leading-tight">{activeTabData?.label}</h1>
               <p className="text-[11px] sm:text-xs text-slate-500 truncate hidden sm:block mt-0.5">{activeTabData?.description}</p>
             </div>
           </div>
 
           <div className="flex items-center gap-2 flex-shrink-0">
             {/* Health dot — green/yellow/red/amber */}
-            <div className={`hidden md:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg ${health.bg} border ${health.border}`}>
+            <div className={`hidden xl:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg ${health.bg} border ${health.border}`}>
               <span className={`w-1.5 h-1.5 ${health.color} rounded-full ${health.pulse ? 'animate-pulse' : ''}`} />
               <span className={`text-[11px] ${health.textColor} font-medium whitespace-nowrap`}>
-                {statsLoading ? 'Checking…' : health.text}
+                {statsLoading ? 'Checking…' : statsError ? 'Status unavailable' : health.text}
               </span>
             </div>
-
-            {/* Per-tab action button — label comes from TAB_DEFS.contextAction */}
-            {activeTabData?.contextAction && (
-              <button
-                onClick={handleSync}
-                aria-label="Sync metrics"
-                disabled={syncing}
-                className="admin-button hidden sm:flex items-center gap-1.5 px-3 py-1.5 border rounded-lg text-xs text-purple-300 font-medium transition focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:opacity-60"
-              >
-                <span className={syncing ? 'animate-spin inline-block' : ''}>{activeTabData.contextAction.icon}</span>
-                <span className="hidden md:inline">{activeTabData.contextAction.label}</span>
-              </button>
-            )}
 
             <ProfileDropdown user={user} onLogout={onLogout} onShortcuts={() => setShortcutsOpen(true)} />
           </div>
         </header>
 
         {/* Role banner — who is logged in + system health at a glance */}
-        <div className="px-4 sm:px-6 pt-5">
+        {activeTab === 'dashboard' && <div className="px-4 pt-5 sm:px-6">
           <div className="rounded-xl border border-amber-300/25 bg-[#111832] overflow-hidden">
             <div className="flex items-center gap-4 px-5 py-4 flex-wrap">
               <img src={adminEmblem} alt="" className="h-11 w-11 shrink-0 object-contain" />
@@ -617,17 +485,16 @@ export default function AdminDashboard({ user, onLogout }) {
               <div className="flex items-center gap-3 px-5 py-2.5 border-t border-white/5 bg-black/10">
                 <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider flex-shrink-0">Tip</span>
                 <p className="text-xs text-slate-400 flex-1">{TIPS[tipIndex]}</p>
-                <button onClick={() => setTipDismissed(true)} className="text-slate-600 hover:text-slate-400 text-sm flex-shrink-0 focus:outline-none" aria-label="Dismiss tip">✕</button>
+                <button onClick={() => setTipDismissed(true)} className="size-11 shrink-0 text-sm text-slate-300 hover:text-white" aria-label="Dismiss tip">✕</button>
               </div>
             )}
           </div>
-        </div>
+        </div>}
 
         {/* The actual tab content */}
-        <div ref={mainRef} className="flex-1 px-4 sm:px-6 py-5">
+        <div ref={mainRef} tabIndex={-1} className="min-w-0 flex-1 px-4 py-5 sm:px-6">
 
-          {/* Tiny timestamp + manual refresh */}
-          <div className="flex items-center justify-between mb-4">
+          {activeTab === 'dashboard' && <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2 text-xs text-slate-300">
               <svg viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3">
                 <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
@@ -640,29 +507,19 @@ export default function AdminDashboard({ user, onLogout }) {
             <button
               onClick={handleSync}
               disabled={syncing}
-              className={`flex items-center gap-1.5 text-xs text-slate-300 hover:text-white transition disabled:opacity-50 focus-visible:outline focus-visible:outline-amber-300 ${activeTabData?.contextAction ? 'sm:hidden' : ''}`}
-              aria-label="Refresh data"
+              className="admin-button flex items-center gap-2 px-3 text-xs"
+              aria-label="Sync metrics"
             >
               <span className={syncing ? 'animate-spin inline-block' : ''}>↻</span>
-              {syncing ? 'Syncing…' : 'Refresh'}
+              {syncing ? 'Syncing…' : 'Sync metrics'}
             </button>
-          </div>
+          </div>}
 
-          {/* Fades out on tab switch, skeleton shows briefly, then new tab fades in */}
-          <div className={`transition-opacity duration-150 ${transitioning ? 'opacity-0' : 'opacity-100'}`}>
-            {transitioning ? (
-              <TabSkeleton />
-            ) : (
-              <>
-                {activeTab === 'dashboard'   && <DashboardOverview onNavigate={handleTabChange} stats={dashStats} loading={statsLoading} healthError={Boolean(statsError)} fetchStats={fetchStats} />}
-                {activeTab === 'users'       && <UserManagement />}
-                {activeTab === 'assignments' && <InstructorAssignments />}
-                {activeTab === 'subjects'    && <SubjectsManagement />}
-                {activeTab === 'sections'    && <SectionsManagement />}
-                {activeTab === 'activity'    && <ActivityLogs />}
-              </>
-            )}
-          </div>
+          {activeTab === 'dashboard'   && <DashboardOverview onNavigate={handleTabChange} stats={dashStats} loading={statsLoading} healthError={Boolean(statsError)} fetchStats={fetchStats} />}
+          {activeTab === 'users'       && <UserManagement />}
+          {activeTab === 'assignments' && <InstructorAssignments />}
+          {activeTab === 'sections'    && <SectionsManagement />}
+          {activeTab === 'activity'    && <ActivityLogs />}
         </div>
       </main>
     </div>    

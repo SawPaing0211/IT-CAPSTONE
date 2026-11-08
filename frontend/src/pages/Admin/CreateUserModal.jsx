@@ -122,9 +122,7 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
   const generatedEmailLocal = form.role === 'student' ? emailLocal : emailLocal.replace(/[^a-z0-9]+/g, '.').replace(/^\.|\.$/g, '')
   useEffect(() => {
     let cancelled = false
-    fetch(`${API}/api/admin/policy`, {
-      headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
-    })
+    authFetch(`${API}/api/admin/policy`)
       .then(r => (r.ok ? r.json() : null))
       .then(d => { if (d && !cancelled) setPolicy(d) })
       .catch(() => {})
@@ -318,7 +316,7 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
     <AdminActionDialog title="Create / Enroll Users" description="Create one account or enroll students from a CSV." emblem={createUsers} onClose={onClose} busy={busy}>
       {/* global toast */}
       {toast && (
-        <div className={`fixed top-5 right-5 z-[9999] px-5 py-3 rounded-xl font-semibold text-sm text-white shadow-2xl flex items-center gap-2 ${
+        <div role="alert" className={`mx-3 mt-3 shrink-0 break-words px-3 py-3 rounded-xl font-semibold text-sm text-white shadow-2xl flex items-center gap-2 ${
           toast.type === 'error' ? 'bg-red-600' : 'bg-emerald-600'
         }`}>
           {toast.type === 'error' ? '❌' : '✅'} {toast.message}
@@ -369,7 +367,7 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
                     <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-3">
                       Account Role
                     </p>
-                    <div className={`grid gap-2 ${headAdmin ? 'grid-cols-3' : 'grid-cols-2'}`}>
+                    <div className={`admin-role-grid grid gap-2 ${headAdmin ? 'grid-cols-3' : 'grid-cols-2'}`}>
                       {[
                         { val: 'student',       label: 'Student',     icon: studentRole, desc: 'Enrolled learner'    },
                         { val: 'instructor',    label: 'Instructor',  icon: instructorRole, desc: 'Course facilitator' },
@@ -684,7 +682,7 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
               {csvStep === 'preview' && csvParsed && (
                 <>
                   {/* row counts */}
-                  <div className="grid grid-cols-4 gap-2">
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                     {[
                       { label: 'Total',      val: csvParsed.rows.length, color: 'text-white'     },
                       { label: 'Regular',    val: regularCount,           color: 'text-emerald-400' },
@@ -767,7 +765,7 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
               {csvStep === 'done' && csvResult && (
                 <>
                   {/* summary counts */}
-                  <div className="grid grid-cols-5 gap-2">
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
                     {[
                       { label: 'Total',    val: csvResult.summary?.total_rows ?? 0, color: 'text-white'      },
                       { label: 'Created',  val: csvResult.summary?.created    ?? 0, color: 'text-emerald-400' },

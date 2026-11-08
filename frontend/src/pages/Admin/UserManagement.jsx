@@ -77,9 +77,7 @@ export default function UserManagement() {
   const isMasterAdmin = policy.can_create_admins
   useEffect(() => {
     let cancelled = false
-    fetch(`${API_BASE}/api/admin/policy`, {
-      headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
-    })
+    authFetch(`${API_BASE}/api/admin/policy`)
       .then(r => (r.ok ? r.json() : null))
       .then(d => { if (d && !cancelled) setPolicy(prev => ({ ...prev, ...d })) })
       .catch(() => {})
@@ -321,7 +319,7 @@ export default function UserManagement() {
 
       {/* Toast — replaces every alert() popup in this page */}
       {toast && (
-        <div className={`fixed top-6 right-6 z-[9999] max-w-md px-5 py-3 rounded-xl font-semibold text-white shadow-2xl border transition ${
+        <div className={`fixed inset-x-4 top-4 z-[9999] max-w-md break-words sm:left-auto sm:right-6 px-5 py-3 rounded-xl font-semibold text-white shadow-2xl border transition ${
           toast.type === 'error'
             ? 'bg-red-600 border-red-500/50'
             : toast.type === 'warning'
@@ -541,7 +539,7 @@ export default function UserManagement() {
               the typed text exactly matches confirmModal.requiredPhrase. */}
           {confirmModal && (
             <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[9998] p-4">
-              <div className="bg-slate-900 border border-red-600/50 rounded-2xl w-full max-w-md shadow-2xl shadow-red-900/50">
+              <div className="bg-slate-900 border border-red-600/50 rounded-2xl max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto shadow-2xl shadow-red-900/50">
                 <div className="flex items-center gap-3 p-6 border-b border-red-600/30">
                   <div className="w-10 h-10 bg-red-600/20 border border-red-600/40 rounded-xl flex items-center justify-center text-xl">⚠️</div>
                   <div>
@@ -650,7 +648,7 @@ export default function UserManagement() {
 
                   <div>
                     <label className="block text-sm text-slate-400 mb-1.5 font-medium">Role <span className="text-red-400">*</span></label>
-                    <div className={`grid gap-3 ${isMasterAdmin ? 'grid-cols-3' : 'grid-cols-2'}`}>
+                    <div className={`admin-role-grid grid gap-3 ${isMasterAdmin ? 'grid-cols-3' : 'grid-cols-2'}`}>
                       {[
                         { value: 'student', label: 'Student', icon: '🎓', desc: 'Enrolled learner' },
                         { value: 'instructor', label: 'Instructor', icon: '👨‍🏫', desc: 'Course facilitator' },
@@ -737,27 +735,27 @@ function UserSection({ title, icon, users, onManage, onRecover, onDelete, onUnlo
       </div>
 
       <div className="overflow-x-auto">
-        <table className="w-full">
-          <thead className="bg-slate-800/60">
-            <tr>
-              <th className="text-left p-4 text-slate-400 font-medium text-sm">USER</th>
-              <th className="text-left p-4 text-slate-400 font-medium text-sm">CLASS CODE</th>
-              <th className="text-left p-4 text-slate-400 font-medium text-sm">LEVEL</th>
-              <th className="text-left p-4 text-slate-400 font-medium text-sm">XP</th>
-              <th className="text-left p-4 text-slate-400 font-medium text-sm">STATUS</th>
-              <th className="text-left p-4 text-slate-400 font-medium text-sm">ACTIONS</th>
+        <table role="table" aria-label={title} className="admin-record-table w-full">
+          <thead role="rowgroup" className="bg-slate-800/60">
+            <tr role="row">
+              <th scope="col" role="columnheader" className="text-left p-4 text-slate-400 font-medium text-sm">USER</th>
+              <th scope="col" role="columnheader" className="text-left p-4 text-slate-400 font-medium text-sm">CLASS CODE</th>
+              <th scope="col" role="columnheader" className="text-left p-4 text-slate-400 font-medium text-sm">LEVEL</th>
+              <th scope="col" role="columnheader" className="text-left p-4 text-slate-400 font-medium text-sm">XP</th>
+              <th scope="col" role="columnheader" className="text-left p-4 text-slate-400 font-medium text-sm">STATUS</th>
+              <th scope="col" role="columnheader" className="text-left p-4 text-slate-400 font-medium text-sm">ACTIONS</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-800">
+          <tbody role="rowgroup" className="divide-y divide-slate-800">
             {users.map(user => (
-              <tr key={user.id} className="hover:bg-slate-800/50 transition">
-                <td className="p-4">
+              <tr role="row" key={user.id} className="hover:bg-slate-800/50 transition">
+                <td role="cell" className="admin-record-heading p-4">
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 bg-violet-800 border border-violet-400/40 rounded-full flex items-center justify-center font-bold text-sm flex-shrink-0">
                       {(user.full_name || user.username)[0].toUpperCase()}
                     </div>
                     <div>
-                      <p className="font-semibold text-white">{user.full_name || user.username}{user.is_head_admin && <span className="ml-2 text-xs text-amber-300">Head Admin</span>}</p>
+                      <p className="break-words font-semibold text-white">{user.full_name || user.username}{user.is_head_admin && <span className="ml-2 text-xs text-amber-300">Head Admin</span>}</p>
                       <p className="text-slate-300 text-xs break-all">{user.email}</p>
                       {user.role === 'student' && (
                         <span className="font-mono text-xs text-yellow-300 bg-yellow-900/20 border border-yellow-600/30 px-1.5 py-0.5 rounded mt-0.5 inline-block">
@@ -769,7 +767,7 @@ function UserSection({ title, icon, users, onManage, onRecover, onDelete, onUnlo
                 </td>
 
                 {/* CLASS CODE column — shows section_no values */}
-                <td className="p-4">
+                <td role="cell" data-label="Class code" className="p-4">
                   {user.sections && user.sections.length > 0 ? (
                     <div className="flex flex-wrap gap-1">
                       {[...new Set(user.sections.map(s => s.section_code))].map((code, idx) => (
@@ -787,10 +785,10 @@ function UserSection({ title, icon, users, onManage, onRecover, onDelete, onUnlo
                   )}
                 </td>
 
-                <td className="p-4 text-white font-mono">{user.level}</td>
-                <td className="p-4 text-yellow-400 font-mono">{user.xp}</td>
+                <td role="cell" data-label="Level" className="p-4 text-white font-mono">{user.level}</td>
+                <td role="cell" data-label="XP" className="p-4 text-yellow-400 font-mono">{user.xp}</td>
 
-                <td className="p-4">
+                <td role="cell" data-label="Status" className="p-4">
                   <div className="flex flex-col gap-1">
                     <span className={`px-3 py-1 rounded-lg text-xs font-bold w-fit ${
                       user.is_active
@@ -812,9 +810,9 @@ function UserSection({ title, icon, users, onManage, onRecover, onDelete, onUnlo
                   </div>
                 </td>
 
-                <td className="p-4 w-52">
+                <td role="cell" className="admin-record-actions p-4 w-52">
                   <div className="flex flex-col gap-1">
-                    <div className="flex gap-1">
+                    <div className="flex flex-wrap gap-2">
                       <button
                         disabled={user.can_manage === false}
                         title={user.can_manage === false ? 'Administrator accounts are managed by the Head Admin; own-account editing is unavailable.' : undefined}

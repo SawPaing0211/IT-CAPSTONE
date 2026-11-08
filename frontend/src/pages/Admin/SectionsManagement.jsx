@@ -1,10 +1,9 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
-import { API_BASE } from '../../api/client'
+import { API_BASE, authFetch } from '../../api/client'
+import AdminActionDialog from './AdminActionDialog'
+import classCodeSeal from '../../assets/admin/class-code-seal.svg'
 
 const API = API_BASE
-
-/** Helper: retrieve the JWT from storage. */
-const token = () => localStorage.getItem('token')
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Inline SVG icons — no icon font dependency whatsoever.
@@ -230,7 +229,7 @@ function Modal({ onClose, title, subtitle, icon, iconBg = '#7c3aed', children, m
         border: '2px solid rgba(124,58,237,0.45)',
         borderRadius: '1rem',
         width: '100%', maxWidth,
-        maxHeight: '90vh',
+        maxHeight: 'calc(100dvh - 2rem)',
         overflow: 'hidden',
         display: 'flex', flexDirection: 'column',
         animation: 'modalIn 0.22s cubic-bezier(0.34,1.56,0.64,1)',
@@ -298,194 +297,149 @@ function Modal({ onClose, title, subtitle, icon, iconBg = '#7c3aed', children, m
 // SectionFormModal — create or edit a section
 // ─────────────────────────────────────────────────────────────────────────────
 function SectionFormModal({ section, subjects, onClose, onSuccess }) {
-  const isEdit = !!section
-
+  const isEdit = Boolean(section)
   const [form, setForm] = useState({
-    section_no:    section?.section_no    ?? '',
-    subject_id:    section?.subject_id    ?? '',
-    schedule:      section?.schedule      ?? '',
-    room:          section?.room          ?? '',
-    capacity:      section?.capacity      ?? 40,
-    semester:      section?.semester      ?? '',
+    section_no: section?.section_no ?? '',
+    subject_id: section?.subject_id ?? '',
+    schedule: section?.schedule ?? '',
+    room: section?.room ?? '',
+    capacity: section?.capacity ?? 40,
+    semester: section?.semester ?? '',
     academic_year: section?.academic_year ?? '',
-    is_active:     section?.is_active     ?? true,
+    is_active: section?.is_active ?? true,
   })
   const [loading, setLoading] = useState(false)
-  const [error, setError]     = useState('')
+  const [error, setError] = useState('')
+  const codeRef = useRef(null)
 
-  const inputStyle = {
-    background: '#1e293b',
-    border: '1px solid rgba(100,116,139,0.4)',
-    borderRadius: 10,
-    padding: '0.625rem 0.875rem',
-    color: '#f1f5f9',
-    fontSize: '0.875rem',
-    outline: 'none',
-    width: '100%',
-    transition: 'border-color 0.15s',
-    boxSizing: 'border-box',
-  }
-  const labelStyle = {
-    fontSize: '0.7rem', fontWeight: 600,
-    letterSpacing: '0.07em', color: '#94a3b8',
-    textTransform: 'uppercase', marginBottom: 6, display: 'block',
+  const change = ({ target }) => {
+    target.setCustomValidity('')
+    const { name, type, checked, value } = target
+    setForm(previous => ({ ...previous, [name]: type === 'checkbox' ? checked : value }))
+    setError('')
   }
 
-  // Create or update the section on the backend
-  const handleSubmit = async () => {
-    if (!form.section_no.trim()) { setError('Class Code is required'); return }
-    if (!form.subject_id)        { setError('Subject is required');    return }
-    setError(''); setLoading(true)
+  const handleSubmit = async event => {
+    event.preventDefault()
+    if (loading) return
+    const code = form.section_no.trim()
+    if (!code) {
+      codeRef.current.setCustomValidity('Enter a class code.')
+      codeRef.current.reportValidity()
+      return
+    }
+
+    setError('')
+    setLoading(true)
     try {
-      const url    = isEdit ? `${API}/api/admin/sections/${section.id}` : `${API}/api/admin/sections`
-      const method = isEdit ? 'PUT' : 'POST'
-      const res    = await fetch(url, {
-        method,
-        headers: { 'Authorization': `Bearer ${token()}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...form, subject_id: parseInt(form.subject_id), capacity: parseInt(form.capacity) || 40 }),
+      const url = isEdit ? `${API}/api/admin/sections/${section.id}` : `${API}/api/admin/sections`
+      const response = await authFetch(url, {
+        method: isEdit ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...form, section_no: code, subject_id: Number(form.subject_id), capacity: Number(form.capacity || 40) }),
       })
-      const data = await res.json()
-      if (!res.ok) { setError(data.error || 'Request failed'); return }
-      onSuccess(); onClose()
-    } catch { setError('Network error — please try again') }
-    finally { setLoading(false) }
+      if (!response.ok) {
+        const data = await response.json().catch(() => null)
+        setError(data?.error || `Could not save the class code (HTTP ${response.status}). Try again.`)
+        return
+      }
+      onSuccess()
+      onClose()
+    } catch {
+      setError('Could not confirm the save. Check the class list before trying again.')
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
-    <Modal
-      onClose={onClose}
+    <AdminActionDialog
       title={isEdit ? 'Edit Class Code' : 'Create Class Code'}
-      subtitle={isEdit ? `Editing section ${section.section_no}` : 'Add a new section for a subject'}
-      icon={isEdit ? <Icon.Edit size={18} color="#fff" /> : <Icon.Plus size={18} color="#fff" />}
+      description={isEdit ? `Update class ${section.section_no}.` : 'Add a class section to an existing subject.'}
+      emblem={classCodeSeal}
+      onClose={onClose}
+      busy={loading}
     >
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-
-        {/* Class Code + Capacity */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-          <div>
-            <label style={labelStyle}>Class Code *</label>
-            <input type="text" value={form.section_no} placeholder="e.g., 29144"
-              onChange={(e) => setForm({ ...form, section_no: e.target.value })}
-              style={inputStyle}
-              onFocus={(e) => { e.target.style.borderColor = '#7c3aed' }}
-              onBlur={(e) => { e.target.style.borderColor = 'rgba(100,116,139,0.4)' }} />
-          </div>
-          <div>
-            <label style={labelStyle}>Capacity</label>
-            <input type="number" value={form.capacity} placeholder="40"
-              onChange={(e) => setForm({ ...form, capacity: e.target.value })}
-              style={inputStyle}
-              onFocus={(e) => { e.target.style.borderColor = '#7c3aed' }}
-              onBlur={(e) => { e.target.style.borderColor = 'rgba(100,116,139,0.4)' }} />
-          </div>
+      <form className="admin-section-form" onSubmit={handleSubmit} aria-busy={loading}>
+        <div className="admin-action-scroll admin-section-fields">
+          <fieldset disabled={loading}>
+            <legend>Class details</legend>
+            <label>
+              Subject <span aria-hidden="true">*</span>
+              <select name="subject_id" required value={form.subject_id} onChange={change}>
+                <option value="" disabled>Choose a subject</option>
+                {isEdit && !subjects.some(subject => subject.id === section.subject_id) && (
+                  <option value={section.subject_id}>{section.subject_name || 'Current subject'}</option>
+                )}
+                {subjects.map(subject => (
+                  <option key={subject.id} value={subject.id}>
+                    {subject.subject_code ? `${subject.subject_code} · ` : ''}{subject.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="admin-section-grid">
+              <label>
+                Class code <span aria-hidden="true">*</span>
+                <input ref={codeRef} name="section_no" required maxLength={20} value={form.section_no} placeholder="e.g. 29144" onChange={change} />
+                <small>Unique across all subjects.</small>
+              </label>
+              <label>
+                Capacity
+                <input name="capacity" type="number" min={1} max={200} step={1} value={form.capacity} placeholder="40" onChange={change} />
+                <small>1–200 students. Default is 40.</small>
+              </label>
+            </div>
+          </fieldset>
+          <fieldset disabled={loading}>
+            <legend>Schedule and term <small>Optional</small></legend>
+            <div className="admin-section-grid">
+              <label>
+                Schedule
+                <input name="schedule" maxLength={100} value={form.schedule} placeholder="e.g. Mon 18:00–21:00" onChange={change} />
+              </label>
+              <label>
+                Room
+                <input name="room" maxLength={50} value={form.room} placeholder="e.g. CL 5" onChange={change} />
+              </label>
+              <label>
+                Semester
+                <select name="semester" value={form.semester} onChange={change}>
+                  <option value="">Choose a semester</option>
+                  {form.semester && !['1st Semester', '2nd Semester', 'Summer'].includes(form.semester) && (
+                    <option value={form.semester}>{form.semester}</option>
+                  )}
+                  <option>1st Semester</option>
+                  <option>2nd Semester</option>
+                  <option>Summer</option>
+                </select>
+              </label>
+              <label>
+                Academic year
+                <input name="academic_year" maxLength={9} value={form.academic_year} placeholder="e.g. 2026–2027" onChange={change} />
+              </label>
+            </div>
+            {isEdit && (
+              <label className="admin-section-active">
+                <input type="checkbox" name="is_active" checked={form.is_active} onChange={change} />
+                Class is active
+              </label>
+            )}
+          </fieldset>
         </div>
-
-        {/* Subject dropdown */}
-        <div>
-          <label style={labelStyle}>Subject *</label>
-          <select value={form.subject_id} onChange={(e) => setForm({ ...form, subject_id: e.target.value })}
-            style={{ ...inputStyle, color: form.subject_id ? '#f1f5f9' : '#64748b' }}>
-            <option value="">— Select Subject —</option>
-            {subjects.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.subject_code ? `[${s.subject_code}] ` : ''}{s.name}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {/* Schedule + Room */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+        <footer className="admin-section-footer">
+          {error && <p role="alert">{error}</p>}
           <div>
-            <label style={labelStyle}>Schedule</label>
-            <input type="text" value={form.schedule} placeholder="Mon 18:00–21:00"
-              onChange={(e) => setForm({ ...form, schedule: e.target.value })}
-              style={inputStyle}
-              onFocus={(e) => { e.target.style.borderColor = '#7c3aed' }}
-              onBlur={(e) => { e.target.style.borderColor = 'rgba(100,116,139,0.4)' }} />
-          </div>
-          <div>
-            <label style={labelStyle}>Room</label>
-            <input type="text" value={form.room} placeholder="CL 5"
-              onChange={(e) => setForm({ ...form, room: e.target.value })}
-              style={inputStyle}
-              onFocus={(e) => { e.target.style.borderColor = '#7c3aed' }}
-              onBlur={(e) => { e.target.style.borderColor = 'rgba(100,116,139,0.4)' }} />
-          </div>
-        </div>
-
-        {/* Semester + Academic Year */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-          <div>
-            <label style={labelStyle}>Semester</label>
-            <select value={form.semester} onChange={(e) => setForm({ ...form, semester: e.target.value })}
-              style={inputStyle}>
-              <option value="">— Select —</option>
-              <option value="1st Semester">1st Semester</option>
-              <option value="2nd Semester">2nd Semester</option>
-              <option value="Summer">Summer</option>
-            </select>
-          </div>
-          <div>
-            <label style={labelStyle}>Academic Year</label>
-            <input type="text" value={form.academic_year} placeholder="2024–2025"
-              onChange={(e) => setForm({ ...form, academic_year: e.target.value })}
-              style={inputStyle}
-              onFocus={(e) => { e.target.style.borderColor = '#7c3aed' }}
-              onBlur={(e) => { e.target.style.borderColor = 'rgba(100,116,139,0.4)' }} />
-          </div>
-        </div>
-
-        {/* Active toggle — edit mode only */}
-        {isEdit && (
-          <div style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            padding: '0.75rem 1rem',
-            background: 'rgba(255,255,255,0.03)',
-            borderRadius: 10, border: '1px solid rgba(100,116,139,0.2)',
-          }}>
-            <span style={{ fontSize: '0.875rem', color: '#cbd5e1', fontWeight: 500 }}>Section Active</span>
-            <button
-              onClick={() => setForm({ ...form, is_active: !form.is_active })}
-              style={{
-                position: 'relative', width: 48, height: 24, borderRadius: 9999,
-                background: form.is_active ? '#16a34a' : '#475569',
-                border: 'none', cursor: 'pointer', transition: 'background 0.2s', padding: 0,
-              }}
-            >
-              <span style={{
-                position: 'absolute', top: 2,
-                left: form.is_active ? 26 : 2,
-                width: 20, height: 20, borderRadius: '50%',
-                background: '#fff', transition: 'left 0.2s',
-              }} />
+            <button type="button" onClick={onClose} disabled={loading} className="admin-button px-4 text-sm font-semibold">Cancel</button>
+            <button type="submit" disabled={loading} className="admin-button admin-button-primary px-4 text-sm font-semibold">
+              {loading ? 'Saving…' : isEdit ? 'Save changes' : 'Create class code'}
             </button>
           </div>
-        )}
-
-        {/* Inline error */}
-        {error && (
-          <p style={{ margin: 0, fontSize: '0.8rem', color: '#f87171', display: 'flex', alignItems: 'center', gap: 6 }}>
-            <Icon.AlertCircle size={14} color="#f87171" /> {error}
-          </p>
-        )}
-
-        {/* Action buttons */}
-        <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.25rem' }}>
-          <button onClick={onClose}
-            className="admin-button flex-1 inline-flex items-center justify-center gap-2 px-4 text-sm font-semibold">
-            Cancel
-          </button>
-          <button onClick={handleSubmit} disabled={loading}
-            className="admin-button admin-button-primary flex-1 inline-flex items-center justify-center gap-2 px-4 text-sm font-semibold">
-            {loading ? <><Spinner size={16} color="#fff" /> Saving…</> : isEdit ? 'Save Changes' : 'Create Section'}
-          </button>
-        </div>
-      </div>
-    </Modal>
+        </footer>
+      </form>
+    </AdminActionDialog>
   )
 }
-
 // ─────────────────────────────────────────────────────────────────────────────
 // EnrolledStudentsModal
 // Smooth, hardware-accelerated scroll — no jank even with 50+ students.
@@ -494,21 +448,33 @@ function EnrolledStudentsModal({ section, onClose }) {
   const [data, setData]       = useState(null)
   const [loading, setLoading] = useState(true)
 
-  // Fetch the students enrolled in this section
+  const [loadError, setLoadError] = useState(false)
+  const [retry, setRetry] = useState(0)
   useEffect(() => {
-    fetch(`${API}/api/admin/sections/${section.id}/enrollments`, {
-      headers: { 'Authorization': `Bearer ${token()}` },
-    })
-      .then((r) => r.json())
-      .then((d) => { setData(d); setLoading(false) })
-      .catch(() => setLoading(false))
-  }, [section.id])
+    const controller = new AbortController()
+    const load = async () => {
+      setLoading(true)
+      setLoadError(false)
+      try {
+        const response = await authFetch(`${API}/api/admin/sections/${section.id}/enrollments`, { signal: controller.signal })
+        if (!response.ok) throw new Error()
+        const roster = await response.json()
+        if (!controller.signal.aborted) setData(roster)
+      } catch {
+        if (!controller.signal.aborted) setLoadError(true)
+      } finally {
+        if (!controller.signal.aborted) setLoading(false)
+      }
+    }
+    load()
+    return () => controller.abort()
+  }, [section.id, retry])
 
   return (
     <Modal
       onClose={onClose}
       title={`Class Code ${section.section_no}`}
-      subtitle={`${data?.enrolled_count ?? '…'} students enrolled`}
+      subtitle={loadError ? 'Roster unavailable' : loading ? 'Loading roster…' : `${data?.enrolled_count ?? 0} students enrolled`}
       icon={<Icon.Users size={18} color="#fff" />}
       iconBg="#1d4ed8"
       maxWidth={540}
@@ -516,6 +482,11 @@ function EnrolledStudentsModal({ section, onClose }) {
       {loading ? (
         <div style={{ display: 'flex', justifyContent: 'center', padding: '3rem' }}>
           <Spinner size={32} />
+        </div>
+      ) : loadError ? (
+        <div role="alert" className="flex flex-wrap items-center gap-3 text-sm text-amber-100">
+          <span>The class roster could not be loaded.</span>
+          <button type="button" className="admin-button px-4" onClick={() => setRetry(value => value + 1)}>Retry</button>
         </div>
       ) : !data?.students?.length ? (
         <div style={{ textAlign: 'center', padding: '3rem 0', color: '#64748b' }}>
@@ -558,7 +529,7 @@ function EnrolledStudentsModal({ section, onClose }) {
                 <p style={{ margin: 0, fontWeight: 600, fontSize: '0.875rem', color: '#f1f5f9', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {s.full_name || s.username}
                 </p>
-                <p style={{ margin: 0, fontSize: '0.75rem', color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <p style={{ margin: 0, fontSize: '0.75rem', color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis', overflowWrap: 'anywhere' }}>
                   {s.username} · {s.email}
                 </p>
               </div>
@@ -581,32 +552,22 @@ function EnrolledStudentsModal({ section, onClose }) {
 // The only delete path is the trash button in the Actions column.
 // ─────────────────────────────────────────────────────────────────────────────
 function SectionRow({ section, onStudents, onEdit, onDelete }) {
-  const [hovered, setHovered] = useState(false)
-
   return (
-    <tr
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      style={{
-        background: hovered ? 'rgba(255,255,255,0.03)' : 'transparent',
-        transition: 'background 0.15s',
-        borderBottom: '1px solid rgba(255,255,255,0.04)',
-      }}
-    >
+    <tr role="row" className="border-b border-white/5 hover:bg-white/[0.03]">
       {/* Class Code */}
-      <td style={{ padding: '0.625rem 1rem' }}>
+      <td role="cell" className="admin-record-heading" style={{ padding: '0.625rem 1rem' }}>
         <span style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: '0.9rem', color: '#a78bfa' }}>
           {section.section_no}
         </span>
       </td>
 
       {/* Schedule */}
-      <td style={{ padding: '0.625rem 0.75rem', fontSize: '0.8rem', color: '#cbd5e1', whiteSpace: 'nowrap' }}>
+      <td role="cell" data-label="Schedule" style={{ padding: '0.625rem 0.75rem', fontSize: '0.8rem', color: '#cbd5e1', whiteSpace: 'nowrap' }}>
         {section.schedule || <span style={{ color: '#475569' }}>—</span>}
       </td>
 
       {/* Room */}
-      <td style={{ padding: '0.625rem 0.75rem' }}>
+      <td role="cell" data-label="Room" style={{ padding: '0.625rem 0.75rem' }}>
         {section.room ? (
           <span style={{ padding: '2px 8px', background: 'rgba(255,255,255,0.06)', borderRadius: 6, fontFamily: 'monospace', fontSize: '0.75rem', color: '#94a3b8' }}>
             {section.room}
@@ -615,23 +576,22 @@ function SectionRow({ section, onStudents, onEdit, onDelete }) {
       </td>
 
       {/* Enrolled / capacity */}
-      <td style={{ padding: '0.625rem 0.75rem' }}>
+      <td role="cell" data-label="Enrolled" style={{ padding: '0.625rem 0.75rem' }}>
         <CapacityBar enrolled={section.current_count} capacity={section.capacity} />
       </td>
 
       {/* Semester */}
-      <td style={{ padding: '0.625rem 0.75rem', fontSize: '0.75rem', color: '#64748b', whiteSpace: 'nowrap' }}>
+      <td role="cell" data-label="Semester" style={{ padding: '0.625rem 0.75rem', fontSize: '0.75rem', color: '#64748b', whiteSpace: 'nowrap' }}>
         {section.semester || '—'}
       </td>
 
       {/* Status */}
-      <td style={{ padding: '0.625rem 0.75rem' }}>
+      <td role="cell" data-label="Status" style={{ padding: '0.625rem 0.75rem' }}>
         <StatusPill active={section.is_active} />
       </td>
 
-      {/* Actions — only 2 buttons now: View Students + Edit + Delete */}
-      <td style={{ padding: '0.625rem 0.75rem' }}>
-        <div style={{ display: 'flex', gap: 6, opacity: hovered ? 1 : 0, transition: 'opacity 0.15s' }}>
+      <td role="cell" className="admin-record-actions" style={{ padding: '0.625rem 0.75rem' }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <ActionBtn IconComponent={Icon.Users} title="View enrolled students" onClick={onStudents} />
           <ActionBtn IconComponent={Icon.Edit}  title="Edit section"           onClick={onEdit} />
           <ActionBtn IconComponent={Icon.Trash} destructive title="Delete section"         onClick={onDelete} />
@@ -664,6 +624,9 @@ function SubjectGroup({ subjectName, subjectCode, sections, onStudents, onEdit, 
     >
       {/* Accordion header */}
       <button
+        type="button"
+        aria-expanded={open}
+        className="admin-subject-toggle"
         onClick={() => setOpen((v) => !v)}
         style={{
           width: '100%', display: 'flex', alignItems: 'center', gap: 12,
@@ -697,7 +660,7 @@ function SubjectGroup({ subjectName, subjectCode, sections, onStudents, onEdit, 
         </span>
 
         {/* Stats pills */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+        <div className="admin-subject-totals flex flex-wrap items-center gap-2">
           <span style={{ fontSize: '0.75rem', color: '#64748b' }}>
             {sections.length} section{sections.length !== 1 ? 's' : ''}
           </span>
@@ -720,27 +683,13 @@ function SubjectGroup({ subjectName, subjectCode, sections, onStudents, onEdit, 
         </div>
       </button>
 
-      {/* Table — CSS max-height transition for smooth open/close */}
-      <div style={{
-        maxHeight: open ? '9999px' : 0,
-        overflow: 'hidden',
-        transition: 'max-height 0.35s cubic-bezier(0.4,0,0.2,1)',
-      }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}
+      <div hidden={!open}>
+        <table role="table" className="admin-record-table w-full border-collapse"
           aria-label={`Sections for ${subjectName}`}>
-          <colgroup>
-            <col style={{ width: 110 }} />
-            <col style={{ width: '22%' }} />
-            <col style={{ width: 80 }} />
-            <col style={{ width: 120 }} />
-            <col style={{ width: 130 }} />
-            <col style={{ width: 80 }} />
-            <col style={{ width: 110 }} />
-          </colgroup>
-          <thead>
-            <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+          <thead role="rowgroup">
+            <tr role="row" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
               {['Class Code', 'Schedule', 'Room', 'Enrolled', 'Semester', 'Status', 'Actions'].map((h) => (
-                <th key={h} style={{
+                <th role="columnheader" scope="col" key={h} style={{
                   padding: '0.5rem 0.75rem', textAlign: 'left',
                   fontSize: '0.65rem', fontWeight: 600,
                   letterSpacing: '0.08em', textTransform: 'uppercase', color: '#475569',
@@ -750,7 +699,7 @@ function SubjectGroup({ subjectName, subjectCode, sections, onStudents, onEdit, 
               ))}
             </tr>
           </thead>
-          <tbody>
+          <tbody role="rowgroup">
             {sections.map((sec) => (
               <SectionRow
                 key={sec.id}
@@ -801,8 +750,8 @@ function CSVUploadModal({ onClose, onSuccess }) {
     setUploading(true)
     try {
       const fd = new FormData(); fd.append('file', file)
-      const res = await fetch(`${API}/api/admin/sections/bulk-upload`, {
-        method: 'POST', headers: { 'Authorization': `Bearer ${token()}` }, body: fd,
+      const res = await authFetch(`${API}/api/admin/sections/bulk-upload`, {
+        method: 'POST', body: fd,
       })
       setResult(await res.json())
     } catch { setResult({ error: 'Network error' }) }
@@ -872,7 +821,7 @@ function CSVUploadModal({ onClose, onSuccess }) {
               )}
             </div>
           ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               {[
                 { label: 'Total',   val: result.summary?.total_rows ?? 0, color: '#e2e8f0' },
                 { label: 'Created', val: result.summary?.created    ?? 0, color: '#4ade80' },
@@ -892,7 +841,7 @@ function CSVUploadModal({ onClose, onSuccess }) {
               shown here before. without this, "3 errors" told you nothing
               about which 3 rows or why. */}
           {result.results?.length > 0 && (
-            <div style={{ borderRadius: 10, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)', maxHeight: 210, overflowY: 'auto' }}>
+            <div style={{ borderRadius: 10, border: '1px solid rgba(255,255,255,0.1)', maxHeight: 210, overflow: 'auto' }}>
               <table style={{ width: '100%', fontSize: '0.8rem', borderCollapse: 'collapse' }}>
                 <thead style={{ background: 'rgba(255,255,255,0.06)', position: 'sticky', top: 0 }}>
                   <tr>
@@ -977,25 +926,36 @@ export default function ClassCodesManagement() {
     setTimeout(() => setToast(null), 4000)
   }, [])
 
+  const [sectionsError, setSectionsError] = useState(false)
+  const [subjectsError, setSubjectsError] = useState(false)
+
   // Fetch all class code sections
-  const fetchSections = useCallback(async () => {
-    setLoading(true)
+  const fetchSections = useCallback(async ({ keepView = false } = {}) => {
+    if (!keepView) setLoading(true)
+    setSectionsError(false)
     try {
-      const res = await fetch(`${API}/api/admin/sections`, { headers: { 'Authorization': `Bearer ${token()}` } })
-      if (res.ok) setSections(await res.json())
-    } catch (err) { console.error('fetchSections:', err) }
-    finally { setLoading(false) }
+      const res = await authFetch(`${API}/api/admin/sections`)
+      if (!res.ok) throw new Error()
+      setSections(await res.json())
+    } catch { setSectionsError(true) }
+    finally { if (!keepView) setLoading(false) }
   }, [])
 
   // Fetch all subjects for the filter dropdown and form
   const fetchSubjects = useCallback(async () => {
+    setSubjectsError(false)
     try {
-      const res = await fetch(`${API}/api/admin/subjects`, { headers: { 'Authorization': `Bearer ${token()}` } })
-      if (res.ok) setSubjects(await res.json())
-    } catch (err) { console.error('fetchSubjects:', err) }
+      const res = await authFetch(`${API}/api/admin/subjects`)
+      if (!res.ok) throw new Error()
+      setSubjects(await res.json())
+    } catch { setSubjectsError(true) }
   }, [])
 
-  useEffect(() => { fetchSections(); fetchSubjects() }, [fetchSections, fetchSubjects])
+  const reload = useCallback(() => { fetchSections(); fetchSubjects() }, [fetchSections, fetchSubjects])
+  useEffect(() => {
+    const timer = setTimeout(reload, 0)
+    return () => clearTimeout(timer)
+  }, [reload])
 
   // ── Single class code deletion ────────────────────────────────────────
   const handleDelete = (section) => {
@@ -1006,8 +966,8 @@ export default function ClassCodesManagement() {
   const confirmDelete = async () => {
     if (!deleteTarget) return
     try {
-      const res  = await fetch(`${API}/api/admin/sections/${deleteTarget.id}`, {
-        method: 'DELETE', headers: { 'Authorization': `Bearer ${token()}` },
+      const res  = await authFetch(`${API}/api/admin/sections/${deleteTarget.id}`, {
+        method: 'DELETE',
       })
       const data = await res.json()
       if (res.ok) { showToast(`Section ${deleteTarget.section_no} deleted`); fetchSections() }
@@ -1021,8 +981,8 @@ export default function ClassCodesManagement() {
     if (bulkDeleting || bulkDeleteInput !== 'DELETE EMPTY CLASS CODES') return
     setBulkDeleting(true)
     try {
-      const res  = await fetch(`${API}/api/admin/sections/bulk-delete`, {
-        method: 'DELETE', headers: { 'Authorization': `Bearer ${token()}` },
+      const res  = await authFetch(`${API}/api/admin/sections/bulk-delete`, {
+        method: 'DELETE',
       })
       const data = await res.json()
       if (res.ok) {
@@ -1082,6 +1042,13 @@ export default function ClassCodesManagement() {
     )
   }
 
+  if (sectionsError || subjectsError) {
+    return <div role="alert" className="flex flex-wrap items-center gap-3 rounded-xl border border-amber-300/25 bg-slate-900 p-4 text-sm text-amber-100">
+      <span>Class codes or subjects could not be loaded.</span>
+      <button type="button" className="admin-button px-4" onClick={reload}>Retry</button>
+    </div>
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', padding: '0 0 3rem' }}>
 
@@ -1091,12 +1058,8 @@ export default function ClassCodesManagement() {
         @keyframes overlayIn{ from { opacity:0 } to { opacity:1 } }
         @keyframes modalIn  { from { opacity:0; transform:translateY(20px) scale(0.97) } to { opacity:1; transform:translateY(0) scale(1) } }
         @keyframes spin     { to   { transform:rotate(360deg) } }
-        * { box-sizing: border-box; }
         /* Smooth scroll on the student list rows — CSS hover, not JS */
         .student-row:hover { background: rgba(255,255,255,0.06) !important; }
-        ::-webkit-scrollbar       { width:6px; height:6px; }
-        ::-webkit-scrollbar-track { background:transparent; }
-        ::-webkit-scrollbar-thumb { background:rgba(124,58,237,0.4); border-radius:3px; }
       `}</style>
 
       <Toast toast={toast} />
@@ -1110,15 +1073,15 @@ export default function ClassCodesManagement() {
           </p>
         </div>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          <HeaderBtn icon={Icon.Refresh}  label="Refresh"        onClick={fetchSections} />
+          <HeaderBtn icon={Icon.Refresh}  label="Refresh"        onClick={reload} />
           <HeaderBtn icon={Icon.Upload}   label="Import Class Codes" onClick={() => setCSVModal(true)} />
-          <HeaderBtn icon={Icon.Plus}     label="Create Section" onClick={() => setCreateModal(true)} tone="admin-button-primary" />
+          <HeaderBtn icon={Icon.Plus}     label="Create Class Code" onClick={() => setCreateModal(true)} tone="admin-button-primary" />
           <HeaderBtn icon={Icon.Trash}    label="Delete Empty Class Codes"     onClick={() => setBulkDeleteModal(true)} tone="admin-button-danger" />
         </div>
       </div>
 
       {/* ── Summary stat cards ───────────────────────────────────────── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 8rem), 1fr))', gap: 12 }}>
         {[
           { label: 'Total Sections', value: sections.length,  color: '#a78bfa', bg: 'rgba(124,58,237,0.1)',  border: 'rgba(124,58,237,0.25)' },
           { label: 'Active',         value: activeSections,   color: '#4ade80', bg: 'rgba(22,163,74,0.1)',   border: 'rgba(74,222,128,0.25)' },
@@ -1134,13 +1097,13 @@ export default function ClassCodesManagement() {
 
       {/* ── Filters bar ─────────────────────────────────────────────── */}
       <div style={{ background: 'rgba(15,23,42,0.8)', border: '1px solid rgba(124,58,237,0.25)', borderRadius: '0.875rem', padding: '1rem 1.25rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.75rem' }}>
+        <div className="grid gap-3 sm:grid-cols-3 [&>*]:min-w-0">
           {/* Search */}
           <div style={{ position: 'relative' }}>
             <div style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }}>
               <Icon.Search size={15} color="#475569" />
             </div>
-            <input type="text" placeholder="Search class codes…" value={search}
+            <input type="text" aria-label="Search class codes" placeholder="Search class codes…" value={search}
               onChange={(e) => setSearch(e.target.value)}
               style={{ width: '100%', background: '#1e293b', border: '1px solid rgba(100,116,139,0.4)', borderRadius: 8, padding: '0.5rem 0.75rem 0.5rem 2.25rem', color: '#f1f5f9', fontSize: '0.875rem', outline: 'none' }}
               onFocus={(e) => { e.target.style.borderColor = '#7c3aed' }}
@@ -1148,7 +1111,7 @@ export default function ClassCodesManagement() {
           </div>
 
           {/* Subject filter */}
-          <select value={subjectFilter} onChange={(e) => setSubjectFilter(e.target.value)}
+          <select aria-label="Filter by subject" value={subjectFilter} onChange={(e) => setSubjectFilter(e.target.value)}
             style={{ background: '#1e293b', border: '1px solid rgba(100,116,139,0.4)', borderRadius: 8, padding: '0.5rem 0.75rem', color: '#f1f5f9', fontSize: '0.875rem', outline: 'none' }}>
             <option value="all">All Subjects</option>
             {subjects.map((s) => (
@@ -1159,7 +1122,7 @@ export default function ClassCodesManagement() {
           </select>
 
           {/* Status filter */}
-          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
+          <select aria-label="Filter by status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
             style={{ background: '#1e293b', border: '1px solid rgba(100,116,139,0.4)', borderRadius: 8, padding: '0.5rem 0.75rem', color: '#f1f5f9', fontSize: '0.875rem', outline: 'none' }}>
             <option value="all">All Status</option>
             <option value="active">Active</option>
@@ -1185,7 +1148,7 @@ export default function ClassCodesManagement() {
 
       {/* ── Content: grouped accordion cards ────────────────────────── */}
       {grouped.length === 0 ? (
-        <div style={{ background: 'rgba(15,23,42,0.6)', border: '1px dashed rgba(100,116,139,0.3)', borderRadius: '0.875rem', padding: '4rem', textAlign: 'center' }}>
+        <div style={{ background: 'rgba(15,23,42,0.6)', border: '1px dashed rgba(100,116,139,0.3)', borderRadius: '0.875rem', padding: '2rem 1rem', textAlign: 'center' }}>
           <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>
             <Icon.Grid size={48} color="#334155" />
           </div>
@@ -1214,12 +1177,12 @@ export default function ClassCodesManagement() {
       {createModal && (
         <SectionFormModal subjects={subjects}
           onClose={() => setCreateModal(false)}
-          onSuccess={() => { fetchSections(); showToast('Class code created!') }} />
+          onSuccess={() => { fetchSections({ keepView: true }); showToast('Class code created!') }} />
       )}
       {editModal && (
         <SectionFormModal section={editModal} subjects={subjects}
           onClose={() => setEditModal(null)}
-          onSuccess={() => { fetchSections(); showToast('Class code updated!') }} />
+          onSuccess={() => { fetchSections({ keepView: true }); showToast('Class code updated!') }} />
       )}
       {enrollModal && (
         <EnrolledStudentsModal section={enrollModal} onClose={() => setEnrollModal(null)} />

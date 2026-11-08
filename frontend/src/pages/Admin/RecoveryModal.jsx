@@ -80,7 +80,7 @@ export default function RecoveryModal({ user, onClose, onSuccess }) {
 
   return (
     <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-slate-900 border border-purple-600/50 rounded-2xl w-full max-w-md shadow-2xl shadow-purple-900/50">
+      <div className="bg-slate-900 border border-purple-600/50 rounded-2xl w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto shadow-2xl shadow-purple-900/50">
 
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-purple-600/30">

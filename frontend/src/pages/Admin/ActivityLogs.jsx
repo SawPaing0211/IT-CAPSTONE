@@ -1,5 +1,6 @@
 import { Fragment, useState, useEffect, useRef, useCallback } from 'react'
-import { API_BASE } from '../../api/client'
+import { API_BASE, authFetch } from '../../api/client'
+import { parseApiTimestamp } from '../../utils/apiTimestamp'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -45,6 +46,8 @@ const TIER_COLORS = {
 
 const ALL_ACTION_TYPES = Object.keys(ACTION_META)
 
+const CRITICAL_ACTIONS = Object.keys(ACTION_META).filter(action => ACTION_META[action].tier === 'critical')
+
 const DATE_PRESETS = [
   { label: 'All Time',    value: 'all' },
   { label: 'Today',       value: 'today' },
@@ -63,19 +66,18 @@ function getTierColors(tier) {
 }
 
 function formatRelativeTime(dateStr) {
-  if (!dateStr) return 'N/A'
-  const diff = Math.floor((Date.now() - new Date(dateStr)) / 1000)
+  const date = parseApiTimestamp(dateStr)
+  if (!date) return 'Time unavailable'
+  const diff = Math.floor((Date.now() - date) / 1000)
   if (diff < 60)    return 'Just now'
   if (diff < 3600)  return `${Math.floor(diff / 60)}m ago`
   if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
   if (diff < 604800) return `${Math.floor(diff / 86400)}d ago`
-  return new Date(dateStr).toLocaleDateString()
+  return date.toLocaleDateString()
 }
 
 function formatExactTime(dateStr) {
-  if (!dateStr) return ''
-  const d = new Date(dateStr)
-  return d.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  return parseApiTimestamp(dateStr)?.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' }) ?? 'Time unavailable'
 }
 
 function getInitials(name) {
@@ -124,12 +126,12 @@ function ActionBadge({ action }) {
   )
 }
 
-function ExpandedRow({ log, onClose }) {
+function ExpandedRow({ log }) {
   const meta = getMeta(log.action)
   const tc = getTierColors(meta.tier)
   return (
-    <tr>
-      <td colSpan="5" className="px-4 pb-4 pt-0">
+    <tr role="row" id={`audit-detail-${log.id}`}>
+      <td role="cell" colSpan="6" className="px-4 pb-4 pt-0">
         <div className={`rounded-xl border ${tc.badge.includes('red') ? 'border-red-500/30 bg-red-950/20' : 'border-slate-700/50 bg-slate-800/40'} p-4`}>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
             <div>
@@ -151,11 +153,6 @@ function ExpandedRow({ log, onClose }) {
                 <p className="text-slate-500 text-xs mt-1">localhost</p>
               )}
             </div>
-          </div>
-          <div className="mt-3 flex justify-end">
-            <button onClick={onClose} className="text-xs text-slate-500 hover:text-slate-300 transition">
-              ▲ Collapse
-            </button>
           </div>
         </div>
       </td>
@@ -185,16 +182,17 @@ function MultiSelect({ options, selected, onChange, placeholder }) {
     : `${selected.length} actions selected`
 
   return (
-    <div className="relative" ref={ref}>
+    <div className="relative w-full sm:w-auto" ref={ref} onKeyDown={event => { if (open && event.key === 'Escape') { setOpen(false); ref.current.querySelector('button')?.focus() } }}>
       <button
         onClick={() => setOpen(!open)}
-        className="admin-button flex items-center gap-2 border rounded-xl px-4 py-2.5 text-sm text-white transition min-w-[200px] justify-between"
+        aria-expanded={open}
+        className="admin-button flex items-center gap-2 border rounded-xl px-4 py-2.5 text-sm text-white transition w-full justify-between sm:min-w-[200px]"
       >
         <span className={selected.length ? 'text-white' : 'text-slate-400'}>{label}</span>
         <span className="text-slate-500 text-xs">{open ? '▲' : '▼'}</span>
       </button>
       {open && (
-        <div className="absolute top-full left-0 mt-1 w-64 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-50 overflow-hidden">
+        <div className="absolute top-full left-0 mt-1 w-full sm:w-64 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-50 overflow-hidden">
           <div className="p-2 border-b border-slate-800 flex justify-between items-center">
             <span className="text-xs text-slate-400">Filter by action type</span>
             {selected.length > 0 && (
@@ -215,8 +213,9 @@ function MultiSelect({ options, selected, onChange, placeholder }) {
                     return (
                       <button
                         key={action}
+                        aria-pressed={checked}
                         onClick={() => toggle(action)}
-                        className={`w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-slate-800 transition ${checked ? 'text-white' : 'text-slate-400'}`}
+                        className={`w-full min-h-11 flex items-center gap-2 px-3 py-2 text-sm hover:bg-slate-800 transition ${checked ? 'text-white' : 'text-slate-400'}`}
                       >
                         <span className={`w-4 h-4 rounded border flex items-center justify-center text-xs shrink-0 ${checked ? 'bg-purple-600 border-purple-600 text-white' : 'border-slate-600'}`}>
                           {checked && '✓'}
@@ -250,137 +249,97 @@ export default function ActivityLogs() {
   const [sortDir, setSortDir]         = useState('desc')   // asc | desc
   const [expandedId, setExpandedId]   = useState(null)
 
-  const [stats, setStats]             = useState({ total: 0, today: 0, unique_admins: 0, critical_actions: 0, last_activity: null, most_active_admin: null })
-  const [toast, setToast]             = useState(null)
+  const [stats, setStats] = useState(null)
+  const [loadError, setLoadError] = useState(false)
+  const [retry, setRetry] = useState(0)
+  const [exporting, setExporting] = useState(false)
+  const [toast, setToast] = useState(null)
+  const [searchInput, setSearchInput] = useState('')
 
-  const searchDebounce = useRef(null)
-
-  // ── Derived: quick filters ───────────────────────────────────────────
-  const criticalActions = ['USER_DELETED', 'SUBJECT_DELETED', 'SECTION_DELETED', 'DATABASE_BACKUP']
-
-  // ── Fetch ────────────────────────────────────────────────────────────
-  // Fetch audit logs from the backend with the current filters and pagination
-  const fetchLogs = useCallback(async () => {
-    setLoading(true)
-    try {
-      const token = localStorage.getItem('token')
-      const params = new URLSearchParams({
-        page,
-        limit: 20,
-        sort: sortDir,
-      })
-      // Multi-action filter: send as comma-separated
-      if (actionFilters.length > 0) params.set('action', actionFilters.join(','))
-      if (search) params.set('search', search)
-      // Date preset
-      const today = new Date()
-      if (datePreset === 'today') {
-        params.set('date_from', today.toISOString().split('T')[0])
-      } else if (datePreset === '7d') {
-        const d = new Date(today); d.setDate(d.getDate() - 7)
-        params.set('date_from', d.toISOString().split('T')[0])
-      } else if (datePreset === '30d') {
-        const d = new Date(today); d.setDate(d.getDate() - 30)
-        params.set('date_from', d.toISOString().split('T')[0])
-      }
-
-      const res = await fetch(`${API_BASE}/api/admin/audit-logs?${params}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      })
-      if (res.ok) {
-        const data = await res.json()
-        setLogs(data.logs || [])
-        setTotalPages(data.pages || 1)
-        setTotal(data.total || 0)
-
-        // Compute enhanced stats from what backend returns
-        const s = data.stats || {}
-        // Count critical actions from this page (approx) – backend should ideally return this
-        const criticalCount = (data.logs || []).filter(l => criticalActions.includes(l.action)).length
-        setStats({
-          total:             s.total || 0,
-          today:             s.today || 0,
-          // "Unique Admins" instead of vague "Unique Users"
-          unique_admins:     s.unique_users || 0,
-          critical_actions:  s.critical_total ?? criticalCount,
-          last_activity:     s.last_activity || null,
-          most_active_admin: s.most_active_admin || null,
-        })
-      }
-    } catch (err) {
-      console.error('Failed to fetch logs:', err)
-      showToast('Failed to load logs', 'error')
-    } finally {
-      setLoading(false)
-    }
-  }, [page, actionFilters, search, datePreset, sortDir])
-
-  // Reload logs whenever the filters, page, or sort order change
-  useEffect(() => { fetchLogs() }, [fetchLogs])
-
-  // Debounce search
-  const handleSearchChange = (val) => {
-    if (searchDebounce.current) clearTimeout(searchDebounce.current)
-    searchDebounce.current = setTimeout(() => {
-      setSearch(val)
+  useEffect(() => {
+    if (searchInput === search) return
+    const timer = setTimeout(() => {
+      setSearch(searchInput)
       setPage(1)
+      setExpandedId(null)
     }, 350)
-  }
+    return () => clearTimeout(timer)
+  }, [searchInput, search])
 
-  // ── Toast ────────────────────────────────────────────────────────────
-  const showToast = (msg, type = 'success') => {
-    setToast({ msg, type })
-    setTimeout(() => setToast(null), 3000)
-  }
+  const filterParams = useCallback(() => {
+    const params = new URLSearchParams()
+    if (actionFilters.length) params.set('action', actionFilters.join(','))
+    if (search.trim()) params.set('search', search.trim())
+    if (datePreset !== 'all') {
+      const daysAgo = datePreset === 'today' ? 0 : datePreset === '7d' ? 6 : 29
+      const from = new Date()
+      from.setUTCDate(from.getUTCDate() - daysAgo)
+      params.set('date_from', from.toISOString().slice(0, 10))
+    }
+    return params
+  }, [actionFilters, search, datePreset])
 
-  // ── Export ───────────────────────────────────────────────────────────
-  // was hitting /api/admin/reports — that's the SUBMISSIONS report endpoint,
-  // not audit logs. button said "Export Logs" but gave you student quiz
-  // scores instead. now hits the real audit-log export endpoint, and sends
-  // along whatever filters are currently active so "export what i see" works
+  useEffect(() => {
+    const controller = new AbortController()
+    const load = async () => {
+      setLoading(true)
+      setLoadError(false)
+      try {
+        const params = filterParams()
+        params.set('page', page)
+        params.set('limit', 20)
+        params.set('sort', sortDir)
+        const res = await authFetch(`${API_BASE}/api/admin/audit-logs?${params}`, { signal: controller.signal })
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        const data = await res.json()
+        if (controller.signal.aborted) return
+        if (!Array.isArray(data.logs) || !Number.isInteger(data.total)) throw new Error('Invalid log response')
+        setLogs(data.logs)
+        setTotalPages(data.pages || 1)
+        setTotal(data.total)
+        setStats(data.stats)
+      } catch {
+        if (!controller.signal.aborted) setLoadError(true)
+      } finally {
+        if (!controller.signal.aborted) setLoading(false)
+      }
+    }
+    load()
+    return () => controller.abort()
+  }, [page, sortDir, filterParams, retry])
+
+  useEffect(() => {
+    if (!toast) return
+    const timer = setTimeout(() => setToast(null), 3000)
+    return () => clearTimeout(timer)
+  }, [toast])
+
   const exportCSV = async () => {
+    setExporting(true)
     try {
-      const token = localStorage.getItem('token')
-      const params = new URLSearchParams()
-      if (actionFilters.length > 0) params.set('action', actionFilters.join(','))
-      if (search) params.set('search', search)
-      const today = new Date()
-      if (datePreset === 'today') {
-        params.set('date_from', today.toISOString().split('T')[0])
-      } else if (datePreset === '7d') {
-        const d = new Date(today); d.setDate(d.getDate() - 7)
-        params.set('date_from', d.toISOString().split('T')[0])
-      } else if (datePreset === '30d') {
-        const d = new Date(today); d.setDate(d.getDate() - 30)
-        params.set('date_from', d.toISOString().split('T')[0])
-      }
-
-      const res = await fetch(`${API_BASE}/api/admin/audit-logs/export?${params}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      })
-      if (res.ok) {
-        const blob = await res.blob()
-        const url = window.URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = `audit_logs_${new Date().toISOString().split('T')[0]}.csv`
-        document.body.appendChild(a)
-        a.click()
-        document.body.removeChild(a)
-        showToast('CSV exported successfully')
-      } else {
-        showToast('Export failed', 'error')
-      }
+      const res = await authFetch(`${API_BASE}/api/admin/audit-logs/export?${filterParams()}`)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const url = URL.createObjectURL(await res.blob())
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `audit_logs_${new Date().toISOString().slice(0, 10)}.csv`
+      link.click()
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
+      setToast({ msg: 'CSV exported successfully', type: 'success' })
     } catch {
-      showToast('Export failed', 'error')
+      setToast({ msg: 'Export failed', type: 'error' })
+    } finally {
+      setExporting(false)
     }
   }
 
-  // ── Quick filters ─────────────────────────────────────────────────────
-  const applyQuickFilter = (type) => {
-    if (type === 'critical') { setActionFilters(criticalActions); setPage(1) }
-    if (type === 'clear')    { setActionFilters([]); setDatePreset('all'); setSearch(''); setPage(1) }
-    if (type === 'today')    { setDatePreset('today'); setPage(1) }
+  const clearFilters = () => {
+    setActionFilters([])
+    setDatePreset('all')
+    setSearchInput('')
+    setSearch('')
+    setPage(1)
+    setExpandedId(null)
   }
 
   // Flip the sort direction and jump back to page one
@@ -391,7 +350,7 @@ export default function ActivityLogs() {
 
   // ─────────────────────────────────────────────────────────────────────────────
 
-  const activeFilterCount = actionFilters.length + (datePreset !== 'all' ? 1 : 0) + (search ? 1 : 0)
+  const activeFilterCount = actionFilters.length + (datePreset !== 'all' ? 1 : 0) + (searchInput.trim() ? 1 : 0)
 
   return (
     <div className="space-y-5 relative">
@@ -410,28 +369,28 @@ export default function ActivityLogs() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <StatCard
           label="Total Actions"
-          value={stats.total.toLocaleString()}
+          value={stats?.total?.toLocaleString() ?? '—'}
           icon="📋"
           color="purple"
           tooltip="All-time audit log entries"
         />
         <StatCard
           label="Actions Today"
-          value={stats.today}
+          value={stats?.today ?? '—'}
           icon="📅"
           color="blue"
           tooltip="Actions logged since midnight"
         />
         <StatCard
           label="Active Admins"
-          value={stats.unique_admins}
+          value={stats?.unique_users ?? '—'}
           icon="🛡️"
           color="green"
           tooltip="Unique administrator accounts that have performed at least one action"
         />
         <StatCard
           label="Critical Actions"
-          value={stats.critical_actions}
+          value={stats?.critical_total ?? '—'}
           icon="🚨"
           color="red"
           tooltip="Deletions, config changes, and log clears — high-impact operations"
@@ -441,12 +400,13 @@ export default function ActivityLogs() {
       {/* ── Toolbar ─────────────────────────────────────────────────── */}
       <div className="flex flex-wrap gap-3 items-center">
         {/* Search */}
-        <div className="relative flex-1 min-w-[220px]">
+        <div className="relative min-w-0 basis-full sm:flex-1 sm:basis-56">
           <input
             type="text"
-            placeholder="Search actions, users, details, IP…"
-            defaultValue={search}
-            onChange={e => handleSearchChange(e.target.value)}
+            placeholder="Search actions, details, or IP…"
+            aria-label="Search activity logs"
+            value={searchInput}
+            onChange={e => setSearchInput(e.target.value)}
             className="w-full bg-slate-900/80 border border-slate-700 hover:border-slate-600 rounded-xl pl-10 pr-4 py-2.5 text-white text-sm focus:border-purple-500 outline-none transition"
           />
           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm">🔍</span>
@@ -461,12 +421,14 @@ export default function ActivityLogs() {
         />
 
         {/* Date preset */}
-        <div className="flex rounded-xl border border-slate-700 overflow-hidden">
+        <div role="group" aria-label="Date range" className="grid w-full grid-cols-2 gap-px overflow-hidden rounded-xl border border-slate-700 bg-slate-700 sm:flex sm:w-auto">
           {DATE_PRESETS.map(p => (
             <button
               key={p.value}
+              type="button"
               onClick={() => { setDatePreset(p.value); setPage(1) }}
-              className={`px-3 py-2.5 text-xs font-medium transition ${
+              aria-pressed={datePreset === p.value}
+              className={`min-h-11 px-3 py-2.5 text-xs font-medium transition focus-visible:-outline-offset-2 ${
                 datePreset === p.value
                   ? 'bg-purple-600 text-white'
                   : 'bg-slate-900/80 text-slate-400 hover:bg-slate-800'
@@ -479,15 +441,16 @@ export default function ActivityLogs() {
 
         {/* Quick filters */}
         <button
-          onClick={() => applyQuickFilter('critical')}
-          className="px-3 py-2.5 bg-red-950/50 border border-red-600/40 text-red-300 hover:bg-red-900/40 rounded-xl text-xs font-semibold transition"
+          type="button"
+          onClick={() => { setActionFilters(CRITICAL_ACTIONS); setPage(1); setExpandedId(null) }}
+          className="min-h-11 px-3 py-2.5 bg-red-950/50 border border-red-600/40 text-red-300 hover:bg-red-900/40 rounded-xl text-xs font-semibold transition"
         >
           🚨 Critical Only
         </button>
 
         {activeFilterCount > 0 && (
           <button
-            onClick={() => applyQuickFilter('clear')}
+            onClick={clearFilters}
             className="admin-button px-3 py-2.5 border text-slate-400 rounded-xl text-xs transition flex items-center gap-1"
           >
             ✕ Clear filters <span className="bg-purple-600 text-white rounded-full w-4 h-4 flex items-center justify-center text-[10px]">{activeFilterCount}</span>
@@ -498,9 +461,10 @@ export default function ActivityLogs() {
         <div className="ml-auto flex gap-2">
           <button
             onClick={exportCSV}
+            disabled={exporting || loading || loadError || searchInput !== search}
             className="admin-button px-3 py-2.5 border text-slate-300 rounded-xl text-xs font-medium transition flex items-center gap-1.5"
           >
-            📥 Export CSV
+            {exporting ? 'Exporting…' : 'Export CSV'}
           </button>
         </div>
       </div>
@@ -511,7 +475,7 @@ export default function ActivityLogs() {
         {/* Table header */}
         <div className="bg-slate-800/60 border-b border-slate-700/50 px-4 py-3 flex items-center justify-between">
           <p className="text-xs text-slate-400">
-            {loading ? 'Loading…' : `${total.toLocaleString()} entries`}
+            {loading ? 'Loading…' : loadError ? 'Logs unavailable' : `${total.toLocaleString()} entries`}
             {activeFilterCount > 0 && <span className="ml-2 text-purple-400">(filtered)</span>}
           </p>
           <button
@@ -528,30 +492,35 @@ export default function ActivityLogs() {
             <div className="w-8 h-8 border-2 border-purple-600 border-t-transparent rounded-full animate-spin" />
             <p className="text-slate-500 text-sm">Loading activity logs…</p>
           </div>
+        ) : loadError ? (
+          <div role="alert" className="flex flex-wrap items-center gap-3 p-4 text-sm text-amber-100">
+            <span>Activity logs could not be loaded.</span>
+            <button type="button" onClick={() => setRetry(value => value + 1)} className="admin-button px-4">Retry</button>
+          </div>
         ) : logs.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 gap-3">
             <span className="text-5xl opacity-30">📭</span>
             <p className="text-slate-400 font-medium">No logs match your filters</p>
             {activeFilterCount > 0 && (
-              <button onClick={() => applyQuickFilter('clear')} className="text-purple-400 text-sm hover:underline">
+              <button onClick={clearFilters} className="text-purple-400 text-sm hover:underline">
                 Clear all filters
               </button>
             )}
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="text-left">
-                  <th className="px-4 py-3 text-slate-500 text-xs font-semibold uppercase tracking-widest w-56">Action</th>
-                  <th className="px-4 py-3 text-slate-500 text-xs font-semibold uppercase tracking-widest w-40">Admin</th>
-                  <th className="px-4 py-3 text-slate-500 text-xs font-semibold uppercase tracking-widest">Details</th>
-                  <th className="px-4 py-3 text-slate-500 text-xs font-semibold uppercase tracking-widest w-32">IP</th>
-                  <th className="px-4 py-3 text-slate-500 text-xs font-semibold uppercase tracking-widest w-32">Time</th>
-                  <th className="px-4 py-3 w-8"></th>
+            <table role="table" aria-label="Activity log entries" className="admin-record-table w-full">
+              <thead role="rowgroup">
+                <tr role="row" className="text-left">
+                  <th scope="col" role="columnheader" className="px-4 py-3 text-slate-500 text-xs font-semibold uppercase tracking-widest w-56">Action</th>
+                  <th scope="col" role="columnheader" className="px-4 py-3 text-slate-500 text-xs font-semibold uppercase tracking-widest w-40">Admin</th>
+                  <th scope="col" role="columnheader" className="px-4 py-3 text-slate-500 text-xs font-semibold uppercase tracking-widest">Details</th>
+                  <th scope="col" role="columnheader" className="px-4 py-3 text-slate-500 text-xs font-semibold uppercase tracking-widest w-32">IP</th>
+                  <th scope="col" role="columnheader" className="px-4 py-3 text-slate-500 text-xs font-semibold uppercase tracking-widest w-32">Time</th>
+                  <th scope="col" role="columnheader" className="px-4 py-3 w-8">Details</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-800/60">
+              <tbody role="rowgroup" className="divide-y divide-slate-800/60">
                 {logs.map(log => {
                   const isExpanded = expandedId === log.id
                   const meta = getMeta(log.action)
@@ -560,8 +529,8 @@ export default function ActivityLogs() {
                   return (
                     <Fragment key={log.id}>
                       <tr
-                        onClick={() => setExpandedId(isExpanded ? null : log.id)}
-                        className={`cursor-pointer transition-colors ${
+                        role="row"
+                        className={`transition-colors ${
                           isExpanded
                             ? 'bg-slate-800/60'
                             : isCritical
@@ -570,12 +539,12 @@ export default function ActivityLogs() {
                         } ${isCritical && !isExpanded ? 'border-l-2 border-red-500/40' : ''}`}
                       >
                         {/* Action */}
-                        <td className="px-4 py-3.5">
+                        <td role="cell" className="admin-record-heading px-4 py-3.5">
                           <ActionBadge action={log.action} />
                         </td>
 
                         {/* Admin */}
-                        <td className="px-4 py-3.5">
+                        <td role="cell" data-label="Admin" className="px-4 py-3.5">
                           <div className="flex items-center gap-2">
                             <div
                               className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white shrink-0"
@@ -591,34 +560,38 @@ export default function ActivityLogs() {
                         </td>
 
                         {/* Details */}
-                        <td className="px-4 py-3.5 max-w-xs">
+                        <td role="cell" data-label="Summary" className="px-4 py-3.5 max-w-xs">
                           <p className="text-slate-300 text-sm truncate">{log.details || '—'}</p>
                         </td>
 
                         {/* IP */}
-                        <td className="px-4 py-3.5">
+                        <td role="cell" data-label="IP address" className="px-4 py-3.5">
                           <span className="text-slate-400 font-mono text-xs">{log.ip || 'N/A'}</span>
                         </td>
 
                         {/* Time */}
-                        <td className="px-4 py-3.5">
+                        <td role="cell" data-label="Time" className="px-4 py-3.5">
                           <p className="text-slate-300 text-sm" title={formatExactTime(log.created_at)}>
                             {formatRelativeTime(log.created_at)}
                           </p>
                           <p className="text-slate-500 text-xs">
-                            {log.created_at ? new Date(log.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : ''}
+                            {parseApiTimestamp(log.created_at)?.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                           </p>
                         </td>
 
                         {/* Expand chevron */}
-                        <td className="px-3 py-3.5 text-slate-600 hover:text-slate-400 transition text-xs select-none">
-                          {isExpanded ? '▲' : '▼'}
+                        <td role="cell" className="admin-record-actions px-3 py-3.5">
+                          <button type="button" className="admin-button px-3 text-xs" aria-expanded={isExpanded}
+                            aria-controls={isExpanded ? `audit-detail-${log.id}` : undefined}
+                            onClick={() => setExpandedId(isExpanded ? null : log.id)}>
+                            {isExpanded ? 'Hide details' : 'View details'}
+                          </button>
                         </td>
                       </tr>
 
                       {/* Expanded detail row */}
                       {isExpanded && (
-                        <ExpandedRow key={`${log.id}-expanded`} log={log} onClose={() => setExpandedId(null)} />
+                        <ExpandedRow key={`${log.id}-expanded`} log={log} />
                       )}
                     </Fragment>
                   )
@@ -629,12 +602,12 @@ export default function ActivityLogs() {
         )}
 
         {/* ── Pagination ────────────────────────────────────────────── */}
-        {!loading && totalPages > 1 && (
-          <div className="flex items-center justify-between px-4 py-3 border-t border-slate-800/60">
+        {!loading && !loadError && totalPages > 1 && (
+          <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-t border-slate-800/60">
             <p className="text-slate-500 text-xs">
               {total === 0 ? 0 : (page - 1) * 20 + 1}–{Math.min(page * 20, total)} of {total.toLocaleString()}
             </p>
-            <div className="flex items-center gap-1.5">
+            <div className="flex flex-wrap items-center gap-1.5">
               <button
                 onClick={() => setPage(1)}
                 disabled={page === 1}
@@ -657,7 +630,7 @@ export default function ActivityLogs() {
                   <button
                     key={pageNum}
                     onClick={() => setPage(pageNum)}
-                    className={`w-8 h-8 text-xs rounded-lg transition ${
+                    className={`min-h-11 min-w-11 text-xs rounded-lg transition ${
                       pageNum === page
                         ? 'bg-purple-600 text-white font-bold'
                         : 'bg-slate-800 hover:bg-slate-700 text-slate-400'

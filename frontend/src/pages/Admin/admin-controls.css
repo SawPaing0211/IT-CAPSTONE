@@ -110,3 +110,224 @@
   outline: 2px solid #e5c089;
   outline-offset: 2px;
 }
+
+.admin-action-dialog:has(.admin-section-form) {
+  width: min(35rem, calc(100% - 1.5rem));
+}
+
+.admin-section-form {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.admin-section-fields {
+  padding: clamp(1rem, 3vw, 1.5rem);
+}
+
+.admin-section-fields fieldset + fieldset {
+  margin-top: 1.25rem;
+  padding-top: 0.25rem;
+  border-top: 1px solid #35314b;
+}
+
+.admin-section-fields legend {
+  margin-bottom: 0.5rem;
+  padding-right: 0.6rem;
+  color: #f2d49a;
+  font-size: 0.875rem;
+  font-weight: 650;
+}
+
+.admin-section-fields :is(label, small) {
+  color: #d4cce5;
+}
+
+.admin-section-fields label {
+  display: block;
+  min-width: 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.admin-section-fields small {
+  font-size: 0.75rem;
+  font-weight: 400;
+}
+
+.admin-section-fields label small {
+  display: block;
+  margin-top: 0.3rem;
+}
+
+.admin-section-fields :is(input:not([type=checkbox]), select) {
+  display: block;
+  width: 100%;
+  min-height: 2.75rem;
+  margin-top: 0.375rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #5b5670;
+  border-radius: 0.625rem;
+  background: #181f35;
+  color: #f1f5f9;
+}
+
+.admin-section-fields input::placeholder {
+  color: #a9a3bb;
+}
+
+.admin-section-grid {
+  display: grid;
+  gap: 0.875rem;
+}
+
+.admin-section-fields label + .admin-section-grid,
+.admin-section-fields .admin-section-active {
+  margin-top: 0.875rem;
+}
+
+.admin-section-fields .admin-section-active {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  min-height: 2.75rem;
+}
+
+.admin-section-active input {
+  width: 1.125rem;
+  height: 1.125rem;
+  accent-color: #a56bef;
+}
+
+.admin-section-footer {
+  flex: none;
+  padding: 0.75rem clamp(1rem, 3vw, 1.5rem);
+  border-top: 1px solid #5e4c38;
+}
+
+.admin-section-footer p {
+  margin-bottom: 0.625rem;
+  color: #ffc1cc;
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
+}
+
+.admin-section-footer > div {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+@media (min-width: 28rem) {
+  .admin-section-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.admin-nav-icon {
+  flex: none;
+  color: #c6b6ee;
+}
+
+[aria-current="page"] > .admin-nav-icon,
+[aria-current="page"] > span > .admin-nav-icon {
+  color: #f6d589;
+}
+
+.admin-workspace :is(input, select, textarea):focus-visible {
+  outline: 2px solid #e5c089;
+  outline-offset: 2px;
+}
+
+.admin-record-table td {
+  overflow-wrap: anywhere;
+}
+
+.admin-record-table .admin-record-actions button {
+  min-width: 44px;
+}
+
+@media (max-width: 74.99rem) {
+  .admin-record-table,
+  .admin-record-table tbody {
+    display: block;
+  }
+
+  .admin-record-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .admin-record-table tbody > tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding: 0.625rem;
+  }
+
+  .admin-record-table td {
+    min-width: 0;
+    width: auto;
+    padding: 0.5rem !important;
+    white-space: normal !important;
+  }
+
+  .admin-record-table [data-label]::before {
+    display: block;
+    margin-bottom: 0.25rem;
+    color: #a9b5cc;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    content: attr(data-label);
+  }
+
+  .admin-record-table :is(.admin-record-heading, .admin-record-actions, [colspan]) {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 63.99rem) {
+  .admin-mobile-nav {
+    padding-inline: env(safe-area-inset-left) env(safe-area-inset-right);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .admin-mobile-nav button:focus-visible {
+    outline-offset: -3px;
+  }
+
+  .admin-main {
+    padding-bottom: calc(3.75rem + env(safe-area-inset-bottom));
+  }
+}
+
+@media (max-width: 39.99rem), (pointer: coarse) {
+  .admin-workspace .admin-button {
+    min-height: 44px;
+  }
+}
+
+@media (max-width: 39.99rem) {
+  .admin-workspace :is(input, select, textarea) {
+    max-width: 100%;
+    font-size: 1rem !important;
+  }
+
+  .admin-subject-toggle {
+    flex-wrap: wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .admin-subject-totals {
+    flex-basis: 100%;
+    margin-inline-start: 1.75rem;
+  }
+
+  .admin-role-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

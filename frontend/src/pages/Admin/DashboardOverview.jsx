@@ -303,7 +303,7 @@ export default function DashboardOverview({ onNavigate, stats, loading, healthEr
           ZONE C — Two-column footer
       ════════════════════════════════════════════════════════════ */}
 
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-5">
+      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_320px] gap-5">
 
         {/* Left — Recent Activity (unchanged, it works well) */}
         <div className="bg-[#111832] rounded-xl border border-amber-300/20 overflow-hidden">

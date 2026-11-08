@@ -255,14 +255,14 @@ export default function SubjectsManagement() {
     <div className="space-y-6">
       {/* Toast */}
       {toast && (
-        <div className={`fixed top-6 right-6 z-[9999] px-5 py-3 rounded-xl font-semibold text-white shadow-xl transition ${toast.type === 'error' ? 'bg-red-600' : 'bg-green-600'}`}>
+        <div className={`fixed inset-x-4 top-4 z-[9999] max-w-md break-words px-5 sm:left-auto sm:right-6 py-3 rounded-xl font-semibold text-white shadow-xl transition ${toast.type === 'error' ? 'bg-red-600' : 'bg-green-600'}`}>
           {toast.type === 'error' ? '❌' : '✅'} {toast.message}
         </div>
       )}
 
       {deleteTarget && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
-          <div className="bg-slate-900 border-2 border-red-600/40 rounded-2xl w-full max-w-md shadow-2xl shadow-red-900/30 overflow-hidden">
+          <div className="bg-slate-900 border-2 border-red-600/40 rounded-2xl w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto shadow-2xl shadow-red-900/30">
             <div className="p-6 space-y-4">
               <div className="flex items-center gap-3">
                 <div className="w-11 h-11 bg-red-600/20 border border-red-600/40 rounded-xl flex items-center justify-center text-xl shrink-0">
@@ -298,7 +298,7 @@ export default function SubjectsManagement() {
       {/* Edit Subject Modal */}
       {showEditModal && editingSubject && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-slate-900 border border-amber-300/35 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden">
+          <div className="bg-slate-900 border border-amber-300/35 rounded-2xl w-full max-w-lg max-h-[calc(100dvh-2rem)] overflow-y-auto shadow-2xl">
             <div className="bg-violet-950/40 px-6 py-5 border-b border-amber-300/25 flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div>
@@ -341,7 +341,7 @@ export default function SubjectsManagement() {
                   placeholder="Brief description..." rows="2"
                   className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white placeholder-slate-500 outline-none focus:border-purple-500 resize-none transition text-sm" />
               </div>
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid gap-3 sm:grid-cols-3 [&>*]:min-w-0">
                 <div>
                   <label className="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">Units</label>
                   <select value={editForm.units} onChange={e => setEditForm({...editForm, units: e.target.value})}

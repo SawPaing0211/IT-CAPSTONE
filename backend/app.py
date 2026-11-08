@@ -6733,6 +6733,8 @@ def admin_create_section(admin):
     section_no = str(data['section_no']).strip()
     if not section_no:
         return jsonify({"error": "section_no cannot be empty"}), 400
+    if len(section_no) > 20:
+        return jsonify({"error": "Class code must be 20 characters or fewer"}), 400
 
     subject = Subject.query.get(data['subject_id'])
     if not subject:
@@ -6796,7 +6798,14 @@ def admin_update_section(admin, section_id):
 
     if 'section_no' in data:
         new_no = str(data['section_no']).strip()
+        if not new_no:
+            return jsonify({"error": "Class code is required"}), 400
+        if len(new_no) > 20:
+            return jsonify({"error": "Class code must be 20 characters or fewer"}), 400
         if new_no != section.section_no:
+            existing = SubjectSection.query.filter_by(section_no=new_no).first()
+            if existing and existing.id != section.id:
+                return jsonify({"error": f"Class code '{new_no}' is already in use"}), 409
             changes.append(f"section_no: {section.section_no} → {new_no}")
             section.section_no = new_no
 
