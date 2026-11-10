@@ -6,6 +6,7 @@ import RecoveryModal from './RecoveryModal'
 import AdminActionDialog from './AdminActionDialog'
 import AdminConfirmDialog from './AdminConfirmDialog'
 import FormBanner from './FormBanner'
+import AdminToast from './AdminToast'
 import createUsersEmblem from '../../assets/admin/create-users.png'
 import studentRoleIcon from '../../assets/admin/role-student.png'
 import instructorRoleIcon from '../../assets/admin/role-instructor.png'
@@ -74,7 +75,6 @@ export default function UserManagement() {
   const [toast, setToast] = useState(null)
   const showToast = (msg, type = 'success') => {
     setToast({ msg, type })
-    setTimeout(() => setToast(null), type === 'warning' ? 6500 : 4000)
   }
 
   // Settings come from the server (it also enforces them): whether this admin may
@@ -323,18 +323,7 @@ export default function UserManagement() {
   return (
     <div className="space-y-6">
 
-      {/* Toast — replaces every alert() popup in this page */}
-      {toast && (
-        <div className={`fixed inset-x-4 top-4 z-[9999] max-w-md break-words sm:left-auto sm:right-6 px-5 py-3 rounded-xl font-semibold text-white shadow-2xl border transition ${
-          toast.type === 'error'
-            ? 'bg-red-600 border-red-500/50'
-            : toast.type === 'warning'
-              ? 'bg-amber-600 border-amber-500/50'
-              : 'bg-violet-700 hover:bg-violet-600 border-purple-400/50'
-        }`}>
-          {toast.type === 'error' ? '❌' : toast.type === 'warning' ? '⚠️' : '✅'} {toast.msg}
-        </div>
-      )}
+      <AdminToast toast={toast} onDone={() => setToast(null)} />
 
       {/* Tab Switcher */}
       <div className="flex gap-2 border-b border-slate-800 pb-2">

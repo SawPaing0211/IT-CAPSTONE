@@ -4,45 +4,19 @@
 // Dropdowns are positioned against their triggers and stay inside the modal's
 // focus boundary while rendering outside its scrolling content.
 
-import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { API_BASE, authFetch } from '../../api/client'
+import AdminActionDialog from './AdminActionDialog'
+import AdminConfirmDialog from './AdminConfirmDialog'
+import AdminToast from './AdminToast'
+import assignmentSeal from '../../assets/admin/instructor-assignment-seal.svg'
+import subjectEditSeal from '../../assets/admin/subject-edit-seal.svg'
 
 // The backend base URL — change this when deploying to a real server
 const API = API_BASE
 
 const jsonHeaders = { 'Content-Type': 'application/json' }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// TOAST
-// Small pop-up notification (bottom-right corner).
-// Shows for ~3 seconds then disappears via the onDone callback.
-// type = 'success' | 'error' | 'warning'
-// ─────────────────────────────────────────────────────────────────────────────
-function Toast({ message, type, onDone }) {
-  useEffect(() => {
-    const t = setTimeout(onDone, 3200)
-    return () => clearTimeout(t)
-  }, [onDone])
-
-  const colors = {
-    success: 'from-emerald-500/20 to-emerald-600/10 border-emerald-500/40 text-emerald-300',
-    error:   'from-red-500/20 to-red-600/10 border-red-500/40 text-red-300',
-    warning: 'from-amber-500/20 to-amber-600/10 border-amber-500/40 text-amber-300',
-  }
-  const icons = { success: '✓', error: '✕', warning: '⚠' }
-
-  return (
-    <div
-      className={`fixed bottom-6 right-6 z-[9999] flex items-center gap-3 px-5 py-3.5 rounded-2xl border bg-gradient-to-r ${colors[type]} backdrop-blur-md shadow-2xl`}
-      style={{ animation: 'slideUp 0.3s ease-out' }}
-    >
-      <span className="text-lg font-bold">{icons[type]}</span>
-      <span className="text-sm font-medium">{message}</span>
-    </div>
-  )
-}
-
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PORTAL DROPDOWN
@@ -572,17 +546,6 @@ function ClassCodePicker({ value, onChange, sectionsBySubject, subjectSelected }
 // ─────────────────────────────────────────────────────────────────────────────
 function AssignmentModal({ mode, formData, setFormData, instructors, subjects, allSections, onSubmit, onCancel, saving, error }) {
   const isEdit = mode === 'edit'
-  const dialogRef = useRef(null)
-
-  useLayoutEffect(() => {
-    const dialog = dialogRef.current
-    const trigger = document.activeElement
-    dialog.showModal()
-    return () => {
-      dialog.close()
-      if (trigger instanceof HTMLElement && trigger.isConnected) trigger.focus()
-    }
-  }, [])
 
   // Filter sections to only those belonging to the currently selected subject.
   // This is the CORE FIX — before, ClassCodePicker received all sections.
@@ -602,44 +565,16 @@ function AssignmentModal({ mode, formData, setFormData, instructors, subjects, a
   }
 
   return (
-    <dialog
-      ref={dialogRef}
-      aria-labelledby="assignment-title"
-      className="m-auto w-[calc(100%-2rem)] max-w-md overflow-visible rounded-2xl bg-transparent p-0 text-slate-100 backdrop:bg-black/80"
-      onCancel={event => { event.preventDefault(); if (!saving) onCancel() }}
+    <AdminActionDialog
+      title={isEdit ? 'Edit Assignment' : 'Assign Instructor'}
+      description={isEdit ? 'Change instructor, subject, or class code.' : 'Link an instructor to a subject and class code.'}
+      emblem={isEdit ? subjectEditSeal : assignmentSeal}
+      onClose={onCancel}
+      busy={saving}
     >
-      {/* The dropdown portal is a sibling of this scrolling card. */}
-      <div
-        className="bg-slate-900 border border-slate-700/60 rounded-2xl w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain shadow-2xl"
-        style={{ animation: 'modalIn 0.2s ease-out' }}
-      >
-        {/* Header */}
-        <div className="px-6 py-5 border-b border-slate-800 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg shadow-lg ${
-              isEdit
-                ? 'bg-gradient-to-br from-violet-600 to-purple-700'
-                : 'bg-gradient-to-br from-purple-600 to-pink-600'
-            }`}>
-              {isEdit ? '✏️' : '＋'}
-            </div>
-            <div>
-              <h2 id="assignment-title" className="font-cinzel text-base font-semibold text-white">
-                {isEdit ? 'Edit Assignment' : 'Assign Instructor'}
-              </h2>
-              <p className="text-xs text-slate-500">
-                {isEdit ? 'Change instructor, subject, or class code' : 'Link an instructor to a subject + class code'}
-              </p>
-            </div>
-          </div>
-          <button type="button" aria-label="Close assignment" disabled={saving} onClick={onCancel}
-            className="admin-button w-8 h-8 flex items-center justify-center rounded-lg text-slate-500 transition-colors text-sm">
-            ✕
-          </button>
-        </div>
-
+      <form className="admin-section-form" onSubmit={event => { event.preventDefault(); if (!saving && formData.instructor_id && formData.subject_id && formData.section_id) onSubmit() }} aria-busy={saving}>
         {/* Form fields */}
-        <fieldset disabled={saving} className="min-w-0 space-y-4 px-4 py-5 sm:px-6">
+        <fieldset disabled={saving} className="admin-action-scroll admin-section-fields min-w-0 space-y-4">
 
           {/* INSTRUCTOR — now uses InstructorPicker instead of native <select> */}
           <div>
@@ -692,52 +627,17 @@ function AssignmentModal({ mode, formData, setFormData, instructors, subjects, a
             )}
           </div>
         </fieldset>
-
-        {error && <p role="alert" className="px-4 pb-4 text-sm text-rose-200 sm:px-6">{error}</p>}
-
-        {/* Cancel / Submit buttons */}
-        <div className="px-6 pb-5 flex gap-3">
-          <button type="button" onClick={onCancel} disabled={saving}
-            className="admin-button flex-1 py-2.5 border rounded-xl text-slate-300 text-sm font-medium transition-colors">
-            Cancel
-          </button>
-          <button type="button" onClick={onSubmit} disabled={saving || !formData.instructor_id || !formData.subject_id || !formData.section_id}
-            className="admin-button admin-button-primary flex-1 py-2.5 rounded-xl font-semibold text-white text-sm transition-all active:scale-[0.98]">
-            {saving ? 'Saving…' : isEdit ? 'Save Changes' : 'Assign Instructor'}
-          </button>
-        </div>
-      </div>
-    </dialog>
-  )
-}
-
-
-// ─────────────────────────────────────────────────────────────────────────────
-// CONFIRM DIALOG
-// "Are you sure?" popup before deleting an assignment.
-// Replaces the old browser-native prompt() which looked terrible.
-// ─────────────────────────────────────────────────────────────────────────────
-function ConfirmDialog({ message, onConfirm, onCancel }) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
-         style={{ background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(6px)' }}>
-      <div className="bg-slate-900 border border-red-500/30 rounded-2xl p-6 w-full max-w-sm shadow-2xl"
-           style={{ animation: 'modalIn 0.2s ease-out' }}>
-        <div className="w-12 h-12 bg-red-500/15 rounded-xl flex items-center justify-center text-2xl mb-4 mx-auto">⚠️</div>
-        <h3 className="text-white font-semibold text-center mb-2">Remove Assignment</h3>
-        <p className="text-slate-400 text-sm text-center mb-6">{message}</p>
-        <div className="flex gap-3">
-          <button onClick={onCancel}
-            className="admin-button flex-1 py-2.5 border rounded-xl text-slate-300 text-sm font-medium transition-colors">
-            Cancel
-          </button>
-          <button onClick={onConfirm}
-            className="admin-button admin-button-danger flex-1 py-2.5 rounded-xl text-white text-sm font-semibold transition-all active:scale-[0.98]">
-            Remove
-          </button>
-        </div>
-      </div>
-    </div>
+        <footer className="admin-section-footer">
+          {error && <p role="alert">{error}</p>}
+          <div>
+            <button type="button" onClick={onCancel} disabled={saving} className="admin-button px-4 text-sm font-semibold">Cancel</button>
+            <button type="submit" disabled={saving || !formData.instructor_id || !formData.subject_id || !formData.section_id} className="admin-button admin-button-primary px-4 text-sm font-semibold">
+              {saving ? 'Saving…' : isEdit ? 'Save changes' : 'Assign instructor'}
+            </button>
+          </div>
+        </footer>
+      </form>
+    </AdminActionDialog>
   )
 }
 
@@ -898,6 +798,7 @@ export default function InstructorAssignments() {
   const [showCreate,       setShowCreate]       = useState(false)
   const [editingId,        setEditingId]        = useState(null)
   const [deleteTarget,     setDeleteTarget]     = useState(null)
+  const [removing,          setRemoving]         = useState(false)
   const [toast,            setToast]            = useState(null)
 
   const [searchTerm,       setSearchTerm]       = useState('')
@@ -1032,7 +933,8 @@ export default function InstructorAssignments() {
 
   // ── Delete (runs only after ConfirmDialog is confirmed) ───────────────────
   const handleDelete = async () => {
-    if (!deleteTarget) return
+    if (!deleteTarget || removing) return
+    setRemoving(true)
     try {
       const res = await authFetch(`${API}/api/admin/instructor-assignments/${deleteTarget.id}`, {
         method: 'DELETE',
@@ -1043,13 +945,15 @@ export default function InstructorAssignments() {
         await refreshAfterSave()
         notify('Assignment removed')
       } else {
-        const data = await res.json()
+        const data = await res.json().catch(() => ({}))
         notify(data.error || 'Delete failed', 'error')
         setDeleteTarget(null)
       }
     } catch {
       notify('Network error — delete failed', 'error')
       setDeleteTarget(null)
+    } finally {
+      setRemoving(false)
     }
   }
 
@@ -1288,15 +1192,19 @@ export default function InstructorAssignments() {
 
       {/* Delete confirmation */}
       {deleteTarget && (
-        <ConfirmDialog
-          message={`Remove ${deleteTarget.instructor?.username}'s assignment for ${deleteTarget.section?.section_no}? This can't be undone.`}
+        <AdminConfirmDialog
+          title="Remove Assignment"
+          message={`Remove ${deleteTarget.instructor?.username}'s assignment for ${deleteTarget.section?.section_no}?`}
+          confirmLabel="Remove"
+          busyLabel="Removing…"
+          busy={removing}
           onConfirm={handleDelete}
           onCancel={() => setDeleteTarget(null)}
         />
       )}
 
       {/* Toast notification */}
-      {toast && <Toast message={toast.message} type={toast.type} onDone={() => setToast(null)} />}
+      <AdminToast toast={toast} onDone={() => setToast(null)} />
     </>
   )
 }

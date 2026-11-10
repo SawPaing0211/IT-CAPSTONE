@@ -443,3 +443,56 @@
   padding: 1rem clamp(1rem, 3vw, 1.5rem);
   border-top: 1px solid rgb(220 38 38 / 30%);
 }
+
+/* Page notification (AdminToast) */
+.admin-toast {
+  position: fixed;
+  inset: 1rem 1rem auto 1rem;
+  width: auto;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  overflow: visible;
+  color: inherit;
+  animation: admin-toast-in 0.2s ease-out;
+}
+
+@media (min-width: 40rem) {
+  .admin-toast {
+    inset: 1.5rem 1.5rem auto auto;
+    width: min(26rem, calc(100% - 3rem));
+  }
+}
+
+.admin-toast-card {
+  padding-right: 2.5rem;
+  box-shadow: 0 12px 32px rgb(0 0 0 / 50%);
+}
+
+.admin-toast-card[role] { background-color: #10162b; }
+
+.admin-toast-close {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  display: grid;
+  width: 1.75rem;
+  height: 1.75rem;
+  place-items: center;
+  border-radius: 0.5rem;
+  color: #cbd5e1;
+}
+
+.admin-toast-close:hover { background: rgb(255 255 255 / 10%); }
+.admin-toast-close:focus-visible { outline: 2px solid #a78bfa; }
+
+@keyframes admin-toast-in {
+  from { opacity: 0; transform: translateY(-0.5rem); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .admin-toast { animation: none; }
+}

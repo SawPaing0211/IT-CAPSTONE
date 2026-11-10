@@ -4,6 +4,7 @@ import { API_BASE, authFetch } from '../../api/client'
 import AdminActionDialog from './AdminActionDialog'
 import UploadSectionsModal from './UploadSectionsModal'
 import AdminConfirmDialog from './AdminConfirmDialog'
+import AdminToast from './AdminToast'
 import classCodeSeal from '../../assets/admin/class-code-seal.svg'
 
 const API = API_BASE
@@ -118,32 +119,6 @@ const Icon = {
 // Small reusable atoms
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Toast notification — self-dismisses via parent timeout. */
-function Toast({ toast }) {
-  if (!toast) return null
-  const isError   = toast.type === 'error'
-  const isWarning = toast.type === 'warning'
-  const bg   = isError ? '#b91c1c' : isWarning ? '#b45309' : '#15803d'
-  const icon = isError
-    ? <Icon.X size={14} color="#fff" />
-    : isWarning
-      ? <Icon.AlertCircle size={14} color="#fff" />
-      : <Icon.Check size={14} color="#fff" />
-  return (
-    <div style={{
-      position: 'fixed', top: '1.5rem', right: '1.5rem', zIndex: 9999,
-      display: 'flex', alignItems: 'center', gap: '0.5rem',
-      padding: '0.75rem 1.25rem', borderRadius: '0.75rem',
-      fontWeight: 600, fontSize: '0.875rem', color: '#fff',
-      background: bg,
-      boxShadow: '0 4px 24px rgba(0,0,0,0.35)',
-      animation: 'toastIn 0.2s ease',
-    }}>
-      {icon}
-      {toast.msg}
-    </div>
-  )
-}
 
 /** Active / Inactive pill badge. */
 function StatusPill({ active }) {
@@ -762,7 +737,6 @@ export default function ClassCodesManagement() {
   // Show a temporary toast notification
   const showToast = useCallback((msg, type = 'success') => {
     setToast({ msg, type })
-    setTimeout(() => setToast(null), 4000)
   }, [])
 
   const [sectionsError, setSectionsError] = useState(false)
@@ -901,7 +875,7 @@ export default function ClassCodesManagement() {
         .student-row:hover { background: rgba(255,255,255,0.06) !important; }
       `}</style>
 
-      <Toast toast={toast} />
+      <AdminToast toast={toast} onDone={() => setToast(null)} />
 
       {/* ── Page header ─────────────────────────────────────────────── */}
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>

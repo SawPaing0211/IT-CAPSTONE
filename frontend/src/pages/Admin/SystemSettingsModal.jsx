@@ -1,4 +1,5 @@
 import AdminActionDialog from './AdminActionDialog'
+import AdminToast from './AdminToast'
 import settingsEmblem from '../../assets/admin/system-settings.png'
 import { useState, useEffect } from 'react'
 import { API_BASE, authFetch } from '../../api/client'
@@ -30,12 +31,6 @@ const IconGamepad = (p) => (
 )
 const IconSearch = (p) => (
   <Icon {...p}><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></Icon>
-)
-const IconCheckCircle = (p) => (
-  <Icon {...p}><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></Icon>
-)
-const IconXCircle = (p) => (
-  <Icon {...p}><circle cx="12" cy="12" r="10" /><line x1="15" y1="9" x2="9" y2="15" /><line x1="9" y1="9" x2="15" y2="15" /></Icon>
 )
 const IconAlertTriangle = (p) => (
   <Icon {...p}><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
@@ -93,7 +88,6 @@ export default function SystemSettingsModal({ onClose, onSaved }) {
 
   const showToast = (message, type = 'success') => {
     setToast({ message, type })
-    setTimeout(() => setToast(null), 4000)
   }
 
   useEffect(() => {
@@ -161,12 +155,7 @@ export default function SystemSettingsModal({ onClose, onSaved }) {
 
   return (
     <AdminActionDialog title="System Settings" description="Change the maintenance status or review the platform’s current rules." emblem={settingsEmblem} onClose={onClose} busy={saving}>
-      {toast && (
-        <div className={`fixed top-6 right-6 z-[9999] px-5 py-3 rounded-xl font-semibold text-white shadow-xl flex items-center gap-2 ${toast.type === 'error' ? 'bg-red-600' : 'bg-green-600'}`}>
-          {toast.type === 'error' ? <IconXCircle className="w-4 h-4 flex-shrink-0" /> : <IconCheckCircle className="w-4 h-4 flex-shrink-0" />}
-          {toast.message}
-        </div>
-      )}
+      <AdminToast toast={toast} onDone={() => setToast(null)} />
 
         <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
           <div className="grid shrink-0 grid-cols-2 gap-1 border-b border-amber-300/20 p-2 sm:block sm:w-40 sm:border-b-0 sm:border-r">

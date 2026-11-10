@@ -1,3 +1,4 @@
+import AdminToast from './AdminToast'
 import { Fragment, useState, useEffect, useRef, useCallback } from 'react'
 import { API_BASE, authFetch } from '../../api/client'
 import { parseApiTimestamp } from '../../utils/apiTimestamp'
@@ -308,12 +309,6 @@ export default function ActivityLogs() {
     return () => controller.abort()
   }, [page, sortDir, filterParams, retry])
 
-  useEffect(() => {
-    if (!toast) return
-    const timer = setTimeout(() => setToast(null), 3000)
-    return () => clearTimeout(timer)
-  }, [toast])
-
   const exportCSV = async () => {
     setExporting(true)
     try {
@@ -355,15 +350,7 @@ export default function ActivityLogs() {
   return (
     <div className="space-y-5 relative">
 
-      {/* Toast */}
-      {toast && (
-        <div className={`fixed top-6 right-6 z-[999] px-4 py-3 rounded-xl shadow-2xl text-sm font-medium flex items-center gap-2 transition-all ${
-          toast.type === 'error' ? 'bg-red-900 text-red-100 border border-red-700' : 'bg-emerald-900 text-emerald-100 border border-emerald-700'
-        }`}>
-          <span>{toast.type === 'error' ? '✗' : '✓'}</span>
-          {toast.msg}
-        </div>
-      )}
+      <AdminToast toast={toast} onDone={() => setToast(null)} />
 
       {/* ── Stats Row ──────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">

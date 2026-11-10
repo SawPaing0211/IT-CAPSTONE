@@ -1,5 +1,10 @@
-import { useState, useEffect, useLayoutEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { API_BASE, authFetch } from '../../api/client'
+import AdminActionDialog from './AdminActionDialog'
+import AdminConfirmDialog from './AdminConfirmDialog'
+import AdminToast from './AdminToast'
+import subjectSeal from '../../assets/admin/subject-seal.svg'
+import subjectEditSeal from '../../assets/admin/subject-edit-seal.svg'
 
 // Accent per year level so the list reads as four cohorts instead of one
 // repeated card — year is the one piece of structure every subject has.
@@ -33,7 +38,6 @@ export default function SubjectsManagement() {
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState('')
-  const createDialog = useRef(null)
   const [showEditModal, setShowEditModal] = useState(false)
   const [savingEdit, setSavingEdit] = useState(false)
   const [editingSubject, setEditingSubject] = useState(null)
@@ -48,15 +52,9 @@ export default function SubjectsManagement() {
     subject_type: 'lab',
   })
   const [toast, setToast] = useState(null)
+  const [deleting, setDeleting] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState(null) // { id, name } of the subject pending deletion
   const [newSubject, setNewSubject] = useState(INITIAL_SUBJECT)
-
-  useLayoutEffect(() => {
-    if (!showCreateModal) return
-    const dialog = createDialog.current
-    dialog.showModal()
-    return () => dialog.close()
-  }, [showCreateModal])
 
   // Load all subjects when the page mounts
   useEffect(() => {
@@ -133,7 +131,6 @@ export default function SubjectsManagement() {
   // Display a temporary toast message
   const showToast = (message, type = 'success') => {
     setToast({ message, type })
-    setTimeout(() => setToast(null), 4000)
   }
 
   // Load the selected subject into the edit form
@@ -205,7 +202,8 @@ export default function SubjectsManagement() {
 
   // Delete the subject that's pending confirmation
   const confirmDeleteSubject = async () => {
-    if (!deleteTarget) return
+    if (!deleteTarget || deleting) return
+    setDeleting(true)
     try {
       const res = await authFetch(`${API_BASE}/api/admin/subjects/${deleteTarget.id}`, {
         method: 'DELETE',
@@ -215,13 +213,14 @@ export default function SubjectsManagement() {
         await fetchSubjects()
         showToast('Subject deleted successfully!')
       } else {
-        const error = await res.json()
-        showToast(`Failed to delete subject: ${error.error}`, 'error')
+        const error = await res.json().catch(() => ({}))
+        showToast(`Failed to delete subject: ${error.error || `HTTP ${res.status}`}`, 'error')
       }
     } catch (err) {
       console.error('Failed to delete subject:', err)
       showToast('Failed to delete subject', 'error')
     } finally {
+      setDeleting(false)
       setDeleteTarget(null)
     }
   }
@@ -253,64 +252,37 @@ export default function SubjectsManagement() {
 
   return (
     <div className="space-y-6">
-      {/* Toast */}
-      {toast && (
-        <div className={`fixed inset-x-4 top-4 z-[9999] max-w-md break-words px-5 sm:left-auto sm:right-6 py-3 rounded-xl font-semibold text-white shadow-xl transition ${toast.type === 'error' ? 'bg-red-600' : 'bg-green-600'}`}>
-          {toast.type === 'error' ? '❌' : '✅'} {toast.message}
-        </div>
-      )}
+      <AdminToast toast={toast} onDone={() => setToast(null)} />
 
       {deleteTarget && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
-          <div className="bg-slate-900 border-2 border-red-600/40 rounded-2xl w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto shadow-2xl shadow-red-900/30">
-            <div className="p-6 space-y-4">
-              <div className="flex items-center gap-3">
-                <div className="w-11 h-11 bg-red-600/20 border border-red-600/40 rounded-xl flex items-center justify-center text-xl shrink-0">
-                  ⚠️
-                </div>
-                <div>
-                  <h3 className="text-white font-bold text-lg">Delete Subject?</h3>
-                  <p className="text-slate-400 text-sm">This can't be undone</p>
-                </div>
-              </div>
-              <p className="text-slate-300 text-sm">
-                Delete <span className="text-white font-semibold">"{deleteTarget.name}"</span>? This removes its lessons, class codes, enrollments and instructor assignments, and detaches its quests from the catalog.
-              </p>
-            </div>
-            <div className="flex gap-3 p-6 pt-0">
-              <button
-                onClick={() => setDeleteTarget(null)}
-                className="admin-button flex-1 py-2.5 rounded-xl text-slate-300 font-bold transition text-sm"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={confirmDeleteSubject}
-                className="admin-button admin-button-danger flex-1 py-2.5 rounded-xl text-white font-bold transition text-sm"
-              >
-                🗑️ Delete
-              </button>
-            </div>
-          </div>
-        </div>
+        <AdminConfirmDialog
+          title="Delete Subject?"
+          message={<>Delete <span className="font-semibold text-white">"{deleteTarget.name}"</span>? This removes its lessons, class codes, enrollments and instructor assignments, and detaches its quests from the catalog.</>}
+          busy={deleting}
+          onConfirm={confirmDeleteSubject}
+          onCancel={() => setDeleteTarget(null)}
+        />
       )}
 
       {/* Edit Subject Modal */}
       {showEditModal && editingSubject && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-slate-900 border border-amber-300/35 rounded-2xl w-full max-w-lg max-h-[calc(100dvh-2rem)] overflow-y-auto shadow-2xl">
-            <div className="bg-violet-950/40 px-6 py-5 border-b border-amber-300/25 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div>
-                  <h2 className="font-cinzel text-xl font-semibold text-white">Edit subject</h2>
-                  <p className="text-slate-300 text-sm">Update subject details</p>
+        <AdminActionDialog
+          title="Edit subject"
+          description="Update subject details."
+          emblem={subjectEditSeal}
+          onClose={() => { setShowEditModal(false); setEditingSubject(null) }}
+          busy={savingEdit}
+        >
+          <form className="admin-section-form" onSubmit={event => { event.preventDefault(); handleSaveEdit() }} aria-busy={savingEdit}>
+            <fieldset disabled={savingEdit} className="admin-action-scroll admin-section-fields min-w-0 space-y-4">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="sm:col-span-2">
+                  <label className="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">Subject Name *</label>
+                  <input type="text" value={editForm.name}
+                    onChange={e => setEditForm({...editForm, name: e.target.value})}
+                    placeholder="e.g., Intro to Computing"
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-white placeholder-slate-500 outline-none focus:border-purple-500 transition text-sm" />
                 </div>
-              </div>
-              <button onClick={() => { setShowEditModal(false); setEditingSubject(null) }}
-                className="admin-button w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 transition text-lg">✕</button>
-            </div>
-            <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 <div>
                   <label className="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">Subject Number</label>
                   <input type="text" value={editForm.internal_subject_no}
@@ -326,13 +298,6 @@ export default function SubjectsManagement() {
                     placeholder="e.g., IT115"
                     className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-white placeholder-slate-500 outline-none focus:border-purple-500 transition font-mono tracking-widest text-sm" />
                 </div>
-                <div>
-                  <label className="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">Subject Name *</label>
-                  <input type="text" value={editForm.name}
-                    onChange={e => setEditForm({...editForm, name: e.target.value})}
-                    placeholder="e.g., Intro to Computing"
-                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-white placeholder-slate-500 outline-none focus:border-purple-500 transition text-sm" />
-                </div>
               </div>
               <div>
                 <label className="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">Description <span className="text-slate-600 normal-case font-normal">(optional)</span></label>
@@ -341,7 +306,7 @@ export default function SubjectsManagement() {
                   placeholder="Brief description..." rows="2"
                   className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white placeholder-slate-500 outline-none focus:border-purple-500 resize-none transition text-sm" />
               </div>
-              <div className="grid gap-3 sm:grid-cols-3 [&>*]:min-w-0">
+              <div className="grid gap-3 sm:grid-cols-2 [&>*]:min-w-0">
                 <div>
                   <label className="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">Units</label>
                   <select value={editForm.units} onChange={e => setEditForm({...editForm, units: e.target.value})}
@@ -384,19 +349,15 @@ export default function SubjectsManagement() {
                   <option value="GE">General Education</option>
                 </select>
               </div>
-              <div className="flex gap-3 pt-1">
-                <button onClick={() => { setShowEditModal(false); setEditingSubject(null) }}
-                  className="admin-button flex-1 py-2.5 rounded-xl text-white font-bold transition border">
-                  Cancel
-                </button>
-                <button onClick={handleSaveEdit} disabled={savingEdit}
-                  className="admin-button admin-button-primary flex-1 py-2.5 rounded-xl text-white font-bold transition flex items-center justify-center gap-2 disabled:opacity-60">
-                  {savingEdit ? 'Saving…' : '💾 Save Changes'}
-                </button>
+            </fieldset>
+            <footer className="admin-section-footer">
+              <div>
+                <button type="button" disabled={savingEdit} onClick={() => { setShowEditModal(false); setEditingSubject(null) }} className="admin-button px-4 text-sm font-semibold">Cancel</button>
+                <button type="submit" disabled={savingEdit} className="admin-button admin-button-primary px-4 text-sm font-semibold">{savingEdit ? 'Saving…' : 'Save changes'}</button>
               </div>
-            </div>
-          </div>
-        </div>
+            </footer>
+          </form>
+        </AdminActionDialog>
       )}
 
       {/* Header */}
@@ -552,19 +513,15 @@ export default function SubjectsManagement() {
       )}
 
       {showCreateModal && (
-        <dialog
-          ref={createDialog}
-          aria-labelledby="create-subject-title"
-          aria-describedby="create-subject-description"
-          onCancel={(event) => { event.preventDefault(); if (!creating) closeCreateSubject() }}
-          className="m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-xl overflow-hidden rounded-2xl border border-amber-300/35 bg-slate-900 p-0 text-slate-100 backdrop:bg-slate-950/80"
+        <AdminActionDialog
+          title="Create Subject"
+          description="Add a first-year lab subject to the course catalog."
+          emblem={subjectSeal}
+          onClose={closeCreateSubject}
+          busy={creating}
         >
-          <form onSubmit={handleCreateSubject} className="flex max-h-[calc(100dvh-2rem)] flex-col">
-            <header className="border-b border-amber-300/20 bg-violet-950/30 px-5 py-5 sm:px-7">
-              <h2 id="create-subject-title" className="font-cinzel text-2xl font-semibold">Create Subject</h2>
-              <p id="create-subject-description" className="mt-1 text-sm text-slate-300">Add a first-year lab subject to the course catalog.</p>
-            </header>
-            <fieldset disabled={creating} className="min-h-0 min-w-0 space-y-4 overflow-y-auto px-5 py-5 sm:px-7">
+          <form className="admin-section-form" onSubmit={handleCreateSubject} aria-busy={creating}>
+            <fieldset disabled={creating} className="admin-action-scroll admin-section-fields min-w-0 space-y-4">
               <label className="block space-y-2 text-sm font-medium">
                 <span>Subject name <span className="text-amber-300" aria-hidden="true">*</span></span>
                 <input className={subjectField} required maxLength={200} autoFocus value={newSubject.name}
@@ -609,17 +566,15 @@ export default function SubjectsManagement() {
               </div>
               <p className="border-t border-slate-700 pt-3 text-sm text-slate-300">Curriculum year: <strong>First year</strong> <span className="mx-2 text-slate-500" aria-hidden="true">·</span> Type: <strong>Lab</strong></p>
             </fieldset>
-            <footer className="shrink-0 border-t border-amber-300/20 bg-slate-950/50 px-5 py-4 sm:px-7">
-              {createError && <p role="alert" className="mb-3 text-sm text-rose-200">{createError}</p>}
-              <div className="flex flex-wrap justify-end gap-3">
-                <button type="button" disabled={creating} onClick={closeCreateSubject}
-                  className="min-h-11 rounded-lg border border-amber-300/45 px-4 text-sm font-semibold text-amber-100 hover:bg-amber-300/10 focus-visible:outline focus-visible:outline-violet-400 disabled:opacity-50">Cancel</button>
-                <button type="submit" disabled={creating}
-                  className="admin-button admin-button-primary font-cinzel min-h-11 rounded-lg border px-5 text-sm font-semibold text-white focus-visible:outline focus-visible:outline-amber-300 disabled:opacity-70">{creating ? 'Creating…' : 'Create Subject'}</button>
+            <footer className="admin-section-footer">
+              {createError && <p role="alert">{createError}</p>}
+              <div>
+                <button type="button" disabled={creating} onClick={closeCreateSubject} className="admin-button px-4 text-sm font-semibold">Cancel</button>
+                <button type="submit" disabled={creating} className="admin-button admin-button-primary px-4 text-sm font-semibold">{creating ? 'Creating…' : 'Create subject'}</button>
               </div>
             </footer>
           </form>
-        </dialog>
+        </AdminActionDialog>
       )}
     </div>
   )
