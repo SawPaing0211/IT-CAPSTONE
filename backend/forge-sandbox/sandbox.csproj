@@ -10,4 +10,4 @@
     <UseAppHost>true</UseAppHost>         <!-- Force apphost binary generation -->
     <SelfContained>false</SelfContained>  <!-- Use runtime from image, not bundled -->
   </PropertyGroup>
-</Project>
+</Project>  

@@ -2,6 +2,20 @@ import { useState, useEffect, useRef } from 'react'
 import Editor from '@monaco-editor/react'
 import { api } from '../../api/client'
 
+// localStorage here is shared by the whole browser -- without the
+// student's own id in the key, sandbox code and saved scrolls would leak
+// to whoever else uses the same machine/browser next. Falls back to
+// 'anon' only if there's genuinely no token yet.
+const getUid = () => {
+  const token = localStorage.getItem('token')
+  if (!token) return 'anon'
+  try {
+    return JSON.parse(atob(token.split('.')[1])).sub || 'anon'
+  } catch (err) {
+    return 'anon'
+  }
+}
+
 // ─── Starter spell templates ───────────────────────────────────────────────
 const SPELL_TEMPLATES = {
   python: {
@@ -29,7 +43,7 @@ const SPELL_TEMPLATES = {
 const LANG_META = {
   python: { icon: '🐍', label: 'Python', ext: 'py', color: 'from-cyan-500 to-blue-600' },
   java:   { icon: '☕', label: 'Java',   ext: 'java', color: 'from-orange-500 to-red-600' },
-  csharp: { icon: '🔷', label: 'C#',     ext: 'cs', color: 'from-purple-500 to-pink-600' }, 
+  csharp: { icon: '🔷', label: 'C#',     ext: 'cs', color: 'from-purple-500 to-pink-600' },
 }
 
 const TEMPLATE_LABELS = {
@@ -112,11 +126,12 @@ export default function Sandbox({ onClose, initialCode = null, initialLanguage =
   const [showSettings, setShowSettings]  = useState(false)
   const [fontSize, setFontSize]           = useState(14)
   const [savedScrolls, setSavedScrolls]  = useState(() => {
-    try { return JSON.parse(localStorage.getItem('sandbox_saved') || '[]') } catch { return [] }
+    try { return JSON.parse(localStorage.getItem(`sandbox_saved_${getUid()}`) || '[]') } catch { return [] }
   })
   const [saveNameInput, setSaveNameInput] = useState('')
   const [showSaveDialog, setShowSaveDialog] = useState(false)
   const [particles, setParticles]         = useState([])
+  const [mobileTab, setMobileTab]         = useState('code')  // Code/Output tabs, mobile only
 
   const editorRef        = useRef(null)
   const editorContainerRef = useRef(null)
@@ -160,10 +175,11 @@ export default function Sandbox({ onClose, initialCode = null, initialLanguage =
     if (isRunning) return
     setIsRunning(true)
     setOutput(null)
+    setMobileTab('output')
     const start = Date.now()
 
     try {
-      // ✅ Centralized API client handles auth & auto-refresh
+      // Centralized API client handles auth & auto-refresh
       const data = await api.post('/api/sandbox/run', { code, language })
       const elapsed = Date.now() - start
       const result = { ...data, elapsed }
@@ -187,6 +203,11 @@ export default function Sandbox({ onClose, initialCode = null, initialLanguage =
     }
   }
 
+  // Monaco needs a manual re-layout after its container is hidden/shown (mobile tab switch)
+  useEffect(() => {
+    if (mobileTab === 'code') setTimeout(() => editorRef.current?.layout(), 50)
+  }, [mobileTab])
+
   // ── Keyboard shortcut ──────────────────────────────────────────────────
   useEffect(() => {
     const handler = (e) => {
@@ -203,14 +224,15 @@ export default function Sandbox({ onClose, initialCode = null, initialLanguage =
   // ── Persist sandbox code across refreshes ─────────────────────────────
   useEffect(() => {
     if (!initialCode) {
-      const saved = localStorage.getItem(`sandbox_code_${language}`)
+      const saved = localStorage.getItem(`sandbox_code_${getUid()}_${language}`)
       if (saved) setCode(saved)
     }
   }, [language])
 
+  // Save code to localStorage whenever it changes
   useEffect(() => {
     if (!initialCode && code !== SPELL_TEMPLATES[language]?.blank) {
-      localStorage.setItem(`sandbox_code_${language}`, code)
+      localStorage.setItem(`sandbox_code_${getUid()}_${language}`, code)
     }
   }, [code, language])
 
@@ -234,21 +256,23 @@ export default function Sandbox({ onClose, initialCode = null, initialLanguage =
     }
     const updated = [scroll, ...savedScrolls.slice(0, 7)]
     setSavedScrolls(updated)
-    localStorage.setItem('sandbox_saved', JSON.stringify(updated))
+    localStorage.setItem(`sandbox_saved_${getUid()}`, JSON.stringify(updated))
     setSaveNameInput('')
     setShowSaveDialog(false)
   }
 
+  // Load a saved scroll back into the editor
   const loadScroll = (scroll) => {
     setLanguage(scroll.language)
     setCode(scroll.code)
     setOutput(null)
   }
 
+  // Remove a saved scroll from the list
   const deleteScroll = (id) => {
     const updated = savedScrolls.filter(s => s.id !== id)
     setSavedScrolls(updated)
-    localStorage.setItem('sandbox_saved', JSON.stringify(updated))
+    localStorage.setItem(`sandbox_saved_${getUid()}`, JSON.stringify(updated))
   }
 
   // ── Download code ──────────────────────────────────────────────────────
@@ -306,7 +330,7 @@ export default function Sandbox({ onClose, initialCode = null, initialLanguage =
       </div>
 
       {/* ── Header ───────────────────────────────────────────────────── */}
-      <header className="h-14 shrink-0 bg-slate-900/95 border-b border-emerald-600/30 flex items-center justify-between px-4 gap-3">
+      <header className="shrink-0 bg-slate-900/95 border-b border-emerald-600/30 flex flex-wrap items-center justify-between gap-y-2 gap-x-3 px-3 sm:px-4 py-2 md:h-14 md:py-0">
 
         {/* Left: identity */}
         <div className="flex items-center gap-3 min-w-0">
@@ -339,13 +363,13 @@ export default function Sandbox({ onClose, initialCode = null, initialLanguage =
             <button
               key={key}
               onClick={() => handleLanguageChange(key)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 border ${
+              className={`px-2 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1 sm:gap-1.5 border ${
                 language === key
                   ? `bg-gradient-to-r ${meta.color} text-white border-white/20 shadow-lg`
                   : 'text-slate-400 hover:text-white border-slate-700 hover:border-slate-500'
               }`}
             >
-              {meta.icon} {meta.label}
+              {meta.icon} <span className="hidden sm:inline">{meta.label}</span>
             </button>
           ))}
         </div>
@@ -428,7 +452,7 @@ export default function Sandbox({ onClose, initialCode = null, initialLanguage =
           <div className="relative">
             <button
               onClick={() => { setShowSettings(!showSettings); setShowTemplates(false); setShowHistory(false) }}
-              className="px-2 py-1.5 text-xs text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition border border-transparent hover:border-slate-700"
+              className="px-2 py-1.5 text-xs text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition border border-transparent hover:border-slate-700 min-w-[44px] min-h-[44px] flex items-center justify-center"
             >
               ⚙️
             </button>
@@ -456,7 +480,7 @@ export default function Sandbox({ onClose, initialCode = null, initialLanguage =
 
           <button
             onClick={handleDownload}
-            className="px-2 py-1.5 text-xs text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition border border-transparent hover:border-slate-700"
+            className="px-2 py-1.5 text-xs text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition border border-transparent hover:border-slate-700 min-w-[44px] min-h-[44px] flex items-center justify-center"
             title="Download code"
           >
             📥
@@ -464,7 +488,7 @@ export default function Sandbox({ onClose, initialCode = null, initialLanguage =
 
           <button
             onClick={() => setShowSaveDialog(true)}
-            className="px-2 py-1.5 text-xs text-slate-400 hover:text-emerald-400 hover:bg-slate-800 rounded-lg transition border border-transparent hover:border-emerald-600/40"
+            className="px-2 py-1.5 text-xs text-slate-400 hover:text-emerald-400 hover:bg-slate-800 rounded-lg transition border border-transparent hover:border-emerald-600/40 min-w-[44px] min-h-[44px] flex items-center justify-center"
             title="Save scroll"
           >
             💾
@@ -519,13 +543,33 @@ export default function Sandbox({ onClose, initialCode = null, initialLanguage =
       )}
 
       {/* ── Body: editor + output ─────────────────────────────────────── */}
-      <div className="flex-1 flex overflow-hidden" style={{ minHeight: 0 }}>
+      <div className="flex-1 flex flex-col overflow-hidden" style={{ minHeight: 0 }}>
+
+        {/* Mobile-only Code/Output tabs, only shown once there's something to switch to */}
+        {(output || isRunning) && (
+          <div className="md:hidden shrink-0 flex border-b border-emerald-600/20 bg-slate-900/60">
+            <button
+              onClick={() => setMobileTab('code')}
+              className={`flex-1 py-2 text-xs font-bold transition ${mobileTab === 'code' ? 'text-emerald-400 border-b-2 border-emerald-400' : 'text-slate-500'}`}
+            >
+              💻 Code
+            </button>
+            <button
+              onClick={() => setMobileTab('output')}
+              className={`flex-1 py-2 text-xs font-bold transition ${mobileTab === 'output' ? 'text-emerald-400 border-b-2 border-emerald-400' : 'text-slate-500'}`}
+            >
+              🔮 Output
+            </button>
+          </div>
+        )}
+
+        <div className="flex-1 flex overflow-hidden" style={{ minHeight: 0 }}>
 
         {/* Editor pane */}
         <div
           ref={editorContainerRef}
           style={{ flex: output ? '1 1 55%' : '1 1 100%', minWidth: 0, position: 'relative', transition: 'flex 0.3s ease' }}
-          className="overflow-hidden"
+          className={`overflow-hidden ${(output || isRunning) && mobileTab === 'output' ? 'hidden' : 'flex'} md:flex flex-col`}
         >
           {/* Decorative top strip */}
           <div className={`h-0.5 w-full bg-gradient-to-r ${langMeta.color} opacity-60`} />
@@ -580,7 +624,7 @@ export default function Sandbox({ onClose, initialCode = null, initialLanguage =
         {(output || isRunning) && (
           <div
             ref={outputRef}
-            className="flex flex-col border-l border-emerald-600/20 bg-slate-950"
+            className={`flex-col border-l-0 md:border-l border-emerald-600/20 bg-slate-950 ${mobileTab === 'code' ? 'hidden' : 'flex'} md:flex`}
             style={{ flex: '1 1 45%', minWidth: 0, minHeight: 0 }}
           >
             {/* Output header */}
@@ -685,6 +729,7 @@ export default function Sandbox({ onClose, initialCode = null, initialLanguage =
             )}
           </div>
         )}
+        </div>
       </div>
 
       {/* ── CSS for particle animation ────────────────────────────────── */}

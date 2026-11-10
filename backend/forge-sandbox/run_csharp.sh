@@ -52,17 +52,27 @@ dotnet build "$BUILD_DIR/sandbox.csproj" \
     --configuration Release \
     --no-restore \
     --output "$BUILD_DIR/out" \
+    -p:StartupObject=Program \
+    -p:Optimize=false \
     -v quiet > /dev/null 2>&1
 
 BUILD_EXIT=$?
 if [ $BUILD_EXIT -ne 0 ]; then
+    # Sentinel for sandbox.py to detect compile errors explicitly
+    printf '__COMPILE_ERROR__\n' >&2
     # Re-run to surface the actual compiler error to the student
     dotnet build "$BUILD_DIR/sandbox.csproj" \
         --configuration Release \
         --no-restore \
         --output "$BUILD_DIR/out" \
+        -p:StartupObject=Program \
+        -p:Optimize=false \
         -v quiet 2>&1
     exit $BUILD_EXIT
 fi
 
-exec dotnet "$BUILD_DIR/out/sandbox.dll"
+if [ -f /tmp/sandbox/input.txt ]; then
+    exec dotnet "$BUILD_DIR/out/sandbox.dll" < /tmp/sandbox/input.txt
+else
+    exec dotnet "$BUILD_DIR/out/sandbox.dll"
+fi

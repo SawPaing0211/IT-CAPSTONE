@@ -1,4 +1,6 @@
-import { useState, useEffect } from 'react'
+// note to self: instructor dashboard uses routes + <Outlet/> so tabs get real URLs. student/admin dashboards just switch tabs internally, no child routes for those two.
+
+import { useState, useEffect, useLayoutEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom'
 
 // Public Components
@@ -10,53 +12,68 @@ import InstructorDashboard from './pages/Instructor/InstructorDashboard'
 import StudentDashboard from './pages/Student/StudentDashboard'
 import AdminDashboard from './pages/Admin/AdminDashboard'
 
-// Instructor Pages
+// Instructor Pages (only these need importing here — they're rendered via <Outlet/>)
 import DashboardOverview from './pages/Instructor/DashboardOverview'
 import MyClasses from './pages/Instructor/MyClasses'
 import ProblemManagement from './pages/Instructor/ProblemManagement'
 import CreateProblem from './pages/Instructor/CreateProblem'
+import SelectClassForQuest from './pages/Instructor/SelectClassForQuest'
 import ClassDetail from './pages/Instructor/ClassDetail'
 import Announcements from './pages/Instructor/Announcements'
-import PlagiarismCheck from './pages/Instructor/PlagiarismCheck'
-import Analytics from './pages/Instructor/Analytics'
 import CourseMaterials from './pages/Instructor/CourseMaterials'
 import ProblemSubmissions from './pages/Instructor/ProblemSubmissions'
-import InstructorAchievements from './pages/Instructor/InstructorAchievements' 
+import InstructorAchievements from './pages/Instructor/InstructorAchievements'
+import { API_BASE, authFetch } from './api/client'
+import ChangePasswordModal from './components/ChangePasswordModal'
+import { CHANGE_PASSWORD_EVENT } from './utils/accountEvents'
+import { achievementStore } from './utils/achievementStore'
+import AchievementCelebrations from './components/AchievementCelebrations'
 
-// Student Pages
-import MySubjects from './pages/Student/MySubjects'
-import StudentCodeEditor from './pages/Student/StudentCodeEditor'
-import ProblemList from './pages/Student/ProblemList'
-import Leaderboard from './pages/Student/components/Leaderboard'
-import ProgressStats from './pages/Student/components/ProgressStats'
-import QuestLog from './pages/Student/QuestLog'
+function ProtectedRoute({ user, children, allowedRoles }) {
+  if (!user) return <Navigate to="/auth" replace />
+  if (!allowedRoles.includes(user.role)) return <Navigate to="/" replace />
+  return children
+}
 
-// Admin Pages
-import UserManagement from './pages/Admin/UserManagement'
-import BlocksSections from './pages/Admin/BlocksSections'
-import ActivityLogs from './pages/Admin/ActivityLogs'
+// student/admin sub-pages are handled inside those dashboards themselves, not routed here
 
 function AppContent() {
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [showChangePw, setShowChangePw] = useState(false)
   const navigate = useNavigate()
+
+  // every role's account menu opens the same dialog
+  useEffect(() => {
+    const open = () => setShowChangePw(true)
+    window.addEventListener(CHANGE_PASSWORD_EVENT, open)
+    return () => window.removeEventListener(CHANGE_PASSWORD_EVENT, open)
+  }, [])
+
+  // a demo server (simulated code runner) says so; real servers report 'docker-sandbox'
+  const [simulatedRunner, setSimulatedRunner] = useState(false)
+  useEffect(() => {
+    fetch(`${API_BASE}/api/health`).then(r => r.json()).then(h => setSimulatedRunner(h.execution_mode === 'demo-stub')).catch(() => {})
+  }, [])
 
   useEffect(() => {
     const token = localStorage.getItem('token')
     if (token) {
-      fetch('http://localhost:5000/api/auth/me', {
+      authFetch(`${API_BASE}/api/auth/me`, {
         headers: { 'Authorization': `Bearer ${token}` }
       })
         .then(res => res.json())
-        .then(data => { 
-          if (data.id) setUser(data); 
+        .then(data => {
+          if (data.id) setUser(data);
           else {
             localStorage.removeItem('token')
+            localStorage.removeItem('refresh_token')
             navigate('/auth')
           }
         })
         .catch(() => {
           localStorage.removeItem('token')
+          localStorage.removeItem('refresh_token')
           navigate('/auth')
         })
         .finally(() => setLoading(false))
@@ -66,24 +83,24 @@ function AppContent() {
   }, [navigate])
 
   const handleLogin = (userData) => {
-  setUser(userData)
-  // Redirect based on role
-  if (userData.role === 'instructor') navigate('/instructor')
-  else if (userData.role === 'student') navigate('/student')
-  else if (userData.role === 'super_admin') navigate('/admin')  // ✅ Updated
-}
-  
-  const handleLogout = () => { 
-    localStorage.removeItem('token')
-    setUser(null)
-    navigate('/')
+    setUser(userData)
+    // Redirect based on role
+    if (userData.role === 'instructor') navigate('/instructor')
+    else if (userData.role === 'student') navigate('/student')
+    else if (userData.role === 'administrator') navigate('/admin')
   }
 
-  // Protected Route Component
-  const ProtectedRoute = ({ children, allowedRoles }) => {
-    if (!user) return <Navigate to="/auth" replace />
-    if (!allowedRoles.includes(user.role)) return <Navigate to="/" replace />
-    return children
+  // The celebration queue/cache belong to exactly one signed-in account.
+  useLayoutEffect(() => {
+    achievementStore.setOwner(user && !user.must_change_password ? { id: user.id, role: user.role } : null)
+  }, [user?.id, user?.role, user?.must_change_password])
+
+  const handleLogout = () => {
+    achievementStore.clear()
+    localStorage.removeItem('token')
+    localStorage.removeItem('refresh_token')
+    setUser(null)
+    navigate('/')
   }
 
   if (loading) {
@@ -96,70 +113,85 @@ function AppContent() {
       </div>
     )
   }
-  
+
+  const mustChange = !!(user && user.must_change_password)
+
   return (
+    <>
+    {simulatedRunner && (
+      <div className="fixed top-0 inset-x-0 z-[100000] bg-amber-500 text-black text-xs font-bold text-center py-1 pointer-events-none">
+        DEMO: code results are simulated, not produced by the real sandbox
+      </div>
+    )}
+    {mustChange && (
+      <ChangePasswordModal
+        forced
+        onChanged={() => setUser(u => ({ ...u, must_change_password: false }))}
+        onLogout={handleLogout}
+      />
+    )}
+    {showChangePw && !mustChange && (
+      <ChangePasswordModal onClose={() => setShowChangePw(false)} onChanged={() => setTimeout(() => setShowChangePw(false), 1200)} />
+    )}
+    <AchievementCelebrations />
+    {mustChange ? (
+      // nothing else is mounted until the temporary password is replaced: every other API call is refused meanwhile
+      <div className="min-h-screen bg-slate-950" />
+    ) : (
     <Routes>
       {/* Public Routes */}
-      <Route path="/" element={<Landing onLogin={() => navigate('/auth')} />} />
+      <Route path="/" element={<Landing />} />
       <Route path="/auth" element={<Auth onLogin={handleLogin} />} />
 
-      {/* Instructor Routes */}
-      <Route 
-        path="/instructor/*" 
+      {/* instructor side, uses <Outlet/> so these tabs are real pages */}
+      <Route
+        path="/instructor/*"
         element={
-          <ProtectedRoute allowedRoles={['instructor']}>
+          <ProtectedRoute user={user} allowedRoles={['instructor']}>
             <InstructorDashboard user={user} onLogout={handleLogout} />
           </ProtectedRoute>
         }
       >
-        <Route index element={<DashboardOverview />} />
-        <Route path="classes" element={<MyClasses />} />
-        <Route path="class/:id" element={<ClassDetail />} />
-        <Route path="problems" element={<ProblemManagement />} />
-        <Route path="create-problem" element={<CreateProblem />} />
-        <Route path="problem/:problemId/submissions" element={<ProblemSubmissions />} /> 
-        <Route path="announcements" element={<Announcements />} />
-        <Route path="plagiarism" element={<PlagiarismCheck />} />
-        <Route path="analytics" element={<Analytics />} />
-        <Route path="materials" element={<CourseMaterials />} />
+        <Route index element={<DashboardOverview />} /> {/* the home tab when you first log in */}
+        <Route path="classes" element={<MyClasses />} /> {/* list of my classes */}
+        <Route path="class/:id" element={<ClassDetail />} /> {/* one class, tabs inside for materials/quests/etc */}
+        <Route path="problems" element={<ProblemManagement />} /> {/* the quests list */}
+        <Route path="create-problem" element={<CreateProblem />} /> {/* the quest builder wizard */}
+        <Route path="create-problem/pick-class" element={<SelectClassForQuest />} /> {/* pick a class first when there's no class context yet */}
+        <Route path="problem/:problemId/submissions" element={<ProblemSubmissions />} />
+        <Route path="announcements" element={<Announcements />} /> {/* posting announcements to students */}
+        {/* plagiarism + analytics live inside each class (class tabs) because they need a class; old direct links go to the class list */}
+        <Route path="plagiarism" element={<Navigate to="/instructor/classes" replace />} />
+        <Route path="analytics" element={<Navigate to="/instructor/classes" replace />} />
+        <Route path="materials" element={<CourseMaterials />} /> {/* uploading modules/lessons/files */}
         <Route path="achievements" element={<InstructorAchievements />} />
       </Route>
 
-      {/* Student Routes */}
-      <Route 
-        path="/student/*" 
+      {/* student side manages its own tabs internally, no child routes needed */}
+      <Route
+        path="/student/*"
         element={
-          <ProtectedRoute allowedRoles={['student']}>
+          <ProtectedRoute user={user} allowedRoles={['student']}>
             <StudentDashboard user={user} onLogout={handleLogout} />
           </ProtectedRoute>
         }
-      >
-        <Route path="subjects" element={<MySubjects />} />
-        <Route index element={<MySubjects />} />
-        <Route path="problem/:problemId" element={<StudentCodeEditor />} />
-        <Route path="leaderboard" element={<Leaderboard />} />
-        <Route path="stats" element={<ProgressStats />} />
-        <Route path="quest-log" element={<QuestLog />} />
-      </Route>
+      />
 
-      {/* Admin Routes */}
-      <Route 
-        path="/admin/*" 
+      {/* admin side, same deal, manages its own tabs internally */}
+      <Route
+        path="/admin/*"
         element={
-          <ProtectedRoute allowedRoles={['super_admin']}>  // ✅ Updated
+          <ProtectedRoute user={user} allowedRoles={['administrator']}>
             <AdminDashboard user={user} onLogout={handleLogout} />
           </ProtectedRoute>
         }
-      >
-        <Route index element={<UserManagement />} />
-        <Route path="users" element={<UserManagement />} />
-        <Route path="blocks" element={<BlocksSections />} />
-        <Route path="logs" element={<ActivityLogs />} />
-      </Route>
+      />
 
       {/* Catch All */}
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+    )}
+    </>
   )
 }
 
@@ -172,4 +204,4 @@ function App() {
   )
 }
 
-export default App  
+export default App

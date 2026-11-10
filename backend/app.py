@@ -1,33 +1,185 @@
+from dotenv import load_dotenv
+load_dotenv()
+import os
 from flask import Flask, jsonify, request
 from flask_cors import CORS
-from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity, decode_token
+from flask_jwt_extended import JWTManager, create_access_token, create_refresh_token, jwt_required, get_jwt_identity, decode_token, verify_jwt_in_request
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from functools import wraps
-import subprocess, sys, time, csv, json, io
+import subprocess, sys, time, csv, json, io, re, base64, secrets, string
 from io import StringIO
-from sqlalchemy import text, inspect
-from routes.sandbox import sandbox_bp, _run_in_docker
+from sqlalchemy import text, inspect, distinct, func
+from sqlalchemy.exc import IntegrityError, OperationalError
+import logging
+import uuid as _uuid
+logger = logging.getLogger('forge')
+from routes.sandbox import sandbox_bp, _run_in_docker, handles_setup_errors
+from account_email_policy import (ACCOUNT_EMAIL_DOMAIN, _EMAIL_RE, normalize_email,
+                                  normalize_student_id, valid_student_id, generated_student_email,
+                                  email_domain_allowed, account_email)
+import re as _re
+from datetime import datetime as _dt, timedelta as _td
+from collections import defaultdict as _dd
 
 app = Flask(__name__)
 app.register_blueprint(sandbox_bp)
-app.config['SECRET_KEY'] = 'dev-secret-change-in-production'
-app.config['JWT_SECRET_KEY'] = 'jwt-secret-change-in-production'
-app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://root:@localhost/forge_dev'
+
+# FORGE_ENV=production (set in docker-compose.yml) switches on strict config:
+# the app refuses to start on missing/placeholder secrets instead of silently
+# falling back to the public dev defaults below, and the debugger is forced off.
+FORGE_ENV = os.environ.get('FORGE_ENV', 'development').strip().lower()
+IS_PRODUCTION = FORGE_ENV == 'production'
+
+_DEV_SECRET_KEY = 'dev-secret-change-in-production'
+_DEV_JWT_SECRET_KEY = 'jwt-secret-change-in-production'
+_PLACEHOLDER_SECRETS = {'', 'change-me', 'change-me-too', _DEV_SECRET_KEY, _DEV_JWT_SECRET_KEY}
+
+def _require_env(name):
+    # production-only: a required setting must be present and not a known placeholder
+    value = os.environ.get(name, '').strip()
+    if not value or (name.endswith('_KEY') and value in _PLACEHOLDER_SECRETS):
+        raise RuntimeError(
+            f"{name} is missing or still a placeholder, and FORGE_ENV=production. "
+            f"Set a real value in backend/.env (see backend/.env.example)."
+        )
+    return value
+
+# Locally (no .env needed) the dev fallbacks are used; in production they never are.
+if IS_PRODUCTION:
+    app.config['SECRET_KEY'] = _require_env('SECRET_KEY')
+    app.config['JWT_SECRET_KEY'] = _require_env('JWT_SECRET_KEY')
+    app.config['SQLALCHEMY_DATABASE_URI'] = _require_env('DATABASE_URL')
+else:
+    app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', _DEV_SECRET_KEY)
+    app.config['JWT_SECRET_KEY'] = os.environ.get('JWT_SECRET_KEY', _DEV_JWT_SECRET_KEY)
+    app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'mysql+pymysql://root:@localhost/forge_dev')
+
+# Behind nginx every request arrives from the proxy's address, which breaks
+# per-IP rate limiting / lockouts / audit logs. TRUSTED_PROXY_COUNT is how many
+# proxies sit in front of the app (1 = just nginx); 0 (default) trusts no
+# forwarded headers, which is right when the app is reached directly.
+_trusted_proxies = int(os.environ.get('TRUSTED_PROXY_COUNT', '0') or 0)
+if _trusted_proxies > 0:
+    from werkzeug.middleware.proxy_fix import ProxyFix
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=_trusted_proxies, x_proto=_trusted_proxies, x_host=_trusted_proxies)
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-CORS(app, origins=["http://localhost:5173"], supports_credentials=True)
+# CORS_ORIGINS can be a comma-separated list, so both the local Vite dev server
+# and the deployed frontend can be allowed at once (e.g. during a staged rollout).
+_cors_origins = os.environ.get('CORS_ORIGINS', 'http://localhost:5173').split(',')
+CORS(app, origins=_cors_origins, supports_credentials=True)
+app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(minutes=15)    # same as the library default, now explicit
+app.config['JWT_REFRESH_TOKEN_EXPIRES'] = timedelta(days=7)
 jwt = JWTManager(app)
+# Demo/test mode may only ever point at a database whose name says so. This is the
+# guard that keeps a demo run from touching the real database by mistake.
+if os.environ.get('FORGE_DEMO', '').strip().lower() in ('1', 'true', 'yes'):
+    from sqlalchemy.engine import make_url as _mk
+    _dbname = (_mk(app.config['SQLALCHEMY_DATABASE_URI']).database or '').lower()
+    if not any(w in _dbname for w in ('demo', 'test')):
+        raise SystemExit(f"FORGE_DEMO is on but the database name {_dbname!r} does not contain 'demo' or 'test'. Refusing to start.")
+    # a name is not enough: a demo may only use a local file or a database on this machine, never a remote server
+    _u = _mk(app.config['SQLALCHEMY_DATABASE_URI'])
+    if not _u.drivername.startswith('sqlite') and (_u.host or '').lower() not in ('127.0.0.1', 'localhost', '::1'):
+        raise SystemExit(f"FORGE_DEMO is on but the database host {_u.host!r} is not this machine. Refusing to start.")
+# How code is run for grading. 'docker-sandbox' is the only real mode. demo_runner.py can switch
+# a throwaway demo process to 'demo-stub' (simulated results); that is recorded on every result
+# and shown by /api/health, so simulated results can never pass as real execution evidence.
+EXECUTION_MODE = 'docker-sandbox'
+_demo_flags = [k for k in ('FORGE_DEMO', 'FORGE_DEMO_RUNNER') if os.environ.get(k, '').strip()]
+if IS_PRODUCTION and _demo_flags:
+    raise SystemExit(f"Refusing to start in production with demo settings enabled: {', '.join(_demo_flags)}.")
+if IS_PRODUCTION and os.environ.get('FORGE_AUTO_SCHEMA', '').strip():
+    # start-up must never write to a production schema; upgrades are the explicit manage_schema.py command
+    raise SystemExit("Refusing to start in production with FORGE_AUTO_SCHEMA set (it would change the schema at start-up). Use manage_schema.py upgrade.")
 db = SQLAlchemy(app)
+
+@jwt.token_in_blocklist_loader
+def _reject_deactivated_users(jwt_header, jwt_payload):
+    # runs on every protected request: a deactivated/deleted account is
+    # locked out immediately instead of riding out its token's lifetime.
+    # The user row is cached in the session, so handlers' own User lookup is free.
+    # Refresh tokens are validated (incl. is_active) in /api/auth/refresh itself.
+    if jwt_payload.get('type') == 'refresh':
+        return False
+    try:
+        user = db.session.get(User, int(jwt_payload['sub']))
+    except (KeyError, TypeError, ValueError):
+        return True
+    # `is False` (not `not`): legacy rows with NULL is_active stay allowed
+    if user is None or user.is_active is False:
+        return True
+    # a password change/reset bumps token_version: older tokens (no claim = version 0) die
+    return int(jwt_payload.get('tv', 0)) != int(user.token_version or 0)
+
+
+# ===== PASSWORD POLICY (one rule everywhere: change, admin reset, admin-set passwords) =====
+PASSWORD_MIN_LENGTH = 8
+PASSWORD_MAX_LENGTH = 128
+
+
+def password_policy_error(password, user=None):
+    """None if acceptable, else a plain-language reason. Never logs the password."""
+    if not isinstance(password, str) or not password:
+        return "A password is required."
+    if len(password) < PASSWORD_MIN_LENGTH:
+        return f"Password must be at least {PASSWORD_MIN_LENGTH} characters."
+    if len(password) > PASSWORD_MAX_LENGTH:
+        return f"Password must be at most {PASSWORD_MAX_LENGTH} characters."
+    if not _re.search(r'[A-Za-z]', password) or not _re.search(r'\d', password):
+        return "Password must contain at least one letter and one number."
+    if user is not None:
+        low = password.lower()
+        for ident in (user.username, (user.email or '').split('@')[0]):
+            if ident and len(ident) >= 4 and low == ident.lower():
+                return "Password must not be the same as your username or email name."
+    return None
+
+
+def issue_tokens(user):
+    claims = {'tv': int(user.token_version or 0)}
+    return (create_access_token(identity=str(user.id), additional_claims=claims),
+            create_refresh_token(identity=str(user.id), additional_claims=claims))
+
+
+# Until a temporary/reset password is replaced, only these calls work.
+_PASSWORD_CHANGE_ALLOWED = {'/api/auth/login', '/api/auth/refresh', '/api/auth/me', '/api/auth/change-password'}
+
+
+@app.before_request
+def _enforce_password_change():
+    if request.method == 'OPTIONS' or not request.path.startswith('/api/') or request.path in _PASSWORD_CHANGE_ALLOWED:
+        return None
+    try:
+        verify_jwt_in_request(optional=True)
+        ident = get_jwt_identity()
+    except Exception:
+        return None            # bad/expired token: the route's own jwt check answers
+    if not ident:
+        return None
+    u = db.session.get(User, int(ident))
+    if u is not None and u.must_change_password:
+        return jsonify({"error": "password_change_required",
+                        "message": "You must change your temporary password before continuing."}), 403
+    return None
 
 # ===== RATE LIMITING =====
 rate_limit_store = {}
+
 def rate_limit(max_calls=5, period=60):
     def decorator(f):
         @wraps(f)
         def decorated_function(*args, **kwargs):
-            ip = request.remote_addr
+            # Signed-in callers are counted per account, not per IP: a whole
+            # classroom behind one school/NAT address would otherwise share a
+            # single allowance. Anonymous callers (e.g. login) still use the IP.
+            try:
+                ident = get_jwt_identity()
+            except Exception:
+                ident = None
+            ip = f"user:{ident}" if ident else request.remote_addr
             now = time.time()
             if ip not in rate_limit_store: rate_limit_store[ip] = []
             rate_limit_store[ip] = [t for t in rate_limit_store[ip] if now - t < period]
@@ -58,7 +210,12 @@ class UserAchievement(db.Model):
     achievement_id = db.Column(db.Integer, db.ForeignKey('achievements.id'), nullable=False)
     earned_at = db.Column(db.DateTime, default=datetime.utcnow)
     progress = db.Column(db.Integer, default=0)
-    
+
+    # One award per user per achievement. db.create_all() adds this to NEW databases only; an existing
+    # database gets it from the explicit `manage_schema.py upgrade`, which refuses (and changes nothing)
+    # while duplicate pairs exist. schema_status() reports it as missing until it is effectively present.
+    __table_args__ = (db.UniqueConstraint('user_id', 'achievement_id', name='uq_user_achievement'),)
+
     user = db.relationship('User', backref=db.backref('user_achievements', lazy=True))
     achievement = db.relationship('Achievement')
 
@@ -68,14 +225,29 @@ class User(db.Model):
     username = db.Column(db.String(50), unique=True, nullable=False)
     email = db.Column(db.String(100), unique=True, nullable=False)
     password_hash = db.Column(db.String(255), nullable=False)
-    role = db.Column(db.Enum('student', 'instructor', 'super_admin'), default='student')
+    role = db.Column(db.Enum('student', 'instructor', 'administrator'), default='student')
+    full_name = db.Column(db.String(200), nullable=True)
     xp = db.Column(db.Integer, default=0)
     level = db.Column(db.Integer, default=1)
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    login_attempts = db.Column(db.Integer, default=0)
+    locked_until = db.Column(db.DateTime, nullable=True)
+    # temporary/reset passwords must be replaced before anything else is allowed
+    must_change_password = db.Column(db.Boolean, nullable=False, default=False, server_default='0')
+    # bumped on every password change/reset: tokens issued earlier stop working
+    token_version = db.Column(db.Integer, nullable=False, default=0, server_default='0')
+    password_changed_at = db.Column(db.DateTime, nullable=True)
+    # set on every successful /api/auth/login -- NOT bumped by /refresh, so this is
+    # "last time they actually typed credentials in", not "last time their session
+    # was alive". Drives the admin dashboard's "Active users today" card.
+    last_login_at = db.Column(db.DateTime, nullable=True)
 
 class Problem(db.Model):
     __tablename__ = 'problems'
+    __table_args__ = (
+        db.Index('idx_problem_published_subject', 'is_published', 'subject_id'),
+    )
     id = db.Column(db.Integer, primary_key=True)
     title = db.Column(db.String(200), nullable=False)
     description = db.Column(db.Text, nullable=False)
@@ -87,39 +259,111 @@ class Problem(db.Model):
     is_published = db.Column(db.Boolean, default=False)
     created_by = db.Column(db.Integer, db.ForeignKey('users.id'))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    
-    # ===== PRO FEATURES (Phase 1) =====
+
+    # extra quest fields below
     problem_type = db.Column(db.Enum('coding', 'debugging'), default='coding')
     languages = db.Column(db.JSON, default=['python'])  # ['python', 'java', 'csharp']
     is_event_quest = db.Column(db.Boolean, default=False)
-    visible_to_blocks = db.Column(db.JSON, default=[])  # [block_id1, block_id2]
+    visible_to_sections = db.Column(db.JSON, default=[])
     hints = db.Column(db.JSON, default=[])  # [{text: "...", xp_penalty: 10}]
     tags = db.Column(db.JSON, default=[])
     prerequisites = db.Column(db.JSON, default=[])
     estimated_time = db.Column(db.String(50))
     partial_credit = db.Column(db.Integer, default=100)
+    # multi-language quests: 'optional' = student answers 1..n of the ticked languages (extra languages earn bonus XP),
+    # 'required' = every ticked language must be submitted. Ignored when only one language is ticked.
+    language_rule = db.Column(db.String(10), nullable=False, default='optional', server_default='optional')
     auto_grade = db.Column(db.Boolean, default=True)
     plagiarism_threshold = db.Column(db.Float, default=0.85)
-    due_date = db.Column(db.DateTime, nullable=True)  # NEW: For quest deadlines
-    # ✅ NEW: Subject ownership (Phase 2)
+    due_date = db.Column(db.DateTime, nullable=True)  # for quest deadlines
+    # this is for which subject a quest belongs to
     subject_id = db.Column(db.Integer, db.ForeignKey('subjects.id'), nullable=True)
 
 class Submission(db.Model):
     __tablename__ = 'submissions'
+    __table_args__ = (
+        db.Index('idx_submission_user_problem', 'user_id', 'problem_id'),
+        db.Index('idx_submission_user_status', 'user_id', 'status'),
+    )
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     problem_id = db.Column(db.Integer, db.ForeignKey('problems.id'), nullable=False)
     code = db.Column(db.Text, nullable=False)
     language = db.Column(db.Enum('python', 'java', 'csharp'), nullable=False)
-    status = db.Column(db.Enum('accepted', 'wrong_answer', 'timeout', 'error'), nullable=False)
-    score = db.Column(db.Integer, default=0)
+    status       = db.Column(db.Enum(
+                       'accepted', 'partial', 'wrong_answer',
+                       'timeout', 'error', 'compile_error'
+                   ), nullable=False, default='error')
+    score        = db.Column(db.Integer, default=0)
+    passed_cases = db.Column(db.Integer, default=0)
+    total_cases  = db.Column(db.Integer, default=0)
+    exec_ms      = db.Column(db.Integer, default=0)
+    error_msg    = db.Column(db.Text,    nullable=True)
     submitted_at = db.Column(db.DateTime, default=datetime.utcnow)
+    # what the grader recorded at submission time: {"runner": ..., "tests": [{index, passed, kind, hidden, message, output?}]}.
+    # NULL on records made before this column existed (the viewer says so instead of guessing).
+    result_details = db.Column(db.JSON, nullable=True)
+
+class SubmissionSlot(db.Model):
+    """
+    Reservation of the single graded attempt for (student, problem, language).
+    UNIQUE(user_id, problem_id, language) is what makes simultaneous requests safe.
+    `language` is NULL on rows made before multi-language quests existed.
+    status: pending (being graded) | done (graded, result saved) | failed (runner broke; retry allowed)
+    """
+    __tablename__ = 'submission_slots'
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'problem_id', 'language', name='uq_submission_slot_user_problem_lang'),
+    )
+    id          = db.Column(db.Integer, primary_key=True)
+    user_id     = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    problem_id  = db.Column(db.Integer, db.ForeignKey('problems.id'), nullable=False)
+    language    = db.Column(db.String(10), nullable=True)
+    status      = db.Column(db.String(10), nullable=False, default='pending')
+    claimed_at  = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    finished_at = db.Column(db.DateTime, nullable=True)
+    error_msg   = db.Column(db.String(500), nullable=True)
+    # random value written by whoever currently owns the pending reservation;
+    # finishing or releasing only works while it still matches (late workers lose)
+    owner_token = db.Column(db.String(36), nullable=True)
+
+class CodeDraft(db.Model):
+    # in-progress code for a quest a student hasn't submitted yet.
+    # autosaved every few seconds from the editor so a power outage,
+    # a crashed browser, or opening the quest on a different machine
+    # doesn't lose the student's work -- this used to live only in
+    # the browser's localStorage, which none of those situations survive.
+    __tablename__ = 'code_drafts'
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'problem_id', 'language', name='uq_code_draft'),
+    )
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    problem_id = db.Column(db.Integer, db.ForeignKey('problems.id'), nullable=False)
+    language = db.Column(db.Enum('python', 'java', 'csharp'), nullable=False)
+    code = db.Column(db.Text, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+class HintReveal(db.Model):
+    # records that a specific student revealed a specific hint on a
+    # specific problem — one row per (student, problem, hint) combo,
+    # enforced by the unique constraint below so revealing the same
+    # hint twice never creates duplicate rows
+    __tablename__ = 'hint_reveals'
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'problem_id', 'hint_index', name='uq_hint_reveal'),
+    )
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    problem_id = db.Column(db.Integer, db.ForeignKey('problems.id'), nullable=False)
+    hint_index = db.Column(db.Integer, nullable=False)
+    revealed_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 class Announcement(db.Model):
     __tablename__ = 'announcements'
     id = db.Column(db.Integer, primary_key=True)
-    instructor_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True) 
-    class_id = db.Column(db.Integer, db.ForeignKey('classes.id'), nullable=True)
+    instructor_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    class_id = db.Column(db.Integer, nullable=True)
     title = db.Column(db.String(200), nullable=False)
     content = db.Column(db.Text, nullable=False)
     is_pinned = db.Column(db.Boolean, default=False)
@@ -127,22 +371,27 @@ class Announcement(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-# ✅ NEW: Block model (section codes only)
-class Block(db.Model):
-    __tablename__ = 'blocks'
-    id = db.Column(db.Integer, primary_key=True)
-    section_code = db.Column(db.String(20), nullable=False)
-    semester = db.Column(db.String(50), nullable=True)
-    instructor_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-
-# ✅ NEW: Subject model (course names)
+# ── Subject model — IT/programming subjects only ──────────────────────
 class Subject(db.Model):
     __tablename__ = 'subjects'
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(200), nullable=False)
-    description = db.Column(db.Text, nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    id                  = db.Column(db.Integer, primary_key=True)
+    internal_subject_no = db.Column(db.String(10),  nullable=True)
+    name                = db.Column(db.String(200),  nullable=False)
+    description         = db.Column(db.Text,         nullable=True)
+    subject_code        = db.Column(db.String(20),   nullable=True, unique=True)
+    units               = db.Column(db.Integer,      nullable=True)
+    department          = db.Column(db.String(100),  nullable=True)
+    year_level          = db.Column(db.Integer,      nullable=True)
+    semester            = db.Column(db.Integer,      nullable=True)
+    subject_type        = db.Column(
+                            db.Enum('lecture', 'lab', 'lecture_lab', 'elective'),
+                            nullable=True, default='lab')
+    # Forge.dev supports Lab-type subjects only. Each subject should be offered
+    # in 3-5 Class Codes (sections) to accommodate regular and irregular students.
+    supported_languages = db.Column(db.String(100),  nullable=False, default='python')
+    default_difficulty  = db.Column(db.String(10),   nullable=False, default='easy')
+    is_active           = db.Column(db.Boolean,      nullable=False, default=True)
+    created_at          = db.Column(db.DateTime,     default=datetime.utcnow)
 
 # ===== COURSE MATERIALS MODELS =====
 class Lesson(db.Model):
@@ -152,14 +401,18 @@ class Lesson(db.Model):
     description = db.Column(db.Text, nullable=True)
     week_number = db.Column(db.Integer, nullable=False)  # Week 1, 2, 3...
     subject_id = db.Column(db.Integer, db.ForeignKey('subjects.id'), nullable=False)
-    block_id = db.Column(db.Integer, db.ForeignKey('blocks.id'), nullable=True)  # ✅ NEW: Target specific block (NULL = All Blocks)
-    created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)  # Instructor
+    # which specific class code this module belongs to. nullable only so
+    # rows created before this column existed don't break -- a lesson with
+    # no section_id is legacy/orphaned and won't show up to anyone anymore
+    # (see get_lessons/get_student_lessons below). every lesson created
+    # from here on always gets one.
+    section_id = db.Column(db.Integer, db.ForeignKey('subject_sections.id'), nullable=True)
+    created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     is_published = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    
+
     # Relationships
     subject = db.relationship('Subject', backref=db.backref('lessons', lazy=True))
-    block = db.relationship('Block', backref=db.backref('lessons', lazy=True))  # ✅ NEW
     instructor = db.relationship('User', backref=db.backref('created_lessons', lazy=True))
     files = db.relationship('LessonFile', backref='lesson', lazy=True, cascade='all, delete-orphan')
 
@@ -174,49 +427,45 @@ class LessonFile(db.Model):
     storage_path = db.Column(db.String(500), nullable=False)  # relative path to uploads folder
     uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-# ✅ NEW: Teacher Assignment (Who teaches what, where)
+#  Teacher Assignment (Who teaches what, where)
 class TeacherAssignment(db.Model):
     __tablename__ = 'teacher_assignments'
-    id = db.Column(db.Integer, primary_key=True)
-    instructor_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
-    subject_id = db.Column(db.Integer, db.ForeignKey('subjects.id'), nullable=False)
-    block_id = db.Column(db.Integer, db.ForeignKey('blocks.id'), nullable=False)
+    __table_args__ = (
+        db.UniqueConstraint('instructor_id', 'subject_id', 'section_id',
+                            name='uq_teacher_assignment'),
+    )
+    id            = db.Column(db.Integer, primary_key=True)
+    instructor_id = db.Column(db.Integer, db.ForeignKey('users.id'),              nullable=False)
+    subject_id    = db.Column(db.Integer, db.ForeignKey('subjects.id'),            nullable=False)
+    section_id    = db.Column(db.Integer, db.ForeignKey('subject_sections.id'),    nullable=True)
 
-# ✅ NEW: Block-Subject junction table
-block_subjects = db.Table('block_subjects',
-    db.Column('id', db.Integer, primary_key=True),
-    db.Column('block_id', db.Integer, db.ForeignKey('blocks.id'), nullable=False),
-    db.Column('subject_id', db.Integer, db.ForeignKey('subjects.id'), nullable=False),
-    db.Column('created_at', db.DateTime, default=datetime.utcnow),
-    db.UniqueConstraint('block_id', 'subject_id', name='unique_block_subject')
-)
+    instructor = db.relationship('User',           foreign_keys=[instructor_id])
+    subject    = db.relationship('Subject')
+    section    = db.relationship('SubjectSection')
 
-# ✅ NEW: Student-Block enrollment table
-student_blocks = db.Table('student_blocks',
-    db.Column('id', db.Integer, primary_key=True),
-    db.Column('student_id', db.Integer, db.ForeignKey('users.id'), nullable=False),
-    db.Column('block_id', db.Integer, db.ForeignKey('blocks.id'), nullable=False),
-    db.Column('enrolled_at', db.DateTime, default=datetime.utcnow),
-    db.UniqueConstraint('student_id', 'block_id', name='unique_student_block')
-)
+class SubjectSection(db.Model):
+    __tablename__ = 'subject_sections'
+    id            = db.Column(db.Integer, primary_key=True)
+    section_no    = db.Column(db.String(20),  nullable=False)
+    subject_id    = db.Column(db.Integer,     db.ForeignKey('subjects.id'), nullable=False)
+    schedule      = db.Column(db.String(100), nullable=True)
+    room          = db.Column(db.String(50),  nullable=True)
+    capacity      = db.Column(db.Integer,     nullable=False, default=40)
+    current_count = db.Column(db.Integer,     nullable=False, default=0)
+    semester      = db.Column(db.String(50),  nullable=True)
+    academic_year = db.Column(db.String(9),   nullable=True)
+    is_active     = db.Column(db.Boolean,     nullable=False, default=True)
+    created_at    = db.Column(db.DateTime,    default=datetime.utcnow)
 
-# ✅ NEW: Block-Problems junction table
-block_problems = db.Table('block_problems',
-    db.Column('id', db.Integer, primary_key=True),
-    db.Column('block_id', db.Integer, db.ForeignKey('blocks.id'), nullable=False),
-    db.Column('problem_id', db.Integer, db.ForeignKey('problems.id'), nullable=False),
-    db.UniqueConstraint('block_id', 'problem_id', name='unique_block_problem')
-)
-
-# ⚠️ Keep old Class model for backward compatibility (can be removed later)
-class Class(db.Model):
-    __tablename__ = 'classes'
-    id = db.Column(db.Integer, primary_key=True)
-    instructor_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
-    name = db.Column(db.String(100), nullable=False)
-    section_code = db.Column(db.String(20), nullable=False)
-    semester = db.Column(db.String(20), nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+class IrregularEnrollment(db.Model):
+    __tablename__ = 'irregular_enrollments'
+    __table_args__ = (
+        db.UniqueConstraint('student_id', 'section_id', name='unique_irregular_enrollment'),
+    )
+    id          = db.Column(db.Integer, primary_key=True)
+    student_id  = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    section_id  = db.Column(db.Integer, db.ForeignKey('subject_sections.id'), nullable=False)
+    enrolled_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 class AuditLog(db.Model):
     __tablename__ = 'audit_logs'
@@ -245,38 +494,271 @@ class PlagiarismReport(db.Model):
     admin_notes = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-class_students = db.Table('class_students',
-    db.Column('class_id', db.Integer, db.ForeignKey('classes.id'), primary_key=True),
-    db.Column('student_id', db.Integer, db.ForeignKey('users.id'), primary_key=True)
-)
-class_problems = db.Table('class_problems',
-    db.Column('class_id', db.Integer, db.ForeignKey('classes.id'), primary_key=True),
-    db.Column('problem_id', db.Integer, db.ForeignKey('problems.id'), primary_key=True)
-)
+# ============================================================
+# IT SUBJECT CONSTANTS — Forge.dev scope (final confirmed)
+# 12 subjects | 6 LEC/LAB pairs | Python, Java, C# only
+# ============================================================
+SUPPORTED_IT_SUBJECTS = [
+    # Year 1, Semester 1
+    ("290007", "IT115",  "Introduction to Computing Lec",      2, "lecture", 1, 1),
+    ("290008", "IT115L", "Introduction to Computing Lab",      1, "lab",     1, 1),
+    ("290009", "IT116",  "Fundamentals of Programming Lec",    2, "lecture", 1, 1),
+    ("290010", "IT116L", "Fundamentals of Programming Lab",    1, "lab",     1, 1),
+    # Year 1, Semester 2
+    ("290013", "IT125",  "Computer Programming 1 Lec",         2, "lecture", 1, 2),
+    ("290014", "IT125L", "Computer Programming 1 Lab",         1, "lab",     1, 2),
+    ("290015", "IT126",  "Data Structure & Algorithm Lec",     2, "lecture", 1, 2),
+    ("290016", "IT126L", "Data Structure & Algorithm Lab",     1, "lab",     1, 2),
+    # Year 2, Semester 1
+    ("290017", "IT215",  "Database Management System Lec",     2, "lecture", 2, 1),
+    ("290018", "IT215L", "Database Management System Lab",     1, "lab",     2, 1),
+    ("290019", "IT216",  "Computer Programming 2 Lec",         2, "lecture", 2, 1),
+    ("290020", "IT216L", "Computer Programming 2 Lab",         1, "lab",     2, 1),
+    # Year 2, Semester 2
+    ("290025", "IT225",  "Object Oriented Programming Lec",    2, "lecture", 2, 2),
+    ("290026", "IT225L", "Object Oriented Programming Lab",    1, "lab",     2, 2),
+    ("290027", "IT226",  "Adv. Database Mgt System Lec",       2, "lecture", 2, 2),
+    ("290028", "IT226L", "Adv. Database Mgt System Lab",       1, "lab",     2, 2),
+]
+
+SUBJECT_LANGUAGE_MAP = {
+    "IT115":  "python",
+    "IT115L": "python",
+    "IT116":  "python",
+    "IT116L": "python",
+    "IT125":  "python,java,csharp",
+    "IT125L": "python,java,csharp",
+    "IT126":  "python,java,csharp",
+    "IT126L": "python,java,csharp",
+    "IT215":  "python,java,csharp",
+    "IT215L": "python,java,csharp",
+    "IT216":  "java,csharp",
+    "IT216L": "java,csharp",
+    "IT225":  "java,csharp,python",
+    "IT225L": "java,csharp,python",
+    "IT226":  "java,csharp,python",
+    "IT226L": "java,csharp,python",
+}
+
+SUBJECT_DIFFICULTY_DEFAULTS = {
+    "IT115":  "easy",   "IT115L": "easy",
+    "IT116":  "easy",   "IT116L": "easy",
+    "IT125":  "easy",   "IT125L": "easy",
+    "IT126":  "medium", "IT126L": "medium",
+    "IT215":  "medium", "IT215L": "medium",
+    "IT216":  "medium", "IT216L": "medium",
+    "IT225":  "medium", "IT225L": "medium",
+    "IT226":  "hard",   "IT226L": "hard",
+}
+
+SUPPORTED_SUBJECT_CODES = frozenset(row[1] for row in SUPPORTED_IT_SUBJECTS)
+
+# Curriculum year of the subjects Forge.dev supports (a property of the
+# SUBJECT only — students of any year level may take these subjects).
+FIRST_YEAR_CURRICULUM = 1
+
+# Highest XP an instructor may attach to a problem, by difficulty.
+MAX_XP_BY_DIFFICULTY = {'Easy': 100, 'Medium': 250, 'Hard': 500}
+
+# Where uploaded lesson files live. Default: <this folder>/uploads (in Docker: /app/uploads, the
+# forge-uploads volume). FORGE_UPLOADS_DIR relocates it (used for isolated recovery rehearsals).
+# Database rows keep a relative storage_path such as 'uploads/lessons/<lesson_id>/<uuid>.pdf'.
+UPLOAD_ROOT = os.path.abspath(os.environ.get('FORGE_UPLOADS_DIR') or os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads'))
+
+def upload_abs_path(storage_path):
+    """Absolute path for a stored relative path, or None if it would leave the uploads folder."""
+    rel = (storage_path or '').replace('\\', '/').lstrip('/')
+    if rel.startswith('uploads/'):
+        rel = rel[len('uploads/'):]
+    full = os.path.abspath(os.path.join(UPLOAD_ROOT, rel))
+    return full if full.startswith(UPLOAD_ROOT + os.sep) else None
+
+def parse_due_date(value):
+    """Parse a quest deadline sent by a client.
+    Returns (datetime_or_None, error_message_or_None). The database stores deadlines as naive UTC.
+    - ISO 8601 only ('2026-11-05T17:00:00', '2026-11-05T17:00:00+08:00', '...Z', or a plain date).
+    - A value with an offset or Z is converted to UTC; a value without one is taken as UTC.
+    - Empty / null means 'no value given' (None, no error). Any other unparseable value is an error;
+      it is never silently dropped."""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None, None
+    if not isinstance(value, str):
+        return None, "due_date must be an ISO 8601 date-time string"
+    text = value.strip()
+    if text.endswith(('Z', 'z')):
+        text = text[:-1] + '+00:00'
+    try:
+        dt = datetime.fromisoformat(text)
+    except ValueError:
+        return None, "due_date is not a valid ISO 8601 date-time (example: 2026-11-05T17:00:00+08:00)"
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt, None
+
+# Institution account addresses use one fixed domain. Head Admin authority is
+# configured separately and should be pinned by immutable user ID.
+# human-readable problems found while reading the settings (shown at startup and
+# by /api/admin/policy); never contain secrets
+CONFIG_DIAGNOSTICS = []
+
+
+def _read_setting(name, default, valid):
+    """Env value if present and well formed, else the default (with a diagnostic). Never crashes."""
+    raw = os.environ.get(name, '').strip().lower()
+    if not raw:
+        return default
+    if not valid.fullmatch(raw):
+        CONFIG_DIAGNOSTICS.append(f"{name} is not a valid value ({raw!r}) and was ignored.")
+        print(f"WARNING: {name} is not a valid value ({raw!r}); ignored.")
+        return default
+    return raw
+
+
+STUDENT_EMAIL_DOMAIN = ALLOWED_EMAIL_DOMAIN = ACCOUNT_EMAIL_DOMAIN
+HEAD_ADMIN_EMAIL = _read_setting('HEAD_ADMIN_EMAIL', '', _EMAIL_RE)
+_head_id_setting = os.environ.get('HEAD_ADMIN_USER_ID', '').strip()
+HEAD_ADMIN_USER_ID = int(_head_id_setting) if _head_id_setting.isascii() and _head_id_setting.isdigit() and int(_head_id_setting) > 0 else None
+if _head_id_setting and HEAD_ADMIN_USER_ID is None:
+    CONFIG_DIAGNOSTICS.append('HEAD_ADMIN_USER_ID is invalid; administrator creation is disabled.')
+if not HEAD_ADMIN_EMAIL and not HEAD_ADMIN_USER_ID:
+    CONFIG_DIAGNOSTICS.append(
+        "HEAD_ADMIN_EMAIL is not set (or invalid): creating or promoting administrator "
+        "accounts is disabled. Ordinary sign-in is not affected.")
+    print("NOTICE: HEAD_ADMIN_EMAIL is not configured; creating/promoting administrators is disabled.")
+
+
+def is_head_admin(user):
+    """Prefer immutable account identity; renaming a user cannot transfer authority."""
+    if not user or user.role != 'administrator' or not user.is_active:
+        return False
+    if HEAD_ADMIN_USER_ID is not None or _head_id_setting:
+        return user.id == HEAD_ADMIN_USER_ID
+    return bool(HEAD_ADMIN_EMAIL) and normalize_email(user.email) == HEAD_ADMIN_EMAIL
+
+
+def lockout_exempt(user):
+    """The head administrator is never locked out by the 3-attempt rule (it is the recovery account, so a
+    typo streak or someone else's guessing must not shut it out). Wrong passwords on it are throttled instead."""
+    return is_head_admin(user)
+
+
+def head_admin_throttled(user, max_fails=10, period=60):
+    """Counts a failed head-admin sign-in; True once there were more than max_fails in the last period seconds."""
+    key = f"head-admin-fail:{user.id}"
+    now = time.time()
+    recent = [t for t in rate_limit_store.get(key, []) if now - t < period]
+    recent.append(now)
+    rate_limit_store[key] = recent
+    return len(recent) > max_fails
+
+
+def admin_target_error(actor, target):
+    # Otherwise a regular admin could reset the head's password and take over.
+    if target.role == 'administrator' and not is_head_admin(actor):
+        return jsonify({"error": "Only the head administrator can manage administrator accounts."}), 403
+    return None
+
+
+def subject_out_of_scope(subject):
+    """
+    True unless the subject is recorded as first-year curriculum. A missing or
+    invalid curriculum year counts as unclassified, so it is blocked too.
+    Year 1 alone does not prove the subject is in the official institutional
+    curriculum; that approval is a separate, still pending, step.
+    Used only to stop NEW activity: existing records stay readable and usable.
+    """
+    return bool(subject) and subject.year_level != FIRST_YEAR_CURRICULUM
+
+
+OUT_OF_SCOPE_MSG = ("This subject is not a recorded first-year curriculum subject, "
+                    "so new activity cannot be added to it.")
+
+
+def validate_it_subject_scope(subject_code: str):
+    if not subject_code:
+        return False, "Subject code is required."
+    code = subject_code.upper().strip()
+    if code in SUPPORTED_SUBJECT_CODES:
+        return True, ""
+    NON_IT = ('TH', 'PE', 'HI', 'HU', 'PY', 'EN', 'NS', 'CM', 'PC', 'MH', 'NSTP')
+    for prefix in NON_IT:
+        if code.startswith(prefix):
+            return False, (
+                f"'{subject_code}' is a non-IT subject and is not supported by Forge.dev. "
+                f"Only IT programming subjects (IT115–IT225L) are in scope."
+            )
+    return False, (
+        f"'{subject_code}' is not in the supported subject list. "
+        f"Supported codes: {', '.join(sorted(SUPPORTED_SUBJECT_CODES))}"
+    )
+
+
+def seed_it_subjects():
+    # Only first-year curriculum subjects are seeded (same rule as the admin
+    # create/edit endpoints). Entries marked for another curriculum year are
+    # left out of NEW seeding; existing rows are never touched or removed.
+    seeded, skipped, out_of_scope = 0, 0, 0
+    for row in SUPPORTED_IT_SUBJECTS:
+        internal_no, code, name, units, stype, yr, sem = row
+        if yr != FIRST_YEAR_CURRICULUM:
+            out_of_scope += 1
+            continue
+        if Subject.query.filter_by(subject_code=code).first():
+            skipped += 1
+            continue
+        db.session.add(Subject(
+            internal_subject_no = internal_no,
+            subject_code        = code,
+            name                = name,
+            units               = units,
+            subject_type        = stype,
+            year_level          = yr,
+            semester            = sem,
+            department          = 'CCIT',
+            supported_languages = SUBJECT_LANGUAGE_MAP.get(code, 'python'),
+            default_difficulty  = SUBJECT_DIFFICULTY_DEFAULTS.get(code, 'easy'),
+            is_active           = True
+        ))
+        seeded += 1
+    db.session.commit()
+    return {'seeded': seeded, 'skipped': skipped, 'out_of_scope': out_of_scope,
+            'total': len(SUPPORTED_IT_SUBJECTS)}
+
 
 # ===== HELPERS =====
-def is_instructor_or_admin(user): return user and user.role in ['instructor', 'super_admin']
-def is_super_admin(user): return user and user.role == 'super_admin'
+def is_instructor_or_admin(user): return user and user.role in ['instructor', 'administrator']
+def is_administrator(user): return user and user.role == 'administrator'
 
-# ✅ NEW: Check if instructor is assigned to teach a subject in a block
-def is_instructor_assigned(instructor_id, subject_id, block_id=None):
-    """Verify instructor has official assignment to teach subject (optionally in specific block)"""
+def is_instructor_assigned(instructor_id, subject_id, section_id=None):
+    """Return True if the instructor has any assignment for the subject.
+    If section_id is given, also verify they teach that specific section.
+    """
     query = TeacherAssignment.query.filter_by(
-        instructor_id=instructor_id, 
+        instructor_id=instructor_id,
         subject_id=subject_id
     )
-    if block_id:
-        query = query.filter_by(block_id=block_id)
+    if section_id is not None:
+        query = query.filter_by(section_id=section_id)
     return query.first() is not None
 
-# ✅ NEW: Get all blocks an instructor teaches a specific subject in
-def get_instructor_blocks_for_subject(instructor_id, subject_id):
-    """Return list of block IDs where instructor teaches this subject"""
+def get_instructor_sections_for_subject(instructor_id, subject_id):
+    """Return list of SubjectSection IDs where this instructor teaches the subject."""
     assignments = TeacherAssignment.query.filter_by(
-        instructor_id=instructor_id, 
+        instructor_id=instructor_id,
         subject_id=subject_id
     ).all()
-    return [a.block_id for a in assignments]
+    return [a.section_id for a in assignments if a.section_id is not None]
+
+
+def validate_quest_sections(instructor_id, subject_id, section_ids):
+    if not isinstance(section_ids, list) or not section_ids or any(
+        type(section_id) is not int or section_id <= 0 for section_id in section_ids
+    ):
+        return jsonify({"error": "Select at least one valid class code for this quest"}), 400
+
+    assigned = set(get_instructor_sections_for_subject(instructor_id, subject_id))
+    if not set(section_ids).issubset(assigned):
+        return jsonify({"error": "Choose only class codes assigned to you for this subject"}), 403
 
 def admin_required(f):
     @wraps(f)
@@ -284,8 +766,8 @@ def admin_required(f):
     def decorated(*args, **kwargs):
         user_id = int(get_jwt_identity())
         user = User.query.get(user_id)
-        if not is_super_admin(user):
-            return jsonify({"error": "Super Admin access required"}), 403
+        if not is_administrator(user):
+            return jsonify({"error": "Administrator access required"}), 403
         return f(user, *args, **kwargs)
     return decorated
 
@@ -305,11 +787,33 @@ def log_admin_action(admin_id, action, details=None, target_id=None):
         print(f"⚠️ audit log failed: {e}")
 
 def sanitize_code(code, language):
+    """
+    Simple substring checks — no regex, no ReDoS risk.
+    Returns True if code is considered safe, False otherwise.
+    """
     if language == 'python':
-        dangerous = ['__import__', 'os.system', 'subprocess', 'eval(', 'exec(', 'open(', 'import os', 'import sys']
-        return not any(p in code for p in dangerous)
+        dangerous_patterns = [
+            '__import__',
+            'os.system',
+            'os.popen',
+            'os.exec',
+            'subprocess',
+            'eval(',
+            'exec(',
+            'open(',
+            'import os',
+            'import sys',
+            'import socket',
+            'import shutil',
+            'importlib',
+            'pty.spawn',
+            'ctypes',
+        ]
+        code_lower = code.lower()
+        return not any(pattern.lower() in code_lower for pattern in dangerous_patterns)
     return True
 
+@handles_setup_errors
 def _run_in_docker_with_stdin(code: str, language: str, stdin_input: str) -> dict:
     """
     like _run_in_docker() but pipes stdin_input into the container.
@@ -321,21 +825,33 @@ def _run_in_docker_with_stdin(code: str, language: str, stdin_input: str) -> dic
         DOCKER_IMAGES, MEM_LIMITS, CAP_DROP, SECURITY_OPTS,
         LANGUAGE_TIMEOUTS, LIMITS,
         _write_source, _generate_java_wrapper, _generate_csharp_wrapper,
-        _get_docker_client,
+        _get_docker_client, sandbox_workdir, make_workdir_readable,
     )
 
     client  = _get_docker_client()
     image   = DOCKER_IMAGES[language]
     started = time.time()
 
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with sandbox_workdir() as tmpdir:
         src_path = _write_source(tmpdir, code, language)
         filename = os.path.basename(src_path)
 
         # ── Write input to file so container can read it ──────────────────
+        # cap stdin so nobody can abuse the sandbox with a huge input
+        max_input_size = 64 * 1024  # 64kb
+        if stdin_input and len(stdin_input.encode('utf-8')) > max_input_size:
+            return {
+                'stdout': '',
+                'stderr': 'input too large (max 64kb)',
+                'returncode': -1,
+                'elapsed': 0,
+                'timed_out': False,
+                'timeout_used': 0
+            }
+
         input_path = os.path.join(tmpdir, 'input.txt')
-        with open(input_path, 'w', encoding='utf-8') as f:
-            f.write(stdin_input if stdin_input else '')
+        with open(input_path, 'w', encoding='utf-8', newline='\n') as f:
+            f.write((stdin_input or '').replace('\r\n', '\n'))
 
         if language == 'java':
             with open(os.path.join(tmpdir, 'Main.java'), 'w', encoding='utf-8') as f:
@@ -344,6 +860,7 @@ def _run_in_docker_with_stdin(code: str, language: str, stdin_input: str) -> dic
             with open(os.path.join(tmpdir, 'Program.cs'), 'w', encoding='utf-8') as f:
                 f.write(_generate_csharp_wrapper())
 
+        make_workdir_readable(tmpdir)
         container_src = f'/tmp/sandbox/{filename}'
 
         try:
@@ -438,48 +955,192 @@ def _run_in_docker_with_stdin(code: str, language: str, stdin_input: str) -> dic
             }
 
 
-def evaluate_code(code, test_cases, language):
-    """Execute code in Docker sandbox and compare against test cases"""
+def serialize_hints_for_viewer(problem, user):
+    """
+    Hints as the given user may see them. Instructors/admins get the stored
+    hints untouched. Students only get each hint's penalty plus the text of
+    hints they have already revealed (recorded in HintReveal); everything else
+    is withheld until /hints/<idx>/reveal is called, so the XP penalty can't
+    be bypassed by reading the API response.
+    """
+    hints = problem.hints or []
+    if user is not None and user.role != 'student':
+        return hints
+
+    revealed = set()
+    if user is not None and hints:
+        rows = HintReveal.query.filter_by(user_id=user.id, problem_id=problem.id).all()
+        revealed = {r.hint_index for r in rows}
+
+    out = []
+    for i, h in enumerate(hints):
+        h = h if isinstance(h, dict) else {}
+        is_revealed = i in revealed
+        out.append({
+            "xp_penalty": h.get('xp_penalty', 0),
+            "revealed":   is_revealed,
+            "text":       h.get('text', '') if is_revealed else None,
+        })
+    return out
+
+
+def sanitize_test_cases_for_student(test_cases):
+    # strips the real input/expected off any test case an instructor
+    # marked hidden, before it ever reaches a student — this covers the
+    # initial quest data (Examples panel, Test Cases tab, Network tab).
+    # grading itself never calls this — it always reads the real values
+    # straight from the database.
+    sanitized = []
+    for tc in (test_cases or []):
+        if tc.get('visible', True) is False:
+            sanitized.append({"input": "🔒 Hidden", "expected": "🔒 Hidden", "visible": False})
+        else:
+            sanitized.append(tc)
+    return sanitized
+
+def _student_section_ids(user_id):
+    return {e.section_id for e in IrregularEnrollment.query.filter_by(student_id=user_id).all()}
+
+
+def user_can_access_problem(user, problem, historical=False):
+    """
+    Server-side access rule for a quest and everything attached to it
+    (details, test cases, hints, drafts, Run, Submit).
+      administrator : always
+      instructor    : created it, or is assigned to one of its classes / its subject
+      student       : enrolled (regular or irregular) in a class the quest is visible to.
+    historical=True additionally lets a student who ALREADY has a submission for the
+    quest keep reading it after leaving the class; it never allows new activity.
+    """
+    if not user or not problem:
+        return False
+    if user.role == 'administrator':
+        return True
+    if user.role == 'instructor':
+        if problem.created_by == user.id:
+            return True
+        q = TeacherAssignment.query.filter_by(instructor_id=user.id)
+        for ta in q.all():
+            if ta.section_id and ta.section_id in (problem.visible_to_sections or []):
+                return True
+        return False
+    if user.role == 'student':
+        if _student_section_ids(user.id) & set(problem.visible_to_sections or []):
+            return True
+        if historical and Submission.query.filter_by(user_id=user.id, problem_id=problem.id).first():
+            return True
+    return False
+
+
+def instructor_teaches_section(user, section_id):
+    """Administrators: any class. Instructors: only classes they are assigned to."""
+    if not user:
+        return False
+    if user.role == 'administrator':
+        return True
+    return user.role == 'instructor' and TeacherAssignment.query.filter_by(
+        instructor_id=user.id, section_id=section_id).first() is not None
+
+
+def deny_problem_access():
+    # 404 rather than 403 so a quest id in another class is not even confirmed to exist
+    return jsonify({"error": "Problem not available"}), 404
+
+
+class ExecutionInfrastructureError(RuntimeError):
+    """The code runner itself failed (Docker, setup, disk); this says nothing about the student's code."""
+
+
+def recorded_result_details(results):
+    """What is kept per graded submission. Hidden tests keep only pass/fail and kind: never their data."""
+    tests = []
+    for i, r in enumerate(results or []):
+        hidden = bool(r.get('hidden'))
+        item = {"index": i + 1, "passed": bool(r.get('passed')), "kind": r.get('kind') or ('passed' if r.get('passed') else 'wrong_output'),
+                "hidden": hidden}
+        if not hidden:
+            item["message"] = str(r.get('message') or '')[:200]
+            if not r.get('passed'):
+                item["output"] = str(r.get('output') or '')[:300]
+        tests.append(item)
+    return {"runner": EXECUTION_MODE, "tests": tests}
+
+
+def evaluate_code(code, test_cases, language, raise_on_infra=False):
+    """
+    Execute code in Docker sandbox and compare against test cases.
+    With raise_on_infra=True (used for GRADING) a runner failure raises
+    ExecutionInfrastructureError instead of being scored as a failed test.
+    """
     results = []
 
     for tc in test_cases:
         input_val = tc.get('input', '').strip()
         expected  = tc.get('expected', '').strip()
+        is_hidden = tc.get('visible', True) is False
 
-        result = _run_in_docker_with_stdin(code, language, input_val)
+        try:
+            result = _run_in_docker_with_stdin(code, language, input_val)
+        except Exception as exc:
+            if raise_on_infra:
+                raise ExecutionInfrastructureError(str(exc)) from exc
+            raise
 
         actual    = result.get('stdout', '').strip()
         stderr    = result.get('stderr', '').strip()
         timed_out = result.get('timed_out', False)
         error     = result.get('error', '')
+        # java/c# compile failures: the compiler text can sit on stdout or
+        # stderr, so build the student-facing message from both
+        compile_failed = '__COMPILE_ERROR__' in stderr and language in ('java', 'csharp')
+        compile_msg = ''
+        if compile_failed:
+            from routes.sandbox import get_compile_error_message
+            compile_msg = get_compile_error_message(result, language)
+        if error and raise_on_infra:
+            raise ExecutionInfrastructureError(error)
+
+        # grading itself always compares the real values above — this
+        # only controls what gets reported back for a hidden test case,
+        # so students only ever see pass/fail for these, never the
+        # actual input, expected output, or program output
+        shown_case     = "🔒 Hidden" if is_hidden else input_val[:50]
+        shown_expected = "🔒 Hidden" if is_hidden else expected[:50]
 
         if timed_out:
             results.append({
-                "test_case": input_val[:50],
-                "expected":  expected[:50],
+                "test_case": shown_case,
+                "expected":  shown_expected,
                 "passed":    False,
-                "output":    "Timeout: execution exceeded time limit",
+                "output":    "🔒 Hidden" if is_hidden else "Timeout: execution exceeded time limit",
                 "runtime":   f"{result.get('elapsed', 0)/1000:.2f}s",
-                "message":   "Execution timeout"
+                "message":   "Execution timeout",
+                "kind":      "timeout",
+                "hidden":    is_hidden
             })
-        elif error or (result.get('returncode', 0) != 0 and not actual):
+        elif error or compile_failed or (result.get('returncode', 0) != 0 and not actual):
+            shown_err = compile_msg if compile_failed else (stderr or error)
             results.append({
-                "test_case": input_val[:50],
-                "expected":  expected[:50],
+                "test_case": shown_case,
+                "expected":  shown_expected,
                 "passed":    False,
-                "output":    (stderr or error)[:500],
+                "output":    "🔒 Hidden" if is_hidden else shown_err[:500],
                 "runtime":   f"{result.get('elapsed', 0)/1000:.2f}s",
-                "message":   (stderr or error)[:80]
+                "message":   "🔒 Hidden test failed" if is_hidden else shown_err[:80],
+                "kind":      "runtime_error",     # compile failure, crash, or no output at all
+                "hidden":    is_hidden
             })
         else:
             passed = actual == expected
             results.append({
-                "test_case": input_val[:50],
-                "expected":  expected[:50],
+                "test_case": shown_case,
+                "expected":  shown_expected,
                 "passed":    passed,
-                "output":    actual[:100],
+                "output":    "🔒 Hidden" if is_hidden else actual[:100],
                 "runtime":   f"{result.get('elapsed', 0)/1000:.2f}s",
-                "message":   "Passed" if passed else f"Expected: {expected[:50]}"
+                "message":   "Passed" if passed else ("🔒 Hidden test failed" if is_hidden else f"Expected: {expected[:50]}"),
+                "kind":      "passed" if passed else "wrong_output",
+                "hidden":    is_hidden
             })
 
     return results
@@ -487,71 +1148,190 @@ def evaluate_code(code, test_cases, language):
 # ===== AUTH ROUTES =====
 @app.route('/api/auth/register', methods=['POST'])
 def register():
-    data = request.get_json()
-    if not all(k in data for k in ['username','email','password']): 
-        return jsonify({"error": "Missing fields"}), 400
-    if User.query.filter_by(username=data['username']).first() or User.query.filter_by(email=data['email']).first():
-        return jsonify({"error": "Username or email exists"}), 400
-    
-    new_user = User(
-        username=data['username'], 
-        email=data['email'], 
-        password_hash=generate_password_hash(data['password']), 
-        role=data.get('role','student')
-    )
-    db.session.add(new_user)
-    db.session.commit()
-    
-    return jsonify({
-        "message": "Created", 
-        "access_token": create_access_token(identity=str(new_user.id)), 
-        "user": {"id": new_user.id, "username": new_user.username, "role": new_user.role}
-    }), 201
+    # public self-registration removed — every account (student or
+    # instructor) is now provisioned centrally by an admin, via the Add
+    # User modal or the CSV bulk-enrollment upload. same 410 pattern
+    # already used for the removed blocks endpoints below, so a stray
+    # request here gets a clear reason instead of a confusing 404.
+    return jsonify({"error": "Public registration is disabled. Accounts are created by an administrator."}), 410
+
+def resolve_login_identifier(identifier):
+    """
+    Map what the person typed to ONE account. Returns (user, ambiguous).
+    Accepts the username / student ID, or the account's email (case-insensitive).
+    An email must be institutional and match a stored address. Refuse ambiguous
+    matches rather than creating aliases in the shared student/staff namespace.
+    """
+    ident = (identifier or '').strip()
+    if '@' in ident and not email_domain_allowed(ident):
+        return None, False
+    if '@' not in ident:
+        return User.query.filter_by(username=ident).first(), False
+    email = normalize_email(ident)
+    found = User.query.filter(db.or_(db.func.lower(User.email) == email,
+                                     db.func.lower(User.username) == email)).limit(2).all()
+    if len(found) > 1:
+        return None, True
+    return (found[0] if found else None), False
+
 
 @app.route('/api/auth/login', methods=['POST'])
 def login():
     data = request.get_json()
-    if not data.get('username') or not data.get('password'): 
+    if not data.get('username') or not data.get('password'):
         return jsonify({"error": "Missing credentials"}), 400
-    
-    user = User.query.filter_by(username=data['username']).first()
-    if not user or not check_password_hash(user.password_hash, data['password']): 
+
+    identifier = str(data['username']).strip()
+    if not identifier:
+        return jsonify({"error": "Missing credentials"}), 400
+
+    # NOTE: there used to be an IP-based lockout check here too, on top of the
+    # real, working per-account lockout below (3 fails -> that one account
+    # locked for 15 min). It was removed, not wired up, because it was dead
+    # code (nothing ever incremented its counter) AND wiring it up would have
+    # been actively dangerous as currently deployed: behind the Cloudflare
+    # quick tunnel, with no TRUSTED_PROXY_COUNT/forwarded-header handling,
+    # request.remote_addr is the tunnel's own loopback address for every
+    # request, not the real caller's. An IP-based lockout here would lock out
+    # every user sharing that (fake) IP -- i.e. everyone -- the moment a
+    # handful of failed logins happened anywhere. Add it back only once
+    # remote_addr can be trusted (a real reverse proxy + TRUSTED_PROXY_COUNT
+    # set correctly, or reading Cloudflare's CF-Connecting-IP).
+    user, ambiguous = resolve_login_identifier(identifier)
+    if ambiguous:
+        logger.warning("Login identifier matched more than one account; refused.")
         return jsonify({"error": "Invalid credentials"}), 401
-    if not user.is_active: 
+
+    # Check account-level lockout first (the head administrator is exempt and any old lock is cleared)
+    if user and user.locked_until and lockout_exempt(user):
+        user.login_attempts = 0
+        user.locked_until = None
+        db.session.commit()
+    if user and user.locked_until:
+        if user.locked_until > datetime.utcnow():
+            remaining = int((user.locked_until - datetime.utcnow()).total_seconds())
+            return jsonify({
+                "error": "Account locked",
+                "message": f"Your account has been locked after 3 failed attempts. Please contact your system administrator.",
+                "locked_until": user.locked_until.isoformat(),
+                "remaining_seconds": remaining
+            }), 423
+        else:
+            # Auto-unlock after 15 min
+            user.login_attempts = 0
+            user.locked_until = None
+            db.session.commit()
+
+    if not user or not check_password_hash(user.password_hash, data['password']):
+        if user and lockout_exempt(user):
+            if head_admin_throttled(user):
+                return jsonify({"error": "Too many attempts", "message": "Too many wrong passwords in a short time. Wait a minute and try again."}), 429
+            return jsonify({"error": "Invalid credentials"}), 401
+        if user:
+            user.login_attempts = (user.login_attempts or 0) + 1
+            if user.login_attempts >= 3:
+                user.locked_until = datetime.utcnow() + timedelta(minutes=15)
+                db.session.commit()
+                return jsonify({
+                    "error": "Account locked",
+                    "message": "Your account has been locked after 3 failed attempts. Please contact your system administrator.",
+                    "locked_until": user.locked_until.isoformat(),
+                    "remaining_seconds": 900
+                }), 423
+            db.session.commit()
+            attempts_left = 3 - user.login_attempts
+            return jsonify({
+                "error": "Invalid credentials",
+                "attempts_left": attempts_left,
+                "warning": f"{attempts_left} attempt(s) remaining before account lockout."
+            }), 401
+        return jsonify({"error": "Invalid credentials"}), 401
+
+    if not user.is_active:
         return jsonify({"error": "Account disabled"}), 403
-    
-    # 🔒 ADD THESE TWO LINES:
-    refresh_token = create_access_token(identity=str(user.id), expires_delta=timedelta(days=7))
-    
+
+    # Clear login attempts on successful login
+    user.login_attempts = 0
+    user.locked_until = None
+    user.last_login_at = datetime.utcnow()
+    db.session.commit()
+
+    # real refresh token (type=refresh): jwt_required() rejects it on normal
+    # endpoints, so it can only be used at /api/auth/refresh
+    access_token, refresh_token = issue_tokens(user)
+
     return jsonify({
-        "message": "Login successful", 
-        "access_token": create_access_token(identity=str(user.id)),
-        "refresh_token": refresh_token,  # 🔒 ADD THIS LINE
+        "message": "Login successful",
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "must_change_password": bool(user.must_change_password),
         "user": {
-            "id": user.id, 
-            "username": user.username, 
-            "role": user.role, 
-            "xp": user.xp, 
+            "id": user.id,
+            "username": user.username,
+            "full_name": user.full_name,
+            "email": user.email,
+            "role": user.role,
+            "xp": user.xp,
             "level": user.level
         }
     }), 200
+
+@app.route('/api/auth/change-password', methods=['POST'])
+@jwt_required()
+@rate_limit(max_calls=10, period=60)
+def change_password():
+    """Own password change. Always needs the current password (the temporary one when forced)."""
+    user = db.session.get(User, int(get_jwt_identity()))
+    data = request.get_json(silent=True) or {}
+    current, new = data.get('current_password'), data.get('new_password')
+    if not isinstance(current, str) or not isinstance(new, str) or not current or not new:
+        return jsonify({"error": "Current and new password are required."}), 400
+    if user.locked_until and user.locked_until > datetime.utcnow():
+        return jsonify({"error": "Account locked", "message": "Too many failed attempts. Contact your system administrator."}), 423
+    if not check_password_hash(user.password_hash, current):
+        # same safeguard as sign-in: repeated wrong current passwords lock the account
+        if not lockout_exempt(user):
+            user.login_attempts = (user.login_attempts or 0) + 1
+            if user.login_attempts >= 3:
+                user.locked_until = datetime.utcnow() + timedelta(minutes=15)
+            db.session.commit()
+        return jsonify({"error": "Current password is incorrect."}), 400
+    err = password_policy_error(new, user)
+    if err:
+        return jsonify({"error": err}), 400
+    if check_password_hash(user.password_hash, new):
+        return jsonify({"error": "The new password must be different from the current one."}), 400
+    user.password_hash = generate_password_hash(new)
+    user.must_change_password = False
+    user.login_attempts = 0
+    user.locked_until = None
+    user.password_changed_at = datetime.utcnow()
+    user.token_version = int(user.token_version or 0) + 1         # every other session ends
+    db.session.commit()
+    access_token, refresh_token = issue_tokens(user)              # this session continues
+    return jsonify({"message": "Password changed.", "access_token": access_token,
+                    "refresh_token": refresh_token, "must_change_password": False}), 200
+
 
 @app.route('/api/auth/me', methods=['GET'])
 @jwt_required()
 def get_current_user():
     user_id = int(get_jwt_identity())
     user = User.query.get(user_id)
-    if not user: 
+    if not user:
         return jsonify({"error": "Not found"}), 404
     return jsonify({
-        "id": user.id, 
-        "username": user.username, 
-        "role": user.role, 
-        "xp": user.xp, 
-        "level": user.level
+        "id": user.id,
+        "username": user.username,
+        "full_name": user.full_name,
+        "email": user.email,
+        "role": user.role,
+        "xp": user.xp,
+        "level": user.level,
+        "must_change_password": bool(user.must_change_password)
     }), 200
 
-# 🔒 NEW: Token Refresh Endpoint
+# this is for refreshing the login token so people don't get logged out mid-session
 @app.route('/api/auth/refresh', methods=['POST'])
 def refresh():
     data = request.get_json()
@@ -559,13 +1339,20 @@ def refresh():
         return jsonify({'error': 'Refresh token required'}), 400
     try:
         decoded = decode_token(data['refresh_token'])
-        user_id = decoded['sub']
-        user = User.query.get(int(user_id))
+        # only a real refresh token is accepted here — an access token
+        # (or anything else signed with our key) must not mint new tokens
+        if decoded.get('type') != 'refresh':
+            return jsonify({'error': 'Invalid refresh token'}), 401
+        user_id = int(decoded['sub'])
+        user = db.session.get(User, user_id)
         if not user or not user.is_active:
             return jsonify({'error': 'Invalid refresh token'}), 401
-        new_token = create_access_token(identity=str(user_id))
-        return jsonify({'access_token': new_token})
+        if int(decoded.get('tv', 0)) != int(user.token_version or 0):
+            return jsonify({'error': 'Invalid refresh token'}), 401      # password changed since
+        return jsonify({'access_token': create_access_token(
+            identity=str(user_id), additional_claims={'tv': int(user.token_version or 0)})})
     except Exception:
+        # expired, malformed, bad signature, non-numeric sub, etc.
         return jsonify({'error': 'Invalid refresh token'}), 401
 
 # ===== PROBLEM ROUTES =====
@@ -574,48 +1361,45 @@ def refresh():
 def create_problem():
     user_id = int(get_jwt_identity())
     user = User.query.get(user_id)
-    if not is_instructor_or_admin(user): 
+    if not is_instructor_or_admin(user):
         return jsonify({"error": "Unauthorized"}), 403
-    
+
     data = request.get_json()
-    
+
     # Validation
     required = ['title','description','difficulty','xp_reward','test_cases']
-    if not all(k in data for k in required): 
+    if not all(k in data for k in required):
         return jsonify({"error": "Missing required fields"}), 400
-    if data['difficulty'] not in ['Easy','Medium','Hard']: 
+    if data['difficulty'] not in ['Easy','Medium','Hard']:
         return jsonify({"error": "Invalid difficulty"}), 400
-    if not isinstance(data['test_cases'], list) or len(data['test_cases']) == 0: 
+    if not isinstance(data['test_cases'], list) or len(data['test_cases']) == 0:
         return jsonify({"error": "At least one test case required"}), 400
     for i, tc in enumerate(data['test_cases']):
-        if 'input' not in tc or 'expected' not in tc: 
+        if 'input' not in tc or 'expected' not in tc:
             return jsonify({"error": f"Test case {i+1} invalid"}), 400
 
-    # ✅ XP Validation based on difficulty
-    max_xp = {
-        'Easy': 100,
-        'Medium': 250,
-        'Hard': 500
-    }
-    
-    # ✅ NEW: Validate subject assignment (Phase 2)
+    # xp has to match the difficulty picked
+    max_xp = MAX_XP_BY_DIFFICULTY
+
+    # make sure the subject picked is actually valid
     subject_id = data.get('subject_id')
     if not subject_id:
         return jsonify({"error": "Course subject is required"}), 400
-    
+
     # Verify instructor is assigned to teach this subject in at least one block
     if not is_instructor_assigned(user_id, subject_id):
         return jsonify({"error": "You are not assigned to teach this subject"}), 403
-    
-    # Validate block visibility matches instructor's assignments for this subject
-    visible_blocks = data.get('visible_to_blocks', [])
-    if visible_blocks:
-        allowed_blocks = get_instructor_blocks_for_subject(user_id, subject_id)
-        for bid in visible_blocks:
-            if bid not in allowed_blocks:
-                return jsonify({"error": f"You are not assigned to Block {bid} for this subject"}), 403
-    # If visible_to_blocks is empty, it means visible to ALL blocks instructor teaches this subject in
+    if subject_out_of_scope(Subject.query.get(subject_id)):
+        return jsonify({"error": OUT_OF_SCOPE_MSG}), 400
 
+    # a quest belongs to a specific class code, never the whole subject --
+    # empty used to silently mean "every section of this subject", which
+    # is exactly the behavior that let old quests leak into new class
+    # codes. it's required now.
+    visible_to_sections = data.get('visible_to_sections')
+    section_error = validate_quest_sections(user_id, subject_id, visible_to_sections)
+    if section_error:
+        return section_error
 
     if data['xp_reward'] > max_xp[data['difficulty']]:
         return jsonify({
@@ -630,165 +1414,146 @@ def create_problem():
         except:
             starter_code = {}
 
-    # Parse due_date if provided
-    due_date = None
-    if data.get('due_date'):
-        try:
-            due_date = datetime.fromisoformat(data['due_date'])
-        except:
-            due_date = None
+    # Parse due_date if provided (invalid values are rejected, not dropped)
+    due_date, due_err = parse_due_date(data.get('due_date'))
+    if due_err:
+        return jsonify({"error": "invalid_due_date", "message": due_err}), 400
 
     p = Problem(
-        subject_id=subject_id,  # ✅ NEW: Link problem to subject
-        title=data['title'], 
-        description=data['description'], 
-        category=data.get('category','General'), 
-        difficulty=data['difficulty'], 
-        xp_reward=data['xp_reward'], 
-        test_cases=data['test_cases'], 
-        starter_code=starter_code, 
-        is_published=data.get('is_published', False), 
+        subject_id=subject_id,  # links this quest to a subject
+        title=data['title'],
+        description=data['description'],
+        category=data.get('category','General'),
+        difficulty=data['difficulty'],
+        xp_reward=data['xp_reward'],
+        test_cases=data['test_cases'],
+        starter_code=starter_code,
+        is_published=data.get('is_published', False),
         created_by=user.id,
         due_date=due_date,
         # PRO FEATURES
         problem_type=data.get('problem_type', 'coding'),
         languages=data.get('languages', ['python']),
         is_event_quest=data.get('is_event_quest', False),
-        visible_to_blocks=data.get('visible_to_blocks', []),
+        visible_to_sections=visible_to_sections,
         hints=data.get('hints', []),
         tags=data.get('tags', []),
         prerequisites=data.get('prerequisites', []),
         estimated_time=data.get('estimated_time'),
         partial_credit=data.get('partial_credit', 100),
+        language_rule=('required' if data.get('language_rule') == 'required' else 'optional'),
         auto_grade=data.get('auto_grade', True),
         plagiarism_threshold=data.get('plagiarism_threshold', 0.85)
     )
-    
+
     db.session.add(p)
     db.session.commit()
-    
-    # ===== ASSIGN PROBLEM TO BLOCKS (NEW TABLE) =====
-    if p.visible_to_blocks:
-        for block_id in p.visible_to_blocks:
-            existing = db.session.query(block_problems).filter_by(
-                block_id=block_id,
-                problem_id=p.id
-            ).first()
-            
-            if not existing:
-                db.session.execute(block_problems.insert().values(
-                    block_id=block_id,
-                    problem_id=p.id
-                ))
-        db.session.commit()
-    
+
     return jsonify({"message": "Problem created", "problem_id": p.id}), 201
 
 @app.route('/api/problems', methods=['GET'])
-@jwt_required()  # ✅ Ensure auth is required for student filtering
+@jwt_required()  # needs auth so we can filter by student
 def get_problems():
     """Get published problems with filtering for block visibility & problem type"""
-    user_id = int(get_jwt_identity())  # ✅ Get user_id once at top
+    user_id = int(get_jwt_identity())
     user = User.query.get(user_id)
-    
-    block_id = request.args.get('block_id', type=int)
+
+    # block_id param ignored — blocks removed
     subject_id = request.args.get('subject_id', type=int)
     problem_type = request.args.get('type')
-    
+
     query = Problem.query.filter_by(is_published=True)
-    
+
     if subject_id:
         query = query.filter_by(subject_id=subject_id)
-    
+
     if problem_type:
         query = query.filter_by(problem_type=problem_type)
-    
+
     problems = query.all()
     filtered = []
-    
-    for p in problems:
-        # ✅ FIXED: Student enrollment check
-        if p.subject_id and user.role == 'student':
-            # Get student's enrolled blocks
-            student_enrollments = db.session.query(student_blocks.c.block_id).filter_by(
-                student_id=user_id  # ✅ Use user_id from top, not conditional
-            ).all()
-            student_block_ids = [e.block_id for e in student_enrollments]
-            
-            if not student_block_ids:
-                continue  # Student not enrolled in any blocks
-            
-            # Check if problem's subject is offered in any of student's blocks
-            subject_in_student_blocks = db.session.query(block_subjects.c.block_id).filter_by(
-                subject_id=p.subject_id
-            ).all()
-            valid_blocks = [s.block_id for s in subject_in_student_blocks]
-            
-            if not any(bid in valid_blocks for bid in student_block_ids):
-                continue  # Skip - student not enrolled in this subject
-        
-        # Block visibility filter
-        if not p.visible_to_blocks or (block_id and block_id in p.visible_to_blocks):
-            filtered.append(p)
-        elif not block_id and not p.visible_to_blocks:
-            filtered.append(p)
-    
-    result = []
-    for p in filtered:
-        # Parse starter_code if stored as string
-        starter = p.starter_code
-        if isinstance(starter, str):
-            try:
-                starter = json.loads(starter)
-            except:
-                starter = {}
-        
-        # Get instructor name
-        instructor_name = "System"
-        if p.created_by:
-            instructor = User.query.get(p.created_by)
-            if instructor:
-                instructor_name = instructor.username
-        
-        # Get block section codes
-        block_names = []
-        if p.visible_to_blocks:
-            for bid in p.visible_to_blocks:
-                block = Block.query.get(bid)
-                if block:
-                    block_names.append(block.section_code)
-        
-        result.append({
-            "id": p.id,
-            "title": p.title,
-            "description": p.description,
-            "difficulty": p.difficulty,
-            "xp_reward": p.xp_reward,
-            "problem_type": p.problem_type,
-            "is_event_quest": p.is_event_quest,
-            "languages": p.languages or ['python'],
-            "hints": p.hints or [],
-            "tags": p.tags or [],
-            "starter_code": starter,
-            "test_cases": p.test_cases,
-            "estimated_time": p.estimated_time,
-            "partial_credit": p.partial_credit,
-            "auto_grade": p.auto_grade,
-            "due_date": p.due_date.isoformat() if p.due_date else None,
-            "instructor_name": instructor_name,
-            "block_names": block_names,
-            "created_at": p.created_at.isoformat()
-        })
-    
+
+    if user.role in ('instructor', 'administrator'):
+        for p in problems:
+            if user.role == 'administrator' or p.created_by == user_id:
+                filtered.append(p)
+    else:
+        # Student path — get enrolled sections
+        enrollments = IrregularEnrollment.query.filter_by(student_id=user_id).all()
+        student_section_ids = [e.section_id for e in enrollments]
+        if not student_section_ids:
+            return jsonify([]), 200
+
+        # a quest belongs to a specific class code, never the whole
+        # subject -- this used to fall back to "any subject match" which
+        # is why students could see quests uploaded to a different
+        # (sometimes already-deleted) class code under the same subject
+        for p in problems:
+            if p.visible_to_sections and any(
+                sid in p.visible_to_sections for sid in student_section_ids
+            ):
+                filtered.append(p)
+
+    result = [serialize_problem_for_viewer(p, user) for p in filtered]
+
     return jsonify(result), 200
 
+
+def serialize_problem_for_viewer(p, user):
+    """
+    Everything the student code editor (StudentCodeEditor.jsx) needs to
+    actually show a quest: description, hints, starter code, test cases --
+    not just the summary fields used for a list/card view. Shared by every
+    endpoint that may end up feeding a quest straight into that editor, so
+    a new entry point can't silently repeat the bug where /api/student/open-quests
+    (the Bounty Board) used to return only 7 summary fields, which the
+    editor rendered as a blank Problem/Test Cases/Hints tab for any quest
+    opened from there -- it never re-fetches full detail itself, it trusts
+    whatever `quest` object its caller passed in.
+    """
+    # Parse starter_code if stored as string
+    starter = p.starter_code
+    if isinstance(starter, str):
+        try:
+            starter = json.loads(starter)
+        except:
+            starter = {}
+    # Get instructor name
+    instructor_name = "System"
+    if p.created_by:
+        instructor = User.query.get(p.created_by)
+        if instructor:
+            instructor_name = instructor.username
+    section_names = []
+    if p.visible_to_sections:
+        sections = SubjectSection.query.filter(SubjectSection.id.in_(p.visible_to_sections)).all()
+        section_names = [s.section_no for s in sections]
+    return {
+        "id": p.id, "title": p.title, "description": p.description,
+        "difficulty": p.difficulty, "xp_reward": p.xp_reward,
+        "problem_type": p.problem_type, "is_event_quest": p.is_event_quest,
+        "languages": p.languages or ['python'],
+        "hints": serialize_hints_for_viewer(p, user),
+        "tags": p.tags or [], "starter_code": starter,
+        "test_cases": sanitize_test_cases_for_student(p.test_cases),
+        "estimated_time": p.estimated_time, "partial_credit": p.partial_credit,
+        "language_rule": p.language_rule or 'optional',
+        "auto_grade": p.auto_grade,
+        "due_date": p.due_date.isoformat() if p.due_date else None,
+        "instructor_name": instructor_name, "section_names": section_names,
+        "created_at": p.created_at.isoformat()
+    }
+
+
 @app.route('/api/problems/<int:problem_id>', methods=['GET'])
+@jwt_required()
 def get_problem_detail(problem_id):
     """Get single problem details (for student code editor)"""
+    viewer = db.session.get(User, int(get_jwt_identity()))
     problem = Problem.query.get_or_404(problem_id)
-    if not problem.is_published:
-        return jsonify({"error": "Problem not available"}), 404
-    
+    if not problem.is_published or not user_can_access_problem(viewer, problem, historical=True):
+        return deny_problem_access()
+
     # Parse starter_code
     starter = problem.starter_code
     if isinstance(starter, str):
@@ -796,22 +1561,19 @@ def get_problem_detail(problem_id):
             starter = json.loads(starter)
         except:
             starter = {}
-    
+
     # Get instructor name
     instructor_name = "System"
     if problem.created_by:
         instructor = User.query.get(problem.created_by)
         if instructor:
             instructor_name = instructor.username
-    
-    # ✅ Get block section codes (NEW TABLE)
-    block_names = []
-    if problem.visible_to_blocks:
-        for bid in problem.visible_to_blocks:
-            block = Block.query.get(bid)
-            if block:
-                block_names.append(block.section_code)
-    
+
+    section_names = []
+    if problem.visible_to_sections:
+        sections = SubjectSection.query.filter(SubjectSection.id.in_(problem.visible_to_sections)).all()
+        section_names = [s.section_no for s in sections]
+
     return jsonify({
         "id": problem.id,
         "title": problem.title,
@@ -821,13 +1583,13 @@ def get_problem_detail(problem_id):
         "problem_type": problem.problem_type,
         "is_event_quest": problem.is_event_quest,
         "languages": problem.languages or ['python'],
-        "hints": problem.hints or [],
+        "hints": serialize_hints_for_viewer(problem, viewer),
         "starter_code": starter,
-        "test_cases": problem.test_cases,
+        "test_cases": sanitize_test_cases_for_student(problem.test_cases),
         "estimated_time": problem.estimated_time,
         "due_date": problem.due_date.isoformat() if problem.due_date else None,
-        "instructor_name": instructor_name,  # ✅ NEW
-        "block_names": block_names  # ✅ NEW
+        "instructor_name": instructor_name,
+        "section_names": section_names
     }), 200
 
 @app.route('/api/problems/<int:problem_id>', methods=['PUT'])
@@ -836,44 +1598,54 @@ def update_problem(problem_id):
     """Update an existing problem (instructors/admins only)"""
     user_id = int(get_jwt_identity())
     user = User.query.get(user_id)
-    
+
     if not is_instructor_or_admin(user):
         return jsonify({"error": "Unauthorized"}), 403
-    
+
     problem = Problem.query.get_or_404(problem_id)
-    
+
     # Verify ownership
-    if problem.created_by != user_id and user.role != 'admin':
+    if problem.created_by != user_id and user.role != 'administrator':
         return jsonify({"error": "Not your problem"}), 403
-    
+
     data = request.get_json()
-    
+
     # ===== VALIDATION (same as create) =====
+    new_due_date, due_err = parse_due_date(data.get('due_date'))
+    if due_err:
+        return jsonify({"error": "invalid_due_date", "message": due_err}), 400
     required = ['title', 'description', 'difficulty', 'xp_reward', 'test_cases']
     if not all(k in data for k in required):
         return jsonify({"error": "Missing required fields"}), 400
-    
+
     if data['difficulty'] not in ['Easy', 'Medium', 'Hard']:
         return jsonify({"error": "Invalid difficulty"}), 400
-    
+
     if not isinstance(data['test_cases'], list) or len(data['test_cases']) == 0:
         return jsonify({"error": "At least one test case required"}), 400
-    
+
     # XP Validation
-    max_xp = {'Easy': 100, 'Medium': 250, 'Hard': 500}
+    max_xp = MAX_XP_BY_DIFFICULTY
     if data['xp_reward'] > max_xp[data['difficulty']]:
         return jsonify({
             "error": f"XP reward exceeds maximum for {data['difficulty']} difficulty"
         }), 400
-    
+
     # Subject validation
     subject_id = data.get('subject_id')
     if not subject_id:
         return jsonify({"error": "Course subject is required"}), 400
-    
+
     if not is_instructor_assigned(user_id, subject_id):
         return jsonify({"error": "You are not assigned to teach this subject"}), 403
-    
+    if subject_id != problem.subject_id and subject_out_of_scope(Subject.query.get(subject_id)):
+        return jsonify({"error": OUT_OF_SCOPE_MSG}), 400
+
+    visible_to_sections = data.get('visible_to_sections', problem.visible_to_sections)
+    section_error = validate_quest_sections(user_id, subject_id, visible_to_sections)
+    if section_error:
+        return section_error
+
     # ===== UPDATE FIELDS =====
     problem.title = data['title']
     problem.description = data['description']
@@ -883,27 +1655,26 @@ def update_problem(problem_id):
     problem.test_cases = data['test_cases']
     problem.is_published = data.get('is_published', problem.is_published)
     problem.subject_id = subject_id
-    
+
     # PRO FEATURES
     problem.problem_type = data.get('problem_type', problem.problem_type)
     problem.languages = data.get('languages', problem.languages)
     problem.is_event_quest = data.get('is_event_quest', problem.is_event_quest)
-    problem.visible_to_blocks = data.get('visible_to_blocks', problem.visible_to_blocks)
+    problem.visible_to_sections = visible_to_sections
     problem.hints = data.get('hints', problem.hints)
     problem.tags = data.get('tags', problem.tags)
     problem.prerequisites = data.get('prerequisites', problem.prerequisites)
     problem.estimated_time = data.get('estimated_time', problem.estimated_time)
     problem.partial_credit = data.get('partial_credit', problem.partial_credit)
+    if data.get('language_rule') in ('required', 'optional'):
+        problem.language_rule = data['language_rule']
     problem.auto_grade = data.get('auto_grade', problem.auto_grade)
     problem.plagiarism_threshold = data.get('plagiarism_threshold', problem.plagiarism_threshold)
-    
-    # Parse due_date
-    if data.get('due_date'):
-        try:
-            problem.due_date = datetime.fromisoformat(data['due_date'])
-        except:
-            pass
-    
+
+    # due_date was validated before any field was changed; an absent/empty value leaves the stored one as is
+    if new_due_date is not None:
+        problem.due_date = new_due_date
+
     # Handle starter_code
     starter_code = data.get('starter_code')
     if starter_code:
@@ -913,21 +1684,9 @@ def update_problem(problem_id):
             except:
                 pass
         problem.starter_code = starter_code
-    
+
     db.session.commit()
-    
-    # ===== UPDATE BLOCK ASSIGNMENTS =====
-    if 'visible_to_blocks' in data:
-        # Remove old assignments
-        db.session.query(block_problems).filter_by(problem_id=problem_id).delete()
-        # Add new assignments
-        for block_id in data['visible_to_blocks']:
-            db.session.execute(block_problems.insert().values(
-                block_id=block_id,
-                problem_id=problem_id
-            ))
-        db.session.commit()
-    
+
     return jsonify({
         "message": "Problem updated successfully",
         "problem_id": problem.id
@@ -941,18 +1700,51 @@ def delete_problem(problem_id):
     user = User.query.get(user_id)
     if not is_instructor_or_admin(user):
         return jsonify({"error": "Unauthorized"}), 403
-    
+
     problem = Problem.query.get_or_404(problem_id)
-    if problem.created_by != user_id and user.role != 'admin':
+
+    if problem.created_by != user_id and user.role != 'administrator':
         return jsonify({"error": "Not your problem"}), 403
-    
-    # Clean up related data in junction tables
-    db.session.query(block_problems).filter_by(problem_id=problem_id).delete()
-    Submission.query.filter_by(problem_id=problem_id).delete()
-    
+
+    # A problem delete is permanent and (via _wipe_problem_dependents below)
+    # takes every Submission row for it with it. Submissions are the only
+    # record of why a student's XP total is what it is -- User.xp is a
+    # running total updated at submission time, never recomputed from the
+    # submissions that remain, so deleting a live problem's submissions
+    # leaves students holding XP with no record left to justify it. Fine
+    # for throwaway/test problems nobody has graded work on; not fine once
+    # real students have submitted. Require an explicit, informed
+    # confirmation (?force=true) once that has happened, and point at
+    # unpublish (reversible, keeps the history) as the default path instead.
+    existing_submissions = Submission.query.filter_by(problem_id=problem_id).count()
+    force = str(request.args.get('force', '')).strip().lower() in ('true', '1', 'yes')
+    if existing_submissions > 0 and not force:
+        return jsonify({
+            "error": "This problem has graded submissions",
+            "message": (
+                f"{existing_submissions} student submission(s) exist for this problem. "
+                "Deleting it permanently erases that grading history (the XP students already "
+                "earned from it is NOT reversed, so it would no longer be accounted for by anything). "
+                "Unpublish the problem instead to hide it while keeping the history, or pass "
+                "?force=true to delete it anyway."
+            ),
+            "submission_count": existing_submissions,
+        }), 409
+
+    # Clean up every row that still points at this problem -- a plain
+    # Submission.query.delete() used to be the only cleanup here, which
+    # left SubmissionSlot/CodeDraft/HintReveal/PlagiarismReport rows
+    # behind for any problem that had ever been submitted to. MySQL's FK
+    # (RESTRICT, not CASCADE) then blocked the Problem delete outright,
+    # surfacing to the instructor as a generic "check your connection"
+    # error with no indication the quest actually had a block. Same fix
+    # as the account-delete cascade -- reuses the same helper so both
+    # stay correct together instead of drifting apart again.
+    _wipe_problem_dependents([problem_id])
+
     db.session.delete(problem)
     db.session.commit()
-    
+
     return jsonify({"message": "Problem deleted"}), 200
 
 # ===== LESSON ROUTES =====
@@ -962,44 +1754,54 @@ def create_lesson():
     """Create a new lesson (instructors only)"""
     user_id = int(get_jwt_identity())
     user = User.query.get(user_id)
-    
+
     if not is_instructor_or_admin(user):
         return jsonify({"error": "Unauthorized"}), 403
-    
-    data = request.get_json()
-    
-    # Validation
-    required = ['title', 'description', 'week_number', 'subject_id']
+
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "A JSON object is required"}), 400
+    if not isinstance(data.get('title'), str) or not data['title'].strip() or len(data['title'].strip()) > 200:
+        return jsonify({"error": "Module title must contain 1–200 characters"}), 400
+    if not isinstance(data.get('description'), str) or not data['description'].strip():
+        return jsonify({"error": "Module description is required"}), 400
+    if type(data.get('week_number')) is not int or not 1 <= data['week_number'] <= 18:
+        return jsonify({"error": "Week must be a whole number from 1 to 18"}), 400
+    if 'is_published' in data and type(data['is_published']) is not bool:
+        return jsonify({"error": "Visibility must be Draft or Publish"}), 400
+
+    # Validation -- section_id is now required: a module belongs to one
+    # specific class code, never the whole subject (see get_lessons /
+    # get_student_lessons for why that matters)
+    required = ['title', 'description', 'week_number', 'subject_id', 'section_id']
     if not all(k in data for k in required):
-        return jsonify({"error": "Missing required fields"}), 400
-    
+        return jsonify({"error": "Missing required fields (a module needs a specific class code)"}), 400
+
+    section = SubjectSection.query.get(data['section_id'])
+    if not section:
+        return jsonify({"error": "Class code not found"}), 404
+
     # Verify instructor is assigned to this subject
-    if not is_instructor_assigned(user_id, data['subject_id']):
-        return jsonify({"error": "You are not assigned to teach this subject"}), 403
-    
-    # ✅ Handle block_id validation
-    block_id = data.get('block_id')
-    if block_id:
-        block = Block.query.get(block_id)
-        if not block:
-            return jsonify({"error": "Invalid block ID"}), 400
-        if not is_instructor_assigned(user_id, data['subject_id'], block_id):
-            return jsonify({"error": "You are not assigned to teach this subject in this block"}), 403
-    
-    # Create lesson
+    if not is_instructor_assigned(user_id, section.subject_id, section.id):
+        return jsonify({"error": "You are not assigned to teach this class"}), 403
+    if subject_out_of_scope(Subject.query.get(section.subject_id)):
+        return jsonify({"error": OUT_OF_SCOPE_MSG}), 400
+
+    # Create lesson -- subject_id always derived from the section so the
+    # two can never disagree
     lesson = Lesson(
-        title=data['title'],
-        description=data.get('description', ''),
+        title=data['title'].strip(),
+        description=data['description'].strip(),
         week_number=data['week_number'],
-        subject_id=data['subject_id'],
-        block_id=block_id,  # ✅ Can be NULL for "All Blocks"
+        subject_id=section.subject_id,
+        section_id=section.id,
         created_by=user_id,
         is_published=data.get('is_published', False)
     )
-    
+
     db.session.add(lesson)
     db.session.commit()
-    
+
     return jsonify({
         "message": "Lesson created",
         "lesson_id": lesson.id
@@ -1011,91 +1813,286 @@ def upload_lesson_file(lesson_id):
     """Upload a file to a lesson (instructors only)"""
     user_id = int(get_jwt_identity())
     user = User.query.get(user_id)
-    
+
     if not is_instructor_or_admin(user):
         return jsonify({"error": "Unauthorized"}), 403
-    
+
     lesson = Lesson.query.get_or_404(lesson_id)
-    
+
     # Verify ownership
-    if lesson.created_by != user_id and user.role != 'admin':
+    if lesson.created_by != user_id and user.role != 'administrator':
         return jsonify({"error": "Not your lesson"}), 403
-    
+
     # Check if file was uploaded
     if 'file' not in request.files:
         return jsonify({"error": "No file uploaded"}), 400
-    
+
     file = request.files['file']
     if file.filename == '':
         return jsonify({"error": "No file selected"}), 400
-    
+
     # Validate file type
     allowed_types = ['pdf', 'ppt', 'pptx', 'doc', 'docx', 'jpg', 'jpeg', 'png', 'zip']
     file_ext = file.filename.rsplit('.', 1)[1].lower() if '.' in file.filename else ''
     if file_ext not in allowed_types:
         return jsonify({"error": f"File type .{file_ext} not allowed"}), 400
-    
-    # Validate file size (16MB max)
-    if file.content_length and file.content_length > 16 * 1024 * 1024:
+
+    # Multipart part Content-Length is usually absent. Measure the spooled
+    # stream itself before saving, and preserve its exact byte count.
+    file.stream.seek(0, 2)
+    file_size = file.stream.tell()
+    file.stream.seek(0)
+    if file_size > 16 * 1024 * 1024:
         return jsonify({"error": "File too large (max 16MB)"}), 400
-    
+
     # Generate secure filename
     import uuid, os
     secure_name = f"{uuid.uuid4().hex}.{file_ext}"
-    
+
     # Create uploads folder if not exists
-    upload_dir = os.path.join('uploads', 'lessons', str(lesson_id))
-    os.makedirs(upload_dir, exist_ok=True)
-    
-    # Save file
-    file_path = os.path.join(upload_dir, secure_name)
-    file.save(file_path)
-    
+    rel_dir = 'uploads/lessons/' + str(lesson_id)
+    os.makedirs(os.path.join(UPLOAD_ROOT, 'lessons', str(lesson_id)), exist_ok=True)
+
+    # Save file (the database keeps the relative path with forward slashes)
+    file_path = rel_dir + '/' + secure_name
+    file.save(upload_abs_path(file_path))
+
     # Create database record
     lesson_file = LessonFile(
         lesson_id=lesson_id,
         filename=secure_name,
         original_filename=file.filename,
         file_type=file_ext,
-        file_size=file.content_length or 0,
+        file_size=file_size,
         storage_path=file_path
     )
-    
+
     db.session.add(lesson_file)
     db.session.commit()
-    
+
     return jsonify({
         "message": "File uploaded",
         "file_id": lesson_file.id,
         "filename": file.filename
     }), 201
 
+@app.route('/api/lessons/<int:lesson_id>', methods=['PUT'])
+@jwt_required()
+def update_lesson(lesson_id):
+    user_id = int(get_jwt_identity())
+    user = User.query.get(user_id)
+    if not is_instructor_or_admin(user):
+        return jsonify({"error": "Unauthorized"}), 403
+
+    lesson = Lesson.query.get_or_404(lesson_id)
+    if lesson.created_by != user_id and user.role != 'administrator':
+        return jsonify({"error": "Not your lesson"}), 403
+
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "A JSON object is required"}), 400
+    if 'title' in data and (not isinstance(data['title'], str) or not data['title'].strip() or len(data['title'].strip()) > 200):
+        return jsonify({"error": "Module title must contain 1–200 characters"}), 400
+    if 'description' in data and (not isinstance(data['description'], str) or not data['description'].strip()):
+        return jsonify({"error": "Module description is required"}), 400
+    if 'week_number' in data and (type(data['week_number']) is not int or not 1 <= data['week_number'] <= 18):
+        return jsonify({"error": "Week must be a whole number from 1 to 18"}), 400
+    if 'is_published' in data and type(data['is_published']) is not bool:
+        return jsonify({"error": "Visibility must be Draft or Publish"}), 400
+    if 'title'        in data: lesson.title        = data['title'].strip()
+    if 'description'  in data: lesson.description  = data['description'].strip()
+    if 'week_number'  in data: lesson.week_number  = int(data['week_number'])
+    if 'is_published' in data: lesson.is_published = bool(data['is_published'])
+
+    db.session.commit()
+    return jsonify({"message": "Lesson updated"}), 200
+
+
+@app.route('/api/lessons/<int:lesson_id>', methods=['DELETE'])
+@jwt_required()
+def delete_lesson(lesson_id):
+    user_id = int(get_jwt_identity())
+    user = User.query.get(user_id)
+    if not is_instructor_or_admin(user):
+        return jsonify({"error": "Unauthorized"}), 403
+
+    lesson = Lesson.query.get_or_404(lesson_id)
+    if lesson.created_by != user_id and user.role != 'administrator':
+        return jsonify({"error": "Not your lesson"}), 403
+
+    # delete physical files from disk first
+    import os
+    files = LessonFile.query.filter_by(lesson_id=lesson_id).all()
+    for f in files:
+        ap = upload_abs_path(f.storage_path)
+        if ap and os.path.exists(ap):
+            try:
+                os.remove(ap)
+            except OSError:
+                pass  # file already gone, no big deal
+        db.session.delete(f)
+
+    db.session.delete(lesson)
+    db.session.commit()
+    return jsonify({"message": "Lesson deleted"}), 200
+
+
+@app.route('/api/lessons/<int:lesson_id>/files/<int:file_id>', methods=['DELETE'])
+@jwt_required()
+def delete_lesson_file(lesson_id, file_id):
+    # this is for deleting one file from a module without wiping the whole thing
+    import os
+    user_id = int(get_jwt_identity())
+    user = User.query.get(user_id)
+    if not is_instructor_or_admin(user):
+        return jsonify({"error": "Unauthorized"}), 403
+
+    lesson = Lesson.query.get_or_404(lesson_id)
+    if lesson.created_by != user_id and user.role != 'administrator':
+        return jsonify({"error": "Not your lesson"}), 403
+
+    f = LessonFile.query.get_or_404(file_id)
+    if f.lesson_id != lesson_id:
+        return jsonify({"error": "File not found"}), 404
+
+    ap = upload_abs_path(f.storage_path)
+    if ap and os.path.exists(ap):
+        try:
+            os.remove(ap)
+        except OSError:
+            pass  # file already gone, no big deal
+
+    db.session.delete(f)
+    db.session.commit()
+    return jsonify({"message": "File deleted"}), 200
+
+
+@app.route('/api/lessons/<int:lesson_id>/files/<int:file_id>/download', methods=['GET'])
+@jwt_required()
+def download_lesson_file(lesson_id, file_id):
+    # this url is shared by both sides — instructors download from
+    # CourseMaterials.jsx, students download from StudentLessons.jsx.
+    # used to be 2 separate functions both sitting on this same url.
+    # flask just runs whichever one it finds first, so the instructor
+    # check always ran first and every student got blocked with a 403,
+    # even though the student logic further down the file was fine —
+    # it just never got a turn. merged them into one function that
+    # checks the role instead. if downloads ever break again for
+    # students, start here.
+    import os
+    from flask import send_file
+
+    user_id = int(get_jwt_identity())
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    lesson = Lesson.query.get_or_404(lesson_id)
+    f = LessonFile.query.get_or_404(file_id)
+    if f.lesson_id != lesson_id:
+        return jsonify({"error": "File not found"}), 404
+
+    if is_instructor_or_admin(user):
+        # instructor has to own the lesson. admins can grab anything.
+        if lesson.created_by != user_id and user.role != 'administrator':
+            return jsonify({"error": "Not your lesson"}), 403
+    else:
+        # student has to be enrolled in a section under this subject
+        enrollments = IrregularEnrollment.query.filter_by(student_id=user_id).all()
+        section_ids = [e.section_id for e in enrollments]
+        if not section_ids:
+            return jsonify({"error": "Not enrolled"}), 403
+
+        # the lesson belongs to one class code and must be published
+        if not lesson.is_published or lesson.section_id not in section_ids:
+            return jsonify({"error": "Access denied"}), 403
+
+    # storage_path is relative; it is resolved against the uploads folder (never the launch directory)
+    abs_path = upload_abs_path(f.storage_path)
+    if not abs_path or not os.path.exists(abs_path):
+        return jsonify({"error": "File not found on disk"}), 404
+
+    return send_file(abs_path, as_attachment=True, download_name=f.original_filename)
+
 @app.route('/api/lessons', methods=['GET'])
 @jwt_required()
 def get_lessons():
-    """Get all lessons (filtered by instructor's classes)"""
+    """Get lessons created by this instructor, optionally scoped to one class code"""
     user_id = int(get_jwt_identity())
     user = User.query.get(user_id)
-    
+
     if not is_instructor_or_admin(user):
         return jsonify({"error": "Unauthorized"}), 403
-    
-    # Get all lessons created by this instructor
-    lessons = Lesson.query.filter_by(created_by=user_id).all()
-    
+
+    class_id = request.args.get('class_id', type=int)
+
+    query = Lesson.query.filter_by(created_by=user_id)
+    if class_id:
+        query = query.filter_by(section_id=class_id)
+    lessons = query.all()
+
     result = []
     for lesson in lessons:
         # Get files for this lesson
         files = LessonFile.query.filter_by(lesson_id=lesson.id).all()
-        
+
         result.append({
             "id": lesson.id,
             "title": lesson.title,
             "description": lesson.description,
             "week_number": lesson.week_number,
             "subject_id": lesson.subject_id,
-            "block_id": lesson.block_id,
+            "section_id": lesson.section_id,
             "is_published": lesson.is_published,
+            "created_at": lesson.created_at.isoformat(),
+            "files": [{
+                "id": f.id,
+                "filename": f.original_filename,
+                "file_size": f.file_size or 0,
+                "file_type": f.file_type
+            } for f in files]
+        })
+
+    return jsonify(result), 200
+
+@app.route('/api/student/lessons', methods=['GET'])
+@jwt_required()
+def get_student_lessons():
+    """Get lessons for one specific class code the student is enrolled in.
+
+    Modules belong to a single class code, not the whole subject -- a
+    student in section 29115 must never see a module uploaded for 29116,
+    even though both are "Introduction to Computing Lab"."""
+    user_id = int(get_jwt_identity())
+    user = User.query.get(user_id)
+
+    if user.role != 'student':
+        return jsonify({"error": "Students only"}), 403
+
+    section_id = request.args.get('section_id', type=int)
+    if not section_id:
+        return jsonify([]), 200
+
+    enrollments = IrregularEnrollment.query.filter_by(student_id=user_id).all()
+    section_ids = [e.section_id for e in enrollments]
+    if section_id not in section_ids:
+        return jsonify([]), 200
+
+    lessons = Lesson.query.filter(
+        Lesson.is_published == True,
+        Lesson.section_id == section_id
+    ).order_by(Lesson.week_number, Lesson.created_at).all()
+
+    result = []
+    for lesson in lessons:
+        # Get files for this lesson
+        files = LessonFile.query.filter_by(lesson_id=lesson.id).all()
+
+        result.append({
+            "id": lesson.id,
+            "title": lesson.title,
+            "description": lesson.description,
+            "week_number": lesson.week_number,
             "created_at": lesson.created_at.isoformat(),
             "files": [{
                 "id": f.id,
@@ -1103,162 +2100,557 @@ def get_lessons():
                 "file_type": f.file_type
             } for f in files]
         })
-    
-    return jsonify(result), 200
 
-@app.route('/api/student/lessons', methods=['GET'])
-@jwt_required()
-def get_student_lessons():
-    """Get lessons for student's enrolled classes"""
-    user_id = int(get_jwt_identity())
-    user = User.query.get(user_id)
-    
-    if user.role != 'student':
-        return jsonify({"error": "Students only"}), 403
-    
-    # Get blocks this student is enrolled in
-    enrollments = db.session.query(student_blocks.c.block_id).filter_by(
-        student_id=user_id
-    ).all()
-    block_ids = [e.block_id for e in enrollments]
-    
-    if not block_ids:
-        return jsonify([]), 200
-    
-    # ✅ FIXED: Get subject_id from query params and filter by it
-    subject_id = request.args.get('subject_id', type=int)
-    if not subject_id:
-        return jsonify([]), 200
-
-    # Verify this subject is actually in one of the student's blocks
-    subject_block_rows = db.session.query(block_subjects.c.block_id).filter_by(
-        subject_id=subject_id
-    ).all()
-    subject_block_ids = [r.block_id for r in subject_block_rows]
-    valid_block_ids = [bid for bid in block_ids if bid in subject_block_ids]
-
-    if not valid_block_ids:
-        return jsonify([]), 200
-
-    # Get lessons filtered by subject_id AND valid blocks
-    lessons = Lesson.query.filter(
-        Lesson.is_published == True,
-        Lesson.subject_id == subject_id,
-        (Lesson.block_id.in_(valid_block_ids)) | (Lesson.block_id == None)
-    ).order_by(Lesson.week_number, Lesson.created_at).all()
-    
-    result = []
-    for lesson in lessons:
-        # Get files for this lesson
-        files = LessonFile.query.filter_by(lesson_id=lesson.id).all()
-        
-        result.append({
-            "id": lesson.id,
-            "title": lesson.title,
-            "description": lesson.description,
-            "week_number": lesson.week_number,
-            "block_id": lesson.block_id,
-            "created_at": lesson.created_at.isoformat(),
-            "files": [{
-                "id": f.id,
-                "filename": f.original_filename,
-                "file_type": f.file_type,
-                "storage_path": f.storage_path
-            } for f in files]
-        })
-    
     return jsonify(result), 200
 
 # ===== SUBMISSION ROUTES =====
-@app.route('/api/submissions', methods=['POST'])
+@app.route('/api/problems/<int:problem_id>/hints/revealed', methods=['GET'])
 @jwt_required()
-def create_submission():
-    """Submit code for grading - returns XP/level updates"""
+def get_revealed_hints(problem_id):
+    # tells the student-side editor which hints it already revealed for
+    # this problem, so reopening or refreshing the page shows the right
+    # hints as still-unblurred instead of resetting to "nothing revealed"
+    user_id = int(get_jwt_identity())
+    prob = db.session.get(Problem, problem_id)
+    if not prob or not user_can_access_problem(db.session.get(User, user_id), prob, historical=True):
+        return deny_problem_access()
+    revealed = HintReveal.query.filter_by(user_id=user_id, problem_id=problem_id).all()
+    hints = (prob.hints if prob else None) or []
+    # "texts" lets the editor show already-revealed hints after a refresh,
+    # since the text is no longer shipped with the problem for locked hints
+    texts = {
+        str(r.hint_index): hints[r.hint_index].get('text', '')
+        for r in revealed
+        if 0 <= r.hint_index < len(hints) and isinstance(hints[r.hint_index], dict)
+    }
+    return jsonify({"revealed": [r.hint_index for r in revealed], "texts": texts}), 200
+
+
+@app.route('/api/problems/<int:problem_id>/hints/<int:hint_index>/reveal', methods=['POST'])
+@jwt_required()
+def reveal_hint(problem_id, hint_index):
+    # saves a hint reveal the moment a student clicks it, so the penalty
+    # applies at submission time based on our own records — refreshing
+    # the page or editing the request afterward can't undo it
     user_id = int(get_jwt_identity())
     user = User.query.get(user_id)
-    if user.role != 'student': 
+    if user.role != 'student':
         return jsonify({"error": "Students only"}), 403
-    
-    data = request.get_json()
-    if not all(k in data for k in ['problem_id','code','language']): 
+
+    prob = Problem.query.get_or_404(problem_id)
+    if not user_can_access_problem(user, prob):
+        return deny_problem_access()
+    if not prob.hints or not (0 <= hint_index < len(prob.hints)):
+        return jsonify({"error": "Invalid hint index"}), 400
+
+    existing = HintReveal.query.filter_by(
+        user_id=user_id, problem_id=problem_id, hint_index=hint_index
+    ).first()
+    if not existing:
+        db.session.add(HintReveal(
+            user_id=user_id, problem_id=problem_id, hint_index=hint_index
+        ))
+        db.session.commit()
+
+    hint = prob.hints[hint_index] if isinstance(prob.hints[hint_index], dict) else {}
+    return jsonify({
+        "revealed":   True,
+        "xp_penalty": hint.get('xp_penalty', 0),
+        "text":       hint.get('text', ''),
+    }), 200
+
+
+# A graded submission is reserved BEFORE the code runs and written AFTER it
+# finishes, so no database transaction is open while Docker works and no
+# half-finished row ever shows up in scores, analytics or plagiarism scans.
+#
+#   submission_slots   one row per (student, problem), UNIQUE in the database
+#     pending -> done     the result (submission row + XP) was written
+#     pending -> failed   the code runner broke; the attempt is NOT consumed
+#
+# Only a legitimate assessed result (wrong answer, compile error, a student's
+# own timeout, ...) consumes the single graded attempt. A slot left "pending"
+# by a crash becomes claimable again after PENDING_SLOT_STALE_SECONDS.
+PENDING_SLOT_STALE_SECONDS = 15 * 60
+# optional multi-language quests: each extra language adds this share of the quest's XP
+LANGUAGE_BONUS_PCT = 0.25
+
+
+class SubmissionConflict(Exception):
+    """The student already has a graded submission, or one is being graded right now."""
+    def __init__(self, message, existing=None):
+        super().__init__(message)
+        self.message = message
+        self.existing = existing
+
+
+def claim_submission_slot(user_id, problem_id, language):
+    """
+    Reserve the one graded attempt (short transaction, committed before running).
+    Raises SubmissionConflict if it is taken. The UNIQUE key makes two
+    simultaneous requests safe: only one INSERT (or one UPDATE of a failed or
+    stale slot) can succeed.
+    """
+    # a legitimately graded submission from before slots existed
+    prior = Submission.query.filter_by(user_id=user_id, problem_id=problem_id, language=language).first()
+    if prior:
+        raise SubmissionConflict(f"You have already submitted this problem in {language}. Use Run to test your code.", prior)
+
+    now = datetime.utcnow()
+    token = str(_uuid.uuid4())
+    stale_before = now - timedelta(seconds=PENDING_SLOT_STALE_SECONDS)
+    slot = SubmissionSlot.query.filter_by(user_id=user_id, problem_id=problem_id, language=language).first()
+    if slot is None:
+        db.session.add(SubmissionSlot(user_id=user_id, problem_id=problem_id, language=language,
+                                      status='pending', claimed_at=now, owner_token=token))
+        try:
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+            raise SubmissionConflict("Your submission for this problem is already being processed.")
+        return token
+    if slot.status == 'done':
+        raise SubmissionConflict(f"You have already submitted this problem in {language}. Use Run to test your code.")
+    # 'failed' (runner broke last time) or a 'pending' slot abandoned by a crash:
+    # take it over with a single conditional UPDATE so only one request wins
+    won = SubmissionSlot.query.filter(
+        SubmissionSlot.id == slot.id,
+        db.or_(SubmissionSlot.status == 'failed',
+               db.and_(SubmissionSlot.status == 'pending', SubmissionSlot.claimed_at < stale_before)),
+    ).update({'status': 'pending', 'claimed_at': now, 'finished_at': None, 'owner_token': token},
+      synchronize_session=False)
+    db.session.commit()
+    if won != 1:
+        raise SubmissionConflict("Your submission for this problem is already being processed.")
+    return token
+
+
+def release_submission_slot(user_id, problem_id, error_text, token=None, language=None):
+    """The runner failed: free the attempt so the student can try again."""
+    try:
+        q = SubmissionSlot.query.filter_by(user_id=user_id, problem_id=problem_id, language=language, status='pending')
+        if token is not None:
+            q = q.filter_by(owner_token=token)       # only the current owner may release
+        q.update(
+            {'status': 'failed', 'finished_at': datetime.utcnow(), 'error_msg': (error_text or '')[:500]},
+            synchronize_session=False)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        logger.exception("could not release submission slot (user=%s problem=%s); it will expire on its own",
+                         user_id, problem_id)
+
+
+@app.route('/api/submissions', methods=['POST'])
+@jwt_required()
+@rate_limit(max_calls=10, period=60)
+def create_submission():
+    """Submit code for grading: one graded attempt per problem, partial credit and floor XP."""
+    user_id = int(get_jwt_identity())
+    user = User.query.get(user_id)
+    if user.role != 'student':
+        return jsonify({"error": "Students only"}), 403
+
+    data = request.get_json() or {}
+    if not all(k in data for k in ['problem_id', 'code', 'language']):
         return jsonify({"error": "Missing fields"}), 400
-    
+
     prob = Problem.query.get_or_404(data['problem_id'])
-    if not prob.is_published: 
-        return jsonify({"error": "Problem unavailable"}), 404
-    
-    sub = Submission(
-         user_id=user.id, 
-         problem_id=prob.id, 
-         code=data['code'], 
-         language=data['language'], 
-         status='error',        # ← valid ENUM value as placeholder
-         score=0
-    )
-    db.session.add(sub)
-    db.session.flush()
-    
+    if not prob.is_published or not user_can_access_problem(user, prob):
+        # unpublished, or not in one of this student's classes: nothing is claimed or graded
+        return deny_problem_access()
+
+    # Deadline enforcement
+    if prob.due_date and datetime.utcnow() > prob.due_date:
+        return jsonify({
+            "error": "Deadline passed",
+            "message": f"This quest closed on {prob.due_date.strftime('%B %d, %Y at %I:%M %p UTC')}",
+            "due_date": prob.due_date.isoformat()
+        }), 403
+
+    # plain values for use after the reservation is committed (ORM objects
+    # expire on commit and would otherwise reopen a transaction)
+    problem_id = prob.id
+    test_cases = list(prob.test_cases or [])
+    xp_reward  = prob.xp_reward
+    partial_pc = prob.partial_credit or 100
+    hints      = list(prob.hints or [])
+    code, language = data['code'], data['language']
+    allowed_langs = [l for l in (prob.languages or ['python'])]
+    if language not in allowed_langs:
+        return jsonify({"error": "Language not allowed",
+                        "message": f"This quest accepts: {', '.join(allowed_langs)}."}), 400
+    multi_lang = len(allowed_langs) > 1
+    lang_rule  = prob.language_rule or 'optional'
+    # Required multi-language quest: the quest's XP is shared evenly between the ticked languages,
+    # so clearing all of them earns the quest's normal XP.
+    if multi_lang and lang_rule == 'required':
+        _share, _rest = divmod(xp_reward, len(allowed_langs))
+        xp_reward = _share + (_rest if language == allowed_langs[0] else 0)
+
+    try:
+        slot_token = claim_submission_slot(user_id, problem_id, language)
+    except SubmissionConflict as c:
+        body = {"error": "Already submitted", "message": c.message}
+        if c.existing is not None:
+            body.update({"submission_id": c.existing.id, "status": c.existing.status, "score": c.existing.score})
+        return jsonify(body), 409
+
+    # XP floor table — 10% of xp_reward, minimum guaranteed even on errors
+    floor_xp = max(5, int(xp_reward * 0.10))
+
+    # ── run the code (no database transaction is held open here) ──────────
+    try:
+        results = evaluate_code(code, test_cases, language, raise_on_infra=True)
+    except ExecutionInfrastructureError as e:
+        logger.error("grading runner failure (user=%s problem=%s): %s", user_id, problem_id, e)
+        release_submission_slot(user_id, problem_id, str(e), slot_token, language)
+        return jsonify({
+            "error": "The code runner is temporarily unavailable.",
+            "message": "Your attempt was not counted. Please try again in a moment.",
+            "attempt_consumed": False,
+        }), 503
+    except Exception as e:
+        logger.exception("unexpected grading failure (user=%s problem=%s)", user_id, problem_id)
+        release_submission_slot(user_id, problem_id, str(e), slot_token, language)
+        return jsonify({
+            "error": "Grading could not be completed.",
+            "message": "Your attempt was not counted. Please try again in a moment.",
+            "attempt_consumed": False,
+        }), 500
+
+    # ── score it ──────────────────────────────────────────────────────────
+    total       = len(results)
+    passed      = sum(1 for r in results if r['passed'])
+    # outcome of the STUDENT'S code, from what the runner reported per test
+    has_timeout = any(r.get('kind') == 'timeout' for r in results)
+    has_error   = any(r.get('kind') == 'runtime_error' for r in results)   # compile failure / crash
+    if total == 0:
+        status, score = 'error', 0
+    elif passed == total:
+        status, score = 'accepted', xp_reward
+    elif has_timeout:
+        status, score = 'timeout', floor_xp
+    elif passed == 0 and has_error:
+        status, score = 'error', floor_xp
+    elif passed == 0:
+        status, score = 'wrong_answer', floor_xp
+    else:
+        status = 'partial'
+        score  = max(floor_xp, int(xp_reward * (passed / total) * (partial_pc / 100.0)))
+
+    # ── write the result and the XP in ONE short transaction ──────────────
+    try:
+        # each hint's xp_penalty is subtracted once per revealed hint, floored at 0
+        # Optional multi-language quest: the first language earns the normal result; every further
+        # language earns a bonus of LANGUAGE_BONUS_PCT of the quest XP, scaled by the tests it passed
+        # (and partial credit). Hint penalties are charged once, on the first language only.
+        other_langs_done = Submission.query.filter(
+            Submission.user_id == user_id, Submission.problem_id == problem_id,
+            Submission.language != language).count()
+        is_bonus_language = multi_lang and lang_rule == 'optional' and other_langs_done >= 1
+        xp_deducted = 0  # XP taken off by revealed hints, shown to the student in the note
+        if is_bonus_language:
+            score = int(xp_reward * LANGUAGE_BONUS_PCT * (passed / total) * (partial_pc / 100.0)) if total else 0
+        else:
+            hint_penalty = 0
+            for r in HintReveal.query.filter_by(user_id=user_id, problem_id=problem_id).all():
+                if 0 <= r.hint_index < len(hints):
+                    hint_penalty += hints[r.hint_index].get('xp_penalty', 0)
+            score_before_hints = score
+            score = max(0, score - hint_penalty)
+            xp_deducted = score_before_hints - score
+
+        # XP only for improvement over an earlier graded result (none exist under
+        # the current one-attempt policy, kept for submissions from older versions)
+        best_prev = (Submission.query.filter_by(user_id=user_id, problem_id=problem_id, language=language)
+                     .order_by(Submission.score.desc()).first())
+        xp_delta = max(0, score - (best_prev.score if best_prev else 0))
+
+        # Lock order matters on MySQL: take the student's row lock FIRST (the XP update),
+        # then insert the submission. Inserting first takes a shared lock on the user row
+        # through the foreign key, and two concurrent submissions then deadlock when both
+        # try to upgrade it (seen on a real MySQL 9 server in mysql_concurrency_check.py).
+        # A deadlock that still happens is retried; the whole write is one transaction.
+        for attempt in range(4):
+            try:
+                if xp_delta > 0:
+                    # increments are done by the database, so two submissions for
+                    # different problems at the same time cannot overwrite each other
+                    User.query.filter_by(id=user_id).update(
+                        {User.xp: User.xp + xp_delta}, synchronize_session=False)
+                    User.query.filter_by(id=user_id).update(
+                        {User.level: 1 + (User.xp // 100)}, synchronize_session=False)
+                slot_done = SubmissionSlot.query.filter_by(
+                    user_id=user_id, problem_id=problem_id, language=language, status='pending', owner_token=slot_token
+                ).update({'status': 'done', 'finished_at': datetime.utcnow()}, synchronize_session=False)
+                if slot_done != 1:
+                    # someone else took over a slot we held too long: do not grade twice
+                    db.session.rollback()
+                    return jsonify({"error": "Already submitted",
+                                    "message": "Your submission for this problem is already being processed."}), 409
+                sub = Submission(user_id=user_id, problem_id=problem_id, code=code, language=language,
+                                 status=status, score=score, passed_cases=passed, total_cases=total,
+                                 result_details=recorded_result_details(results))
+                db.session.add(sub)
+                db.session.commit()
+                break
+            except OperationalError as oe:
+                db.session.rollback()
+                code_no = getattr(getattr(oe, 'orig', None), 'args', [None])[0]
+                if code_no in (1213, 1205) and attempt < 3:      # deadlock / lock wait timeout
+                    time.sleep(0.05 * (attempt + 1))
+                    continue
+                raise
+    except Exception:
+        db.session.rollback()
+        logger.exception("could not save the result (user=%s problem=%s)", user_id, problem_id)
+        # nothing was written; free the attempt so the student is not penalised
+        release_submission_slot(user_id, problem_id, 'result could not be saved', slot_token, language)
+        return jsonify({
+            "error": "Your result could not be saved.",
+            "message": "Your attempt was not counted. Please try again in a moment.",
+            "attempt_consumed": False,
+        }), 500
+
+    user = User.query.get(user_id)
+    return jsonify({
+        "submission_id": sub.id,
+        "status":        status,
+        "score":         score,
+        "passed_cases":  passed,
+        "total_cases":   total,
+        "xp_earned":     xp_delta,
+        "test_results":  results,
+        "user_xp":       user.xp,
+        "user_level":    user.level,
+        "language":      language,
+        "language_rule": lang_rule if multi_lang else None,
+        "bonus_language": bool(is_bonus_language),
+        "languages_done": sorted({r.language for r in Submission.query.filter_by(user_id=user_id, problem_id=problem_id).all()}),
+        "scoring_note": (
+            f"Language bonus: {passed}/{total} test cases passed in {language}. {score} bonus XP awarded." if is_bonus_language
+            else f"All {total} test cases passed. {score} XP awarded ({xp_deducted} XP deducted for hints used)." if status == 'accepted' and xp_deducted
+            else f"All {total} test cases passed. Full XP awarded." if status == 'accepted'
+            else f"{passed}/{total} test cases passed. {score} XP awarded" + (f" ({xp_deducted} XP deducted for hints used)." if xp_deducted else ".") if status == 'partial'
+            else f"Participation credit awarded: {score} XP."
+        )
+    }), 201
+
+@app.route('/api/problems/<int:problem_id>/my-submission', methods=['GET'])
+@jwt_required()
+def get_my_submission(problem_id):
+    """This student's graded submissions for a quest, one per language."""
+    user_id = int(get_jwt_identity())
+    user = User.query.get(user_id)
+    if user.role != 'student':
+        return jsonify({"has_submitted": False}), 200
+
+    subs = Submission.query.filter_by(user_id=user_id, problem_id=problem_id) \
+        .order_by(Submission.submitted_at.desc()).all()
+    prob = db.session.get(Problem, problem_id)
+    allowed = (prob.languages or ['python']) if prob else ['python']
+    rule = (prob.language_rule or 'optional') if prob and len(allowed) > 1 else None
+
+    if not subs:
+        return jsonify({"has_submitted": False, "submissions": [], "languages_done": [],
+                        "language_rule": rule, "quest_complete": False}), 200
+
+    done = {}
+    for sub in subs:                     # newest first: keep the latest per language
+        done.setdefault(sub.language, sub)
+    if rule == 'required':
+        complete = all(l in done for l in allowed)
+    else:
+        complete = True
+    latest = subs[0]
+    return jsonify({
+        # kept for older clients: the most recent submission
+        "has_submitted": True,
+        "status": latest.status,
+        "score": latest.score,
+        "passed_cases": latest.passed_cases,
+        "total_cases": latest.total_cases,
+        "submitted_at": latest.submitted_at.isoformat(),
+        "language": latest.language,
+        # per-language state
+        "language_rule": rule,
+        "languages_done": sorted(done.keys()),
+        "quest_complete": complete,
+        "xp_total": sum(x.score or 0 for x in done.values()),
+        "submissions": [student_saved_submission(x) for x in done.values()],
+    }), 200
+
+
+def student_saved_submission(sub):
+    """Read-only projection of recorded results. Never return hidden case data."""
+    details = sub.result_details if isinstance(sub.result_details, dict) else {}
+    tests = details.get('tests')
+    recorded = isinstance(tests, list) and len(tests) == sub.total_cases and all(isinstance(t, dict) for t in tests)
+    safe_tests = []
+    if recorded:
+        for index, test in enumerate(tests, 1):
+            hidden = test.get('hidden') is not False  # missing visibility fails closed
+            item = {'index': index, 'passed': test.get('passed') is True, 'hidden': hidden}
+            if test.get('kind') in ('passed', 'wrong_output', 'runtime_error', 'timeout', 'compile_error', 'output_limit'):
+                item['kind'] = test['kind']
+            runtime = test.get('runtime')
+            if isinstance(runtime, str) and _re.fullmatch(r'\d+(?:\.\d+)?(?:ms|s)', runtime):
+                item['runtime'] = runtime
+            if not hidden and isinstance(test.get('output'), str):
+                item['output'] = test['output']
+            safe_tests.append(item)
+    return {
+        'submission_id': sub.id, 'language': sub.language, 'status': sub.status,
+        'score': sub.score, 'passed_cases': sub.passed_cases, 'total_cases': sub.total_cases,
+        'submitted_at': sub.submitted_at.isoformat(),
+        'results_recorded': recorded, 'test_results': safe_tests,
+    }
+
+@app.route('/api/student/quest-progress', methods=['GET'])
+@jwt_required()
+def my_quest_progress():
+    """Per quest: which languages this student has submitted (read only; used for the quest cards)."""
+    user_id = int(get_jwt_identity())
+    user = db.session.get(User, user_id)
+    if not user or user.role != 'student':
+        return jsonify({}), 200
+    out = {}
+    for sub in Submission.query.filter_by(user_id=user_id).all():
+        e = out.setdefault(str(sub.problem_id), {"languages_done": [], "xp": 0, "accepted": False})
+        if sub.language not in e["languages_done"]:
+            e["languages_done"].append(sub.language)
+        e["xp"] += sub.score or 0
+        e["accepted"] = e["accepted"] or sub.status == 'accepted'
+    return jsonify(out), 200
+
+
+@app.route('/api/problems/<int:problem_id>/draft', methods=['GET'])
+@jwt_required()
+def get_code_draft(problem_id):
+    """Fetch this student's in-progress code for a quest, if any was autosaved."""
+    user_id = int(get_jwt_identity())
+    language = request.args.get('language', 'python')
+    prob = db.session.get(Problem, problem_id)
+    if not prob or not user_can_access_problem(db.session.get(User, user_id), prob, historical=True):
+        return deny_problem_access()
+
+    draft = CodeDraft.query.filter_by(
+        user_id=user_id, problem_id=problem_id, language=language
+    ).first()
+
+    if not draft:
+        return jsonify({"code": None}), 200
+
+    return jsonify({
+        "code": draft.code,
+        "updated_at": draft.updated_at.isoformat()
+    }), 200
+
+@app.route('/api/problems/<int:problem_id>/draft', methods=['PUT'])
+@jwt_required()
+def save_code_draft(problem_id):
+    """Autosave (or manual-save) this student's in-progress code for a quest."""
+    user_id = int(get_jwt_identity())
+    data = request.get_json() or {}
+    language = data.get('language', 'python')
+    code = data.get('code', '')
+    prob = db.session.get(Problem, problem_id)
+    me = db.session.get(User, user_id)
+    if not prob or not user_can_access_problem(me, prob):
+        return deny_problem_access()
+    if not isinstance(code, str) or len(code) > 100_000:
+        return jsonify({"error": "Code too large"}), 413
+    # once the graded submission exists the editor is read-only: a later autosave
+    # must not replace the code that was graded
+    if me.role == 'student' and Submission.query.filter_by(user_id=user_id, problem_id=problem_id).first():
+        return jsonify({"error": "Already submitted", "message": "This quest has a final graded submission; the draft is locked."}), 409
+
+    draft = CodeDraft.query.filter_by(
+        user_id=user_id, problem_id=problem_id, language=language
+    ).first()
+
+    if draft:
+        draft.code = code
+    else:
+        draft = CodeDraft(user_id=user_id, problem_id=problem_id, language=language, code=code)
+        db.session.add(draft)
+
+    db.session.commit()
+    return jsonify({"saved": True}), 200
+
+@app.route('/api/problems/<int:problem_id>/draft', methods=['DELETE'])
+@jwt_required()
+def clear_code_draft(problem_id):
+    """Drop the saved draft for a quest, e.g. after a successful submit or a manual reset."""
+    user_id = int(get_jwt_identity())
+    language = request.args.get('language', 'python')
+
+    CodeDraft.query.filter_by(
+        user_id=user_id, problem_id=problem_id, language=language
+    ).delete()
+    db.session.commit()
+
+    return jsonify({"deleted": True}), 200
+
+@app.route('/api/problems/<int:problem_id>/run', methods=['POST'])
+@jwt_required()
+@rate_limit(max_calls=20, period=60)
+def run_problem_code(problem_id):
+    """Students run code against test cases without submitting (no XP, no lock)"""
+    user_id = int(get_jwt_identity())
+    user = User.query.get(user_id)
+
+    data = request.get_json()
+    if not all(k in data for k in ['code', 'language']):
+        return jsonify({"error": "Missing code or language"}), 400
+
+    prob = Problem.query.get_or_404(problem_id)
+    if not prob.is_published or not user_can_access_problem(user, prob):
+        return deny_problem_access()
+
     try:
         results = evaluate_code(data['code'], prob.test_cases, data['language'])
         passed = sum(1 for r in results if r['passed'])
         total = len(results)
-        
-        if passed == total and total > 0:
-            # Full credit
-            sub.status, sub.score = 'accepted', prob.xp_reward
-            user.xp += prob.xp_reward
-        else:
-            # Partial credit based on config
-            partial = prob.partial_credit / 100.0
-            sub.status, sub.score = 'wrong_answer', int((passed/total) * prob.xp_reward * partial) if total > 0 else 0
-            if sub.score > 0:
-                user.xp += sub.score
-        
-        # Update level: every 100 XP = 1 level
-        user.level = 1 + (user.xp // 100)
-        
-        db.session.commit()
-        
+
         return jsonify({
-            "submission_id": sub.id, 
-            "status": sub.status, 
-            "score": sub.score, 
-            "test_results": results, 
-            "user_xp": user.xp, 
-            "user_level": user.level
-        }), 201
-        
+            "message": "Run mode — no submission recorded",
+            "test_results": results,
+            "passed": passed,
+            "total": total,
+            "is_run_mode": True,
+            "success_rate": round((passed / total * 100), 1) if total > 0 else 0
+        }), 200
     except Exception as e:
-        db.session.rollback()
-        sub.status = 'error'
-        db.session.commit()
         return jsonify({"error": str(e)}), 500
-    
+
+
 @app.route('/api/problems/<int:problem_id>/test', methods=['POST'])
 @jwt_required()
 def test_problem_code(problem_id):
     """Instructors can test code without submitting (no XP, no submission recorded)"""
     user_id = int(get_jwt_identity())
     user = User.query.get(user_id)
-    
+
     if not is_instructor_or_admin(user):
         return jsonify({"error": "Instructors and admins only"}), 403
-    
+
     data = request.get_json()
     if not all(k in data for k in ['code', 'language']):
         return jsonify({"error": "Missing code or language"}), 400
-    
+
     prob = Problem.query.get_or_404(problem_id)
-    if not prob.is_published:
-        return jsonify({"error": "Problem not available"}), 404
-    
+    if not prob.is_published or not user_can_access_problem(user, prob):
+        return deny_problem_access()
+
     # Run the code against test cases
     try:
         results = evaluate_code(data['code'], prob.test_cases, data['language'])
-        
+
         passed = sum(1 for r in results if r['passed'])
         total = len(results)
-        
+
         return jsonify({
             "message": "Test mode - no submission recorded",
             "test_results": results,
@@ -1266,7 +2658,7 @@ def test_problem_code(problem_id):
             "total": total,
             "success_rate": round((passed/total*100), 1) if total > 0 else 0
         }), 200
-        
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -1276,64 +2668,292 @@ def get_student_submissions():
     user_id = int(get_jwt_identity())
     page = request.args.get('page', 1, type=int)
     limit = min(request.args.get('limit', 15, type=int), 50)
-    
-    total = Submission.query.filter_by(user_id=user_id).count()
-    subs = Submission.query.filter_by(user_id=user_id)\
+    # optional Hero Sheet filter: only submissions for quests belonging to
+    # this one subject, instead of every subject the student is enrolled in
+    subject_id = request.args.get('subject_id', type=int)
+
+    base_query = Submission.query.filter_by(user_id=user_id)
+    if subject_id:
+        base_query = base_query.join(Problem).filter(Problem.subject_id == subject_id)
+
+    total = base_query.count()
+    subs = base_query\
         .order_by(Submission.submitted_at.desc())\
         .limit(limit).offset((page-1)*limit).all()
-    
+
+    # one query for every problem this page needs, instead of querying
+    # per row per field — this page used to run up to 4 database queries
+    # per submission just to get its title and difficulty
+    problem_ids = list(set(s.problem_id for s in subs))
+    problems_by_id = {p.id: p for p in Problem.query.filter(Problem.id.in_(problem_ids)).all()}
+
     return jsonify({
         "submissions": [{
-            "id": s.id, 
-            "problem_id": s.problem_id, 
-            "problem_title": Problem.query.get(s.problem_id).title if Problem.query.get(s.problem_id) else "Unknown", 
-            "status": s.status, 
-            "score": s.score, 
-            "language": s.language, 
+            "id": s.id,
+            "problem_id": s.problem_id,
+            "problem_title": problems_by_id[s.problem_id].title if s.problem_id in problems_by_id else "Unknown",
+            "difficulty": problems_by_id[s.problem_id].difficulty if s.problem_id in problems_by_id else None,
+            "status": s.status,
+            "score": s.score,
+            "language": s.language,
             "submitted_at": s.submitted_at.isoformat()
-        } for s in subs], 
-        "total": total, 
-        "page": page, 
+        } for s in subs],
+        "total": total,
+        "page": page,
         "pages": max(1, (total + limit - 1) // limit)
     }), 200
+
+def calculate_streak(subs):
+    # counts consecutive days (counting back from the newest submission)
+    # that a student has submitted something. shared by 2 places:
+    # /api/student/stats (the flame icon) and /api/student/achievements
+    # (streak-type badges) — so both always show the same real number.
+    # achievements used to fake this as xp // 100 instead of checking
+    # real dates. moved the real logic here so nothing can fake it again.
+    if not subs:
+        return 0
+    sorted_subs = sorted(subs, key=lambda x: x.submitted_at, reverse=True)
+    last_date = sorted_subs[0].submitted_at.date()
+    streak = 1
+    for i in range(1, len(sorted_subs)):
+        curr_date = sorted_subs[i].submitted_at.date()
+        if (last_date - curr_date).days == 1:
+            streak += 1
+            last_date = curr_date
+        elif (last_date - curr_date).days > 1:
+            break
+    return min(streak, 30)  # cap it so it never shows a silly huge number
+
+def student_difficulty_progress(user_id, subject_id=None):
+    """Quests cleared out of quests visible to the student, per difficulty.
+    Counts quests (not submissions): same visibility rule as the course cards."""
+    section_ids = [e.section_id for e in IrregularEnrollment.query.filter_by(student_id=user_id).all()]
+    visible = {}
+    if section_ids:
+        for section in SubjectSection.query.filter(SubjectSection.id.in_(section_ids)).all():
+            if subject_id and section.subject_id != subject_id:
+                continue
+            for pr in Problem.query.filter_by(subject_id=section.subject_id, is_published=True).all():
+                if not pr.visible_to_sections or section.id in pr.visible_to_sections:
+                    visible[pr.id] = pr.difficulty
+    accepted_ids = {s.problem_id for s in Submission.query.filter_by(user_id=user_id, status='accepted').all()}
+    out = []
+    for level in ('Easy', 'Medium', 'Hard'):
+        ids = [pid for pid, d in visible.items() if d == level]
+        out.append({"level": level, "total": len(ids), "completed": sum(1 for pid in ids if pid in accepted_ids)})
+    return out
 
 @app.route('/api/student/stats', methods=['GET'])
 @jwt_required()
 def get_student_stats():
-    """Get student's gamification stats for dashboard"""
+    """Get student's gamification stats for dashboard.
+
+    By default this is account-wide (every subject mixed together), which
+    is the original behavior and still what `user.xp` / `user.level`
+    directly store. Passing ?subject_id=<id> instead scopes everything to
+    quests belonging to that one subject -- XP/level in that case can't
+    just read user.xp (that column has no per-subject breakdown), so it's
+    recomputed the same way real XP is ever awarded: the best score the
+    student ever got on each problem, summed up (see the xp_delta logic
+    in submit_solution). Achievement-bonus XP is NOT included in the
+    per-subject number, since badges themselves aren't tied to one
+    subject -- only real quest scores are.
+    """
     user_id = int(get_jwt_identity())
     user = User.query.get(user_id)
-    if user.role != 'student': 
+    if user.role != 'student':
         return jsonify({"error": "Students only"}), 403
-    
+
+    subject_id = request.args.get('subject_id', type=int)
+
+    if subject_id:
+        subs = Submission.query.join(Problem)\
+            .filter(Submission.user_id == user.id, Problem.subject_id == subject_id).all()
+        accepted = len([s for s in subs if s.status == 'accepted'])
+        quests_done = len({s.problem_id for s in subs if s.status == 'accepted'})
+        streak = calculate_streak(subs)
+
+        # best score per quest AND language: each language is graded once, and its XP is its own
+        best_by_problem = {}
+        for s in subs:
+            k = (s.problem_id, s.language)
+            if k not in best_by_problem or s.score > best_by_problem[k]:
+                best_by_problem[k] = s.score
+        subject_xp = sum(best_by_problem.values())
+
+        return jsonify({
+            "total_xp": subject_xp,
+            "level": 1 + (subject_xp // 100),
+            "total_submissions": len(subs),
+            "accepted_submissions": accepted,
+            "quests_done": quests_done,
+            "success_rate": round((accepted/len(subs)*100), 1) if subs else 0.0,
+            "streak": streak,
+            "last_submission": subs[0].submitted_at.isoformat() if subs else None,
+            "scope": "subject",
+            "difficulty_progress": student_difficulty_progress(user.id, subject_id)
+        }), 200
+
     subs = Submission.query.filter_by(user_id=user.id).all()
     accepted = len([s for s in subs if s.status == 'accepted'])
-    
-    # Better mock streak: count consecutive days with submissions
-    streak = 0
-    if subs:
-        # Sort by date
-        sorted_subs = sorted(subs, key=lambda x: x.submitted_at, reverse=True)
-        last_date = sorted_subs[0].submitted_at.date()
-        streak = 1
-        for i in range(1, len(sorted_subs)):
-            curr_date = sorted_subs[i].submitted_at.date()
-            if (last_date - curr_date).days == 1:
-                streak += 1
-                last_date = curr_date
-            elif (last_date - curr_date).days > 1:
-                break
-        streak = min(streak, 30)  # Cap at 30 for demo
-    
+    quests_done = len({s.problem_id for s in subs if s.status == 'accepted'})
+    streak = calculate_streak(subs)
+
     return jsonify({
-        "total_xp": user.xp, 
-        "level": user.level, 
-        "total_submissions": len(subs), 
-        "accepted_submissions": accepted, 
-        "success_rate": round((accepted/len(subs)*100), 1) if subs else 0.0, 
+        "total_xp": user.xp,
+        "level": user.level,
+        "total_submissions": len(subs),
+        "accepted_submissions": accepted,
+        "quests_done": quests_done,
+        "success_rate": round((accepted/len(subs)*100), 1) if subs else 0.0,
         "streak": streak,
-        "last_submission": subs[0].submitted_at.isoformat() if subs else None
+        "last_submission": subs[0].submitted_at.isoformat() if subs else None,
+        "scope": "global",
+        "difficulty_progress": student_difficulty_progress(user.id)
     }), 200
+
+
+# ===== ACHIEVEMENT AWARDING =====
+# What the code below can really measure. This is the ONLY source of `attainable`: a definition whose
+# requirement_type is not listed for its category cannot be earned today (nothing computes its progress).
+# Do not extend a list without also adding the progress calculation in the matching route.
+STUDENT_EARNABLE_TYPES = frozenset({'quest_count', 'streak', 'python_count', 'java_count',
+                                    'csharp_count', 'hard_count', 'debug_count'})
+INSTRUCTOR_EARNABLE_TYPES = frozenset({'lesson_count', 'problem_count', 'blocks_taught',
+                                       'subjects_taught', 'students_taught', 'file_count', 'student_quest'})
+EARNABLE_TYPES = {'student': STUDENT_EARNABLE_TYPES, 'instructor': INSTRUCTOR_EARNABLE_TYPES}
+AWARD_MAX_ATTEMPTS = 4                       # 1 try + 3 retries, only for deadlock / lock-wait errors
+_RETRYABLE_DB_CODES = (1213, 1205)           # MySQL/MariaDB: deadlock, lock wait timeout
+
+
+class AwardRetryExhausted(Exception):
+    """A recognised lock conflict persisted through every attempt. Nothing was written."""
+
+
+def achievement_attainable(category, requirement_type):
+    return requirement_type in EARNABLE_TYPES.get(category or '', frozenset())
+
+
+def _utc_iso(dt):
+    """Stored times are naive UTC. Send an explicit 'Z': a bare '2026-10-22T16:30:00' is read by browsers as
+    LOCAL time (a day early for Asia/Manila after 16:00 UTC). Whole seconds, matching the DATETIME column."""
+    if dt is None:
+        return None
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt.replace(microsecond=0).isoformat() + 'Z'
+
+
+def _award_attempt(user_id, candidates):
+    """ONE attempt, inside the caller's transaction (caller commits or rolls back).
+    candidates = [(achievement_id, xp_reward, progress)] - plain values, so a rollback/retry rebuilds
+    everything from the database and nothing depends on stale ORM state.
+
+    Lock order (the same as create_submission, which takes the users row first via its UPDATE):
+      1. the users row  (SELECT ... FOR UPDATE)  - serialises every XP writer for this user
+      2. this user's user_achievements rows (locking read)
+      3. INSERT missing awards -> UPDATE users.xp -> UPDATE users.level
+    The re-read in step 2 is a LOCKING read on purpose: under REPEATABLE READ a plain read would use the
+    snapshot opened earlier in the request and miss awards another request committed meanwhile.
+    Returns the set of achievement ids this attempt inserted."""
+    user = User.query.filter_by(id=user_id).with_for_update().populate_existing().first()
+    if user is None:
+        raise LookupError("user vanished")
+    have = {r[0] for r in db.session.query(UserAchievement.achievement_id)
+            .filter_by(user_id=user_id).with_for_update().all()}
+    created, gain = set(), 0
+    for ach_id, reward, progress in candidates:
+        if ach_id in have or ach_id in created:
+            continue
+        db.session.add(UserAchievement(user_id=user_id, achievement_id=ach_id, progress=progress))
+        created.add(ach_id)
+        gain += int(reward or 0)
+    db.session.flush()
+    if gain > 0:
+        # database-side arithmetic (never "user.xp += n" from an object that may be stale)
+        User.query.filter_by(id=user_id).update({User.xp: User.xp + gain}, synchronize_session=False)
+        # level follows the resulting XP in the same transaction (same rule create_submission uses).
+        # A zero-reward award writes no users row at all; unrelated historical level drift is not repaired here.
+        User.query.filter_by(id=user_id).update({User.level: 1 + (User.xp // 100)}, synchronize_session=False)
+    return created
+
+
+def award_achievements(user_id, candidates, sleep=None):
+    """Award rows + XP + level commit together or not at all. Retries only recognised lock conflicts (whole
+    transaction rolled back and rebuilt each time, bounded). Anything else is rolled back and re-raised."""
+    if not candidates:
+        return set()
+    for attempt in range(AWARD_MAX_ATTEMPTS):
+        try:
+            created = _award_attempt(user_id, candidates)
+            db.session.commit()
+            return created
+        except OperationalError as oe:
+            db.session.rollback()
+            code_no = getattr(getattr(oe, 'orig', None), 'args', [None])[0]
+            if code_no in _RETRYABLE_DB_CODES:
+                if attempt < AWARD_MAX_ATTEMPTS - 1:
+                    (sleep or time.sleep)(0.05 * (attempt + 1))
+                    continue
+                raise AwardRetryExhausted() from oe
+            raise
+        except BaseException:
+            db.session.rollback()
+            raise
+    raise AwardRetryExhausted()
+
+
+def _canonical_awards(user_id):
+    """{achievement_id: (earned_at, row_id)} from the durable rows. A historical duplicate pair is reported
+    as ONE earned achievement: the earliest RECORDED time (rows with no time never beat one that has it),
+    lowest id on ties. Originals are not touched and this does not claim to explain past XP."""
+    best = {}
+    for ua in UserAchievement.query.filter_by(user_id=user_id).order_by(UserAchievement.id).all():
+        key = (ua.earned_at is None, ua.earned_at or datetime.max, ua.id)
+        if ua.achievement_id not in best or key < best[ua.achievement_id][0]:
+            best[ua.achievement_id] = (key, ua.earned_at)
+    return {aid: v[1] for aid, v in best.items()}
+
+
+def serve_achievements(user_id, rows):
+    """rows = [(Achievement, current_progress_or_None, attainable)]. Awards what is newly met (one shared path
+    for every role), then describes the COMMITTED state. just_earned is true only for rows this request
+    inserted and committed. Returns a Flask response."""
+    plain = [(a.id, a.xp_reward, a.requirement_value, a.requirement_type, a.category, a.name,
+              a.description, a.icon, p, ok) for a, p, ok in rows]
+    earned_before = _canonical_awards(user_id)
+    candidates = [(i, reward, prog) for i, reward, need, rt, cat, nm, ds, ic, prog, ok in plain
+                  if ok and prog is not None and i not in earned_before and prog >= need]
+    try:
+        created = award_achievements(user_id, candidates)
+    except AwardRetryExhausted:
+        resp = jsonify({"error": "award_temporarily_unavailable", "retryable": True,
+                        "message": "Your achievements could not be updated right now. Nothing was changed; please try again."})
+        resp.status_code = 503
+        resp.headers['Retry-After'] = '1'
+        return resp
+    except Exception:
+        logger.exception("achievement award failed (user=%s); rolled back", user_id)
+        return jsonify({"error": "award_failed", "retryable": False,
+                        "message": "Your achievements could not be updated. Nothing was changed."}), 500
+    db.session.expire_all()          # describe what the database now holds (incl. a concurrent winner's award)
+    earned = _canonical_awards(user_id)
+    out = []
+    for i, reward, need, rt, cat, nm, ds, ic, prog, ok in plain:
+        out.append({
+            "id": i, "name": nm, "description": ds, "icon": ic,
+            "category": cat, "requirement_type": rt,
+            "xp_reward": reward,
+            "is_earned": i in earned,
+            "attainable": bool(ok),
+            "just_earned": i in created,
+            "progress": min(prog or 0, need),
+            "max_progress": need,
+            "requirement_value": need,
+            "earned_at": _utc_iso(earned.get(i)),
+        })
+    return jsonify(out), 200
+
 
 @app.route('/api/student/achievements', methods=['GET'])
 @jwt_required()
@@ -1341,69 +2961,44 @@ def get_student_achievements():
     """Get all student achievements with progress"""
     user_id = int(get_jwt_identity())
     user = User.query.get(user_id)
-    
+
     if user.role != 'student':
         return jsonify({"error": "Students only"}), 403
-    
+
     # Calculate current user stats for progress tracking
-    total_quests = Submission.query.filter_by(user_id=user_id, status='accepted').count()
+    total_quests = db.session.query(func.count(distinct(Submission.problem_id))).filter(Submission.user_id == user_id, Submission.status == 'accepted').scalar() or 0
     python_quests = Submission.query.filter_by(user_id=user_id, status='accepted', language='python').count()
     java_quests = Submission.query.filter_by(user_id=user_id, status='accepted', language='java').count()
     csharp_quests = Submission.query.filter_by(user_id=user_id, status='accepted', language='csharp').count()
-    hard_quests = Submission.query.filter_by(user_id=user_id, status='accepted').join(Problem).filter(Problem.difficulty == 'Hard').count()
-    debug_quests = Submission.query.filter_by(user_id=user_id, status='accepted').join(Problem).filter(Problem.problem_type == 'debugging').count()
-    
-    # Get already earned achievements
-    earned = {ua.achievement_id: ua for ua in UserAchievement.query.filter_by(user_id=user_id).all()}
-    
-    result = []
-    all_achievements = Achievement.query.filter_by(category='student').all()
-    
-    for ach in all_achievements:
-        is_earned = ach.id in earned
-        current_progress = 0
-        
-        # Calculate progress based on requirement type
-        if ach.requirement_type == 'quest_count': 
+    hard_quests = db.session.query(func.count(distinct(Submission.problem_id))).join(Problem, Problem.id == Submission.problem_id).filter(Submission.user_id == user_id, Submission.status == 'accepted', Problem.difficulty == 'Hard').scalar() or 0
+    debug_quests = db.session.query(func.count(distinct(Submission.problem_id))).join(Problem, Problem.id == Submission.problem_id).filter(Submission.user_id == user_id, Submission.status == 'accepted', Problem.problem_type == 'debugging').scalar() or 0
+
+    # need EVERY submission here (not just accepted ones) to work out
+    # the real day-streak below — same rule /api/student/stats uses
+    all_subs = Submission.query.filter_by(user_id=user_id).all()
+
+    rows = []
+    for ach in Achievement.query.filter_by(category='student').order_by(Achievement.id).all():
+        current_progress = None          # None = nothing measures this type: it can never be earned
+        if ach.requirement_type == 'quest_count':
             current_progress = total_quests
-        elif ach.requirement_type == 'streak': 
-            current_progress = user.xp // 100  # Mock: 100 XP = 1 "streak day"
-        elif ach.requirement_type == 'python_count': 
+        elif ach.requirement_type == 'streak':
+            current_progress = calculate_streak(all_subs)
+        elif ach.requirement_type == 'python_count':
             current_progress = python_quests
-        elif ach.requirement_type == 'java_count': 
+        elif ach.requirement_type == 'java_count':
             current_progress = java_quests
-        elif ach.requirement_type == 'csharp_count': 
+        elif ach.requirement_type == 'csharp_count':
             current_progress = csharp_quests
-        elif ach.requirement_type == 'hard_count': 
+        elif ach.requirement_type == 'hard_count':
             current_progress = hard_quests
-        elif ach.requirement_type == 'debug_count': 
+        elif ach.requirement_type == 'debug_count':
             current_progress = debug_quests
-        # Add more types here as needed...
-        
-        # Auto-earn if requirements met (and not already earned)
-        if not is_earned and current_progress >= ach.requirement_value:
-            db.session.add(UserAchievement(
-                user_id=user_id, 
-                achievement_id=ach.id, 
-                progress=current_progress
-            ))
-            user.xp += ach.xp_reward  # Award XP immediately
-            is_earned = True
-            
-        result.append({
-            "id": ach.id,
-            "name": ach.name,
-            "description": ach.description,
-            "icon": ach.icon,
-            "xp_reward": ach.xp_reward,
-            "is_earned": is_earned,
-            "progress": min(current_progress, ach.requirement_value),  # Cap at max
-            "max_progress": ach.requirement_value,
-            "earned_at": earned[ach.id].earned_at.isoformat() if is_earned and ach.id in earned else None
-        })
-        
-    db.session.commit()
-    return jsonify(result), 200
+        # a new type needs BOTH a branch here and an entry in STUDENT_EARNABLE_TYPES
+        rows.append((ach, current_progress, ach.requirement_type in STUDENT_EARNABLE_TYPES))
+
+    # Known limitation: this GET still performs awarding (kept for compatibility)
+    return serve_achievements(user_id, rows)
 
 @app.route('/api/instructor/achievements', methods=['GET'])
 @jwt_required()
@@ -1411,49 +3006,42 @@ def get_instructor_achievements():
     """Get all instructor achievements with progress"""
     user_id = int(get_jwt_identity())
     user = User.query.get(user_id)
-    
-    if user.role not in ['instructor', 'admin']:
+
+    if user.role not in ['instructor', 'administrator']:
         return jsonify({"error": "Instructors only"}), 403
-    
+
     # Calculate instructor stats
     lessons_created = Lesson.query.filter_by(created_by=user_id).count()
     problems_created = Problem.query.filter_by(created_by=user_id).count()
-    
+
     # Get blocks this instructor teaches
     assignments = TeacherAssignment.query.filter_by(instructor_id=user_id).all()
-    blocks_taught = len(set(a.block_id for a in assignments))
+    sections_taught = len(set(a.section_id for a in assignments if a.section_id))
     subjects_taught = len(set(a.subject_id for a in assignments))
-    
-    # Count students taught
-    student_blocks_list = [a.block_id for a in assignments]
+
+    # Count students taught via sections → blocks
+    section_ids_list = [a.section_id for a in assignments if a.section_id]
     students_taught = 0
-    if student_blocks_list:
-        students_taught = db.session.query(student_blocks.c.student_id).filter(
-            student_blocks.c.block_id.in_(student_blocks_list)
-        ).distinct().count()
-    
+    if section_ids_list:
+        if section_ids_list:
+            students_taught = db.session.query(IrregularEnrollment.student_id).filter(
+                IrregularEnrollment.section_id.in_(section_ids_list)
+            ).distinct().count()
+
     # Count files uploaded to lessons
     files_uploaded = db.session.query(LessonFile.id).join(Lesson).filter(
         Lesson.created_by == user_id
     ).count()
-    
-    # Get already earned achievements
-    earned = {ua.achievement_id: ua for ua in UserAchievement.query.filter_by(user_id=user_id).all()}
-    
-    result = []
-    all_achievements = Achievement.query.filter_by(category='instructor').all()
-    
-    for ach in all_achievements:
-        is_earned = ach.id in earned
-        current_progress = 0
-        
-        # Calculate progress based on requirement type
+
+    rows = []
+    for ach in Achievement.query.filter_by(category='instructor').order_by(Achievement.id).all():
+        current_progress = None          # None = nothing measures this type: it can never be earned
         if ach.requirement_type == 'lesson_count':
             current_progress = lessons_created
         elif ach.requirement_type == 'problem_count':
             current_progress = problems_created
         elif ach.requirement_type == 'blocks_taught':
-            current_progress = blocks_taught
+            current_progress = sections_taught
         elif ach.requirement_type == 'subjects_taught':
             current_progress = subjects_taught
         elif ach.requirement_type == 'students_taught':
@@ -1461,129 +3049,169 @@ def get_instructor_achievements():
         elif ach.requirement_type == 'file_count':
             current_progress = files_uploaded
         elif ach.requirement_type == 'student_quest':
-            # Count students who completed at least one quest in instructor's blocks
-            if student_blocks_list:
+            # Count students who completed at least one quest in instructor's sections
+            current_progress = 0
+            if section_ids_list:
                 current_progress = db.session.query(Submission.user_id).join(Problem).filter(
                     Problem.created_by == user_id,
                     Submission.status == 'accepted'
                 ).distinct().count()
-        # Add more types as needed...
-        
-        # Auto-earn if requirements met (and not already earned)
-        if not is_earned and current_progress >= ach.requirement_value:
-            db.session.add(UserAchievement(
-                user_id=user_id,
-                achievement_id=ach.id,
-                progress=current_progress
-            ))
-            user.xp += ach.xp_reward
-            is_earned = True
-        
-        result.append({
-            "id": ach.id,
-            "name": ach.name,
-            "description": ach.description,
-            "icon": ach.icon,
-            "xp_reward": ach.xp_reward,
-            "is_earned": is_earned,
-            "progress": min(current_progress, ach.requirement_value),
-            "max_progress": ach.requirement_value,
-            "earned_at": earned[ach.id].earned_at.isoformat() if is_earned and ach.id in earned else None
-        })
-    
-    db.session.commit()
-    return jsonify(result), 200
+        # a new type needs BOTH a branch here and an entry in INSTRUCTOR_EARNABLE_TYPES
+        rows.append((ach, current_progress, ach.requirement_type in INSTRUCTOR_EARNABLE_TYPES))
+
+    return serve_achievements(user_id, rows)
 
 # ===== STUDENT BLOCK/SUBJECT ROUTES =====
-@app.route('/api/student/subjects', methods=['GET'])  # ✅ Changed endpoint
+@app.route('/api/student/subjects', methods=['GET'])
 @jwt_required()
-def get_student_subjects():  # ✅ Renamed function
-    """Get all individual subjects this student is enrolled in"""
+def get_student_subjects():
     user_id = int(get_jwt_identity())
-    
-    # ✅ Get blocks student is enrolled in
-    enrollments = db.session.query(student_blocks.c.block_id).filter_by(
-        student_id=user_id
-    ).all()
-    block_ids = [e.block_id for e in enrollments]
-    
-    if not block_ids:
-        return jsonify([]), 200
-    
-    # ✅ Fetch blocks
-    blocks = Block.query.filter(Block.id.in_(block_ids)).all()
-    
-    # ✅ Return EACH SUBJECT as a separate item
-    result = []
-    for block in blocks:
-        # Get subjects for this block
-        subj_rows = db.session.query(block_subjects.c.subject_id).filter_by(
-            block_id=block.id
-        ).all()
-        subject_ids = [r.subject_id for r in subj_rows]
-        
-        # Get instructor name
-        instructor_name = "TBA"
-        if block.instructor_id:
-            instructor = User.query.get(block.instructor_id)
-            if instructor:
-                instructor_name = instructor.username
-        
-        # ✅ Create a separate entry for EACH subject
-        for subj_id in subject_ids:
-            subject = Subject.query.get(subj_id)
-            if subject:
-                result.append({
-                    "id": subject.id,  # ✅ Subject ID (not block ID)
-                    "name": subject.name,  # ✅ Subject name (e.g., "Introduction to Programming")
-                    "block_id": block.id,  # ✅ Keep reference to block
-                    "block_code": block.section_code,  # ✅ Block code (e.g., "101")
-                    "semester": block.semester,
-                    "instructor": instructor_name
-                })
-    
-    return jsonify(result), 200
 
-@app.route('/api/student/submissions/by-block', methods=['GET'])
+    enrollments = IrregularEnrollment.query.filter_by(student_id=user_id).all()
+    section_ids = [e.section_id for e in enrollments]
+
+    if not section_ids:
+        return jsonify([]), 200
+
+    accepted_ids = {s.problem_id for s in Submission.query.filter_by(user_id=user_id, status='accepted').all()}
+
+    seen_subjects = {}
+    for section in SubjectSection.query.filter(SubjectSection.id.in_(section_ids)).all():
+        subject = Subject.query.get(section.subject_id)
+        if not subject:
+            continue
+        assignment = TeacherAssignment.query.filter_by(
+            subject_id=subject.id, section_id=section.id
+        ).first()
+        instructor = User.query.get(assignment.instructor_id) if assignment else None
+
+        if subject.id not in seen_subjects:
+            # quests this student can see in the subject, and how many are cleared
+            visible = [p for p in Problem.query.filter_by(subject_id=subject.id, is_published=True).all()
+                       if not p.visible_to_sections or section.id in p.visible_to_sections]
+            seen_subjects[subject.id] = {
+                "quests_total": len(visible),
+                "quests_done": sum(1 for p in visible if p.id in accepted_ids),
+                "id": subject.id,
+                "name": subject.name,
+                "subject_code": subject.subject_code,
+                "section_id": section.id,
+                "section_no": section.section_no,   # Class Code
+                "semester": section.semester,
+                "instructor": (instructor.full_name or instructor.username) if instructor else "TBA"
+            }
+
+    return jsonify(list(seen_subjects.values())), 200
+
+@app.route('/api/student/open-quests', methods=['GET'])
 @jwt_required()
-def get_submissions_by_block():
-    """Get submissions filtered by specific block/subject"""
+def get_student_open_quests():
+    # every quest across all of a student's enrolled subjects that they
+    # have not yet submitted. running code doesn't count — only a real
+    # Submit removes a quest from this list, since that's the point where
+    # it locks and can't be attempted again. grouped by subject so the
+    # Bounty Board can show a clear section break per subject.
     user_id = int(get_jwt_identity())
-    block_id = request.args.get('block_id', type=int)
-    
-    if not block_id:
-        return jsonify({"error": "block_id query parameter required"}), 400
-    
-    # ✅ Verify student is enrolled in this block (NEW TABLE)
-    enrollment = db.session.query(student_blocks).filter_by(
-        student_id=user_id, 
-        block_id=block_id
+    user = User.query.get(user_id)
+
+    enrollments = IrregularEnrollment.query.filter_by(student_id=user_id).all()
+    section_ids = [e.section_id for e in enrollments]
+    if not section_ids:
+        return jsonify([]), 200
+
+    langs_by_problem = {}
+    for s in Submission.query.filter_by(user_id=user_id).all():
+        langs_by_problem.setdefault(s.problem_id, set()).add(s.language)
+
+    def _still_open(p):
+        # never submitted -> open. A REQUIRED multi-language quest stays open until every
+        # ticked language has its submission; any other quest closes on the first submit.
+        done = langs_by_problem.get(p.id)
+        if not done:
+            return True
+        langs = p.languages or ['python']
+        return (len(langs) > 1 and (p.language_rule or 'optional') == 'required'
+                and not set(langs) <= done)
+
+    groups = {}
+    for section in SubjectSection.query.filter(SubjectSection.id.in_(section_ids)).all():
+        subject = Subject.query.get(section.subject_id)
+        if not subject:
+            continue
+        assignment = TeacherAssignment.query.filter_by(
+            subject_id=subject.id, section_id=section.id
+        ).first()
+        instructor = User.query.get(assignment.instructor_id) if assignment else None
+
+        problems = Problem.query.filter_by(subject_id=subject.id, is_published=True).all()
+
+        open_quests = []
+        for p in problems:
+            if not _still_open(p):
+                continue
+            if p.visible_to_sections and section.id not in p.visible_to_sections:
+                continue
+            open_quests.append(serialize_problem_for_viewer(p, user))
+
+        if not open_quests:
+            continue
+
+        if subject.id not in groups:
+            groups[subject.id] = {
+                "subject_id": subject.id,
+                "subject_name": subject.name,
+                "section_id": section.id,
+                "section_no": section.section_no,
+                "semester": section.semester,
+                "instructor": (instructor.full_name or instructor.username) if instructor else "TBA",
+                "quests": []
+            }
+        groups[subject.id]["quests"].extend(open_quests)
+
+    return jsonify(list(groups.values())), 200
+
+
+@app.route('/api/student/submissions/by-section', methods=['GET'])
+@jwt_required()
+def get_submissions_by_section():
+    user_id = int(get_jwt_identity())
+    section_id = request.args.get('section_id', type=int)
+
+    if not section_id:
+        return jsonify({"error": "section_id required"}), 400
+
+    enrollment = IrregularEnrollment.query.filter_by(
+        student_id=user_id, section_id=section_id
     ).first()
-    
     if not enrollment:
-        return jsonify({"error": "Not enrolled in this block"}), 403
-    
-    # ✅ Get problem IDs assigned to this block (NEW TABLE)
-    problem_rows = db.session.query(block_problems.c.problem_id).filter_by(
-        block_id=block_id
+        return jsonify({"error": "Not enrolled in this class code"}), 403
+
+    section = SubjectSection.query.get(section_id)
+    if not section:
+        return jsonify({"submissions": []}), 200
+
+    problems_for_subject = Problem.query.filter_by(
+        subject_id=section.subject_id, is_published=True
     ).all()
-    problem_ids = [p[0] for p in problem_rows]
-    
-    # If no problems in block, return empty
+    problem_ids = [p.id for p in problems_for_subject]
+    # reuses the list already fetched above instead of querying again
+    # per row — this page used to run 2 extra queries per submission
+    problems_by_id = {p.id: p for p in problems_for_subject}
+
     if not problem_ids:
         return jsonify({"submissions": []}), 200
-    
-    # Get submissions for these problems by this student
+
     subs = Submission.query.filter(
         Submission.user_id == user_id,
         Submission.problem_id.in_(problem_ids)
     ).order_by(Submission.submitted_at.desc()).all()
-    
+
     return jsonify({
         "submissions": [{
             "id": s.id,
             "problem_id": s.problem_id,
-            "problem_title": Problem.query.get(s.problem_id).title if Problem.query.get(s.problem_id) else "Unknown",
+            "problem_title": problems_by_id[s.problem_id].title if s.problem_id in problems_by_id else "Unknown",
+            "difficulty": problems_by_id[s.problem_id].difficulty if s.problem_id in problems_by_id else None,
             "status": s.status,
             "score": s.score,
             "language": s.language,
@@ -1593,16 +3221,17 @@ def get_submissions_by_block():
 
 # ===== LEADERBOARD =====
 @app.route('/api/leaderboard', methods=['GET'])
+@jwt_required()
 def get_leaderboard():
-    block_id = request.args.get('block_id', type=int)  # ✅ changed param name
-    
-    if block_id:
-        # ✅ Get students in specific block (NEW TABLE)
-        student_rows = db.session.query(student_blocks.c.student_id).filter_by(block_id=block_id).all()
-        student_ids = [s[0] for s in student_rows]
+    # block_id param ignored — blocks removed
+
+    section_id = request.args.get('section_id', type=int)
+    if section_id:
+        student_rows = IrregularEnrollment.query.filter_by(section_id=section_id).all()
+        student_ids = [s.student_id for s in student_rows]
         if student_ids:
             students = User.query.filter(
-                User.id.in_(student_ids), 
+                User.id.in_(student_ids),
                 User.role == 'student'
             ).order_by(User.xp.desc()).limit(20).all()
         else:
@@ -1610,12 +3239,13 @@ def get_leaderboard():
     else:
         # Global leaderboard
         students = User.query.filter_by(role='student').order_by(User.xp.desc()).limit(20).all()
-    
+
     return jsonify([{
         "id": s.id,
-        "rank": i+1, 
-        "username": s.username, 
-        "xp": s.xp, 
+        "rank": i+1,
+        "username": s.username,
+        "full_name": s.full_name or s.username,
+        "xp": s.xp,
         "level": s.level
     } for i, s in enumerate(students)]), 200
 
@@ -1625,37 +3255,97 @@ def get_leaderboard():
 def get_instructor_problems():
     user_id = int(get_jwt_identity())
     user = User.query.get(user_id)
-    if not is_instructor_or_admin(user): 
+    if not is_instructor_or_admin(user):
         return jsonify({"error": "Unauthorized"}), 403
-    
+
     problems = Problem.query.filter_by(created_by=user.id).all()
     return jsonify([{
-        "id": p.id, 
-        "title": p.title, 
-        "difficulty": p.difficulty, 
-        "is_published": p.is_published, 
+        "id": p.id,
+        "title": p.title,
+        "difficulty": p.difficulty,
+        "is_published": p.is_published,
         "xp_reward": p.xp_reward,
         "problem_type": p.problem_type,
         "is_event_quest": p.is_event_quest,
         "languages": p.languages or ['python'],
         "tags": p.tags or [],
-        "visible_to_blocks": p.visible_to_blocks or [],
+        "visible_to_sections": p.visible_to_sections or [],
         "due_date": p.due_date.isoformat() if p.due_date else None,
         "created_at": p.created_at.isoformat()
     } for p in problems]), 200
+
+@app.route('/api/instructor/classes/<int:class_id>/problems', methods=['GET'])
+@jwt_required()
+def get_class_problems(class_id):
+    """Problems scoped to a specific block — only shows problems visible to that block."""
+    user_id = int(get_jwt_identity())
+    user = User.query.get(user_id)
+
+    if not is_instructor_or_admin(user):
+        return jsonify({"error": "Unauthorized"}), 403
+
+    if not instructor_teaches_section(user, class_id):
+        return jsonify({"error": "Not your class"}), 403
+
+    section = SubjectSection.query.get(class_id)
+    if not section:
+        return jsonify({"error": "Class not found"}), 404
+
+    problems = Problem.query.filter_by(created_by=user_id).all()
+
+    result = []
+    for p in problems:
+        # strict: a quest shows up on this class page only if this exact
+        # class code is in its visible_to_sections list. no more
+        # subject-wide fallback for an empty list -- every quest is
+        # required to pick its section(s) at creation now.
+        if not p.visible_to_sections or class_id not in p.visible_to_sections:
+            continue
+
+        result.append({
+            "id": p.id,
+            "title": p.title,
+            "difficulty": p.difficulty,
+            "is_published": p.is_published,
+            "xp_reward": p.xp_reward,
+            "problem_type": p.problem_type,
+            "languages": p.languages or ['python'],
+            "tags": p.tags or [],
+            "visible_to_sections": p.visible_to_sections or [],
+            "due_date": p.due_date.isoformat() if p.due_date else None,
+            "created_at": p.created_at.isoformat()
+        })
+
+    return jsonify(result), 200
+
+
+def _published_quest_counts(instructor_id, sections):
+    """Count published quests for each exact class, using the activity list's scope."""
+    counts = {section.id: 0 for section in sections}
+    if counts:
+        scopes = Problem.query.with_entities(Problem.visible_to_sections).filter_by(
+            created_by=instructor_id, is_published=True
+        ).all()
+        for (visible_sections,) in scopes:
+            if not isinstance(visible_sections, list):
+                continue
+            valid_ids = {section_id for section_id in visible_sections if type(section_id) is int}
+            for section_id in valid_ids & counts.keys():
+                counts[section_id] += 1
+    return counts
 
 @app.route('/api/instructor/problems/<int:problem_id>', methods=['GET'])
 @jwt_required()
 def get_instructor_problem_detail(problem_id):
     user_id = int(get_jwt_identity())
     user = User.query.get(user_id)
-    if not is_instructor_or_admin(user): 
+    if not is_instructor_or_admin(user):
         return jsonify({"error": "Unauthorized"}), 403
-    
+
     problem = Problem.query.get_or_404(problem_id)
-    if problem.created_by != user_id and user.role != 'admin':
+    if problem.created_by != user_id and user.role != 'administrator':
         return jsonify({"error": "Not your problem"}), 403
-    
+
     # Parse starter_code
     starter = problem.starter_code
     if isinstance(starter, str):
@@ -1663,7 +3353,7 @@ def get_instructor_problem_detail(problem_id):
             starter = json.loads(starter)
         except:
             starter = {}
-    
+
     return jsonify({
         "id": problem.id,
         "title": problem.title,
@@ -1677,15 +3367,20 @@ def get_instructor_problem_detail(problem_id):
         "problem_type": problem.problem_type,
         "languages": problem.languages,
         "is_event_quest": problem.is_event_quest,
-        "visible_to_blocks": problem.visible_to_blocks,
+        "visible_to_sections": problem.visible_to_sections,
         "hints": problem.hints,
         "tags": problem.tags,
         "prerequisites": problem.prerequisites,
         "estimated_time": problem.estimated_time,
         "partial_credit": problem.partial_credit,
+        "language_rule": problem.language_rule or 'optional',
         "auto_grade": problem.auto_grade,
         "plagiarism_threshold": problem.plagiarism_threshold,
-        "due_date": problem.due_date.isoformat() if problem.due_date else None
+        "due_date": problem.due_date.isoformat() if problem.due_date else None,
+        # the edit form needs this to pre-select (and lock) the subject the
+        # quest already belongs to — without it, editing always falls back
+        # to the blank "Select a subject you teach" state
+        "subject_id": problem.subject_id
     }), 200
 
 @app.route('/api/instructor/classes', methods=['GET'])
@@ -1693,115 +3388,329 @@ def get_instructor_problem_detail(problem_id):
 def get_instructor_classes():
     user_id = int(get_jwt_identity())
     user = User.query.get(user_id)
-    if not is_instructor_or_admin(user): 
+    if not is_instructor_or_admin(user):
         return jsonify({"error": "Unauthorized"}), 403
-    
-    # ✅ NEW: Get blocks from TeacherAssignment table
+
+    # Get assigned sections from TeacherAssignment table
     assignments = TeacherAssignment.query.filter_by(instructor_id=user_id).all()
-    block_ids = list(set(a.block_id for a in assignments))  # Unique block IDs
-    
-    if not block_ids:
+    section_ids = list(set(a.section_id for a in assignments if a.section_id is not None))
+
+    if not section_ids:
         return jsonify([]), 200
-    
-    # Fetch blocks
-    blocks = Block.query.filter(Block.id.in_(block_ids)).all()
-    
+
+    sections = SubjectSection.query.filter(SubjectSection.id.in_(section_ids)).all()
+    quest_counts = _published_quest_counts(user_id, sections)
+    lesson_counts = dict(db.session.query(Lesson.section_id, db.func.count(Lesson.id)).filter(
+        Lesson.created_by == user_id, Lesson.section_id.in_(section_ids)
+    ).group_by(Lesson.section_id).all())
     result = []
-    for b in blocks:
-        # Get subjects for this block
-        subj_ids = [s.subject_id for s in db.session.query(block_subjects.c.subject_id).filter_by(block_id=b.id).all()]
-        subjects = [Subject.query.get(sid).name for sid in subj_ids if Subject.query.get(sid)]
-        
-        # Count students
-        student_count = db.session.query(student_blocks.c.student_id).filter_by(block_id=b.id).count()
-        
-        # ✅ Count problems assigned to this block (via block_problems junction table)
-        problem_count = db.session.query(block_problems.c.problem_id).filter_by(block_id=b.id).count()
-        
-        # ✅ Count lessons
-        lesson_count = 0
-        if subj_ids:
-            lesson_count = Lesson.query.filter(
-                Lesson.subject_id.in_(subj_ids),
-                (Lesson.block_id == b.id) | (Lesson.block_id == None)
-            ).count()
-        
-        # ✅ Count announcements
-        announcement_count = Announcement.query.filter_by(class_id=b.id).count()
-        
+
+    for s in sections:
+        my_subject_ids = [a.subject_id for a in assignments if a.section_id == s.id]
+        subjects = [Subject.query.get(sid).name for sid in my_subject_ids if Subject.query.get(sid)]
+
+        student_count = IrregularEnrollment.query.filter_by(section_id=s.id).count()
+        announcement_count = Announcement.query.filter_by(class_id=s.id).count()
+
         result.append({
-            "id": b.id, 
-            "section_code": b.section_code, 
-            "name": subjects[0] if subjects else b.section_code,  # ✅ Use first subject name
+            "id": s.id,
+            "section_no": s.section_no,
+            "section_code": s.section_no,
+            "name": ', '.join(subjects) if subjects else s.section_no,
             "subjects": subjects,
-            "semester": b.semester, 
+            "subject_id": s.subject_id,  # needed by the quest-creation class picker
+            "semester": s.semester,
             "student_count": student_count,
-            "problem_count": problem_count,
-            "lesson_count": lesson_count,
+            "problem_count": quest_counts[s.id],
+            "lesson_count": lesson_counts.get(s.id, 0),
             "announcement_count": announcement_count
         })
+
     return jsonify(result), 200
 
 @app.route('/api/instructor/classes/<int:classId>', methods=['GET'])
 @jwt_required()
-def get_instructor_class_detail(classId):  # ✅ must match route parameter name
-    """Get detailed information about a specific class/block"""
+def get_instructor_class_detail(classId):
+    """Get detailed information about a specific section (classId = SubjectSection.id)"""
     user_id = int(get_jwt_identity())
     user = User.query.get(user_id)
-    
+
     if not is_instructor_or_admin(user):
         return jsonify({"error": "Unauthorized"}), 403
-    
-    # Get block details
-    block = Block.query.get_or_404(classId)
-    
-    # Verify instructor has access to this block
+
+    # classId is now a SubjectSection.id
+    section = SubjectSection.query.get_or_404(classId)
+
+    # Verify instructor has this section assigned
     assignments = TeacherAssignment.query.filter_by(
-        instructor_id=user_id, 
-        block_id=classId
+        instructor_id=user_id,
+        section_id=classId
     ).all()
-    
-    if not assignments and user.role != 'admin':
+
+    if not assignments and user.role != 'administrator':
         return jsonify({"error": "Not authorized to view this class"}), 403
-    
-    # Get subjects for this block
-    subj_rows = db.session.query(block_subjects.c.subject_id).filter_by(
-        block_id=classId
-    ).all()
-    subject_ids = [r.subject_id for r in subj_rows]
-    subjects = [Subject.query.get(sid).name for sid in subject_ids if Subject.query.get(sid)]
-    
-    # Count students
-    student_count = db.session.query(student_blocks.c.student_id).filter_by(
-        block_id=classId
-    ).count()
-    
-    # Count problems assigned to this block
-    problem_count = db.session.query(block_problems.c.problem_id).filter_by(
-        block_id=classId
-    ).count()
-    
-    # Count lessons (if subject exists)
-    lesson_count = 0
-    if subject_ids:
-        lesson_count = Lesson.query.filter(
-            Lesson.subject_id.in_(subject_ids),
-            (Lesson.block_id == classId) | (Lesson.block_id == None)
-        ).count()
-    
-    # Count announcements
-    announcement_count = Announcement.query.filter_by(class_id=classId).count()  # ✅ Use snake_case column name
-    
+
+    my_subject_ids = list(set(a.subject_id for a in assignments))
+    subjects = [Subject.query.get(sid).name for sid in my_subject_ids if Subject.query.get(sid)]
+
+    student_count = IrregularEnrollment.query.filter_by(section_id=classId).count()
+
+    problem_count = _published_quest_counts(user_id, [section])[classId]
+    lesson_count = Lesson.query.filter_by(created_by=user_id, section_id=classId).count()
+
+    announcement_count = Announcement.query.filter_by(class_id=section.id).count()
+
     return jsonify({
-        "id": block.id,
-        "section_code": block.section_code,
-        "name": subjects[0] if subjects else block.section_code,  # or you can use subjects[0] if only one subject
-        "semester": block.semester or 'Current Semester',
+        "id": section.id,
+        "subject_id": section.subject_id,
+        "section_no": section.section_no,
+        "section_code": section.section_no,
+        "name": ', '.join(subjects) if subjects else section.section_no,
+        "is_active": section.is_active,
+        "semester": section.semester or 'Current Semester',
         "subjects": subjects,
         "student_count": student_count,
         "problem_count": problem_count,
         "lesson_count": lesson_count,
         "announcement_count": announcement_count
+    }), 200
+
+@app.route('/api/instructor/classes/<int:class_id>/analytics', methods=['GET'])
+@jwt_required()
+def get_class_analytics(class_id):
+    user_id = int(get_jwt_identity())
+    user    = User.query.get(user_id)
+    if not is_instructor_or_admin(user):
+        return jsonify({"error": "Unauthorized"}), 403
+    if not instructor_teaches_section(user, class_id):
+        return jsonify({"error": "Not your class"}), 403
+
+    enrollments = IrregularEnrollment.query.filter_by(section_id=class_id).all()
+    student_ids = [e.student_id for e in enrollments]
+    total_students = len(student_ids)
+
+    if not student_ids:
+        return jsonify({
+            "total_students": 0, "total_submissions": 0,
+            "accepted_submissions": 0, "success_rate": 0,
+            "top_performers": [], "challenging_problems": [],
+            "activity_heatmap": [], "at_risk_students": [], "avg_xp": 0,
+        }), 200
+
+    subs           = Submission.query.filter(Submission.user_id.in_(student_ids)).all()
+    total_subs     = len(subs)
+    accepted_subs  = [s for s in subs if s.status == 'accepted']
+    success_rate   = round(len(accepted_subs) / total_subs * 100, 1) if total_subs > 0 else 0
+
+    # top 5 by XP
+    top_students = User.query.filter(User.id.in_(student_ids)).order_by(User.xp.desc()).limit(5).all()
+    top_performers = [{
+        "id": s.id, "username": s.username,
+        "full_name": s.full_name or s.username,
+        "xp": s.xp, "level": s.level,
+        "solved": db.session.query(func.count(distinct(Submission.problem_id))).filter(Submission.user_id == s.id, Submission.status == 'accepted').scalar() or 0,
+    } for s in top_students]
+
+    all_students = User.query.filter(User.id.in_(student_ids)).all()
+    avg_xp = round(sum(s.xp for s in all_students) / total_students, 1) if total_students > 0 else 0
+
+    # most challenging problems — lowest success rate, min 3 attempts
+    prob_stats = _dd(lambda: {"total": 0, "accepted": 0, "title": "", "difficulty": ""})
+    for s in subs:
+        prob = Problem.query.get(s.problem_id)
+        if prob:
+            prob_stats[s.problem_id]["total"]      += 1
+            prob_stats[s.problem_id]["title"]      = prob.title
+            prob_stats[s.problem_id]["difficulty"] = prob.difficulty
+            if s.status == 'accepted':
+                prob_stats[s.problem_id]["accepted"] += 1
+
+    challenging = []
+    for pid, stat in prob_stats.items():
+        if stat["total"] >= 3:
+            rate = round(stat["accepted"] / stat["total"] * 100, 1)
+            challenging.append({
+                "problem_id": pid, "title": stat["title"],
+                "difficulty": stat["difficulty"],
+                "success_rate": rate, "attempts": stat["total"],
+            })
+    challenging.sort(key=lambda x: x["success_rate"])
+    challenging = challenging[:5]
+
+    # activity heatmap — submissions grouped by hour
+    hour_counts = _dd(int)
+    for s in subs:
+        hour_counts[s.submitted_at.hour] += 1
+    activity_heatmap = [
+        {"hour": f"{h}:00", "submissions": hour_counts.get(h, 0)}
+        for h in range(0, 24, 4)
+    ]
+
+    # at-risk = no submissions in last 14 days
+    two_weeks_ago = _dt.utcnow() - _td(days=14)
+    recent_user_ids = set(s.user_id for s in subs if s.submitted_at >= two_weeks_ago)
+    at_risk = []
+    for sid in student_ids:
+        s = User.query.get(sid)
+        if s and sid not in recent_user_ids:
+            at_risk.append({
+                "id": s.id, "username": s.username,
+                "full_name": s.full_name or s.username,
+                "xp": s.xp, "level": s.level,
+            })
+
+    return jsonify({
+        "total_students":       total_students,
+        "total_submissions":    total_subs,
+        "accepted_submissions": len(accepted_subs),
+        "success_rate":         success_rate,
+        "avg_xp":               avg_xp,
+        "top_performers":       top_performers,
+        "challenging_problems": challenging,
+        "activity_heatmap":     activity_heatmap,
+        "at_risk_students":     at_risk,
+    }), 200
+
+
+@app.route('/api/instructor/plagiarism/scan', methods=['POST'])
+@jwt_required()
+def plagiarism_scan():
+    user_id = int(get_jwt_identity())
+    user    = User.query.get(user_id)
+    if not is_instructor_or_admin(user):
+        return jsonify({"error": "Unauthorized"}), 403
+
+    data       = request.get_json()
+    problem_id = data.get('problem_id')
+    class_id   = data.get('class_id')
+    threshold  = int(data.get('threshold', 85)) / 100.0
+
+    if not problem_id:
+        return jsonify({"error": "problem_id required"}), 400
+    scan_problem = db.session.get(Problem, problem_id)
+    if not scan_problem or not user_can_access_problem(user, scan_problem):
+        return deny_problem_access()
+    if class_id and not instructor_teaches_section(user, class_id):
+        return jsonify({"error": "Not your class"}), 403
+
+    query = Submission.query.filter_by(problem_id=problem_id)
+    if class_id:
+        enrolled    = IrregularEnrollment.query.filter_by(section_id=class_id).all()
+        student_ids = [e.student_id for e in enrolled]
+        query       = query.filter(Submission.user_id.in_(student_ids))
+
+    all_subs = query.order_by(Submission.submitted_at.desc()).all()
+    seen, unique_subs = {}, []
+    for s in all_subs:
+        if s.user_id not in seen:
+            seen[s.user_id] = s
+            unique_subs.append(s)
+
+    if len(unique_subs) < 2:
+        return jsonify({
+            "pairs": [], "total_compared": len(unique_subs),
+            "flagged": 0, "threshold": int(threshold * 100)
+        }), 200
+
+    def tokenize(code):
+        code = _re.sub(r'#[^\n]*',   '', code)
+        code = _re.sub(r'//[^\n]*',  '', code)
+        code = _re.sub(r'/\*.*?\*/', '', code, flags=_re.DOTALL)
+        tokens = _re.findall(r'\b\w+\b', code.lower())
+        keywords = {
+            'int','string','bool','void','return','if','else','for','while',
+            'def','class','import','print','public','private','static','new',
+            'this','self','true','false','null','none','and','or','not',
+            'in','is','pass','break','continue'
+        }
+        return [t for t in tokens if t not in keywords]
+
+    def jaccard(code1, code2):
+        t1, t2 = set(tokenize(code1)), set(tokenize(code2))
+        if not t1 or not t2:
+            return 0.0
+        return len(t1 & t2) / len(t1 | t2)
+
+    flagged_pairs = []
+    for i in range(len(unique_subs)):
+        for j in range(i + 1, len(unique_subs)):
+            s1, s2 = unique_subs[i], unique_subs[j]
+            sim = jaccard(s1.code or '', s2.code or '')
+            if sim >= threshold:
+                u1 = User.query.get(s1.user_id)
+                u2 = User.query.get(s2.user_id)
+                flagged_pairs.append({
+                    "student1": {
+                        "id": s1.user_id, "name": u1.full_name or u1.username,
+                        "username": u1.username, "sub_id": s1.id,
+                        "status": s1.status, "language": s1.language,
+                    },
+                    "student2": {
+                        "id": s2.user_id, "name": u2.full_name or u2.username,
+                        "username": u2.username, "sub_id": s2.id,
+                        "status": s2.status, "language": s2.language,
+                    },
+                    "similarity":    round(sim * 100, 1),
+                    "code_preview1": (s1.code or '')[:600],
+                    "code_preview2": (s2.code or '')[:600],
+                    "ai_verdict":    None,
+                })
+
+    flagged_pairs.sort(key=lambda x: x["similarity"], reverse=True)
+
+    # layer 2: gemini flash writes plain-english verdict for each flagged pair
+    # gemini flash is free (1500 requests/day), smart enough for code analysis,
+    # and needs GEMINI_API_KEY set in your .env file.
+    # if the key is missing or the API fails, verdicts just stay None —
+    # the similarity scores and code previews still show up fine.
+    try:
+        from google import genai
+        import os
+        api_key = os.environ.get('GEMINI_API_KEY')
+        if not api_key:
+            raise ValueError("GEMINI_API_KEY not set in environment")
+        client = genai.Client(api_key=api_key)
+
+        for pair in flagged_pairs[:10]:
+            prompt = f"""You are helping a university instructor review potential plagiarism in student code submissions.
+
+Two students submitted very similar code ({pair['similarity']}% similarity score) for the same programming problem.
+
+Student 1 ({pair['student1']['name']}) code preview:
+```
+{pair['code_preview1']}
+```
+
+Student 2 ({pair['student2']['name']}) code preview:
+```
+{pair['code_preview2']}
+```
+
+Write a brief 2-3 sentence verdict for the instructor. Be direct and specific:
+- What specific patterns make these similar (same variable names, same structure, same logic)?
+- Does this look like one student copied from the other, or could it be coincidental?
+- What should the instructor look for when reviewing the full submissions?
+
+Keep it concise and practical. Do not be accusatory — just describe what you observe."""
+
+            response = client.models.generate_content(
+                # gemini-1.5-flash-8b is dead -- all 1.5 models were shut down by
+                # Google in 2026 and now 404. 2.5 Flash followed the same path
+                # later in 2026 ("no longer available to new users") -- Google's
+                # own 404 response names the replacement, 3.6 Flash, which is
+                # the current free-tier workhorse as of this writing.
+                model='gemini-3.6-flash',
+                contents=prompt
+            )
+            pair["ai_verdict"] = response.text
+    except Exception as e:
+        print(f"Gemini API unavailable for plagiarism verdicts: {e}")
+
+    return jsonify({
+        "pairs":          flagged_pairs,
+        "total_compared": len(unique_subs),
+        "flagged":        len(flagged_pairs),
+        "threshold":      int(threshold * 100),
     }), 200
 
 @app.route('/api/instructor/dashboard-stats', methods=['GET'])
@@ -1810,15 +3719,15 @@ def get_instructor_dashboard_stats():
     """Get instructor dashboard statistics"""
     user_id = int(get_jwt_identity())
     user = User.query.get(user_id)
-    
+
     if not is_instructor_or_admin(user):
         return jsonify({"error": "Unauthorized"}), 403
-    
-    # Get all blocks this instructor teaches
+
+    # Get all sections this instructor teaches (via TeacherAssignment → section_id)
     assignments = TeacherAssignment.query.filter_by(instructor_id=user_id).all()
-    block_ids = list(set(a.block_id for a in assignments))
-    
-    if not block_ids:
+    section_ids = list(set(a.section_id for a in assignments if a.section_id is not None))
+
+    if not section_ids:
         return jsonify({
             "total_students": 0,
             "total_problems": 0,
@@ -1828,40 +3737,45 @@ def get_instructor_dashboard_stats():
             "recent_activity": [],
             "top_performers": []
         }), 200
-    
-    # 1. Total students across all blocks
-    student_rows = db.session.query(student_blocks.c.student_id).filter(
-        student_blocks.c.block_id.in_(block_ids)
+
+    # 1. Total students across all sections
+    student_rows = db.session.query(IrregularEnrollment.student_id).filter(
+        IrregularEnrollment.section_id.in_(section_ids)
     ).distinct().all()
     total_students = len(student_rows)
     student_ids = [s[0] for s in student_rows]
-    
+
     # 2. Total problems created by this instructor
     total_problems = Problem.query.filter_by(created_by=user_id, is_published=True).count()
-    
-    # 3. Average class score (from submissions)
+
+    # 3. Average score on submitted work: XP earned / XP available, as a percentage.
+    #    Submission.score is the XP awarded (max = that problem's xp_reward), so each
+    #    submission is measured against its own problem's xp_reward. Students who have
+    #    not submitted are NOT counted as zero; they are simply absent from this figure.
+    avg_score = 0
+    avg_basis = {"submissions": 0, "students_submitted": 0, "students_enrolled": total_students,
+                 "unsubmitted_students_excluded": True}
     if student_ids:
-        submissions = Submission.query.filter(
+        rows = db.session.query(Submission.user_id, Submission.score, Problem.xp_reward).join(
+            Problem, Problem.id == Submission.problem_id
+        ).filter(
             Submission.user_id.in_(student_ids),
-            Submission.problem_id.in_(
-                db.session.query(Problem.id).filter(Problem.created_by == user_id)
-            )
+            Problem.created_by == user_id,
+            Problem.is_published == True,
+            Problem.xp_reward > 0
         ).all()
-        
-        if submissions:
-            total_score = sum(s.score for s in submissions)
-            max_possible = len(submissions) * 100  # Assuming max score is 100
-            avg_score = round((total_score / max_possible) * 100) if max_possible > 0 else 0
-        else:
-            avg_score = 0
-    else:
-        avg_score = 0
-    
+        if rows:
+            earned = sum(r[1] or 0 for r in rows)
+            available = sum(r[2] for r in rows)
+            avg_score = round(earned / available * 100)
+            avg_basis["submissions"] = len(rows)
+            avg_basis["students_submitted"] = len({r[0] for r in rows})
+
     # 4. Pending reviews (submissions needing manual review)
     pending_reviews = Submission.query.filter(
         Submission.status == 'pending_review'
     ).count() if 'pending_review' in [col.name for col in Submission.__table__.columns] else 0
-    
+
     # 5. New problems this week
     from datetime import datetime, timedelta
     one_week_ago = datetime.utcnow() - timedelta(days=7)
@@ -1869,45 +3783,88 @@ def get_instructor_dashboard_stats():
         Problem.created_by == user_id,
         Problem.created_at >= one_week_ago
     ).count()
-    
-    # 6. Recent activity (last 10 submissions from students)
+
+    # 6. Recent activity — support optional class_code (section_no) filter
+    filter_section_no = request.args.get('class_code', '').strip()
+    filtered_student_ids = student_ids
+
+    if filter_section_no and student_ids:
+        target_section = SubjectSection.query.filter_by(section_no=filter_section_no).first()
+        if target_section:
+            rows = db.session.query(IrregularEnrollment.student_id).filter(
+                IrregularEnrollment.section_id == target_section.id,
+                IrregularEnrollment.student_id.in_(student_ids)
+            ).all()
+            filtered_student_ids = [r[0] for r in rows]
+        else:
+            filtered_student_ids = []
+
     recent_subs = Submission.query.filter(
-        Submission.user_id.in_(student_ids) if student_ids else False
+        Submission.user_id.in_(filtered_student_ids) if filtered_student_ids else False
     ).order_by(Submission.submitted_at.desc()).limit(10).all()
-    
-    recent_activity = [{
-        "id": s.id,
-        "student": User.query.get(s.user_id).username if s.user_id else "Unknown",
-        "problem": Problem.query.get(s.problem_id).title if s.problem_id else "Unknown",
-        "status": s.status,
-        "score": s.score,
-        "submitted_at": s.submitted_at.isoformat()
-    } for s in recent_subs]
-    
+
+    recent_activity = []
+    for s in recent_subs:
+        student_obj = User.query.get(s.user_id)
+        problem_obj = Problem.query.get(s.problem_id)
+        subject_name = None
+        section_no_val = None
+        if problem_obj and problem_obj.subject_id:
+            subj = Subject.query.get(problem_obj.subject_id)
+            if subj:
+                subject_name = subj.name
+            # Find which of the instructor's sections this student is enrolled in
+            # that is also tied to this problem's subject
+            enroll = IrregularEnrollment.query.filter(
+                IrregularEnrollment.student_id == s.user_id,
+                IrregularEnrollment.section_id.in_(section_ids)
+            ).first()
+            if enroll:
+                sec = SubjectSection.query.get(enroll.section_id)
+                if sec:
+                    section_no_val = sec.section_no
+        recent_activity.append({
+            "id": s.id,
+            "student": (student_obj.full_name or student_obj.username) if student_obj else "Unknown",
+            "problem": problem_obj.title if problem_obj else "Unknown",
+            "subject": subject_name,
+            "section_no": section_no_val,
+            "status": s.status,
+            "score": s.score,
+            "submitted_at": s.submitted_at.isoformat()
+        })
+
     # 7. Top performers (top 5 students by XP)
     if student_ids:
         top_students = User.query.filter(
             User.id.in_(student_ids),
             User.role == 'student'
         ).order_by(User.xp.desc()).limit(5).all()
-        
-        top_performers = [{
-            "id": s.id,
-            "username": s.username,
-            "xp": s.xp,
-            "level": s.level
-        } for s in top_students]
+
+        top_performers = [{"id": s.id,"username": s.username,"full_name": s.full_name,"xp": s.xp,"level": s.level} for s in top_students]
     else:
         top_performers = []
-    
+
+    # build list of this instructor's assigned sections for the filter dropdown
+    assigned_sections = []
+    for sid in section_ids:
+        sec = SubjectSection.query.get(sid)
+        if sec:
+            assigned_sections.append({
+                "id": sec.id,
+                "section_no": sec.section_no
+            })
+
     return jsonify({
         "total_students": total_students,
         "total_problems": total_problems,
         "avg_score": avg_score,
+        "avg_score_basis": avg_basis,
         "pending_reviews": pending_reviews,
         "new_problems_this_week": new_problems,
         "recent_activity": recent_activity,
-        "top_performers": top_performers
+        "top_performers": top_performers,
+        "assigned_sections": assigned_sections
     }), 200
 
 @app.route('/api/instructor/problems/<int:problem_id>/submissions', methods=['GET'])
@@ -1921,26 +3878,40 @@ def get_problem_submissions(problem_id):
 
     problem = Problem.query.get_or_404(problem_id)
 
-    if problem.created_by != user_id and not is_super_admin(user):
+    if problem.created_by != user_id and not is_administrator(user):
         return jsonify({"error": "Not your problem"}), 403
 
     submissions = Submission.query.filter_by(problem_id=problem_id)\
         .order_by(Submission.submitted_at.desc()).all()
 
-    assignments = TeacherAssignment.query.filter_by(instructor_id=user_id).all()
-    block_ids = list(set(a.block_id for a in assignments))
+    assignments = TeacherAssignment.query.filter_by(
+        instructor_id=user_id, subject_id=problem.subject_id
+    ).all()
+    section_ids = list(set(a.section_id for a in assignments if a.section_id))
+
+    # if this quest is scoped to specific sections, only count those —
+    # not every section the instructor teaches for this subject
+    if problem.visible_to_sections:
+        section_ids = [sid for sid in section_ids if sid in problem.visible_to_sections]
 
     enrolled_student_ids = []
-    if block_ids:
-        rows = db.session.query(student_blocks.c.student_id).filter(
-            student_blocks.c.block_id.in_(block_ids)
+    if section_ids:
+        rows = db.session.query(IrregularEnrollment.student_id).filter(
+            IrregularEnrollment.section_id.in_(section_ids)
         ).distinct().all()
         enrolled_student_ids = [r[0] for r in rows]
 
     sub_map = {}
+    lang_map = {}          # user -> {language: newest submission}: one graded submission per language
     for s in submissions:
         if s.user_id not in sub_map:
             sub_map[s.user_id] = s
+        lang_map.setdefault(s.user_id, {}).setdefault(s.language, s)
+
+    def per_language(uid):
+        rows = sorted(lang_map.get(uid, {}).values(), key=lambda x: x.submitted_at)
+        return [{"submission_id": x.id, "language": x.language, "status": x.status, "score": x.score,
+                 "submitted_at": x.submitted_at.isoformat()} for x in rows]
 
     result_students = []
     for student_id in enrolled_student_ids:
@@ -1951,9 +3922,13 @@ def get_problem_submissions(problem_id):
         result_students.append({
             "id": student.id,
             "username": student.username,
+            "full_name": student.full_name or student.username,
             "email": student.email,
             "submitted": sub is not None,
-            "score": sub.score if sub else 0,
+            # score = total over every language the student submitted; the newest one stays in
+            # status/language/submission_id for older clients
+            "score": sum(r["score"] or 0 for r in per_language(student.id)) if sub else 0,
+            "submissions": per_language(student.id),
             "status": sub.status if sub else "Not Submitted",
             "submitted_at": sub.submitted_at.isoformat() if sub else None,
             "submission_id": sub.id if sub else None,
@@ -1967,9 +3942,11 @@ def get_problem_submissions(problem_id):
                 result_students.append({
                     "id": student.id,
                     "username": student.username,
+                    "full_name": student.full_name or student.username,
                     "email": student.email,
                     "submitted": True,
-                    "score": sub.score,
+                    "score": sum(r["score"] or 0 for r in per_language(student_id)),
+                    "submissions": per_language(student_id),
                     "status": sub.status,
                     "submitted_at": sub.submitted_at.isoformat(),
                     "submission_id": sub.id,
@@ -1988,132 +3965,105 @@ def get_problem_submissions(problem_id):
         }
     }), 200
 
+@app.route('/api/instructor/submissions/<int:submission_id>/code', methods=['GET'])
+@jwt_required()
+def get_submission_code(submission_id):
+    """Instructor views a student's submitted code + test results"""
+    user_id = int(get_jwt_identity())
+    user = User.query.get(user_id)
+
+    if not is_instructor_or_admin(user):
+        return jsonify({"error": "Unauthorized"}), 403
+
+    sub = Submission.query.get_or_404(submission_id)
+    problem = Problem.query.get_or_404(sub.problem_id)
+
+    # Verify instructor owns this problem OR is administrator
+    if problem.created_by != user_id and user.role != 'administrator':
+        return jsonify({"error": "Not your problem"}), 403
+
+    student = User.query.get(sub.user_id)
+
+    # Read-only: shows what was stored when the student submitted. Nothing is executed here,
+    # no attempt is consumed, no XP is awarded and no record is changed.
+    details = sub.result_details if isinstance(sub.result_details, dict) else None
+    return jsonify({
+        "submission_id": sub.id,
+        "student": {
+            "id": student.id,
+            "username": student.username
+        } if student else None,
+        "problem": {
+            "id": problem.id,
+            "title": problem.title,
+            "difficulty": problem.difficulty
+        },
+        "code": sub.code,
+        "language": sub.language,
+        "status": sub.status,
+        "score": sub.score,
+        "passed_cases": sub.passed_cases,
+        "total_cases": sub.total_cases,
+        "error_msg": sub.error_msg,
+        "submitted_at": sub.submitted_at.isoformat(),
+        # True only when per-test results were recorded with this submission
+        "results_recorded": details is not None,
+        "execution_mode": (details or {}).get("runner"),
+        "test_results": (details or {}).get("tests", []),
+        # Author-only current definitions, not historical execution snapshots.
+        "current_test_cases": [
+            {"index": index + 1, "input": case.get("input", ""),
+             "expected": case.get("expected", ""), "hidden": case.get("visible", True) is False}
+            for index, case in enumerate(problem.test_cases or []) if isinstance(case, dict)
+        ],
+        "note": None if details is not None else
+                "This submission was saved before per-test results were recorded. Only the stored status, score and "
+                "pass counts are available; they were not re-run."
+    }), 200
+
 @app.route('/api/instructor/assigned-subjects', methods=['GET'])
 @jwt_required()
 def get_instructor_assigned_subjects():
     """Get unique subjects this instructor is assigned to teach"""
     user_id = int(get_jwt_identity())
-    
+
     # Get all teacher assignments for this instructor
     assignments = TeacherAssignment.query.filter_by(instructor_id=user_id).all()
-    
+
     # Extract unique subject IDs
     subject_ids = list(set(a.subject_id for a in assignments))
-    
+
     # Fetch subject details
     subjects = Subject.query.filter(Subject.id.in_(subject_ids)).all() if subject_ids else []
-    
+
     return jsonify([{
         "id": s.id,
         "name": s.name,
         "description": s.description
     } for s in subjects]), 200
 
-@app.route('/api/instructor/blocks-by-subject', methods=['GET'])
+@app.route('/api/instructor/sections-by-subject', methods=['GET'])
 @jwt_required()
-def get_blocks_by_subject():
+def get_sections_by_subject():
     """Get blocks where instructor teaches a specific subject"""
     user_id = int(get_jwt_identity())
     subject_id = request.args.get('subject_id', type=int)
-    
+
     if not subject_id:
         return jsonify({"error": "subject_id required"}), 400
-    
+
     assignments = TeacherAssignment.query.filter_by(
-        instructor_id=user_id, 
+        instructor_id=user_id,
         subject_id=subject_id
     ).all()
-    block_ids = [a.block_id for a in assignments]
-    
-    blocks = Block.query.filter(Block.id.in_(block_ids)).all()
+    section_ids = [a.section_id for a in assignments if a.section_id]
+    sections = SubjectSection.query.filter(SubjectSection.id.in_(section_ids)).all()
     return jsonify([{
-        "id": b.id,
-        "section_code": b.section_code,
-        "semester": b.semester or 'Current'
-    } for b in blocks]), 200
-
-@app.route('/api/blocks', methods=['POST'])  # ✅ Changed route name
-@jwt_required()
-def create_block():  # ✅ Changed function name
-    user_id = int(get_jwt_identity())
-    user = User.query.get(user_id)
-    if not is_instructor_or_admin(user): 
-        return jsonify({"error": "Unauthorized"}), 403
-    
-    data = request.get_json()
-    if not data.get('section_code'): 
-        return jsonify({"error": "Section code required"}), 400
-    
-    # ✅ Check if block already exists (NEW TABLE)
-    if Block.query.filter_by(instructor_id=user.id, section_code=data['section_code'], semester=data.get('semester')).first(): 
-        return jsonify({"error": "Block already exists"}), 400
-    
-    # ✅ Create new Block (NEW MODEL)
-    b = Block(
-        instructor_id=user.id, 
-        section_code=data['section_code'], 
-        semester=data.get('semester','')
-    )
-    db.session.add(b)
-    db.session.commit()
-    
-    # ✅ Link subjects if provided
-    subjects = data.get('subjects', [])
-    for sub_name in subjects:
-        subject = Subject.query.filter_by(name=sub_name).first()
-        if not subject:
-            subject = Subject(name=sub_name)
-            db.session.add(subject)
-            db.session.flush()
-        db.session.execute(block_subjects.insert().values(
-            block_id=b.id,
-            subject_id=subject.id
-        ))
-    db.session.commit()
-    
-    return jsonify({"message": "Block created", "block_id": b.id}), 201
-
-@app.route('/api/instructor/class/<int:class_id>/stats', methods=['GET'])
-@jwt_required()
-def get_class_stats(class_id):
-    user_id = int(get_jwt_identity())
-    user = User.query.get(user_id)
-    if not is_instructor_or_admin(user): 
-        return jsonify({"error": "Unauthorized"}), 403
-    
-    c = Class.query.get_or_404(class_id)
-    if c.instructor_id != user.id and user.role != 'admin': 
-        return jsonify({"error": "Not your class"}), 403
-    
-    student_ids = [cs.student_id for cs in db.session.query(class_students.c.student_id).filter_by(class_id=class_id).all()]
-    problem_ids = [cp.problem_id for cp in db.session.query(class_problems.c.problem_id).filter_by(class_id=class_id).all()]
-    
-    if student_ids and problem_ids:
-        subs = Submission.query.filter(
-            Submission.user_id.in_(student_ids), 
-            Submission.problem_id.in_(problem_ids)
-        ).all()
-    else:
-        subs = []
-    
-    accepted = len([s for s in subs if s.status == 'accepted'])
-    total = len(subs)
-    avg = round((accepted/total*100), 1) if total > 0 else 0.0
-    recent = [{
-        "student": User.query.get(s.user_id).username, 
-        "problem": Problem.query.get(s.problem_id).title, 
-        "status": s.status, 
-        "xp": s.score, 
-        "submitted_at": s.submitted_at.isoformat()
-    } for s in subs[-5:]]
-    
-    return jsonify({
-        "total_problems": len(problem_ids), 
-        "total_students": len(student_ids), 
-        "avg_completion": avg, 
-        "total_xp_awarded": sum(s.score for s in subs), 
-        "recent_submissions": recent
-    }), 200
+        "id": s.id,
+        "section_no": s.section_no,
+        "schedule": s.schedule or '',
+        "semester": s.semester or 'Current'
+    } for s in sections]), 200
 
 # ===== ANNOUNCEMENTS =====
 @app.route('/api/announcements', methods=['POST'])
@@ -2121,18 +4071,39 @@ def get_class_stats(class_id):
 def create_announcement():
     user_id = int(get_jwt_identity())
     user = User.query.get(user_id)
-    if not is_instructor_or_admin(user): 
+    if not is_instructor_or_admin(user):
         return jsonify({"error": "Unauthorized"}), 403
-    
+
     data = request.get_json()
-    if not data.get('title') or not data.get('content'): 
+    if not data.get('title') or not data.get('content'):
         return jsonify({"error": "Title & content required"}), 400
-    
+
+    class_id = data.get('class_id')
+
+    # instructors must post to a specific class they actually teach — a
+    # platform-wide announcement from an instructor was never an intended
+    # feature, just an accidental gap when the frontend skipped class
+    # selection (admins keep the null/global path since nothing here
+    # restricts them the way it restricts an instructor's own students)
+    if user.role != 'administrator':
+        if not class_id:
+            return jsonify({"error": "class_id required"}), 400
+        section = SubjectSection.query.get(class_id)
+        if not section:
+            return jsonify({"error": "Class not found"}), 404
+        owns = TeacherAssignment.query.filter_by(instructor_id=user.id, section_id=class_id).first()
+        if not owns:
+            return jsonify({"error": "You don't teach this class"}), 403
+    if class_id:
+        _sec = SubjectSection.query.get(class_id)
+        if _sec and subject_out_of_scope(Subject.query.get(_sec.subject_id)):
+            return jsonify({"error": OUT_OF_SCOPE_MSG}), 400
+
     a = Announcement(
-        instructor_id=user.id, 
-        class_id=data.get('class_id'), 
-        title=data['title'], 
-        content=data['content'], 
+        instructor_id=user.id,
+        class_id=class_id,
+        title=data['title'],
+        content=data['content'],
         is_pinned=data.get('is_pinned', False),
         priority=data.get('priority', 'medium')
     )
@@ -2141,42 +4112,25 @@ def create_announcement():
     return jsonify({"message": "Announcement created", "announcement_id": a.id}), 201
 
 @app.route('/api/announcements', methods=['GET'])
+@jwt_required()
 def get_announcements():
+    user = db.session.get(User, int(get_jwt_identity()))
+    if not user:
+        return jsonify({"error": "Unauthorized"}), 403
     class_id = request.args.get('class_id', type=int)
-    if class_id:
+    if 'class_id' in request.args and (class_id is None or class_id <= 0):
+        return jsonify({"error": "Invalid class"}), 400
+    if class_id is not None:
+        if user.role == 'student':
+            allowed = class_id in _student_section_ids(user.id)
+        else:
+            allowed = instructor_teaches_section(user, class_id)
+        if not allowed:
+            return jsonify({"error": "Not authorized to view this class"}), 403
         q = Announcement.query.filter_by(class_id=class_id)
     else:
         q = Announcement.query.filter(Announcement.class_id == None)
-    
-    return jsonify([{
-        "id": a.id, 
-        "title": a.title, 
-        "content": a.content, 
-        "is_pinned": a.is_pinned,
-        "priority": a.priority,
-        "created_at": a.created_at.isoformat(), 
-        "instructor": User.query.get(a.instructor_id).username if a.instructor_id else "System"
-    } for a in q.order_by(Announcement.is_pinned.desc(), Announcement.created_at.desc()).all()]), 200
 
-# ✅ NEW: Student-specific announcements endpoint
-@app.route('/api/student/announcements', methods=['GET'])
-@jwt_required()
-def get_student_announcements():
-    """Get announcements for logged-in student's blocks"""
-    user_id = int(get_jwt_identity())
-    user = User.query.get(user_id)
-    if user.role != 'student':
-        return jsonify({"error": "Students only"}), 403
-    
-    # Get blocks this student is in
-    student_class_ids = db.session.query(class_students.c.class_id).filter_by(student_id=user_id).all()
-    block_ids = [b[0] for b in student_class_ids]
-    
-    # Fetch announcements: global OR for student's blocks
-    announcements = Announcement.query.filter(
-        (Announcement.class_id == None) | (Announcement.class_id.in_(block_ids))
-    ).order_by(Announcement.is_pinned.desc(), Announcement.created_at.desc()).all()
-    
     return jsonify([{
         "id": a.id,
         "title": a.title,
@@ -2185,54 +4139,299 @@ def get_student_announcements():
         "priority": a.priority,
         "created_at": a.created_at.isoformat(),
         "instructor": User.query.get(a.instructor_id).username if a.instructor_id else "System",
-        "block_name": Class.query.get(a.class_id).name if a.class_id else "All Blocks"
-    } for a in announcements]), 200
+        "can_manage": user.role == 'administrator' or (
+            user.role == 'instructor' and class_id is not None and a.instructor_id == user.id
+        )
+    } for a in q.order_by(Announcement.is_pinned.desc(), Announcement.created_at.desc()).all()]), 200
+
+@app.route('/api/announcements/<int:announcement_id>', methods=['DELETE'])
+@jwt_required()
+def delete_announcement(announcement_id):
+    user_id = int(get_jwt_identity())
+    user = User.query.get(user_id)
+    if not is_instructor_or_admin(user):
+        return jsonify({"error": "Unauthorized"}), 403
+
+    ann = Announcement.query.get_or_404(announcement_id)
+
+    if ann.instructor_id != user_id and user.role != 'administrator':
+        return jsonify({"error": "Not your announcement"}), 403
+
+    if ann.class_id is not None and not instructor_teaches_section(user, ann.class_id):
+        return jsonify({"error": "Not your class"}), 403
+    db.session.delete(ann)
+    db.session.commit()
+    return jsonify({"message": "Announcement deleted"}), 200
+
+
+@app.route('/api/announcements/<int:announcement_id>', methods=['PUT'])
+@jwt_required()
+def update_announcement(announcement_id):
+    user_id = int(get_jwt_identity())
+    user = User.query.get(user_id)
+    if not is_instructor_or_admin(user):
+        return jsonify({"error": "Unauthorized"}), 403
+
+    ann = Announcement.query.get_or_404(announcement_id)
+
+    if ann.instructor_id != user_id and user.role != 'administrator':
+        return jsonify({"error": "Not your announcement"}), 403
+    if ann.class_id is not None and not instructor_teaches_section(user, ann.class_id):
+        return jsonify({"error": "Not your class"}), 403
+
+    data = request.get_json()
+    if not data.get('title') or not data.get('content'):
+        return jsonify({"error": "Title and content are required"}), 400
+
+    ann.title     = data['title'].strip()
+    ann.content   = data['content'].strip()
+    ann.priority  = data.get('priority', ann.priority)
+    ann.is_pinned = data.get('is_pinned', ann.is_pinned)
+    db.session.commit()
+
+    return jsonify({"message": "Announcement updated"}), 200
+
+# this is for the announcements a student actually sees
+@app.route('/api/student/announcements', methods=['GET'])
+@jwt_required()
+def get_student_announcements():
+    # every announcement visible to this student — global ones (no class_id
+    # set) plus ones posted specifically to any section they're actually
+    # enrolled in. uses IrregularEnrollment like every other multi-subject
+    # student endpoint (Bounty Board, My Subjects) — a student can be in
+    # more than one section, so a single section_id field was never enough.
+    user_id = int(get_jwt_identity())
+    user = User.query.get(user_id)
+    if user.role != 'student':
+        return jsonify({"error": "Students only"}), 403
+
+    enrollments = IrregularEnrollment.query.filter_by(student_id=user_id).all()
+    section_ids = [e.section_id for e in enrollments]
+
+    announcements = Announcement.query.filter(
+        db.or_(
+            Announcement.class_id == None,
+            Announcement.class_id.in_(section_ids)
+        )
+    ).order_by(Announcement.is_pinned.desc(), Announcement.created_at.desc()).all()
+
+    sections_by_id = {s.id: s for s in SubjectSection.query.filter(SubjectSection.id.in_(section_ids)).all()}
+    subjects_by_id = {}
+    if sections_by_id:
+        subj_ids = list(set(s.subject_id for s in sections_by_id.values()))
+        subjects_by_id = {s.id: s for s in Subject.query.filter(Subject.id.in_(subj_ids)).all()}
+
+    result = []
+    for a in announcements:
+        subject_name = "All Subjects"
+        section_no = None
+        if a.class_id and a.class_id in sections_by_id:
+            section = sections_by_id[a.class_id]
+            section_no = section.section_no
+            subject = subjects_by_id.get(section.subject_id)
+            subject_name = subject.name if subject else "Unknown Subject"
+
+        result.append({
+            "id": a.id,
+            "title": a.title,
+            "content": a.content,
+            "is_pinned": a.is_pinned,
+            "priority": a.priority,
+            "created_at": a.created_at.isoformat(),
+            "instructor": User.query.get(a.instructor_id).username if a.instructor_id else "System",
+            "class_id": a.class_id,
+            # numeric subject id — lets the frontend jump straight into the
+            # right subject's tabs when a notification is clicked
+            "subject_id": sections_by_id[a.class_id].subject_id if a.class_id in sections_by_id else None,
+            "subject_name": subject_name,
+            "section_no": section_no
+        })
+    return jsonify(result), 200
 
 @app.route('/api/admin/dashboard-stats', methods=['GET'])
 @admin_required
 def admin_dashboard_stats(admin):
-    """Get dashboard statistics for admin overview"""
-    from sqlalchemy import func
-    
-    # Get counts
-    total_students = User.query.filter_by(role='student', is_active=True).count()
-    total_instructors = User.query.filter_by(role='instructor', is_active=True).count()
-    total_blocks = Block.query.count()
-    total_subjects = Subject.query.count()
-    total_problems = Problem.query.count()
-    total_submissions = Submission.query.count()
-    
-    # Get today's stats
+    """
+    Redesigned dashboard stats endpoint.
+
+    Returns
+    -------
+    {
+        # ── Primary metrics ──────────────────────────────────────────────
+        "system_health":       "operational" | "degraded" | "down",
+        "active_users_today":  <int>,   # unique students/instructors who logged in today
+        "enrollment_alerts":   <int>,   # students stuck in inactive sections
+
+        # ── Secondary (compact) metrics ──────────────────────────────────
+        "total_students":      <int>,
+        "total_instructors":   <int>,
+        "total_sections":      <int>,   # active sections only
+        "total_enrolled":      <int>,   # sum of current_count across active sections
+
+        # ── Maintenance / misc ───────────────────────────────────────────
+        "maintenance_mode":    <bool>,
+        "today_logins":        <int>,   # kept for backwards-compat
+        "today_submissions":   <int>,   # kept for backwards-compat
+
+        # ── Activity feed ────────────────────────────────────────────────
+        "recent_activity":     [ { id, action, details, created_at, admin }, … ]
+    }
+    """
+    from sqlalchemy import func, distinct
+
     today = datetime.utcnow().date()
-    today_logins = User.query.filter(
-        User.role == 'student',
-        func.date(User.created_at) == today
-    ).count()
-    
-    today_submissions = Submission.query.filter(
-        func.date(Submission.submitted_at) == today
-    ).count()
-    
-    # Get recent activity (last 10 audit logs)
-    recent_activity = AuditLog.query.order_by(AuditLog.created_at.desc()).limit(10).all()
-    activity_list = [{
-        "id": a.id,
-        "action": a.action,
-        "details": a.details,
-        "created_at": a.created_at.isoformat(),
-        "admin": User.query.get(a.admin_id).username if a.admin_id else "System"
-    } for a in recent_activity]
-    
+
+    # ── 1. System health ─────────────────────────────────────────────────────
+    # Lightweight probe: if we can reach the DB we're operational.
+    # You can extend this to ping Docker / sandbox in the future.
+    try:
+        db.session.execute(text('SELECT 1'))
+        db_ok = True
+    except Exception:
+        db_ok = False
+
+    system_health = 'operational' if db_ok else 'down'
+
+    # ── 2. Active users today ────────────────────────────────────────────────
+    # Definition: students and instructors who logged in today (last_login_at,
+    # stamped on every successful /api/auth/login). Used to count submissions
+    # instead, which undercounted badly: a student who ran code all period but
+    # hadn't yet hit the one-shot graded Submit showed as "not active", and an
+    # instructor could never show as active at all since instructors never
+    # create Submission rows. Admins are excluded on purpose -- their job here
+    # is keeping the system healthy, not using the quest pipeline, so folding
+    # them in would just dilute what this card is meant to tell an admin about
+    # their actual userbase.
+    try:
+        active_users_today = (
+            db.session.query(func.count(User.id))
+            .filter(User.role.in_(['student', 'instructor']))
+            .filter(func.date(User.last_login_at) == today)
+            .scalar() or 0
+        )
+    except Exception:
+        active_users_today = 0
+
+    # ── 3. Enrollment alerts ─────────────────────────────────────────────────
+    # Students enrolled in a section that is currently inactive →
+    # they exist in the DB but cannot access course content.
+    try:
+        enrollment_alerts = (
+            db.session.query(func.count(distinct(IrregularEnrollment.student_id)))
+            .join(SubjectSection, IrregularEnrollment.section_id == SubjectSection.id)
+            .filter(SubjectSection.is_active == False)           # noqa: E712
+            .scalar() or 0
+        )
+    except Exception:
+        enrollment_alerts = 0
+
+    # ── 4. Totals ─────────────────────────────────────────────────────────────
+    total_students    = User.query.filter_by(role='student',    is_active=True).count()
+    total_instructors = User.query.filter_by(role='instructor', is_active=True).count()
+
+    # Sections: count only active ones — inactive sections are the problem,
+    # not the baseline.
+    total_sections = SubjectSection.query.filter_by(is_active=True).count()
+
+    # Total enrolled: sum current_count on active sections.
+    # IrregularEnrollment rows are the source of truth; current_count is a
+    # denormalised cache that may lag.  We query the real count here.
+    try:
+        total_enrolled = (
+            db.session.query(func.count(IrregularEnrollment.id))
+            .join(SubjectSection, IrregularEnrollment.section_id == SubjectSection.id)
+            .filter(SubjectSection.is_active == True)            # noqa: E712
+            .scalar() or 0
+        )
+    except Exception:
+        # Fallback: sum the denormalised column
+        total_enrolled = (
+            db.session.query(func.sum(SubjectSection.current_count))
+            .filter(SubjectSection.is_active == True)            # noqa: E712
+            .scalar() or 0
+        )
+
+    # ── 5. Backwards-compat values (old frontend uses these) ─────────────────
+    today_logins = (
+        db.session.query(func.count(distinct(Submission.user_id)))
+        .filter(func.date(Submission.submitted_at) == today)
+        .scalar() or 0
+    )
+    today_submissions = (
+        Submission.query
+        .filter(func.date(Submission.submitted_at) == today)
+        .count()
+    )
+
+# ── 5b. Audit log count for today — feeds the Activity Logs sidebar badge ──
+    # frontend AdminDashboard.jsx reads dashStats.stats?.today, expects this
+    # exact shape. without this the badge is permanently stuck at 0/blank
+    # because the field straight up didn't exist before.
+    audit_logs_today = (
+        AuditLog.query
+        .filter(func.date(AuditLog.created_at) == today)
+        .count()
+    )
+
+    # ── 6. Maintenance mode ───────────────────────────────────────────────────
+    maint_row = SystemConfig.query.filter_by(key='maintenance_mode').first()
+    maintenance_mode = (maint_row.value == 'true') if maint_row else False
+
+    # If maintenance_mode is ON, reflect that in system_health so the
+    # frontend primary card shows the right state.
+    if maintenance_mode and system_health == 'operational':
+        system_health = 'maintenance'
+
+    # ── 7. Recent activity (last 10 audit log entries) ────────────────────────
+    recent_logs = (
+        AuditLog.query
+        .order_by(AuditLog.created_at.desc())
+        .limit(10)
+        .all()
+    )
+    recent_activity = [
+        {
+            'id':         log.id,
+            'action':     log.action,
+            'details':    log.details,
+            'created_at': log.created_at.isoformat(),
+            'admin':      (
+                User.query.get(log.admin_id).username
+                if log.admin_id else 'System'
+            ),
+        }
+        for log in recent_logs
+    ]
+
+    # ── 8. Response ───────────────────────────────────────────────────────────
     return jsonify({
-        "total_students": total_students,
-        "total_instructors": total_instructors,
-        "total_blocks": total_blocks,
-        "total_subjects": total_subjects,
-        "total_problems": total_problems,
-        "total_submissions": total_submissions,
-        "today_logins": today_logins,
-        "today_submissions": today_submissions,
-        "recent_activity": activity_list
+        # Primary metrics
+        'system_health':       system_health,
+        'active_users_today':  active_users_today,
+        'enrollment_alerts':   enrollment_alerts,
+
+        # Secondary metrics
+        'total_students':      total_students,
+        'total_instructors':   total_instructors,
+        'total_sections':      total_sections,
+        'total_enrolled':      total_enrolled,
+
+        # Maintenance / misc
+        'maintenance_mode':    maintenance_mode,
+
+        # Backwards-compat
+        'today_logins':        today_logins,
+        'today_submissions':   today_submissions,
+        'total_problems':      0,   # kept for compat; fetched lazily by frontend
+
+        # nested under 'stats' on purpose — AdminDashboard.jsx sidebar badge
+        # for the Activity Logs tab reads dashStats.stats?.today specifically
+        'stats': {
+            'today': audit_logs_today,
+        },
+
+        # Activity feed
+        'recent_activity':     recent_activity,
     }), 200
 
 # ===== ADMIN ROUTES =====
@@ -2249,37 +4448,91 @@ def admin_overview(admin):
         "server_time": datetime.utcnow().isoformat()
     }), 200
 
+@app.route('/api/admin/policy', methods=['GET'])
+@admin_required
+def admin_policy(admin):
+    """Settings the admin forms need: email domain and whether this admin may create admins."""
+    if HEAD_ADMIN_USER_ID is not None:
+        head_exists = User.query.filter_by(id=HEAD_ADMIN_USER_ID, role='administrator', is_active=True).first() is not None
+    else:
+        head_exists = not _head_id_setting and bool(HEAD_ADMIN_EMAIL) and User.query.filter(
+            db.func.lower(User.email) == HEAD_ADMIN_EMAIL,
+            User.role == 'administrator', User.is_active.is_(True)).first() is not None
+    return jsonify({
+        "allowed_email_domain": ALLOWED_EMAIL_DOMAIN,
+        "student_email_domain": STUDENT_EMAIL_DOMAIN,
+        "head_admin_configured": bool(HEAD_ADMIN_USER_ID or (HEAD_ADMIN_EMAIL and not _head_id_setting)),
+        "config_diagnostics": list(CONFIG_DIAGNOSTICS),
+        "can_create_admins": is_head_admin(admin),
+        # false means nobody can create administrators until that account exists
+        "head_admin_account_exists": head_exists,
+    }), 200
+
 @app.route('/api/admin/users', methods=['POST'])
 @admin_required
 def admin_create_user(admin):
-    data = request.get_json()
-    required = ['username', 'email', 'password', 'role']
-    if not all(k in data for k in required):
+    data = request.get_json(silent=True)
+    required = ('username', 'password', 'role')
+    if not isinstance(data, dict) or not all(isinstance(data.get(k), str) for k in required):
         return jsonify({"error": "Missing required fields"}), 400
-    if data['role'] not in ['student', 'instructor', 'super_admin']:
+    if data['role'] not in ['student', 'instructor', 'administrator']:
         return jsonify({"error": "Invalid role"}), 400
-    if User.query.filter_by(username=data['username']).first():
+    if data['role'] == 'administrator' and not is_head_admin(admin):
+        return jsonify({"error": "Only the head administrator can create administrator accounts."}), 403
+    pw_err = password_policy_error(data.get('password'))
+    if pw_err:
+        return jsonify({"error": pw_err}), 400
+    role = data['role']
+    username = normalize_student_id(data['username']) if role == 'student' else (data['username'] or '').strip()
+    if not username or len(username) > 50 or _re.search(r'[\x00-\x1f\x7f]', username):
+        return jsonify({"error": "Username must contain 1–50 characters without control characters."}), 400
+    if '@' in username or (role == 'student' and not valid_student_id(username)):
+        return jsonify({"error": "Use a username without '@'. Student IDs also cannot contain spaces."}), 400
+    try:
+        data['email'] = account_email(username, role, data.get('email'))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    if HEAD_ADMIN_EMAIL and normalize_email(data['email']) == HEAD_ADMIN_EMAIL:
+        return jsonify({"error": "That email address is reserved for the head administrator."}), 400
+    data['username'] = username
+    # login accepts a username or an email, so a username equal to someone's
+    # email would shadow that person's login
+    if User.query.filter_by(username=username).first():
         return jsonify({"error": "Username already exists"}), 400
-    if User.query.filter_by(email=data['email']).first():
+    if User.query.filter(db.or_(db.func.lower(User.email) == data['email'],
+                                db.func.lower(User.username) == data['email'])).first():
         return jsonify({"error": "Email already exists"}), 400
+    section_ids = data.get('section_ids', [])
+    if not isinstance(section_ids, list) or any(type(sid) is not int or sid <= 0 for sid in section_ids):
+        return jsonify({"error": "Select valid class codes."}), 400
+    if section_ids and role != 'student':
+        return jsonify({"error": "Only students can be enrolled during account creation."}), 400
+    section_ids = set(section_ids)
+    if section_ids:
+        sections = SubjectSection.query.filter(SubjectSection.id.in_(section_ids)).all()
+        if len(sections) != len(section_ids) or any(not section.is_active for section in sections):
+            return jsonify({"error": "One or more selected class codes no longer exist or are inactive."}), 400
+        for section in sections:
+            if subject_out_of_scope(db.session.get(Subject, section.subject_id)):
+                return jsonify({"error": f"Class code {section.section_no}: {OUT_OF_SCOPE_MSG}"}), 400
     new_user = User(
         username=data['username'],
         email=data['email'],
         password_hash=generate_password_hash(data['password']),
         role=data['role'],
         is_active=True,
+        must_change_password=True,          # the admin knows this password: replace at first sign-in
         xp=0, level=1
     )
-    db.session.add(new_user)
-    db.session.flush()
-    if data.get('block_id') and data['role'] == 'student':
-        block = Block.query.get(int(data['block_id']))
-        if block:
-            db.session.execute(student_blocks.insert().values(
-                student_id=new_user.id,
-                block_id=int(data['block_id'])
-            ))
-    db.session.commit()
+    try:
+        db.session.add(new_user)
+        db.session.flush()
+        for sid in section_ids:
+            db.session.add(IrregularEnrollment(student_id=new_user.id, section_id=sid))
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({"error": "The account or class enrollment could not be saved. Check for a duplicate account or a changed class code."}), 409
     log_admin_action(admin.id, "USER_CREATED",
         f"Created {data['role']} account: {data['username']} ({data['email']})",
         target_id=new_user.id)
@@ -2295,72 +4548,99 @@ def admin_get_users(admin):
     role = request.args.get('role')
     search = request.args.get('search', '').lower()
     status = request.args.get('status')
-    
+    section = request.args.get('section')
+
     q = User.query
     if role and role != 'all': q = q.filter_by(role=role)
     if status == 'active': q = q.filter_by(is_active=True)
     elif status == 'inactive': q = q.filter_by(is_active=False)
-    if search: q = q.filter((User.username.ilike(f'%{search}%')) | (User.email.ilike(f'%{search}%')))
-    
-    users = q.order_by(User.created_at.desc()).limit(50).all()
-    
+    if search:
+        q = q.filter(db.or_(User.username.icontains(search, autoescape=True),
+                            User.email.icontains(search, autoescape=True),
+                            User.full_name.icontains(search, autoescape=True),
+                            db.and_(User.role == 'student', db.func.replace(User.username, '-', '').icontains(search.replace('-', ''), autoescape=True))
+                            if search.replace('-', '') else db.false()))
+    if section:
+        section_id = request.args.get('section', type=int)
+        if section_id is None or section_id <= 0:
+            return jsonify({"error": "Invalid class code filter."}), 400
+        q = q.filter(db.or_(
+            db.and_(User.role == 'student', User.id.in_(db.select(IrregularEnrollment.student_id).where(IrregularEnrollment.section_id == section_id))),
+            db.and_(User.role == 'instructor', User.id.in_(db.select(TeacherAssignment.instructor_id).where(TeacherAssignment.section_id == section_id))),
+        ))
+
+    sort = request.args.get('sort', 'newest')
+    if sort not in ('name_asc', 'name_desc', 'newest'):
+        return jsonify({"error": "Invalid user sort order."}), 400
+    display_name = db.func.lower(db.func.coalesce(db.func.nullif(db.func.trim(User.full_name), ''), User.username))
+    order = (User.created_at.desc(), User.id.desc()) if sort == 'newest' else (
+        display_name.desc() if sort == 'name_desc' else display_name.asc(),
+        db.func.lower(User.username).asc(), User.id.asc(),
+    )
+    users = q.order_by(*order).limit(500).all()
+
     result = []
     for u in users:
-        blocks_list = []
-        block_id, block_name = None, None
-        
+        sections_list = []
+        section_id, section_name = None, None
+
         if u.role == 'student':
-            # ✅ Get ALL blocks this student is enrolled in (NEW TABLE)
-            enrollments = db.session.query(student_blocks.c.block_id).filter_by(student_id=u.id).all()
-            block_ids = [e.block_id for e in enrollments]
-            
-            if block_ids:
-                all_blocks = Block.query.filter(Block.id.in_(block_ids)).all()
-                for b in all_blocks:
-                    # Get subjects linked to this block
-                    subj_ids = [s.subject_id for s in db.session.query(block_subjects.c.subject_id).filter_by(block_id=b.id).all()]
-                    subjects = [Subject.query.get(sid).name for sid in subj_ids if Subject.query.get(sid)]
-                    
-                    blocks_list.append({
-                        "id": b.id, 
-                        "section_code": b.section_code, 
-                        "name": b.section_code, # Block name is usually the code
-                        "semester": b.semester,
-                        "subjects": subjects # List of subject names
+            enrollments = IrregularEnrollment.query.filter_by(student_id=u.id).all()
+            for e in enrollments:
+                section = SubjectSection.query.get(e.section_id)
+                if section:
+                    subject = Subject.query.get(section.subject_id)
+                    sections_list.append({
+                        "id": section.id,
+                        "section_code": section.section_no,
+                        "name": section.section_no,
+                        "semester": section.semester,
+                        "subjects": [subject.name] if subject else []
                     })
-                
-                # Fallback for backward compatibility
-                if all_blocks:
-                    block_id = all_blocks[0].id
-                    block_name = all_blocks[0].section_code
-        
+            if sections_list:
+                section_id = sections_list[0]["id"]
+                section_name = sections_list[0]["section_code"]
+
         elif u.role == 'instructor':
-            # ✅ Get blocks this instructor teaches
-            instructor_blocks = Block.query.filter_by(instructor_id=u.id).all()
-            for b in instructor_blocks:
-                # Get subjects linked to this block
-                subj_ids = [s.subject_id for s in db.session.query(block_subjects.c.subject_id).filter_by(block_id=b.id).all()]
-                subjects = [Subject.query.get(sid).name for sid in subj_ids if Subject.query.get(sid)]
-                
-                blocks_list.append({
-                    "id": b.id, 
-                    "section_code": b.section_code, 
-                    "name": b.section_code,
-                    "semester": b.semester,
-                    "subjects": subjects
-                })
-            
-            # Fallback for backward compatibility
-            if instructor_blocks:
-                block_id = instructor_blocks[0].id
-                block_name = instructor_blocks[0].section_code
-        
+            assignments = TeacherAssignment.query.filter_by(instructor_id=u.id).all()
+            seen_sections = set()
+            for a in assignments:
+                if a.section_id and a.section_id not in seen_sections:
+                    seen_sections.add(a.section_id)
+                    section = SubjectSection.query.get(a.section_id)
+                    subject = Subject.query.get(a.subject_id)
+                    if section:
+                        sections_list.append({
+                            "id": section.id,
+                            "section_code": section.section_no,
+                            "name": section.section_no,
+                            "semester": section.semester,
+                            "subjects": [subject.name] if subject else []
+                        })
+            if sections_list:
+                section_id = sections_list[0]["id"]
+                section_name = sections_list[0]["section_code"]
+
+        # Check if student has irregular enrollments
+        is_irregular = False
+        if u.role == 'student' and not sections_list:
+            irr_count = IrregularEnrollment.query.filter_by(student_id=u.id).count()
+            is_irregular = irr_count > 0
+
         result.append({
             "id": u.id, "username": u.username, "email": u.email, "role": u.role,
+            "is_head_admin": is_head_admin(u),
+            "can_manage": u.id != admin.id and (u.role != 'administrator' or is_head_admin(admin)),
+            "can_delete": u.id != admin.id and not is_head_admin(u) and (u.role != 'administrator' or is_head_admin(admin)),
+            "full_name": getattr(u, 'full_name', None) or None,
             "xp": u.xp, "level": u.level, "is_active": u.is_active,
             "created_at": u.created_at.isoformat(),
-            "block_id": block_id, "block_name": block_name,
-            "blocks": blocks_list  # ✅ Send full block list to frontend
+            "section_id": section_id, "section_name": section_name,
+            "sections": sections_list,
+            "is_irregular": is_irregular,
+            "login_attempts": u.login_attempts or 0,
+            "locked_until": u.locked_until.isoformat() if u.locked_until else None,
+            "is_locked": bool(u.locked_until and u.locked_until > datetime.utcnow())
         })
     return jsonify(result), 200
 
@@ -2368,96 +4648,330 @@ def admin_get_users(admin):
 @admin_required
 def admin_update_user(admin, user_id):
     target = User.query.get_or_404(user_id)
-    if target.id == admin.id: 
+    denied = admin_target_error(admin, target)
+    if denied:
+        return denied
+    if target.id == admin.id:
         return jsonify({"error": "Cannot modify own account"}), 400
-    
-    data = request.get_json()
+
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "A JSON object is required"}), 400
     changes = []
-    
-    if 'role' in data and data['role'] in ['student','instructor','super_admin']:
+
+    if is_head_admin(target) and (data.get('role', target.role) != 'administrator' or data.get('is_active', True) is not True):
+        return jsonify({"error": "The head administrator cannot be demoted or deactivated."}), 403
+    if 'role' in data and data['role'] not in ['student', 'instructor', 'administrator']:
+        return jsonify({"error": "Invalid role"}), 400
+    if 'full_name' in data:
+        if data.get('role', target.role) not in ('student', 'instructor'):
+            return jsonify({"error": "Name changes are available for students and instructors."}), 400
+        if not isinstance(data['full_name'], str) or len(data['full_name'].strip()) > 200 or any(ord(ch) < 32 or ord(ch) == 127 for ch in data['full_name']):
+            return jsonify({"error": "Full name must be text of at most 200 characters, without control characters."}), 400
+    if 'username' in data:
+        if not isinstance(data['username'], str):
+            return jsonify({"error": "Username must be text"}), 400
+        username = data['username'].strip()
+        if not username or len(username) > 50 or any(ord(ch) < 32 or ord(ch) == 127 for ch in username):
+            return jsonify({"error": "Username must contain 1–50 characters, without control characters."}), 400
+        if data.get('role', target.role) == 'student' and not valid_student_id(username):
+            return jsonify({"error": "Student usernames must not contain spaces or '@'."}), 400
+        if '@' in username and username != target.username:
+            return jsonify({"error": "Use a username without '@'."}), 400
+        collision = User.query.filter(User.id != target.id, db.or_(
+            db.func.lower(User.username) == username.lower(),
+            db.func.lower(User.email) == username.lower())).first()
+        if collision:
+            return jsonify({"error": "Username is already used by another account."}), 409
+        # Preserve permanent email identifiers and all ID-based student history.
+        if username != target.username:
+            changes.append(f"Username: {target.username} -> {username}")
+            target.username = username
+
+    if 'full_name' in data:
+        full_name = data['full_name'].strip() or None
+        if full_name != target.full_name:
+            changes.append(f"Full name: {target.full_name or '(not set)'} -> {full_name or '(not set)'}")
+            target.full_name = full_name
+
+    if 'role' in data and data['role'] == 'administrator' and target.role != 'administrator' \
+            and not is_head_admin(admin):
+        return jsonify({"error": "Only the head administrator can promote users to administrator."}), 403
+    if 'role' in data and data['role'] in ['student','instructor','administrator']:
         if target.role != data['role']: changes.append(f"Role: {target.role} -> {data['role']}")
         target.role = data['role']
-    if 'is_active' in data:  # ✅ FIXED: was missing 'data:'
-        if target.is_active != data['is_active']: 
+    if 'is_active' in data:
+        if target.is_active != data['is_active']:
             changes.append(f"Status: {'Active' if target.is_active else 'Inactive'} -> {'Active' if data['is_active'] else 'Inactive'}")
         target.is_active = data['is_active']
-    if 'xp' in data: target.xp = int(data['xp'])  # ✅ FIXED
-    if 'level' in data: target.level = int(data['level'])  # ✅ FIXED
-    
-    # ✅ updated: accept 'block_ids' as a list for multi-class enrollment
-    if 'block_ids' in data:
-        block_ids = data['block_ids']  # expected format: [1, 5, 8]
+    if 'xp' in data: target.xp = int(data['xp'])
+    if 'level' in data: target.level = int(data['level'])
+
+    # this is for enrolling into multiple sections/classes at once
+    if 'section_ids' in data:
+        section_ids = data['section_ids']
         if target.role == 'student':
-            # 1. remove all old block assignments for this student (NEW TABLE)
-            db.session.query(student_blocks).filter_by(student_id=user_id).delete()
-            
-            # 2. add the new assignments from the list
-            if block_ids:
-                # create list of dictionaries for bulk insert
-                insert_data = [{'block_id': int(bid), 'student_id': user_id} for bid in block_ids]
-                db.session.execute(student_blocks.insert(), insert_data)
-                changes.append(f"Assigned to {len(block_ids)} blocks")
+            # sections the student already has are kept as they are; only NEW
+            # links to out-of-scope subjects are refused
+            already = {e.section_id for e in IrregularEnrollment.query.filter_by(student_id=user_id).all()}
+            for sid in (section_ids or []):
+                if int(sid) in already:
+                    continue
+                sec = SubjectSection.query.get(int(sid))
+                if sec and subject_out_of_scope(Subject.query.get(sec.subject_id)):
+                    db.session.rollback()
+                    return jsonify({"error": f"Class code {sec.section_no}: {OUT_OF_SCOPE_MSG}"}), 400
+            IrregularEnrollment.query.filter_by(student_id=user_id).delete()
+            if section_ids:
+                for sid in section_ids:
+                    db.session.add(IrregularEnrollment(
+                        student_id=user_id,
+                        section_id=int(sid)
+                    ))
+                changes.append(f"Enrolled in {len(section_ids)} class codes")
             else:
-                changes.append("Unassigned from block")
+                changes.append("Removed from all class codes")
         elif target.role == 'instructor':
-            # ✅ Use NEW Block model and handle block_ids list
-            if block_ids:
-                # Unassign instructor from all old blocks
-                Block.query.filter_by(instructor_id=user_id).update({'instructor_id': None})
-                # Assign to first block in the list (instructors typically teach one block)
-                Block.query.filter_by(id=block_ids[0]).update({'instructor_id': user_id})
-                changes.append(f"Assigned as Instructor to Block {block_ids[0]}")
+            _kept = {a.section_id for a in TeacherAssignment.query.filter_by(instructor_id=user_id).all()}
+            for sid in (section_ids or []):
+                if int(sid) in _kept:
+                    continue
+                _sec = SubjectSection.query.get(int(sid))
+                if _sec and subject_out_of_scope(Subject.query.get(_sec.subject_id)):
+                    db.session.rollback()
+                    return jsonify({"error": f"Class code {_sec.section_no}: {OUT_OF_SCOPE_MSG}"}), 400
+            # this branch didn't exist before — the modal let you PICK class
+            # codes for an instructor, but nothing ever saved it. same
+            # "replace everything" pattern as the student branch above:
+            # wipe existing assignments for this instructor, then recreate
+            # from what was just picked.
+            TeacherAssignment.query.filter_by(instructor_id=user_id).delete()
+            if section_ids:
+                assigned = 0
+                conflicts = []  # class codes that belong to someone else
+                for sid in section_ids:
+                    section = SubjectSection.query.get(int(sid))
+                    # a section always has exactly one subject (set when the
+                    # section itself was created), so we don't need the
+                    # frontend to send subject_id separately — just look it
+                    # up here.
+                    if section and section.subject_id:
+                        # one instructor per class code. we already deleted this instructor's own
+                        # rows above, so if a row still exists for this
+                        # subject+section, it belongs to a different
+                        # instructor. skip it instead of double-booking,
+                        # and say so, rather than silently dropping it.
+                        taken_by = TeacherAssignment.query.filter_by(
+                            subject_id=section.subject_id,
+                            section_id=int(sid)
+                        ).first()
+                        if taken_by:
+                            other = User.query.get(taken_by.instructor_id)
+                            conflicts.append(f"{section.section_no} (already taught by {other.username if other else 'another instructor'})")
+                            continue
+                        db.session.add(TeacherAssignment(
+                            instructor_id=user_id,
+                            subject_id=section.subject_id,
+                            section_id=int(sid)
+                        ))
+                        assigned += 1
+                changes.append(f"Assigned to {assigned} class codes")
+                if conflicts:
+                    changes.append(f"Skipped (already taken): {', '.join(conflicts)}")
             else:
-                Block.query.filter_by(instructor_id=user_id).update({'instructor_id': None})
-                changes.append("Unassigned as instructor")
-    
-    db.session.commit()
+                changes.append("Removed from all class codes")
+
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({"error": "Username is already used by another account."}), 409
     log_admin_action(admin.id, "USER_UPDATED", f"Target: {target.username}. Changes: {', '.join(changes) if changes else 'None'}", target_id=user_id)
     return jsonify({"message": "User updated", "changes": changes}), 200
+
+def _wipe_problem_dependents(problem_ids):
+    # every FK that points at problems.id, cleared in the order MySQL
+    # requires: PlagiarismReport points at submissions.id (not problems.id
+    # directly), so submissions have to be identified first and their
+    # reports cleared before the submissions themselves can go. The other
+    # three (SubmissionSlot/CodeDraft/HintReveal) point straight at
+    # problems.id and can be cleared any time before the Problem delete.
+    if not problem_ids:
+        return
+    submission_ids = [
+        row[0] for row in
+        db.session.query(Submission.id).filter(Submission.problem_id.in_(problem_ids)).all()
+    ]
+    if submission_ids:
+        PlagiarismReport.query.filter(
+            db.or_(
+                PlagiarismReport.submission_a_id.in_(submission_ids),
+                PlagiarismReport.submission_b_id.in_(submission_ids),
+            )
+        ).delete(synchronize_session=False)
+    SubmissionSlot.query.filter(SubmissionSlot.problem_id.in_(problem_ids)).delete(synchronize_session=False)
+    CodeDraft.query.filter(CodeDraft.problem_id.in_(problem_ids)).delete(synchronize_session=False)
+    HintReveal.query.filter(HintReveal.problem_id.in_(problem_ids)).delete(synchronize_session=False)
+    Submission.query.filter(Submission.problem_id.in_(problem_ids)).delete(synchronize_session=False)
+    Problem.query.filter(Problem.id.in_(problem_ids)).delete(synchronize_session=False)
+
+def _cascade_delete_user_data(user_id):
+    # removes every row that references this user before the User row
+    # itself can be deleted — MySQL blocks deleting a row that's still
+    # referenced elsewhere, and none of these foreign keys cascade at the
+    # database level. Covers both sides of the account, since the same
+    # endpoint deletes students, instructors, and (via admin_delete_user)
+    # any other role: a student's own submissions/achievements/enrollments,
+    # AND anything an instructor authored (quests/problems and course
+    # lessons) plus everything those rows themselves depend on. Shared by
+    # the single-user delete and the bulk-delete-all-students endpoints so
+    # both stay correct together instead of quietly drifting apart later.
+    import os
+
+    # --- instructor side: authored quests/problems and everything under them ---
+    problem_ids = [
+        row[0] for row in
+        db.session.query(Problem.id).filter_by(created_by=user_id).all()
+    ]
+    _wipe_problem_dependents(problem_ids)
+
+    # --- instructor side: authored course-material lessons + their files ---
+    for lesson in Lesson.query.filter_by(created_by=user_id).all():
+        for lesson_file in LessonFile.query.filter_by(lesson_id=lesson.id).all():
+            if lesson_file.storage_path and os.path.exists(lesson_file.storage_path):
+                try:
+                    os.remove(lesson_file.storage_path)
+                except OSError:
+                    pass  # file already gone from disk; the DB row still needs removing
+            db.session.delete(lesson_file)
+        db.session.delete(lesson)
+
+    Announcement.query.filter_by(instructor_id=user_id).delete()
+    TeacherAssignment.query.filter_by(instructor_id=user_id).delete()
+
+    # --- student side: this account's own hint reveals, achievements, drafts ---
+    HintReveal.query.filter_by(user_id=user_id).delete()
+    UserAchievement.query.filter_by(user_id=user_id).delete()
+    CodeDraft.query.filter_by(user_id=user_id).delete()
+    SubmissionSlot.query.filter_by(user_id=user_id).delete()
+
+    # PlagiarismReport rows point at submissions.id (not nullable, no
+    # cascade). Any submission that was ever run through the Instructor's
+    # Plagiarism Check — even just once — leaves a report row behind, and
+    # MySQL refuses to delete a submission that's still referenced. Those
+    # have to go before the submissions themselves.
+    own_submission_ids = [
+        row[0] for row in
+        db.session.query(Submission.id).filter_by(user_id=user_id).all()
+    ]
+    if own_submission_ids:
+        PlagiarismReport.query.filter(
+            db.or_(
+                PlagiarismReport.submission_a_id.in_(own_submission_ids),
+                PlagiarismReport.submission_b_id.in_(own_submission_ids),
+            )
+        ).delete(synchronize_session=False)
+
+    Submission.query.filter_by(user_id=user_id).delete()
+
+    # Release the student's seat in each section along with the enrollment
+    # row, so current_count doesn't stay inflated after they're gone.
+    for enr in IrregularEnrollment.query.filter_by(student_id=user_id).all():
+        section = SubjectSection.query.get(enr.section_id)
+        if section and section.current_count:
+            section.current_count = max(0, section.current_count - 1)
+        db.session.delete(enr)
 
 @app.route('/api/admin/users/<int:user_id>', methods=['DELETE'])
 @admin_required
 def admin_delete_user(admin, user_id):
-    if user_id == admin.id: 
+    if user_id == admin.id:
         return jsonify({"error": "Cannot delete own account"}), 400
     target = User.query.get_or_404(user_id)
-    
-    # ✅ Use NEW student_blocks table
-    db.session.query(student_blocks).filter_by(student_id=user_id).delete()
-    # ✅ Use NEW Block table
-    Block.query.filter_by(instructor_id=user_id).update({'instructor_id': None})
+    denied = admin_target_error(admin, target)
+    if denied:
+        return denied
+    if is_head_admin(target):
+        return jsonify({"error": "The head administrator cannot be deleted."}), 403
+
+    _cascade_delete_user_data(user_id)
     db.session.delete(target)
     db.session.commit()
-    
+
     log_admin_action(admin.id, "USER_DELETED", f"Deleted user {target.username} (ID: {user_id})")
     return jsonify({"message": "User deleted"}), 200
+
+@app.route('/api/admin/students/bulk-delete', methods=['DELETE'])
+@admin_required
+def admin_bulk_delete_students(admin):
+    # deletes EVERY student account — used to clear out accumulated test
+    # data before a real demo/defense. only ever touches role='student',
+    # never instructors or admins, so the account running this stays safe
+    # and instructor/subject/class-code setup survives intact.
+    students = User.query.filter_by(role='student').all()
+    count = len(students)
+
+    for student in students:
+        _cascade_delete_user_data(student.id)
+        db.session.delete(student)
+
+    db.session.commit()
+
+    log_admin_action(admin.id, "BULK_STUDENTS_DELETED", f"Deleted all {count} student accounts.")
+    return jsonify({"message": f"Deleted {count} student accounts", "count": count}), 200
 
 @app.route('/api/admin/users/<int:user_id>/reset-password', methods=['POST'])
 @admin_required
 def admin_reset_password(admin, user_id):
+    """
+    Authorized recovery that does not depend on any inbox: the admin either types a
+    temporary password or asks for a generated one (returned ONCE in this response,
+    never logged). The student must replace it at next sign-in; old sessions end.
+    """
     target = User.query.get_or_404(user_id)
-    data = request.get_json()
-    if not data.get('new_password'):
+    denied = admin_target_error(admin, target)
+    if denied:
+        return denied
+    data = request.get_json(silent=True) or {}
+    generated = False
+    new_pw = data.get('new_password')
+    if not new_pw and data.get('generate'):
+        new_pw, generated = _generate_secure_password(), True
+    if not new_pw:
         return jsonify({"error": "New password required"}), 400
-    target.password_hash = generate_password_hash(data['new_password'])
+    err = password_policy_error(new_pw, target)
+    if err:
+        return jsonify({"error": err}), 400
+    target.password_hash = generate_password_hash(new_pw)
+    target.must_change_password = True
+    target.token_version = int(target.token_version or 0) + 1
+    target.password_changed_at = datetime.utcnow()
+    target.login_attempts = 0
+    target.locked_until = None
     db.session.commit()
-    log_admin_action(admin.id, "PASSWORD_RESET", f"Reset password for {target.username}")
-    return jsonify({"message": "Password reset successfully"}), 200
+    log_admin_action(admin.id, "PASSWORD_RESET", f"Reset password for {target.username} (change required at next sign-in)")
+    body = {"message": "Password reset. The user must choose a new password at next sign-in."}
+    if generated:
+        body["temporary_password"] = new_pw
+    return jsonify(body), 200
+
+@app.route('/api/admin/users/<int:user_id>/unlock', methods=['POST'])
+@admin_required
+def admin_unlock_user(admin, user_id):
+    target = User.query.get_or_404(user_id)
+    denied = admin_target_error(admin, target)
+    if denied:
+        return denied
+    target.login_attempts = 0
+    target.locked_until = None
+    db.session.commit()
+    log_admin_action(admin.id, "USER_UNLOCKED", f"Unlocked account for {target.username}")
+    return jsonify({"message": f"Account {target.username} has been unlocked."}), 200
 
 @app.route('/api/admin/users/<int:user_id>/email', methods=['PUT'])
 @admin_required
 def admin_update_email(admin, user_id):
-    target = User.query.get_or_404(user_id)
-    data = request.get_json()
-    new_email = data.get('new_email')
-    if not new_email:
-        return jsonify({"error": "New email required"}), 400
-    if User.query.filter_by(email=new_email).first():
-        return jsonify({"error": "Email already in use"}), 400
-    target.email = new_email
-    db.session.commit()
-    log_admin_action(admin.id, "EMAIL_UPDATED", f"Updated email for {target.username} to {new_email}")
-    return jsonify({"message": "Email updated successfully"}), 200
+    return jsonify({"error": "Institutional email addresses are permanent and cannot be changed."}), 403
 
 @app.route('/api/admin/config', methods=['GET'])
 @admin_required
@@ -2490,25 +5004,22 @@ def admin_get_config(admin):
         configs.setdefault(k, v)
     return jsonify(configs), 200
 
+# Only maintenance_mode is read by the running system. The other keys used to be
+# stored here but nothing ever consumed them, so saving them looked like it
+# changed behaviour when it did not. They are rejected now; the real, fixed
+# values are shown read-only by /api/admin/effective-settings.
+ADJUSTABLE_CONFIG_KEYS = {'maintenance_mode'}
+
+
 @app.route('/api/admin/config', methods=['PUT'])
 @admin_required
 def admin_update_config(admin):
-    data = request.get_json()
-    allowed = {
-        # General
-        'system_name', 'institution_name', 'timezone',
-        # Security
-        'maintenance_mode', 'min_password_length', 'session_timeout', 'jwt_expiration_hours',
-        # Execution
-        'execution_timeout', 'enabled_languages', 'memory_limit_mb',
-        # Gamification
-        'xp_multiplier', 'easy_xp_max', 'medium_xp_max', 'hard_xp_max',
-        # Plagiarism
-        'plagiarism_threshold', 'plagiarism_auto_flag',
-    }
-    invalid_keys = [k for k in data.keys() if k not in allowed]
-    if invalid_keys:
-        return jsonify({"error": f"Invalid config keys: {', '.join(invalid_keys)}"}), 400
+    data = request.get_json() or {}
+    not_adjustable = [k for k in data.keys() if k not in ADJUSTABLE_CONFIG_KEYS]
+    if not_adjustable:
+        return jsonify({
+            "error": f"These settings are fixed in the application and cannot be changed here: {', '.join(not_adjustable)}"
+        }), 400
     changes = []
     for k, v in data.items():
         existing = SystemConfig.query.filter_by(key=k).first()
@@ -2522,60 +5033,270 @@ def admin_update_config(admin):
     log_admin_action(admin.id, "CONFIG_UPDATED", f"Changes: {', '.join(changes)}")
     return jsonify({"message": "Config updated", "changes": changes}), 200
 
+
+@app.route('/api/admin/effective-settings', methods=['GET'])
+@admin_required
+def admin_effective_settings(admin):
+    """Read-only view of the limits the running system really uses (nothing here is editable)."""
+    from routes.sandbox import LANGUAGE_TIMEOUTS, MEM_LIMITS, LIMITS
+    return jsonify({
+        "execution": {
+            "per_language": {
+                lang: {"timeout_seconds": LANGUAGE_TIMEOUTS[lang],
+                       "memory_mb": MEM_LIMITS[lang] // (1024 * 1024)}
+                for lang in LANGUAGE_TIMEOUTS
+            },
+            "cpu_cores": LIMITS['cpu_quota'] / LIMITS['cpu_period'],
+            "max_processes": LIMITS['pids_limit'],
+            "max_code_characters": LIMITS['code_max_chars'],
+            "max_output_bytes": LIMITS['output_bytes'],
+            "network": "disabled",
+        },
+        "xp": {
+            "max_xp_by_difficulty": MAX_XP_BY_DIFFICULTY,
+            "level_rule": "level = 1 + total XP // 100",
+            "failed_attempt_minimum": "10% of the problem's XP (at least 5)",
+            "hint_penalty": "set per hint by the instructor",
+        },
+        "authentication": {"access_token_minutes": 15, "refresh_token_days": 7},
+        "plagiarism": {
+            "threshold": "chosen per problem (default 0.85) and per scan (default 85%)",
+            "scan_trigger": "manual, started by an instructor or administrator",
+            "ai_verdict_configured": bool(os.environ.get('GEMINI_API_KEY')),
+        },
+    }), 200
+
 @app.route('/api/admin/audit-logs', methods=['GET'])
 @admin_required
 def admin_get_logs(admin):
-    search = request.args.get('search', '')
-    action_filter = request.args.get('action', '')
-    page = request.args.get('page', 1, type=int)
-    limit = min(request.args.get('limit', 20, type=int), 200)
+    """
+    Enhanced audit-log endpoint.
 
+    Query params
+    ────────────
+    search     : str   – free-text search across action, details, ip_address
+    action     : str   – comma-separated list of action names, OR a single name
+                         (e.g. "USER_DELETED,SUBJECT_DELETED"  or  "USER_CREATED")
+    date_from  : str   – ISO date  (YYYY-MM-DD), inclusive
+    date_to    : str   – ISO date  (YYYY-MM-DD), inclusive
+    sort       : str   – "asc" | "desc"  (default: desc)
+    page       : int   – 1-based page number
+    limit      : int   – rows per page, max 200
+
+    Response
+    ────────
+    {
+        "logs":  [ { id, admin, action, details, ip, created_at } … ],
+        "total": <int>,
+        "page":  <int>,
+        "pages": <int>,
+        "stats": {
+            "total":             <int>,   # all-time log count
+            "today":             <int>,   # logs created today (UTC)
+            "unique_users":      <int>,   # distinct admin accounts that have logged an action
+            "critical_total":    <int>,   # all-time count of critical-tier actions
+            "last_activity":     <str>,   # ISO timestamp of most recent log
+            "most_active_admin": <str|null>  # username of admin with most logs ever
+        }
+    }
+    """
+    from sqlalchemy import func
+
+    # ── 1. Parse query params ─────────────────────────────────────────────
+    search       = request.args.get('search', '').strip()
+    action_param = request.args.get('action', '').strip()
+    date_from    = request.args.get('date_from', '').strip()
+    date_to      = request.args.get('date_to',   '').strip()
+    sort_dir     = request.args.get('sort', 'desc').strip().lower()
+    page         = request.args.get('page',  1, type=int)
+    limit        = min(request.args.get('limit', 20, type=int), 200)
+
+    # ── 2. Build base query ────────────────────────────────────────────────
     q = AuditLog.query
-    if action_filter and action_filter != 'all':
-        q = q.filter(AuditLog.action == action_filter)
+
+    # Action filter: comma-separated multi-select OR legacy single value
+    if action_param and action_param.lower() != 'all':
+        actions = [a.strip() for a in action_param.split(',') if a.strip()]
+        if len(actions) == 1:
+            q = q.filter(AuditLog.action == actions[0])
+        elif len(actions) > 1:
+            q = q.filter(AuditLog.action.in_(actions))
+
+    # Date range filter
+    if date_from:
+        try:
+            dt_from = datetime.strptime(date_from, '%Y-%m-%d')
+            q = q.filter(AuditLog.created_at >= dt_from)
+        except ValueError:
+            pass  # malformed date — ignore
+
+    if date_to:
+        try:
+            # Include the full end day (up to 23:59:59)
+            dt_to = datetime.strptime(date_to, '%Y-%m-%d') + timedelta(days=1)
+            q = q.filter(AuditLog.created_at < dt_to)
+        except ValueError:
+            pass
+
+    # Free-text search
     if search:
+        like = f'%{search}%'
         q = q.filter(
-            (AuditLog.action.ilike(f'%{search}%')) |
-            (AuditLog.details.ilike(f'%{search}%')) |
-            (AuditLog.ip_address.ilike(f'%{search}%'))
+            (AuditLog.action.ilike(like))     |
+            (AuditLog.details.ilike(like))    |
+            (AuditLog.ip_address.ilike(like))
         )
 
-    total = q.count()
-    logs = q.order_by(AuditLog.created_at.desc()).offset((page-1)*limit).limit(limit).all()
+    # ── 3. Sort ────────────────────────────────────────────────────────────
+    if sort_dir == 'asc':
+        q = q.order_by(AuditLog.created_at.asc())
+    else:
+        q = q.order_by(AuditLog.created_at.desc())
 
-    today = datetime.utcnow().date()
-    today_count = AuditLog.query.filter(db.func.date(AuditLog.created_at) == today).count()
-    unique_users = db.session.query(AuditLog.admin_id).distinct().count()
+    # ── 4. Paginate ────────────────────────────────────────────────────────
+    total    = q.count()
+    logs     = q.offset((page - 1) * limit).limit(limit).all()
+    pages    = max(1, (total + limit - 1) // limit)
+
+    # ── 5. Stats ───────────────────────────────────────────────────────────
+    today_date  = datetime.utcnow().date()
+    today_count = AuditLog.query.filter(
+        func.date(AuditLog.created_at) == today_date
+    ).count()
+
+    unique_admins = db.session.query(AuditLog.admin_id).distinct().count()
+
     last_log = AuditLog.query.order_by(AuditLog.created_at.desc()).first()
 
-    return jsonify({
-        "logs": [{
-            "id": l.id,
-            "admin": User.query.get(l.admin_id).username if l.admin_id else "System",
-            "action": l.action,
-            "details": l.details,
-            "ip": l.ip_address,
-            "created_at": l.created_at.isoformat()
-        } for l in logs],
-        "total": total,
-        "page": page,
-        "pages": max(1, (total + limit - 1) // limit),
-        "stats": {
-            "total": AuditLog.query.count(),
-            "today": today_count,
-            "unique_users": unique_users,
-            "last_activity": last_log.created_at.isoformat() if last_log else None
+    # Critical-tier actions (destructive / high-impact)
+    CRITICAL_ACTIONS = [
+        'USER_DELETED', 'SUBJECT_DELETED', 'SECTION_DELETED',
+        'DATABASE_BACKUP',
+    ]
+    critical_total = AuditLog.query.filter(
+        AuditLog.action.in_(CRITICAL_ACTIONS)
+    ).count()
+
+    # Most active admin (by total log count, all time)
+    most_active_row = (
+        db.session.query(AuditLog.admin_id, func.count(AuditLog.id).label('cnt'))
+        .group_by(AuditLog.admin_id)
+        .order_by(func.count(AuditLog.id).desc())
+        .first()
+    )
+    most_active_admin = None
+    if most_active_row:
+        u = User.query.get(most_active_row.admin_id)
+        most_active_admin = u.username if u else None
+
+    stats = {
+        'total':             AuditLog.query.count(),
+        'today':             today_count,
+        'unique_users':      unique_admins,   # kept for legacy; means unique admins
+        'critical_total':    critical_total,
+        'last_activity':     last_log.created_at.isoformat() if last_log else None,
+        'most_active_admin': most_active_admin,
+    }
+
+    # ── 6. Serialise ───────────────────────────────────────────────────────
+    def _admin_name(admin_id):
+        u = User.query.get(admin_id)
+        return u.username if u else 'System'
+
+    serialised = [
+        {
+            'id':         l.id,
+            'admin':      _admin_name(l.admin_id),
+            'action':     l.action,
+            'details':    l.details,
+            'ip':         l.ip_address,
+            'created_at': l.created_at.isoformat(),
         }
+        for l in logs
+    ]
+
+    return jsonify({
+        'logs':  serialised,
+        'total': total,
+        'page':  page,
+        'pages': pages,
+        'stats': stats,
     }), 200
 
-@app.route('/api/admin/audit-logs/clear', methods=['DELETE'])
+# ============================================================================
+# paste this into app.py, near admin_get_logs (same area, they share logic)
+#
+# why this exists: the old "Export CSV" button on Activity Logs was calling
+# /api/admin/reports, which only ever exported SUBMISSIONS data (student
+# quiz scores) — there was never an endpoint that actually exports audit
+# log rows. clicking "Export Logs" silently gave you the wrong file. this
+# is the real one.
+#
+# reuses the same filter params as GET /api/admin/audit-logs (search,
+# action, date_from, date_to) so "export what i'm currently looking at"
+# actually works — no pagination limit here though, exports everything
+# that matches the filter, not just the current page.
+# ============================================================================
+
+@app.route('/api/admin/audit-logs/export', methods=['GET'])
 @admin_required
-def admin_clear_logs(admin):
-    cutoff = datetime.utcnow() - timedelta(days=30)
-    deleted = AuditLog.query.filter(AuditLog.created_at < cutoff).delete()
-    db.session.commit()
-    log_admin_action(admin.id, "LOGS_CLEARED", f"Cleared {deleted} logs older than 30 days")
-    return jsonify({"message": f"Cleared {deleted} old logs"}), 200
+def admin_export_audit_logs(admin):
+    search       = request.args.get('search', '').strip()
+    action_param = request.args.get('action', '').strip()
+    date_from    = request.args.get('date_from', '').strip()
+    date_to      = request.args.get('date_to', '').strip()
+
+    q = AuditLog.query
+
+    if action_param and action_param.lower() != 'all':
+        actions = [a.strip() for a in action_param.split(',') if a.strip()]
+        if len(actions) == 1:
+            q = q.filter(AuditLog.action == actions[0])
+        elif len(actions) > 1:
+            q = q.filter(AuditLog.action.in_(actions))
+
+    if date_from:
+        try:
+            q = q.filter(AuditLog.created_at >= datetime.strptime(date_from, '%Y-%m-%d'))
+        except ValueError:
+            pass
+
+    if date_to:
+        try:
+            dt_to = datetime.strptime(date_to, '%Y-%m-%d') + timedelta(days=1)
+            q = q.filter(AuditLog.created_at < dt_to)
+        except ValueError:
+            pass
+
+    if search:
+        like = f'%{search}%'
+        q = q.filter(
+            (AuditLog.action.ilike(like))  |
+            (AuditLog.details.ilike(like)) |
+            (AuditLog.ip_address.ilike(like))
+        )
+
+    logs = q.order_by(AuditLog.created_at.desc()).all()
+
+    si = StringIO()
+    cw = csv.writer(si)
+    cw.writerow(["ID", "Admin", "Action", "Details", "IP Address", "Timestamp"])
+    for log in logs:
+        admin_user = User.query.get(log.admin_id)
+        cw.writerow([
+            log.id,
+            admin_user.username if admin_user else 'System',
+            log.action,
+            log.details,
+            log.ip_address,
+            log.created_at.isoformat(),
+        ])
+
+    return app.response_class(
+        si.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=audit_logs_export.csv"}
+    )
 
 @app.route('/api/admin/reports', methods=['GET'])
 @admin_required
@@ -2583,12 +5304,17 @@ def admin_generate_report(admin):
     fmt = request.args.get('format', 'csv')
     start = request.args.get('start')
     end = request.args.get('end')
-    
+
     q = Submission.query
-    if start: q = q.filter(Submission.submitted_at >= datetime.fromisoformat(start))
-    if end: q = q.filter(Submission.submitted_at <= datetime.fromisoformat(end))
+    try:
+        if start:
+            q = q.filter(Submission.submitted_at >= datetime.fromisoformat(start))
+        if end:
+            q = q.filter(Submission.submitted_at <= datetime.fromisoformat(end))
+    except ValueError:
+        return jsonify({"error": "Use ISO dates for the report start and end."}), 400
     subs = q.all()
-    
+
     if fmt == 'csv':
         si = StringIO()
         cw = csv.writer(si)
@@ -2598,17 +5324,73 @@ def admin_generate_report(admin):
             p = Problem.query.get(s.problem_id)
             cw.writerow([s.id, u.username if u else "Unknown", p.title if p else "Unknown", s.language, s.status, s.score, s.submitted_at.isoformat()])
         return app.response_class(si.getvalue(), mimetype="text/csv", headers={"Content-Disposition": "attachment; filename=submissions_report.csv"})
-    
+
     return jsonify({"error": "Unsupported format"}), 400
 
-# =====================================================================
-# ADD THIS ROUTE TO app.py  (paste after admin_generate_report route)
-# =====================================================================
-#
-# Also add these imports at the top of app.py if not already present:
-#   import io, zipfile
-#
-# =====================================================================
+@app.route('/api/admin/users/bulk-upload-csv', methods=['POST'])
+@admin_required
+def admin_bulk_upload_csv(admin):
+    return jsonify({"error": "This endpoint is deprecated. Use /api/admin/enrollment/bulk-upload instead."}), 410
+
+
+def build_backup_sql(tables_to_export, who_label):
+    """SQL text (bytes) for the given tables. Used by the admin endpoint and by backup_full.py."""
+    import io
+    def _sql_literal(val):
+        import json as _json
+        if val is None:
+            return 'NULL'
+        if isinstance(val, bool):
+            return '1' if val else '0'
+        if isinstance(val, (int, float)):
+            return str(val)
+        if isinstance(val, datetime):
+            return "'" + val.strftime('%Y-%m-%d %H:%M:%S.%f') + "'"
+        if isinstance(val, (dict, list)):
+            val = _json.dumps(val, ensure_ascii=False)
+        elif isinstance(val, (bytes, bytearray)):
+            return "0x" + bytes(val).hex() if val else "''"
+        else:
+            val = str(val)
+        # MySQL string literal: backslashes first, then quotes, control characters
+        val = (val.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n")
+                  .replace("\r", "\\r").replace("\x00", "\\0"))
+        return "'" + val + "'"
+
+    # ── Build SQL dump ────────────────────────────────────────────────
+    buf = io.StringIO()
+    ts  = datetime.utcnow().isoformat()
+
+    buf.write(f"-- Forge.dev Database Backup\n")
+    buf.write(f"-- Generated : {ts} UTC\n")
+    buf.write(f"-- Tables    : {', '.join(t.name for t in tables_to_export)}\n")
+    buf.write(f"-- Requested by: {who_label}\n")
+    buf.write("-- Contains password hashes and personal data: store securely.\n")
+    buf.write("-- Uploaded lesson files are NOT inside this SQL file; back up the uploads folder separately.\n\n")
+    buf.write("SET FOREIGN_KEY_CHECKS=0;\n\n")
+
+    for table in tables_to_export:
+        try:
+            rows = db.session.execute(table.select()).fetchall()
+            if not rows:
+                buf.write(f"-- Table `{table.name}` is empty\n\n")
+                continue
+            columns = [c.name for c in table.columns]
+            buf.write(f"-- ── {table.name} ({len(rows)} rows) ──\n")
+            buf.write(f"TRUNCATE TABLE `{table.name}`;\n")
+            col_list = ', '.join(f'`{c}`' for c in columns)
+            for row in rows:
+                val_list = ', '.join(_sql_literal(row._mapping[c]) for c in columns)
+                buf.write(f"INSERT INTO `{table.name}` ({col_list}) VALUES ({val_list});\n")
+            buf.write("\n")
+        except Exception as exc:
+            raise RuntimeError(f"Could not export table {table.name}") from exc
+
+    buf.write("SET FOREIGN_KEY_CHECKS=1;\n")
+    buf.write(f"-- End of backup\n")
+
+    return buf.getvalue().encode('utf-8')
+
 
 @app.route('/api/admin/backup', methods=['POST'])
 @admin_required
@@ -2625,94 +5407,37 @@ def admin_backup_database(admin):
     to mysqldump and stream the result; this pure-Python implementation
     works without mysqldump and avoids extra OS dependencies.
     """
-    import io
-
-    data = request.get_json(silent=True) or {}
+    data = request.get_json(silent=True) if request.get_data(cache=True) else {}
+    if not isinstance(data, dict):
+        return jsonify({"error": "Expected a JSON object with a tables selection."}), 400
     tables_param = data.get('tables', 'all')
 
-    # ── Resolve which models / table names to export ──────────────────
-    ALL_MODELS = [
-        ('users',               User),
-        ('blocks',              Block),
-        ('subjects',            Subject),
-        ('problems',            Problem),
-        ('submissions',         Submission),
-        ('audit_logs',          AuditLog),
-        ('achievements',        Achievement),
-        ('teacher_assignments', TeacherAssignment),
-        ('announcements',       Announcement),
-        ('system_config',       SystemConfig),
-    ]
-
+    # ── Resolve which tables to export ────────────────────────────────
+    # Every table the application defines is included (the old list left out enrollments,
+    # lessons, files, achievements earned, drafts, submission slots ... so a restore lost them).
+    all_tables = list(db.metadata.sorted_tables)          # parents before children
     if tables_param == 'all':
-        models_to_export = ALL_MODELS
-    elif isinstance(tables_param, list):
-        key_set = set(tables_param)
-        models_to_export = [(tbl, mdl) for tbl, mdl in ALL_MODELS if tbl in key_set]
+        tables_to_export = all_tables
     else:
-        models_to_export = ALL_MODELS
+        if not isinstance(tables_param, list) or not tables_param or any(not isinstance(name, str) for name in tables_param):
+            return jsonify({"error": "Select at least one valid table or choose all tables."}), 400
+        wanted = set(tables_param)
+        tables_to_export = [t for t in all_tables if t.name in wanted]
+        if len(tables_to_export) != len(wanted):
+            return jsonify({"error": "The selection contains an unknown table."}), 400
 
-    # ── Build SQL dump ────────────────────────────────────────────────
-    buf = io.StringIO()
-    ts  = datetime.utcnow().isoformat()
-
-    buf.write(f"-- Forge.dev Database Backup\n")
-    buf.write(f"-- Generated : {ts} UTC\n")
-    buf.write(f"-- Tables    : {', '.join(t for t, _ in models_to_export)}\n")
-    buf.write(f"-- Admin     : {admin.username} (ID {admin.id})\n\n")
-    buf.write("SET FOREIGN_KEY_CHECKS=0;\n\n")
-
-    for table_name, model_cls in models_to_export:
-        try:
-            rows = db.session.query(model_cls).all()
-            if not rows:
-                buf.write(f"-- Table `{table_name}` is empty\n\n")
-                continue
-
-            # Introspect columns from the mapper
-            columns = [c.key for c in model_cls.__mapper__.columns]
-
-            buf.write(f"-- ── {table_name} ({len(rows)} rows) ──\n")
-            buf.write(f"TRUNCATE TABLE `{table_name}`;\n")
-
-            for row in rows:
-                values = []
-                for col in columns:
-                    val = getattr(row, col, None)
-                    if val is None:
-                        values.append('NULL')
-                    elif isinstance(val, bool):
-                        values.append('1' if val else '0')
-                    elif isinstance(val, (int, float)):
-                        values.append(str(val))
-                    elif isinstance(val, datetime):
-                        values.append(f"'{val.isoformat()}'")
-                    elif isinstance(val, (dict, list)):
-                        import json as _json
-                        safe = _json.dumps(val).replace("'", "\\'")
-                        values.append(f"'{safe}'")
-                    else:
-                        safe = str(val).replace("\\", "\\\\").replace("'", "\\'")
-                        values.append(f"'{safe}'")
-
-                col_list = ', '.join(f'`{c}`' for c in columns)
-                val_list = ', '.join(values)
-                buf.write(f"INSERT INTO `{table_name}` ({col_list}) VALUES ({val_list});\n")
-
-            buf.write("\n")
-        except Exception as e:
-            buf.write(f"-- ERROR exporting {table_name}: {e}\n\n")
-
-    buf.write("SET FOREIGN_KEY_CHECKS=1;\n")
-    buf.write(f"-- End of backup\n")
-
-    sql_bytes = buf.getvalue().encode('utf-8')
+    try:
+        sql_bytes = build_backup_sql(tables_to_export, f"{admin.username} (ID {admin.id})")
+    except RuntimeError as exc:
+        db.session.rollback()
+        app.logger.error("Database export failed: %s", exc)
+        return jsonify({"error": "Could not export all requested tables. No backup file was produced."}), 500
 
     # ── Log the action ────────────────────────────────────────────────
     log_admin_action(
         admin.id,
         'DATABASE_BACKUP',
-        f"Backup generated: {len(models_to_export)} tables, {len(sql_bytes)//1024} KB",
+        f"Backup generated: {len(tables_to_export)} tables, {len(sql_bytes)//1024} KB",
     )
 
     filename = f"forge_backup_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.sql"
@@ -2730,32 +5455,108 @@ def admin_backup_database(admin):
 @app.route('/api/admin/subjects', methods=['POST'])
 @admin_required
 def admin_create_subject(admin):
-    """Create a new subject"""
-    data = request.get_json()
-    
-    if not data or not data.get('name'):
+    """Create a new subject with full university metadata."""
+    data = request.get_json(silent=True)
+
+    # ── Basic validation ───────────────────────────────────────────────
+    if not isinstance(data, dict) or not isinstance(data.get('name'), str) or not data['name'].strip():
         return jsonify({"error": "Subject name is required"}), 400
-    
-    # Check if subject already exists
-    existing = Subject.query.filter_by(name=data['name'].strip()).first()
+
+    name = data['name'].strip()
+    if len(name) > 200:
+        return jsonify({"error": "Subject name must be 200 characters or fewer"}), 400
+
+    # ── subject_code: alphanumeric + hyphens only, no regex needed ────
+    for field in ('subject_code', 'internal_subject_no', 'description', 'department'):
+        if data.get(field) is not None and not isinstance(data[field], str):
+            return jsonify({"error": f"{field} must be text"}), 400
+    subject_code = (data.get('subject_code') or '').strip().upper() or None
+    if subject_code:
+        if len(subject_code) > 20:
+            return jsonify({"error": "Subject code must be 20 characters or fewer"}), 400
+        allowed_chars = set('ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_')
+        if not all(ch in allowed_chars for ch in subject_code):
+            return jsonify({"error": "Subject code may only contain letters, digits, hyphens, and underscores"}), 400
+
+    # ── units ─────────────────────────────────────────────────────────
+    units = data.get('units')
+    if units is not None:
+        if isinstance(units, str) and units in ('1', '2', '3'):
+            units = int(units)
+        if type(units) is not int or not 1 <= units <= 3:
+            return jsonify({"error": "Units must be a whole number from 1 to 3"}), 400
+
+    # ── year_level ────────────────────────────────────────────────────
+    year_level = data.get('year_level')
+    if year_level is not None:
+        try:
+            year_level = int(year_level)
+            if year_level < 1 or year_level > 6:
+                return jsonify({"error": "Year level must be between 1 and 6"}), 400
+        except (ValueError, TypeError):
+            return jsonify({"error": "Year level must be a valid integer"}), 400
+    # Forge.dev covers first-year curriculum subjects only. This is the
+    # SUBJECT's curriculum year, not a classification of the students taking it.
+    if year_level is None:
+        year_level = FIRST_YEAR_CURRICULUM
+    elif year_level != FIRST_YEAR_CURRICULUM:
+        return jsonify({"error": "Only first-year curriculum subjects are supported."}), 400
+
+    # ── subject_type ──────────────────────────────────────────────────
+    allowed_types = {'lab', 'lecture_lab', 'elective'}
+    subject_type = data.get('subject_type', 'lab')
+    if subject_type not in allowed_types:
+        return jsonify({"error": f"subject_type must be one of: {', '.join(sorted(allowed_types))}. Note: 'lecture' type is no longer accepted for new subjects."}), 400
+
+    # ── department ────────────────────────────────────────────────────
+    internal_subject_no = (data.get('internal_subject_no') or '').strip() or None
+    if internal_subject_no and len(internal_subject_no) > 10:
+        return jsonify({"error": "Subject number must be 10 characters or fewer"}), 400
+    department = (data.get('department') or '').strip() or None
+    if department and len(department) > 100:
+        return jsonify({"error": "Department must be 100 characters or fewer"}), 400
+
+    # ── Duplicate check ───────────────────────────────────────────────
+    existing = Subject.query.filter_by(name=name).first()
     if existing:
-        return jsonify({"error": "Subject already exists"}), 409
-    
+        return jsonify({"error": "A subject with this name already exists"}), 409
+    if subject_code and Subject.query.filter_by(subject_code=subject_code).first():
+        return jsonify({"error": f"Subject code '{subject_code}' is already in use"}), 409
+
+    # ── Persist ───────────────────────────────────────────────────────
     subject = Subject(
-        name=data['name'].strip(),
-        description=data.get('description', '').strip()
+        name=name,
+        description=(data.get('description') or '').strip() or None,
+        subject_code=subject_code,
+        internal_subject_no=internal_subject_no,
+        units=units,
+        department=department,
+        year_level=year_level,
+        subject_type=subject_type,
     )
     db.session.add(subject)
     db.session.commit()
-    
-    log_admin_action(admin.id, "SUBJECT_CREATED", f"Created subject: {subject.name}")
-    
+
+    log_admin_action(
+        admin.id,
+        "SUBJECT_CREATED",
+        f"Created subject: {subject.name}"
+        + (f" [{subject.subject_code}]" if subject.subject_code else ""),
+        target_id=subject.id,
+    )
+
     return jsonify({
         "message": "Subject created successfully",
         "subject": {
-            "id": subject.id,
-            "name": subject.name,
-            "description": subject.description
+            "id":           subject.id,
+            "name":         subject.name,
+            "description":  subject.description,
+            "subject_code": subject.subject_code,
+            "internal_subject_no": subject.internal_subject_no,
+            "units":        subject.units,
+            "department":   subject.department,
+            "year_level":   subject.year_level,
+            "subject_type": subject.subject_type,
         }
     }), 201
 
@@ -2766,7 +5567,7 @@ def admin_get_subjects(admin):
     try:
         # Get all subjects
         subjects = Subject.query.all()
-        
+
         # Remove duplicates in Python (keep first occurrence of each name)
         seen_names = set()
         unique_subjects = []
@@ -2774,271 +5575,325 @@ def admin_get_subjects(admin):
             if s.name not in seen_names:
                 seen_names.add(s.name)
                 unique_subjects.append(s)
-        
+
         return jsonify([{
-            "id": s.id,
-            "name": s.name,
-            "description": s.description
+            "id":           s.id,
+            "name":         s.name,
+            "description":  s.description,
+            "subject_code": s.subject_code,
+            "internal_subject_no": s.internal_subject_no,
+            "units":        s.units,
+            "department":   s.department,
+            "year_level":   s.year_level,
+            "subject_type": s.subject_type,
         } for s in unique_subjects]), 200
     except Exception as e:
         print(f"Error fetching subjects: {e}")
         return jsonify({"error": "Failed to fetch subjects"}), 500
-    
-    
+
+
 @app.route('/api/admin/subjects/<int:subject_id>', methods=['DELETE'])
 @admin_required
 def admin_delete_subject(admin, subject_id):
-    """Delete a subject"""
+    """
+    Delete a subject.
+    Cascades through junction tables before removing the subject row so
+    that no FK constraint fires:
+      1. TeacherAssignment rows that reference this subject
+      2. block_subjects junction rows
+      3. SubjectSection rows (and their IrregularEnrollment children)
+      4. Problems that reference this subject (subject_id set to NULL)
+    """
     subject = Subject.query.get_or_404(subject_id)
-    
-    # Check if subject is used in any blocks (via block_subjects junction table)
-    usage = db.session.query(block_subjects.c.block_id).filter_by(
-        subject_id=subject_id
-    ).first()
-    
-    if usage:
-        return jsonify({"error": "Cannot delete subject - it's assigned to blocks. Remove it from blocks first."}), 400
-    
-    # Check if subject is used in any problems
-    problem_usage = Problem.query.filter_by(subject_id=subject_id).first()
-    if problem_usage:
-        return jsonify({"error": "Cannot delete subject - it's used in problems. Delete or reassign problems first."}), 400
-    
-    # Safe to delete
+    subject_name = subject.name  # capture before deletion
+
+    # 1. Remove teacher assignments for this subject
+    TeacherAssignment.query.filter_by(subject_id=subject_id).delete()
+
+    # 2. (block_subjects removed — no longer needed)
+
+    # 3. Remove every SubjectSection that belongs to this subject,
+    #    but first remove the IrregularEnrollment rows that point to them
+    sections = SubjectSection.query.filter_by(subject_id=subject_id).all()
+    for sec in sections:
+        IrregularEnrollment.query.filter_by(section_id=sec.id).delete()
+        db.session.delete(sec)
+
+    # 4. Nullify subject_id on Problems (keeps the problems, just unlinks them)
+    Problem.query.filter_by(subject_id=subject_id).update(
+        {'subject_id': None}, synchronize_session=False
+    )
+
+    # 5. Also remove any Lesson rows linked to this subject
+    Lesson.query.filter_by(subject_id=subject_id).delete()
+
+    # 6. Finally delete the subject itself
     db.session.delete(subject)
     db.session.commit()
-    
-    log_admin_action(admin.id, "SUBJECT_DELETED", f"Deleted subject: {subject.name}")
-    
+
+    log_admin_action(
+        admin.id, "SUBJECT_DELETED",
+        f"Deleted subject: {subject_name} (ID {subject_id}) — "
+        f"cascade-removed teacher assignments, block links, and sections.",
+        target_id=subject_id,
+    )
+
     return jsonify({"message": "Subject deleted successfully"}), 200
 
-# ===== ADMIN BLOCK ROUTES =====
-@app.route('/api/admin/blocks', methods=['GET'])
+@app.route('/api/admin/subjects/<int:subject_id>', methods=['PUT'])
 @admin_required
-def admin_get_blocks(admin):
-    # Query the NEW Blocks table
-    blocks = Block.query.all()
+def admin_update_subject(admin, subject_id):
+    """Update an existing subject"""
+    subject = Subject.query.get_or_404(subject_id)
+    data = request.get_json()
+    changes = []
+
+    # ── name ──────────────────────────────────────────────────────────
+    if 'name' in data:
+        name = data['name'].strip()
+        if not name:
+            return jsonify({"error": "Subject name cannot be empty"}), 400
+        if len(name) > 200:
+            return jsonify({"error": "Subject name must be 200 characters or fewer"}), 400
+        if name != subject.name:
+            existing = Subject.query.filter(Subject.name == name, Subject.id != subject_id).first()
+            if existing:
+                return jsonify({"error": "A subject with this name already exists"}), 409
+            changes.append(f"name: {subject.name} → {name}")
+            subject.name = name
+
+    # ── subject_code ──────────────────────────────────────────────────
+    if 'subject_code' in data:
+        code = data['subject_code'].strip().upper() if data['subject_code'] else None
+        if code:
+            if len(code) > 20:
+                return jsonify({"error": "Subject code must be 20 characters or fewer"}), 400
+            allowed_chars = set('ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_')
+            if not all(ch in allowed_chars for ch in code):
+                return jsonify({"error": "Subject code may only contain letters, digits, hyphens, and underscores"}), 400
+            duplicate = Subject.query.filter(Subject.subject_code == code, Subject.id != subject_id).first()
+            if duplicate:
+                return jsonify({"error": f"Subject code '{code}' is already in use"}), 409
+        changes.append(f"subject_code → {code}")
+        subject.subject_code = code
+
+    # ── internal_subject_no ───────────────────────────────────────────
+    if 'internal_subject_no' in data:
+        internal_no = data['internal_subject_no']
+        if internal_no is not None and (not isinstance(internal_no, str) or len(internal_no.strip()) > 10):
+            return jsonify({"error": "Subject number must be text of at most 10 characters"}), 400
+        subject.internal_subject_no = (internal_no or '').strip() or None
+        changes.append("internal_subject_no updated")
+
+    # ── description ───────────────────────────────────────────────────
+    if 'description' in data:
+        subject.description = data['description'].strip() or None
+        changes.append("description updated")
+
+    # ── units ─────────────────────────────────────────────────────────
+    if 'units' in data:
+        units = data['units']
+        if units is not None:
+            try:
+                units = int(units)
+                if units < 1 or units > 12:
+                    return jsonify({"error": "Units must be between 1 and 12"}), 400
+            except (ValueError, TypeError):
+                return jsonify({"error": "Units must be a valid integer"}), 400
+        subject.units = units
+        changes.append(f"units → {units}")
+
+    # ── year_level ────────────────────────────────────────────────────
+    if 'year_level' in data:
+        year_level = data['year_level']
+        if year_level is not None:
+            try:
+                year_level = int(year_level)
+                if year_level < 1 or year_level > 6:
+                    return jsonify({"error": "Year level must be between 1 and 6"}), 400
+            except (ValueError, TypeError):
+                return jsonify({"error": "Year level must be a valid integer"}), 400
+        # The curriculum year of an existing subject is never changed through
+        # this endpoint: legacy rows stay as they are until the official
+        # curriculum is confirmed. Sending the current value back is fine.
+        if year_level != subject.year_level:
+            return jsonify({"error": "The curriculum year of an existing subject cannot be changed here."}), 400
+
+    # ── subject_type ──────────────────────────────────────────────────
+    if 'subject_type' in data:
+        allowed_types = {'lab', 'lecture_lab', 'elective'}
+        if data['subject_type'] not in allowed_types:
+            return jsonify({"error": f"subject_type must be one of: {', '.join(sorted(allowed_types))}. Note: 'lecture' type is no longer accepted."}), 400
+        subject.subject_type = data['subject_type']
+        changes.append(f"subject_type → {data['subject_type']}")
+
+    # ── department ────────────────────────────────────────────────────
+    if 'department' in data:
+        dept = data['department'].strip() or None
+        if dept and len(dept) > 100:
+            return jsonify({"error": "Department must be 100 characters or fewer"}), 400
+        subject.department = dept
+        changes.append(f"department → {dept}")
+
+    db.session.commit()
+
+    log_admin_action(
+        admin.id,
+        "SUBJECT_UPDATED",
+        f"Updated subject: {subject.name} — {', '.join(changes) if changes else 'no changes'}",
+        target_id=subject_id,
+    )
+
+    return jsonify({
+        "message": "Subject updated successfully",
+        "subject": {
+            "id":                  subject.id,
+            "name":                subject.name,
+            "description":         subject.description,
+            "subject_code":        subject.subject_code,
+            "internal_subject_no": subject.internal_subject_no,
+            "units":               subject.units,
+            "department":          subject.department,
+            "year_level":          subject.year_level,
+            "subject_type":        subject.subject_type,
+        }
+    }), 200
+
+# ===== ADMIN BLOCK ROUTES =====
+@app.route('/api/admin/sections-list', methods=['GET'])
+@admin_required
+def admin_get_sections_list(admin):
+    """Get all sections as the primary organizational unit (replaces blocks)"""
+    sections = SubjectSection.query.filter_by(is_active=True).all()
     result = []
-    for block in blocks:
-        # Count students in NEW student_blocks table
-        student_count = db.session.query(student_blocks.c.student_id).filter_by(block_id=block.id).count()
-        instructor = User.query.get(block.instructor_id)
-        
-        # Get subjects linked to this block
-        # ✅ use distinct() to prevent duplicate subjects in display
-        subject_rows = db.session.query(block_subjects.c.subject_id).filter_by(block_id=block.id).distinct().all()
-        subject_ids = [r.subject_id for r in subject_rows]
-        subjects_list = [Subject.query.get(sid).name for sid in subject_ids if Subject.query.get(sid)]
-        
+    for s in sections:
+        subject = Subject.query.get(s.subject_id)
+        student_count = IrregularEnrollment.query.filter_by(section_id=s.id).count()
+
+        # Get instructor for this section
+        assignment = TeacherAssignment.query.filter_by(section_id=s.id).first()
+        instructor = User.query.get(assignment.instructor_id) if assignment else None
+
         result.append({
-            "id": block.id, 
-            "section_code": block.section_code, 
-            "name": block.section_code, # Block name is the code
-            "subjects": subjects_list,  # ✅ Show subjects grouped under block
-            "semester": block.semester,
-            "instructor": instructor.username if instructor else None, 
-            "instructor_id": block.instructor_id,
-            "student_count": student_count, 
-            "instructor_count": 1 if instructor else 0,
-            "created_at": block.created_at.isoformat()
+            "id": s.id,
+            "section_no": s.section_no,
+            "section_code": s.section_no,  # alias for frontend compat
+            "name": s.section_no,
+            "subject_id": s.subject_id,
+            "subject_name": subject.name if subject else None,
+            "subject_code": subject.subject_code if subject else None,
+            "schedule": s.schedule,
+            "room": s.room,
+            "semester": s.semester,
+            "academic_year": s.academic_year,
+            "student_count": student_count,
+            "capacity": s.capacity,
+            "instructor": (instructor.full_name or instructor.username) if instructor else None,
+            "is_active": s.is_active,
+            "created_at": s.created_at.isoformat()
         })
     return jsonify(result), 200
 
-@app.route('/api/admin/blocks', methods=['POST'])
-@admin_required
-def admin_create_block(admin):
-    data = request.get_json()
-    # Expecting: { section_code: "101", semester: "1st", subjects: ["Intro", "Comp Prog"] }
-    if not data.get('section_code'):
-        return jsonify({"error": "Section Code required"}), 400
-        
-    # 1. Create or get the Block
-    existing_block = Block.query.filter_by(section_code=data['section_code'], semester=data.get('semester')).first()
-    if not existing_block:
-        new_block = Block(
-            section_code=data['section_code'], 
-            semester=data.get('semester', ''),
-            instructor_id=data.get('instructor_id')
-        )
-        db.session.add(new_block)
-        db.session.flush() # Get ID immediately
-        block_id = new_block.id
-    else:
-        block_id = existing_block.id
-
-    # 2. Link Subjects
-    subjects_to_link = data.get('subjects', []) # List of subject names
-    for sub_name in subjects_to_link:
-        # Find or Create Subject
-        subject = Subject.query.filter_by(name=sub_name).first()
-        if not subject:
-            subject = Subject(name=sub_name)
-            db.session.add(subject)
-            db.session.flush()
-            
-        # Link Block to Subject
-        existing_link = db.session.query(block_subjects).filter_by(
-            block_id=block_id, 
-            subject_id=subject.id
-        ).first()
-        
-        if not existing_link:
-            db.session.execute(block_subjects.insert().values(
-                block_id=block_id, 
-                subject_id=subject.id
-            ))
-
-    db.session.commit()
-    log_admin_action(admin.id, "CREATE_BLOCK", f"Created/Updated block {data['section_code']} with {len(subjects_to_link)} subjects")
-    return jsonify({"message": "Block updated", "block_id": block_id}), 201
-
-@app.route('/api/admin/blocks/<int:block_id>', methods=['PUT'])
-@admin_required
-def admin_update_block(admin, block_id):
-    block = Block.query.get_or_404(block_id)
-    data = request.get_json()
-    changes = []
-    
-    if 'section_code' in data:
-        changes.append(f"Code: {block.section_code} → {data['section_code']}")
-        block.section_code = data['section_code']
-    
-    if 'semester' in data:
-        changes.append(f"Semester: {data['semester']}")
-        block.semester = data['semester']
-    
-    if 'instructor_id' in data:
-        changes.append(f"Instructor ID: {data['instructor_id']}")
-        block.instructor_id = data['instructor_id']
-    
-    # ✅ Handle subject assignments
-    if 'subject_ids' in data:
-        subject_ids = data['subject_ids']
-        
-        # Remove all current subject assignments
-        db.session.query(block_subjects).filter_by(block_id=block_id).delete()
-        
-        # Add new subject assignments
-        if subject_ids:
-            for subject_id in subject_ids:
-                db.session.execute(block_subjects.insert().values(
-                    block_id=block_id,
-                    subject_id=subject_id
-                ))
-            changes.append(f"Assigned {len(subject_ids)} subjects")
-        else:
-            changes.append("Removed all subject assignments")
-    
-    db.session.commit()
-    log_admin_action(admin.id, "UPDATE_BLOCK", f"Updated block {block.section_code}: {', '.join(changes)}", block_id)
-    return jsonify({"message": "Block updated", "changes": changes}), 200
-
-@app.route('/api/admin/blocks/<int:block_id>/students', methods=['GET'])
+@app.route('/api/admin/sections/<int:section_id>/students', methods=['GET'])
 @jwt_required()
-def get_block_students(block_id):
+def get_section_students(section_id):
     token_user_id = int(get_jwt_identity())
     token_user = User.query.get(token_user_id)
     if not is_instructor_or_admin(token_user):
         return jsonify({"error": "Unauthorized"}), 403
-    
-    # ✅ use new student_blocks table
-    student_rows = db.session.query(student_blocks.c.student_id)\
-        .filter_by(block_id=block_id).all()
-    student_ids = [s[0] for s in student_rows]
-    
+
+    enrollments = IrregularEnrollment.query.filter_by(section_id=section_id).all()
+    student_ids = [e.student_id for e in enrollments]
+
     students = User.query.filter(
         User.id.in_(student_ids),
         User.role == 'student'
     ).all() if student_ids else []
-    
+
     return jsonify([{
         "id": s.id,
         "username": s.username,
+        "full_name": s.full_name or s.username,
         "email": s.email,
         "xp": s.xp,
         "level": s.level,
         "is_active": s.is_active
     } for s in students]), 200
 
-@app.route('/api/admin/blocks/<int:block_id>', methods=['DELETE'])
-@admin_required
-def admin_delete_block(admin, block_id):
-    # ✅ Use the new Block model
-    block = Block.query.get_or_404(block_id)
-    section_code = block.section_code
-    
-    # ✅ Clean up related data in new tables
-    db.session.query(block_subjects).filter_by(block_id=block_id).delete()
-    db.session.query(student_blocks).filter_by(block_id=block_id).delete()
-    db.session.query(block_problems).filter_by(block_id=block_id).delete()
-    
-    # ✅ Delete the block itself
-    db.session.delete(block)
-    db.session.commit()
-    
-    log_admin_action(admin.id, "DELETE_BLOCK", f"Deleted block {section_code}", block_id)
-    return jsonify({"message": "Block deleted"}), 200
-
-
 @app.route('/api/admin/instructor-assignments', methods=['POST'])
 @admin_required
 def admin_create_instructor_assignment(admin):
-    """Admin assigns an instructor to teach a subject in a block"""
+    """Admin assigns an instructor to teach a subject in a section (class code)"""
     data = request.get_json()
-    
-    # Required fields
-    required = ['instructor_id', 'subject_id', 'block_id']
+
+    required = ['instructor_id', 'subject_id', 'section_id']
     if not all(k in data for k in required):
-        return jsonify({"error": "Missing required fields: instructor_id, subject_id, block_id"}), 400
-    
+        return jsonify({"error": "Missing required fields: instructor_id, subject_id, section_id"}), 400
+
     instructor_id = data['instructor_id']
-    subject_id = data['subject_id']
-    block_id = data['block_id']
-    
-    # Validate instructor exists and has instructor role
+    subject_id    = data['subject_id']
+    section_id    = data['section_id']
+
     instructor = User.query.get(instructor_id)
     if not instructor or instructor.role != 'instructor':
         return jsonify({"error": "Invalid instructor ID"}), 400
-    
-    # Validate subject exists
+
     subject = Subject.query.get(subject_id)
     if not subject:
         return jsonify({"error": "Invalid subject ID"}), 400
-    
-    # Validate block exists
-    block = Block.query.get(block_id)
-    if not block:
-        return jsonify({"error": "Invalid block ID"}), 400
-    
-        # Check if assignment already exists
+    if subject_out_of_scope(subject):
+        return jsonify({"error": OUT_OF_SCOPE_MSG}), 400
+
+    section = SubjectSection.query.get(section_id)
+    if not section:
+        return jsonify({"error": "Invalid section_id — Class Code not found"}), 400
+    if section.subject_id != subject.id:
+        return jsonify({"error": "Class code does not belong to the selected subject"}), 400
+
     existing = TeacherAssignment.query.filter_by(
         instructor_id=instructor_id,
         subject_id=subject_id,
-        block_id=block_id
+        section_id=section_id
     ).first()
-
     if existing:
         return jsonify({"error": "Assignment already exists"}), 409
-    
-    # Create new assignment
+
+    # one instructor per class code. the check above
+    # only caught the exact same instructor being assigned twice; this is
+    # the actual rule: this subject+section combo can only ever have ONE
+    # instructor. if someone else is already on it, the admin has to
+    # unassign them first — no silent double-booking.
+    taken_by = TeacherAssignment.query.filter_by(
+        subject_id=subject_id,
+        section_id=section_id
+    ).first()
+    if taken_by:
+        current_instructor = User.query.get(taken_by.instructor_id)
+        current_name = current_instructor.username if current_instructor else 'another instructor'
+        return jsonify({
+            "error": f"This class code already has an instructor ({current_name}). "
+                     f"Remove them first before assigning someone new."
+        }), 409
+
     assignment = TeacherAssignment(
         instructor_id=instructor_id,
         subject_id=subject_id,
-        block_id=block_id
+        section_id=section_id
     )
     db.session.add(assignment)
     db.session.commit()
-    
-    log_admin_action(admin.id, "INSTRUCTOR_ASSIGNED", 
-                    f"Instructor {instructor.username} assigned to teach {subject.name} in Block {block.section_code}")
-    
+
+    section_label = section.section_no  # section is already fetched above
+    log_admin_action(admin.id, "INSTRUCTOR_ASSIGNED",
+        f"Instructor {instructor.username} assigned to teach {subject.name} in section {section_label}")
+
     return jsonify({
         "message": "Instructor assigned successfully",
         "assignment": {
             "id": assignment.id,
             "instructor": instructor.username,
             "subject": subject.name,
-            "block": block.section_code
+            "section": section_label
         }
     }), 201
 
@@ -3048,60 +5903,80 @@ def admin_update_instructor_assignment(admin, assignment_id):
     """Update an instructor assignment"""
     assignment = TeacherAssignment.query.get_or_404(assignment_id)
     data = request.get_json()
-    
-    # Validate required fields
-    if not all(k in data for k in ['instructor_id', 'subject_id', 'block_id']):
-        return jsonify({"error": "Missing required fields: instructor_id, subject_id, block_id"}), 400
-    
+
+    if not all(k in data for k in ['instructor_id', 'subject_id', 'section_id']):
+        return jsonify({"error": "Missing required fields: instructor_id, subject_id, section_id"}), 400
+
     instructor_id = data['instructor_id']
-    subject_id = data['subject_id']
-    block_id = data['block_id']
-    
-    # Check for duplicate assignment (different assignment with same combo)
+    subject_id    = data['subject_id']
+    section_id    = data['section_id']
+
     duplicate = TeacherAssignment.query.filter(
         TeacherAssignment.instructor_id == instructor_id,
         TeacherAssignment.subject_id == subject_id,
-        TeacherAssignment.block_id == block_id,
+        TeacherAssignment.section_id == section_id,
         TeacherAssignment.id != assignment_id
     ).first()
-    
     if duplicate:
         return jsonify({"error": "This assignment already exists"}), 409
-    
-    # Validate entities exist
+
+    # same one-instructor-per-class-code rule as the create route.
+    # excluding this assignment's own id — editing an assignment shouldn't
+    # conflict with itself.
+    taken_by = TeacherAssignment.query.filter(
+        TeacherAssignment.subject_id == subject_id,
+        TeacherAssignment.section_id == section_id,
+        TeacherAssignment.id != assignment_id
+    ).first()
+    if taken_by:
+        current_instructor = User.query.get(taken_by.instructor_id)
+        current_name = current_instructor.username if current_instructor else 'another instructor'
+        return jsonify({
+            "error": f"This class code already has an instructor ({current_name}). "
+                     f"Remove them first before assigning someone new."
+        }), 409
+
     instructor = User.query.get(instructor_id)
     if not instructor or instructor.role != 'instructor':
         return jsonify({"error": "Invalid instructor ID"}), 400
-    
+
     subject = Subject.query.get(subject_id)
     if not subject:
         return jsonify({"error": "Invalid subject ID"}), 400
-    
-    block = Block.query.get(block_id)
-    if not block:
-        return jsonify({"error": "Invalid block ID"}), 400
+    unchanged_target = (subject_id == assignment.subject_id and section_id == assignment.section_id)
+    if subject_out_of_scope(subject) and not unchanged_target:
+        return jsonify({"error": OUT_OF_SCOPE_MSG}), 400
 
-    # Get old values for logging
+    section = SubjectSection.query.get(section_id)
+    if not section:
+        return jsonify({"error": "Invalid section_id — Class Code not found"}), 400
+    if section.subject_id != subject.id:
+        return jsonify({"error": "Class code does not belong to the selected subject"}), 400
+
     old_instructor = User.query.get(assignment.instructor_id)
     old_subject = Subject.query.get(assignment.subject_id)
-    old_block = Block.query.get(assignment.block_id)
-    
-    # Update assignment
+    old_section = SubjectSection.query.get(assignment.section_id) if assignment.section_id else None
+    old_section_label = old_section.section_no if old_section else 'No Section'
+
     assignment.instructor_id = instructor_id
     assignment.subject_id = subject_id
-    assignment.block_id = block_id
+    assignment.section_id = section_id
     db.session.commit()
-    
-    log_admin_action(admin.id, "INSTRUCTOR_ASSIGNMENT_UPDATED", 
-                    f"Updated: {old_instructor.username} teaching {old_subject.name} in {old_block.section_code} → {instructor.username} teaching {subject.name} in {block.section_code}")
-    
+
+    new_section = SubjectSection.query.get(section_id) if section_id else None
+    new_section_label = new_section.section_no if new_section else 'No Section'
+
+    log_admin_action(admin.id, "INSTRUCTOR_ASSIGNMENT_UPDATED",
+        f"Updated: {old_instructor.username} teaching {old_subject.name} in {old_section_label} → "
+        f"{instructor.username} teaching {subject.name} in {new_section_label}")
+
     return jsonify({
         "message": "Assignment updated successfully",
         "assignment": {
             "id": assignment.id,
             "instructor": instructor.username,
             "subject": subject.name,
-            "block": block.section_code
+            "section": new_section_label
         }
     }), 200
 
@@ -3112,41 +5987,39 @@ def admin_get_instructor_assignments(admin):
     """Get all instructor assignments (with optional filters)"""
     instructor_id = request.args.get('instructor_id', type=int)
     subject_id = request.args.get('subject_id', type=int)
-    block_id = request.args.get('block_id', type=int)
-    
+    section_id = request.args.get('section_id', type=int)
+
     query = TeacherAssignment.query
-    
+
     if instructor_id:
         query = query.filter_by(instructor_id=instructor_id)
     if subject_id:
         query = query.filter_by(subject_id=subject_id)
-    if block_id:
-        query = query.filter_by(block_id=block_id)
-    
+    if section_id:
+        query = query.filter_by(section_id=section_id)
+
     assignments = query.all()
-    
+
     result = []
     for a in assignments:
-        instructor = User.query.get(a.instructor_id)
-        subject = Subject.query.get(a.subject_id)
-        block = Block.query.get(a.block_id)
-        
         result.append({
             "id": a.id,
             "instructor": {
-                "id": instructor.id,
-                "username": instructor.username
-            } if instructor else None,
+                "id": a.instructor.id,
+                "username": a.instructor.username
+            } if a.instructor else None,
             "subject": {
-                "id": subject.id,
-                "name": subject.name
-            } if subject else None,
-            "block": {
-                "id": block.id,
-                "section_code": block.section_code
-            } if block else None
+                "id": a.subject.id,
+                "name": a.subject.name
+            } if a.subject else None,
+            "section": {
+                "id": a.section.id,
+                "section_no": a.section.section_no,
+                "schedule": a.section.schedule,
+                "room": a.section.room,
+            } if a.section else None,
         })
-    
+
     return jsonify(result), 200
 
 @app.route('/api/admin/instructor-assignments/<int:assignment_id>', methods=['DELETE'])
@@ -3154,110 +6027,1547 @@ def admin_get_instructor_assignments(admin):
 def admin_delete_instructor_assignment(admin, assignment_id):
     """Remove an instructor assignment"""
     assignment = TeacherAssignment.query.get_or_404(assignment_id)
-    
-    # Get details for logging
+
+    # Get details for logging before deletion
     instructor = User.query.get(assignment.instructor_id)
     subject = Subject.query.get(assignment.subject_id)
-    block = Block.query.get(assignment.block_id)
-    
+    section = SubjectSection.query.get(assignment.section_id) if assignment.section_id else None
+    section_label = section.section_no if section else 'No Section'
+
     db.session.delete(assignment)
     db.session.commit()
-    
-    log_admin_action(admin.id, "INSTRUCTOR_UNASSIGNED", 
-                    f"Removed assignment: {instructor.username} teaching {subject.name} in Block {block.section_code if block else 'Unknown'}")
-    
+
+    log_admin_action(admin.id, "INSTRUCTOR_UNASSIGNED",
+        f"Removed assignment: {instructor.username} teaching {subject.name} in section {section_label}")
+
     return jsonify({"message": "Assignment removed"}), 200
-    
+
+# ── Seed IT subjects (one-time, administrator only) ──────────────────────
+@app.route('/api/admin/seed-subjects', methods=['POST'])
+@admin_required
+def admin_seed_subjects(admin):
+    result = seed_it_subjects()
+    log_admin_action(
+        admin.id, 'SUBJECTS_SEEDED',
+        f"Seeded {result['seeded']} IT subjects, {result['skipped']} already existed, "
+        f"{result['out_of_scope']} not seeded (not first-year curriculum)."
+    )
+    return jsonify({
+        "message": f"Seeded {result['seeded']} subjects. {result['skipped']} already existed.",
+        "details": result
+    }), 200
+
+# ============================================================
+# PASTE THIS BLOCK INTO app.py
+#
+# Add these imports at the top of app.py if not already present:
+#   import re, base64, secrets, string, csv, io
+#   (all are stdlib — no pip installs needed)
+#
+# Add these two SQLAlchemy models anywhere in the MODELS section:
+#
+#   class SubjectSection(db.Model):
+#       __tablename__ = 'subject_sections'
+#       id            = db.Column(db.Integer, primary_key=True)
+#       section_no    = db.Column(db.String(20),  nullable=False)
+#       subject_id    = db.Column(db.Integer,     db.ForeignKey('subjects.id'), nullable=False)
+#       block_id      = db.Column(db.Integer,     db.ForeignKey('blocks.id'),   nullable=True)
+#       schedule      = db.Column(db.String(100), nullable=True)
+#       room          = db.Column(db.String(50),  nullable=True)
+#       capacity      = db.Column(db.Integer,     nullable=False, default=40)
+#       current_count = db.Column(db.Integer,     nullable=False, default=0)
+#       semester      = db.Column(db.String(50),  nullable=True)
+#       academic_year = db.Column(db.String(9),   nullable=True)
+#       is_active     = db.Column(db.Boolean,     nullable=False, default=True)
+#       created_at    = db.Column(db.DateTime,    default=datetime.utcnow)
+#
+#   class IrregularEnrollment(db.Model):
+#       __tablename__ = 'irregular_enrollments'
+#       id          = db.Column(db.Integer, primary_key=True)
+#       student_id  = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+#       section_id  = db.Column(db.Integer, db.ForeignKey('subject_sections.id'), nullable=False)
+#       enrolled_at = db.Column(db.DateTime, default=datetime.utcnow)
+#       __table_args__ = (
+#           db.UniqueConstraint('student_id', 'section_id', name='unique_irregular_enrollment'),
+#       )
+#
+# ============================================================
+
+
+def _generate_secure_password(length: int = 12) -> str:
+    """
+    Cryptographically secure 12-char password.
+    Guarantees at least one uppercase, one digit, one symbol.
+    """
+    pool = string.ascii_letters + string.digits + "!@#$%&*"
+    while True:
+        pwd = "".join(secrets.choice(pool) for _ in range(length))
+        if (
+            any(c.isupper() for c in pwd)
+            and any(c.islower() for c in pwd)
+            and any(c.isdigit() for c in pwd)
+            and any(c in "!@#$%&*" for c in pwd)
+        ):
+            return pwd
+
+
+# ── Route ───────────────────────────────────────────────────────────────
+
+@app.route("/api/admin/enrollment/bulk-upload", methods=["POST"])
+@admin_required
+def admin_bulk_enrollment_upload(admin):
+    """
+    Master enrollment CSV upload — handles regular AND irregular students
+    in a single file.
+
+    CSV columns (header row required, order does NOT matter):
+        student_id, firstname, middlename, lastname, suffix,
+        student_type, section_no
+    (middlename, suffix and email are optional. Other extra columns, including
+    a legacy year_level column, are accepted and ignored.)
+
+    Regular row example (one section — their fixed cohort's class code):
+        2024-00001,Juan,Santos,Dela Cruz,,regular,29022
+
+    Irregular row example (one row per section — same student_id repeats):
+        2024-00100,Pedro,Jose,Reyes,,irregular,29144
+
+    Returns JSON:
+    {
+        "summary":        { total_rows, created, enrolled, skipped, errors },
+        "results":        [ { row, student_id, status, reason? } … ],
+        "credential_csv": "<base64-encoded CSV>",
+        "errors":         [ "human-readable error string" … ]
+    }
+
+    HTTP 200 on full success, 207 if any row had errors.
+    """
+    # ── 1. File validation ────────────────────────────────────────────────
+    if "file" not in request.files:
+        return jsonify({"error": "No file provided — send field name 'file'"}), 400
+
+    f = request.files["file"]
+    if not f.filename.lower().endswith(".csv"):
+        return jsonify({"error": "Only .csv files are accepted"}), 400
+
+    raw = f.read(5 * 1024 * 1024 + 1)
+    if len(raw) > 5 * 1024 * 1024:
+        return jsonify({"error": "File exceeds 5 MB limit"}), 413
+
+    try:
+        text   = raw.decode("utf-8-sig")          # handles Excel BOM
+        reader = csv.DictReader(io.StringIO(text))
+        rows   = list(reader)
+    except Exception as exc:
+        return jsonify({"error": f"CSV parse error: {exc}"}), 400
+
+    if not rows:
+        return jsonify({"error": "CSV file is empty"}), 400
+    if len(rows) > 2000:
+        return jsonify({"error": "Maximum 2000 rows per upload"}), 400
+
+    # Normalise header names (strip whitespace, lowercase)
+    rows = [{k.strip().lower(): (v or "").strip() for k, v in row.items() if k is not None} for row in rows]
+
+    # block_code and subject_code used to be required here, but neither
+    # is ever actually read anywhere in this function — a class code
+    # (section_no) already knows its own subject internally, so specifying
+    # it again here was always redundant. requiring 2 columns that do
+    # nothing just confused anyone building the CSV.
+    # middlename/suffix are optional (read with .get() below), and so is any
+    # legacy year_level column: it is never required and its value is ignored.
+    required_cols = {
+        "student_id", "firstname", "lastname", "student_type", "section_no",
+    }
+    missing_cols = required_cols - set(rows[0].keys())
+    if missing_cols:
+        return jsonify({
+            "error":   "Missing CSV columns",
+            "missing": sorted(missing_cols),
+        }), 400
+
+    # ── 2. Pre-load lookup caches (avoids N+1 queries) ────────────────────
+    # blocks removed — no longer used
+
+    # subject_sections: section_no (str) → SubjectSection object
+    sections_by_no: dict = {
+        str(s.section_no).strip(): s
+        for s in SubjectSection.query.filter_by(is_active=True).all()
+    }
+    # class codes that belong to out-of-scope subjects: found, but not enrollable
+    out_of_scope_nos = {
+        no for no, s in sections_by_no.items()
+        if subject_out_of_scope(Subject.query.get(s.subject_id))
+    }
+
+    # existing emails in DB (for duplicate-email guard)
+    existing_emails: set = {
+        (row[0] or '').strip().lower() for row in db.session.query(User.email).all()
+    }
+
+    # existing usernames (username = student_id without hyphens, e.g. "2024-00001")
+    existing_usernames: set = {
+        row[0] for row in db.session.query(User.username).all()
+    }
+    existing_email_usernames = {name.lower() for name in existing_usernames if name and '@' in name}
+
+    # student_id string → User (already-created users, re-populated per flush)
+    users_by_sid: dict = {
+        u.username: u
+        for u in User.query.filter_by(role="student").all()
+    }
+
+    # ── 3. Group rows by student_id for deduplication ─────────────────────
+    # irregular students can have multiple rows (one per section)
+    regular_rows:   list  = []
+    irregular_dict: dict  = {}   # sid → [row, …]
+
+    row_errors: list = []   # human-readable strings for the response
+
+    for idx, row in enumerate(rows, start=2):
+        stype = row.get("student_type", "").strip().lower()
+        sid   = row.get("student_id", "").strip()
+
+        try:
+            account_email(sid, 'student', row.get('email'))
+        except ValueError as exc:
+            row_errors.append(f"Row {idx}: {exc} — skipped")
+            continue
+        if stype == "regular":
+            regular_rows.append((idx, row))
+        elif stype == "irregular":
+            irregular_dict.setdefault(sid, []).append((idx, row))
+        else:
+            row_errors.append(
+                f"Row {idx} (student_id={sid}): unknown student_type '{stype}' — skipped"
+            )
+
+    # ── 4. Processing helpers ─────────────────────────────────────────────
+
+    results:         list = []
+    credential_list: list = []   # dicts for the output CSV
+    created_count   = 0
+    enrolled_count  = 0
+    skipped_count   = 0
+
+    def _get_or_create_user(idx, row) -> "tuple[User|None, str|None, bool]":
+        """
+        Return (user, plain_password, is_new).
+        plain_password is None when the user already existed.
+        Flushes the new user to DB so its .id is available immediately.
+        """
+        nonlocal created_count, existing_emails, existing_usernames
+
+        sid = row["student_id"].strip()
+
+        # --- already in DB from a previous upload -----------------------
+        if sid in users_by_sid:
+            return users_by_sid[sid], None, False
+
+        # --- basic field validation ------------------------------------
+        fn = row.get("firstname",  "").strip()
+        ln = row.get("lastname",   "").strip()
+        mn = row.get("middlename", "").strip()
+        sx = row.get("suffix",     "").strip()
+
+        if not fn or not ln:
+            row_errors.append(f"Row {idx} (student_id={sid}): firstname/lastname missing — skipped")
+            return None, None, False
+
+        # --- username = student_id (matches existing CSV convention) ---
+        if sid in existing_usernames:
+            row_errors.append(f"Row {idx} (student_id={sid}): username conflict — skipped")
+            return None, None, False
+
+        # --- generated sign-in identifier: <student_id>@STUDENT_EMAIL_DOMAIN ---
+        if len(sid) > 50:
+            row_errors.append(f"Row {idx} (student_id={sid}): student ID exceeds 50 characters — skipped")
+            return None, None, False
+        email = generated_student_email(sid)
+        if email in existing_emails or email in existing_email_usernames or email == HEAD_ADMIN_EMAIL:
+            row_errors.append(
+                f"Row {idx} (student_id={sid}): identifier '{email}' already belongs to another account — skipped"
+            )
+            return None, None, False
+
+        # --- create user -----------------------------------------------
+        plain_pwd = _generate_secure_password()
+
+        full_name = " ".join(filter(None, [fn, mn, ln, sx]))
+
+        new_user = User(
+            username      = sid,
+            email         = email,
+            password_hash = generate_password_hash(plain_pwd),
+            must_change_password = True,
+            role          = "student",
+            full_name     = full_name,
+            is_active     = True,
+            xp            = 0,
+            level         = 1,
+            created_at    = datetime.utcnow(),
+        )
+        db.session.add(new_user)
+        db.session.flush()   # populates new_user.id without committing
+
+        # Update in-memory caches so subsequent rows see this user
+        existing_emails.add(email)
+        existing_usernames.add(sid)
+        users_by_sid[sid] = new_user
+
+        created_count += 1
+        credential_list.append({
+            "student_id":       sid,
+            "full_name":        full_name,
+            "email":            email,
+            "temp_password":    plain_pwd,
+            "student_type":     row.get("student_type", "").strip().lower(),
+            "class_codes": "",   # filled in by caller
+        })
+
+        return new_user, plain_pwd, True
+
+    # ── 5. Process REGULAR students ───────────────────────────────────────
+    for idx, row in regular_rows:
+        sid        = row["student_id"].strip()
+        section_no = row.get("section_no", "").strip()
+
+        if not section_no:
+            skipped_count += 1
+            results.append({"row": idx, "student_id": sid, "status": "error",
+                             "reason": "section_no missing"})
+            row_errors.append(f"Row {idx} (student_id={sid}): section_no is empty — skipped")
+            continue
+
+        if section_no in out_of_scope_nos:
+            skipped_count += 1
+            results.append({"row": idx, "student_id": sid, "status": "error",
+                             "reason": f"section '{section_no}' belongs to a subject outside the first-year scope"})
+            row_errors.append(f"Row {idx} (student_id={sid}): section '{section_no}' is outside the supported first-year subjects — skipped")
+            continue
+        section = sections_by_no.get(section_no)
+        if not section:
+            skipped_count += 1
+            results.append({"row": idx, "student_id": sid, "status": "error",
+                             "reason": f"section '{section_no}' not found"})
+            row_errors.append(f"Row {idx} (student_id={sid}): section '{section_no}' not found — skipped")
+            continue
+
+        user, plain_pwd, is_new = _get_or_create_user(idx, row)
+        if user is None:
+            skipped_count += 1
+            continue
+
+        already = IrregularEnrollment.query.filter_by(
+            student_id=user.id, section_id=section.id
+        ).first()
+        if already:
+            skipped_count += 1
+            results.append({"row": idx, "student_id": sid, "status": "skipped",
+                             "reason": "already enrolled"})
+            continue
+
+        db.session.add(IrregularEnrollment(
+            student_id=user.id,
+            section_id=section.id,
+            enrolled_at=datetime.utcnow(),
+        ))
+        section.current_count = (section.current_count or 0) + 1
+        enrolled_count += 1
+
+        if is_new:
+            credential_list[-1]["class_codes"] = section_no
+
+        results.append({"row": idx, "student_id": sid,
+                         "status": "created" if is_new else "enrolled",
+                         "section": section_no})
+
+    # ── 6. Process IRREGULAR students ─────────────────────────────────────
+    # Irregular students are assigned to specific CLASS CODES (section_no, e.g., "29144").
+    # Each row for an irregular student maps to one SubjectSection.section_no in the DB.
+    # A single irregular student can have multiple rows — one per class code they attend.
+    for sid, sid_rows in irregular_dict.items():
+        # Use the FIRST row to create / fetch the user
+        first_idx, first_row = sid_rows[0]
+        user, plain_pwd, is_new = _get_or_create_user(first_idx, first_row)
+
+        if user is None:
+            skipped_count += len(sid_rows)
+            continue
+
+        sections_enrolled = []
+
+        for idx, row in sid_rows:
+            section_no = row["section_no"].strip()
+
+            if not section_no:
+                skipped_count += 1
+                results.append({"row": idx, "student_id": sid, "status": "error",
+                                 "reason": "section_no (Class Code, e.g. 29144) missing for irregular student"})
+                row_errors.append(
+                    f"Row {idx} (student_id={sid}): section_no (Class Code, e.g. 29144) is empty — skipped"
+                )
+                continue
+
+            if section_no in out_of_scope_nos:
+                skipped_count += 1
+                results.append({"row": idx, "student_id": sid, "status": "error",
+                                 "reason": f"section '{section_no}' belongs to a subject outside the first-year scope"})
+                row_errors.append(f"Row {idx} (student_id={sid}): section '{section_no}' is outside the supported first-year subjects — skipped")
+                continue
+            section = sections_by_no.get(section_no)
+            if not section:
+                skipped_count += 1
+                results.append({"row": idx, "student_id": sid, "status": "error",
+                                 "reason": f"section '{section_no}' not found or inactive"})
+                row_errors.append(
+                    f"Row {idx} (student_id={sid}): section '{section_no}' not found — skipped"
+                )
+                continue
+
+            # Idempotency — skip if already enrolled in this section
+            already = IrregularEnrollment.query.filter_by(
+                student_id = user.id,
+                section_id = section.id,
+            ).first()
+            if already:
+                skipped_count += 1
+                results.append({"row": idx, "student_id": sid, "status": "skipped",
+                                 "reason": f"already enrolled in section {section_no}"})
+                continue
+
+            enrollment = IrregularEnrollment(
+                student_id  = user.id,
+                section_id  = section.id,
+                enrolled_at = datetime.utcnow(),
+            )
+            db.session.add(enrollment)
+
+            # Bump section's current_count
+            section.current_count = (section.current_count or 0) + 1
+
+            enrolled_count    += 1
+            sections_enrolled.append(section_no)
+
+            results.append({
+                "row":        idx,
+                "student_id": sid,
+                "status":     "created" if (is_new and idx == first_idx) else "enrolled",
+                "section":    section_no,
+            })
+
+        # Patch credential list entry with section list
+        if is_new and sections_enrolled:
+            credential_list[-1]["class_codes"] = ";".join(sections_enrolled)
+
+    # ── 7. Commit everything ───────────────────────────────────────────────
+    try:
+        db.session.commit()
+    except Exception as exc:
+        db.session.rollback()
+        return jsonify({
+            "error":  "Database commit failed — all changes rolled back",
+            "detail": str(exc),
+        }), 500
+
+    # ── 8. Build base64 credential CSV ────────────────────────────────────
+    cred_buf = io.StringIO()
+    cred_writer = csv.writer(cred_buf)
+    cred_writer.writerow([
+        "student_id", "full_name", "email",
+        "temporary_password", "student_type",
+        "class_codes", "must_change_password",
+    ])
+    for c in credential_list:
+        cred_writer.writerow([
+            c["student_id"],
+            c["full_name"],
+            c["email"],
+            c["temp_password"],
+            c["student_type"],
+            c["class_codes"],
+            "YES",
+        ])
+    cred_b64 = base64.b64encode(
+        cred_buf.getvalue().encode("utf-8")
+    ).decode("utf-8")
+
+    # ── 9. Audit log ──────────────────────────────────────────────────────
+    log_admin_action(
+        admin.id,
+        "BULK_ENROLLMENT_UPLOAD",
+        (
+            f"Enrollment upload: {len(rows)} rows processed — "
+            f"{created_count} accounts created, "
+            f"{enrolled_count} enrollments added, "
+            f"{skipped_count} skipped, "
+            f"{len(row_errors)} errors."
+        ),
+    )
+
+    # ── 10. Response ──────────────────────────────────────────────────────
+    error_count = len(row_errors)
+    return jsonify({
+        "summary": {
+            "total_rows": len(rows),
+            "created":    created_count,
+            "enrolled":   enrolled_count,
+            "skipped":    skipped_count,
+            "errors":     error_count,
+        },
+        "results":        results,
+        "errors":         row_errors,
+        "credential_csv": cred_b64,
+    }), (207 if error_count else 200)
+
+
+# ── Bulk CSV user upload ────────────────────────────────────────────────
+@app.route('/api/admin/users/bulk-upload', methods=['POST'])
+@admin_required
+def admin_bulk_upload_users(admin):
+    """
+    Accepts a CSV file and bulk-creates student or instructor accounts.
+
+    Form fields:
+        role_type : 'student' or 'instructor'
+        file      : the CSV file
+
+    Student CSV columns  : student_id, firstname, lastname
+    (a legacy year_level column is accepted and ignored)
+    Instructor CSV columns: employee_id, firstname, lastname, department
+
+    Returns a summary + base64-encoded credential CSV for download.
+    """
+    import secrets, string, base64
+
+    role_type = request.form.get('role_type', 'student')
+    if role_type not in ('student', 'instructor'):
+        return jsonify({"error": "role_type must be 'student' or 'instructor'"}), 400
+
+    if 'file' not in request.files:
+        return jsonify({"error": "No file provided"}), 400
+
+    file = request.files['file']
+    if not file.filename.lower().endswith('.csv'):
+        return jsonify({"error": "Only .csv files are accepted"}), 400
+
+    raw = file.read(5 * 1024 * 1024)
+    if len(raw) >= 5 * 1024 * 1024:
+        return jsonify({"error": "File exceeds 5 MB limit"}), 413
+
+    # Parse CSV
+    try:
+        text   = raw.decode('utf-8-sig')   # handle Excel BOM
+        reader = csv.DictReader(io.StringIO(text))
+        rows   = list(reader)
+    except Exception as e:
+        return jsonify({"error": f"CSV parse error: {str(e)}"}), 400
+
+    if not rows:
+        return jsonify({"error": "CSV file is empty"}), 400
+    if len(rows) > 1500:
+        return jsonify({"error": "Maximum 1500 rows per upload"}), 400
+
+    # Validate required columns
+    headers = {k.strip().lower() for k in rows[0] if k is not None}
+    required = (
+        {'student_id', 'firstname', 'lastname'}
+        if role_type == 'student'
+        else {'employee_id', 'firstname', 'lastname', 'department'}
+    )
+    missing = required - headers
+    if missing:
+        return jsonify({"error": "Missing columns", "missing": sorted(missing)}), 400
+
+    def _gen_password():
+        chars = (
+            secrets.choice(string.ascii_uppercase) +
+            secrets.choice(string.ascii_uppercase) +
+            secrets.choice(string.digits) +
+            secrets.choice(string.digits) +
+            secrets.choice('!@#$%') +
+            ''.join(secrets.choice(string.ascii_lowercase) for _ in range(6))
+        )
+        lst = list(chars)
+        secrets.SystemRandom().shuffle(lst)
+        return ''.join(lst)
+
+    results, created_users, errors = [], [], []
+
+    try:
+        for row_num, row in enumerate(rows, start=2):
+            row = {k.strip().lower(): (v or '').strip() for k, v in row.items() if k is not None}
+
+            row_errors = []
+            fn = row.get('firstname', '')
+            ln = row.get('lastname', '')
+            if not fn or len(fn) > 50:
+                row_errors.append('firstname missing or too long')
+            if not ln or len(ln) > 50:
+                row_errors.append('lastname missing or too long')
+
+            if role_type == 'student':
+                sid = row.get('student_id', '')
+                if not sid or not sid.isdigit() or not (7 <= len(sid) <= 10):
+                    row_errors.append('student_id must be 7–10 digits')
+            else:
+                eid = row.get('employee_id', '')
+                if not eid or len(eid) > 20:
+                    row_errors.append('employee_id missing or too long')
+
+            if row_errors:
+                errors.append({'row': row_num, 'errors': row_errors})
+                results.append({'row': row_num, 'status': 'error', 'errors': row_errors})
+                continue
+
+            # Build email and username
+            username = row['student_id'] if role_type == 'student' else row['employee_id']
+            try:
+                if '@' in username or _re.search(r'[\x00-\x1f\x7f]', username):
+                    raise ValueError('Use a username without @ or control characters.')
+                email = account_email(username, role_type, row.get('email'))
+            except ValueError as exc:
+                errors.append({'row': row_num, 'errors': [str(exc)]})
+                results.append({'row': row_num, 'status': 'error', 'errors': [str(exc)]})
+                continue
+
+            if (HEAD_ADMIN_EMAIL and email == HEAD_ADMIN_EMAIL) or User.query.filter(db.or_(
+                db.func.lower(User.email) == email, db.func.lower(User.username) == email,
+                User.username == username,
+            )).first():
+                results.append({
+                    'row': row_num, 'status': 'skipped',
+                    'reason': 'email_exists', 'email': email
+                })
+                continue
+
+            temp_pwd = _gen_password()
+            new_user = User(
+                username      = username,
+                email         = email,
+                password_hash = generate_password_hash(temp_pwd),
+                must_change_password = True,
+                role          = 'instructor' if role_type == 'instructor' else 'student',
+                is_active     = True,
+                xp            = 0,
+                level         = 1
+            )
+            db.session.add(new_user)
+            db.session.flush()
+
+            created_users.append({
+                'row':           row_num,
+                'username':      username,
+                'email':         email,
+                'temp_password': temp_pwd,
+                'status':        'created'
+            })
+            results.append({'row': row_num, 'status': 'created', 'email': email})
+
+        db.session.commit()
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "error":   "Transaction rolled back",
+            "detail":  str(e),
+            "results": results
+        }), 500
+
+    # Build credential CSV for download (base64 encoded)
+    cred_buf    = io.StringIO()
+    cred_writer = csv.writer(cred_buf)
+    id_col      = 'student_id' if role_type == 'student' else 'employee_id'
+    cred_writer.writerow([id_col, 'email', 'temporary_password', 'must_change_password'])
+    for u in created_users:
+        cred_writer.writerow([u['username'], u['email'], u['temp_password'], 'YES'])
+    cred_b64 = base64.b64encode(
+        cred_buf.getvalue().encode('utf-8')
+    ).decode('utf-8')
+
+    log_admin_action(
+        admin.id, 'BULK_USER_UPLOAD',
+        f"Bulk upload ({role_type}): {len(created_users)} created, "
+        f"{len(errors)} errors out of {len(rows)} rows."
+    )
+
+    status_code = 207 if errors else 200
+    return jsonify({
+        "summary": {
+            "total_rows": len(rows),
+            "created":    len(created_users),
+            "skipped":    len(results) - len(created_users) - len(errors),
+            "errors":     len(errors),
+        },
+        "results":        results,
+        "credential_csv": cred_b64
+    }), status_code
+
+
+# ===== ADMIN SECTIONS ROUTES =====
+
+@app.route('/api/admin/sections', methods=['GET'])
+@admin_required
+def admin_get_sections(admin):
+    """Get all subject sections with enrollment counts and related info"""
+    subject_id = request.args.get('subject_id', type=int)
+    # block_id param ignored — blocks removed
+    semester = request.args.get('semester', '')
+    active_only = request.args.get('active_only', 'false').lower() == 'true'
+
+    q = SubjectSection.query
+    if subject_id:
+        q = q.filter_by(subject_id=subject_id)
+    # block_id filter removed
+    if semester:
+        q = q.filter_by(semester=semester)
+    if active_only:
+        q = q.filter_by(is_active=True)
+
+    sections = q.order_by(SubjectSection.section_no).all()
+
+    result = []
+    for s in sections:
+        subject = Subject.query.get(s.subject_id)
+        enrolled = IrregularEnrollment.query.filter_by(section_id=s.id).count()
+
+        result.append({
+            "id":            s.id,
+            "section_no":    s.section_no,
+            "subject_id":    s.subject_id,
+            "subject_name":  subject.name if subject else None,
+            "subject_code":  subject.subject_code if subject else None,
+            "schedule":      s.schedule,
+            "room":          s.room,
+            "capacity":      s.capacity,
+            "current_count": enrolled,
+            "semester":      s.semester,
+            "academic_year": s.academic_year,
+            "is_active":     s.is_active,
+            "created_at":    s.created_at.isoformat(),
+        })
+
+    return jsonify(result), 200
+
+
+@app.route('/api/admin/sections', methods=['POST'])
+@admin_required
+def admin_create_section(admin):
+    """Create a new subject section"""
+    data = request.get_json()
+
+    required = ['section_no', 'subject_id']
+    if not all(k in data for k in required):
+        return jsonify({"error": "section_no and subject_id are required"}), 400
+
+    section_no = str(data['section_no']).strip()
+    if not section_no:
+        return jsonify({"error": "section_no cannot be empty"}), 400
+    if len(section_no) > 20:
+        return jsonify({"error": "Class code must be 20 characters or fewer"}), 400
+
+    subject = Subject.query.get(data['subject_id'])
+    if not subject:
+        return jsonify({"error": "Subject not found"}), 404
+    if subject_out_of_scope(subject):
+        return jsonify({"error": OUT_OF_SCOPE_MSG}), 400
+
+    # Check global uniqueness (matches DB constraint)
+    existing = SubjectSection.query.filter_by(section_no=section_no).first()
+    if existing:
+        return jsonify({"error": f"Section number '{section_no}' is already in use university-wide"}), 409
+
+    capacity = data.get('capacity', 40)
+    try:
+        capacity = int(capacity)
+        if capacity < 1 or capacity > 200:
+            return jsonify({"error": "Capacity must be between 1 and 200"}), 400
+    except (ValueError, TypeError):
+        return jsonify({"error": "Capacity must be an integer"}), 400
+
+    section = SubjectSection(
+        section_no    = section_no,
+        subject_id    = data['subject_id'],
+        schedule      = data.get('schedule', '').strip() or None,
+        room          = data.get('room', '').strip() or None,
+        capacity      = capacity,
+        current_count = 0,
+        semester      = data.get('semester', '').strip() or None,
+        academic_year = data.get('academic_year', '').strip() or None,
+        is_active     = data.get('is_active', True),
+    )
+    db.session.add(section)
+    db.session.commit()
+
+    log_admin_action(admin.id, "SECTION_CREATED",
+        f"Created section {section_no} for {subject.name}", target_id=section.id)
+
+    return jsonify({
+        "message":    "Section created successfully",
+        "section_id": section.id,
+        "section_no": section.section_no,
+    }), 201
+
+
+@app.route('/api/admin/sections/<int:section_id>', methods=['PUT'])
+@admin_required
+def admin_update_section(admin, section_id):
+    """Update a subject section"""
+    section = SubjectSection.query.get_or_404(section_id)
+    data = request.get_json()
+    changes = []
+
+    # checked before anything is modified, so a refusal leaves no partial change:
+    # a section may not be moved INTO, or reactivated under, an unapproved subject
+    if 'subject_id' in data and data['subject_id'] != section.subject_id:
+        if subject_out_of_scope(Subject.query.get(data['subject_id'])):
+            return jsonify({"error": OUT_OF_SCOPE_MSG}), 400
+    if data.get('is_active') and not section.is_active:
+        if subject_out_of_scope(Subject.query.get(data.get('subject_id', section.subject_id))):
+            return jsonify({"error": OUT_OF_SCOPE_MSG}), 400
+
+    if 'section_no' in data:
+        new_no = str(data['section_no']).strip()
+        if not new_no:
+            return jsonify({"error": "Class code is required"}), 400
+        if len(new_no) > 20:
+            return jsonify({"error": "Class code must be 20 characters or fewer"}), 400
+        if new_no != section.section_no:
+            existing = SubjectSection.query.filter_by(section_no=new_no).first()
+            if existing and existing.id != section.id:
+                return jsonify({"error": f"Class code '{new_no}' is already in use"}), 409
+            changes.append(f"section_no: {section.section_no} → {new_no}")
+            section.section_no = new_no
+
+    if 'subject_id' in data:
+        subject = Subject.query.get(data['subject_id'])
+        if not subject:
+            return jsonify({"error": "Subject not found"}), 404
+        if data['subject_id'] != section.subject_id:
+            changes.append(f"subject_id: {section.subject_id} → {data['subject_id']}")
+            section.subject_id = data['subject_id']
+
+    # block_id removed
+
+    if 'schedule' in data:
+        section.schedule = data['schedule'].strip() or None
+        changes.append("schedule updated")
+
+    if 'room' in data:
+        section.room = data['room'].strip() or None
+        changes.append("room updated")
+
+    if 'capacity' in data:
+        try:
+            cap = int(data['capacity'])
+            if cap < 1 or cap > 200:
+                return jsonify({"error": "Capacity must be between 1 and 200"}), 400
+            section.capacity = cap
+            changes.append(f"capacity → {cap}")
+        except (ValueError, TypeError):
+            return jsonify({"error": "Capacity must be an integer"}), 400
+
+    if 'semester' in data:
+        section.semester = data['semester']
+    if 'academic_year' in data:
+        section.academic_year = data['academic_year']
+    if 'is_active' in data:
+        section.is_active = bool(data['is_active'])
+        changes.append(f"is_active → {section.is_active}")
+
+    db.session.commit()
+    log_admin_action(admin.id, "SECTION_UPDATED",
+        f"Updated section {section.section_no}: {', '.join(changes) or 'no changes'}",
+        target_id=section_id)
+
+    return jsonify({"message": "Section updated", "changes": changes}), 200
+
+
+def _cascade_delete_section_content(section_id):
+    """
+    A module, quest or announcement belongs to one specific class code now
+    (see get_lessons/get_class_problems/get_student_announcements) -- so
+    deleting that class code must take its content with it, or the content
+    just sits there orphaned forever, invisible but never cleaned up.
+
+    - Lessons: deleted outright (their LessonFile rows cascade via the
+      model's own relationship).
+    - Problems: this section is removed from visible_to_sections; if that
+      was the only section it was visible to, the quest (and its
+      Submissions/HintReveals) is deleted too. A quest still shared with
+      another section survives, just narrower.
+    - Announcements: deleted outright (class_id is a straight section id,
+      never shared across sections).
+
+    Returns a small summary dict for the audit log / API response.
+    """
+    lessons = Lesson.query.filter_by(section_id=section_id).all()
+    lessons_deleted = len(lessons)
+    for lesson in lessons:
+        db.session.delete(lesson)
+
+    problems_deleted = 0
+    problems = Problem.query.filter(Problem.visible_to_sections.isnot(None)).all()
+    for p in problems:
+        if section_id not in (p.visible_to_sections or []):
+            continue
+        remaining = [sid for sid in p.visible_to_sections if sid != section_id]
+        if remaining:
+            p.visible_to_sections = remaining
+        else:
+            Submission.query.filter_by(problem_id=p.id).delete()
+            HintReveal.query.filter_by(problem_id=p.id).delete()
+            db.session.delete(p)
+            problems_deleted += 1
+
+    announcements_deleted = Announcement.query.filter_by(class_id=section_id).delete()
+
+    return {
+        "lessons_deleted": lessons_deleted,
+        "problems_deleted": problems_deleted,
+        "announcements_deleted": announcements_deleted,
+    }
+
+
+@app.route('/api/admin/sections/<int:section_id>', methods=['DELETE'])
+@admin_required
+def admin_delete_section(admin, section_id):
+    """Delete a section (only if no irregular enrollments exist)"""
+    section = SubjectSection.query.get_or_404(section_id)
+
+    enrolled = IrregularEnrollment.query.filter_by(section_id=section_id).count()
+    if enrolled > 0:
+        return jsonify({
+            "error": f"Cannot delete — {enrolled} student(s) are enrolled in this section. Unenroll them first."
+        }), 400
+
+    assigned_instructors = TeacherAssignment.query.filter_by(section_id=section_id).count()
+    if assigned_instructors > 0:
+        return jsonify({
+            "error": f"Cannot delete — {assigned_instructors} instructor assignment(s) reference this section. Remove those assignments first."
+        }), 400
+
+    # Submissions and drafts belong to quests, even after students move sections.
+    for quest in Problem.query.filter(Problem.visible_to_sections.isnot(None)).all():
+        if set(quest.visible_to_sections or []) != {section_id}:
+            continue
+        if any(model.query.filter_by(problem_id=quest.id).first() is not None
+               for model in (Submission, SubmissionSlot, CodeDraft)):
+            return jsonify({
+                "error": "This class has saved student work. Set it inactive to preserve its quests and history."
+            }), 409
+
+    section_no = section.section_no
+    content = _cascade_delete_section_content(section_id)
+    db.session.delete(section)
+    db.session.commit()
+
+    log_admin_action(admin.id, "SECTION_DELETED",
+        f"Deleted section {section_no} (also removed {content['lessons_deleted']} module(s), "
+        f"{content['problems_deleted']} quest(s), {content['announcements_deleted']} announcement(s))",
+        target_id=section_id)
+    return jsonify({"message": "Section deleted", **content}), 200
+
+
+@app.route('/api/admin/sections/bulk-delete', methods=['DELETE'])
+@admin_required
+def admin_bulk_delete_sections(admin):
+    """Delete only class codes with no enrollments, assignments or class content."""
+    sections = SubjectSection.query.all()
+    quest_section_ids = {
+        section_id
+        for (scope,) in db.session.query(Problem.visible_to_sections)
+        for section_id in (scope or [])
+    }
+    deleted = 0
+    skipped = []
+
+    for s in sections:
+        enrolled = IrregularEnrollment.query.filter_by(section_id=s.id).count()
+        if enrolled:
+            reason = f"{enrolled} student(s) enrolled"
+        elif TeacherAssignment.query.filter_by(section_id=s.id).first():
+            reason = "instructor assigned"
+        elif (s.id in quest_section_ids
+              or Lesson.query.filter_by(section_id=s.id).first()
+              or Announcement.query.filter_by(class_id=s.id).first()):
+            reason = "class content exists"
+        else:
+            reason = None
+
+        if reason:
+            skipped.append({"section_no": s.section_no, "reason": reason})
+            continue
+
+        db.session.delete(s)
+        deleted += 1
+
+    db.session.commit()
+    log_admin_action(admin.id, "BULK_SECTIONS_DELETED",
+        f"Deleted {deleted} empty class code(s), skipped {len(skipped)} with enrollments, assignments or class content.")
+
+    return jsonify({
+        "message": f"Deleted {deleted} class code(s)",
+        "deleted": deleted,
+        "skipped": skipped,
+    }), 200
+
+
+@app.route('/api/admin/sections/<int:section_id>/enrollments', methods=['GET'])
+@admin_required
+def admin_get_section_enrollments(admin, section_id):
+    """Get all students enrolled in a specific section"""
+    section = SubjectSection.query.get_or_404(section_id)
+
+    enrollments = IrregularEnrollment.query.filter_by(section_id=section_id).all()
+    students = []
+    for e in enrollments:
+        student = User.query.get(e.student_id)
+        if student:
+            students.append({
+                "enrollment_id": e.id,
+                "student_id":    student.id,
+                "username":      student.username,
+                "full_name":     student.full_name or student.username,
+                "email":         student.email,
+                "enrolled_at":   e.enrolled_at.isoformat(),
+            })
+
+    subject = Subject.query.get(section.subject_id)
+    return jsonify({
+        "section": {
+            "id":         section.id,
+            "section_no": section.section_no,
+            "subject":    subject.name if subject else None,
+            "schedule":   section.schedule,
+            "room":       section.room,
+            "capacity":   section.capacity,
+        },
+        "enrolled_count": len(students),
+        "students":       students,
+    }), 200
+
+
+@app.route('/api/admin/sections/bulk-upload', methods=['POST'])
+@admin_required
+def admin_bulk_upload_sections(admin):
+    """
+    Bulk create sections from CSV.
+
+    CSV columns:
+        section_no, subject_code, schedule, room,
+        capacity, semester, academic_year
+    """
+    if 'file' not in request.files:
+        return jsonify({"error": "No file provided"}), 400
+
+    f = request.files['file']
+    if not f.filename.lower().endswith('.csv'):
+        return jsonify({"error": "Only .csv files accepted"}), 400
+
+    raw = f.read(5 * 1024 * 1024 + 1)
+    if len(raw) > 5 * 1024 * 1024:
+        return jsonify({"error": "File exceeds 5 MB"}), 413
+
+    try:
+        text   = raw.decode('utf-8-sig')
+        reader = csv.DictReader(io.StringIO(text))
+        rows   = list(reader)
+    except Exception as e:
+        return jsonify({"error": f"CSV parse error: {e}"}), 400
+
+    if not rows:
+        return jsonify({"error": "CSV is empty"}), 400
+
+    rows = [{k.strip().lower(): (v or '').strip() for k, v in row.items()} for row in rows]
+
+    required_cols = {'section_no', 'subject_code'}
+    missing = required_cols - set(rows[0].keys())
+    if missing:
+        return jsonify({"error": "Missing columns", "missing": sorted(missing)}), 400
+
+    subjects_by_code = {s.subject_code.upper(): s for s in Subject.query.filter(Subject.subject_code != None).all()}
+    blocks_by_code   = {}  # blocks removed
+
+    results = []
+    created = 0
+    skipped = 0
+    errors  = 0
+
+    for idx, row in enumerate(rows, start=2):
+        section_no   = row.get('section_no', '').strip()
+        subject_code = row.get('subject_code', '').strip().upper()
+
+        if not section_no or not subject_code:
+            errors += 1
+            results.append({"row": idx, "status": "error", "reason": "section_no and subject_code required"})
+            continue
+
+        subject = subjects_by_code.get(subject_code)
+        if not subject:
+            errors += 1
+            results.append({"row": idx, "status": "error", "reason": f"subject_code '{subject_code}' not found"})
+            continue
+        if subject_out_of_scope(subject):
+            errors += 1
+            results.append({"row": idx, "status": "error", "reason": f"subject '{subject_code}' is outside the supported first-year curriculum"})
+            continue
+
+        block = None
+
+        semester      = row.get('semester', '').strip() or None
+        academic_year = row.get('academic_year', '').strip() or None
+
+        # section number has to be unique across everything
+        existing = SubjectSection.query.filter_by(section_no=section_no).first()
+        if existing:
+            existing_subject = Subject.query.get(existing.subject_id)
+            subject_label = existing_subject.subject_code if existing_subject else f"subject_id={existing.subject_id}"
+            skipped += 1
+            results.append({
+                "row": idx,
+                "status": "skipped",
+                "reason": f"section_no '{section_no}' already assigned to {subject_label}"
+            })
+            continue
+
+        try:
+            capacity = int(row.get('capacity', 40))
+        except ValueError:
+            capacity = 40
+
+        section = SubjectSection(
+            section_no    = section_no,
+            subject_id    = subject.id,
+            schedule      = row.get('schedule', '').strip() or None,
+            room          = row.get('room', '').strip() or None,
+            capacity      = max(1, min(200, capacity)),
+            current_count = 0,
+            semester      = semester,
+            academic_year = academic_year,
+            is_active     = True,
+        )
+        db.session.add(section)
+        created += 1
+        results.append({"row": idx, "status": "created", "section_no": section_no, "subject": subject.name})
+
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": "Commit failed", "detail": str(e)}), 500
+
+    log_admin_action(admin.id, "SECTIONS_BULK_UPLOAD",
+        f"Sections CSV: {created} created, {skipped} skipped, {errors} errors from {len(rows)} rows.")
+
+    return jsonify({
+        "summary": {"total_rows": len(rows), "created": created, "skipped": skipped, "errors": errors},
+        "results": results,
+    }), (207 if errors else 200)
+
 # ===== UTILITY & INIT =====
 @app.route('/api/health')
-def health(): 
-    return jsonify({"status": "running", "version": "1.0"}), 200
+def health():
+    return jsonify({"status": "running", "version": "1.0", "execution_mode": EXECUTION_MODE,
+                    "schema_up_to_date": SCHEMA_STATE.get("up_to_date")}), 200
 
-with app.app_context():
-        # ===== SEED ACHIEVEMENTS =====
-    if not Achievement.query.first():
-        achievements_data = [
-            # --- STUDENT BADGES (12) ---
-            {"name": "First Steps", "desc": "Complete your first quest", "icon": "🎯", "xp": 10, "type": "quest_count", "val": 1, "cat": "student"},
-            {"name": "Quest Master", "desc": "Complete 10 quests", "icon": "⚔️", "xp": 50, "type": "quest_count", "val": 10, "cat": "student"},
-            {"name": "Week Warrior", "desc": "Maintain a 7-day streak", "icon": "🔥", "xp": 20, "type": "streak", "val": 7, "cat": "student"},
-            {"name": "Python Novice", "desc": "Solve 5 Python quests", "icon": "🐍", "xp": 15, "type": "python_count", "val": 5, "cat": "student"},
-            {"name": "Java Apprentice", "desc": "Solve 5 Java quests", "icon": "☕", "xp": 15, "type": "java_count", "val": 5, "cat": "student"},
-            {"name": "C# Wizard", "desc": "Solve 5 C# quests", "icon": "🔷", "xp": 15, "type": "csharp_count", "val": 5, "cat": "student"},
-            {"name": "Hard Coder", "desc": "Complete 5 Hard quests", "icon": "💀", "xp": 40, "type": "hard_count", "val": 5, "cat": "student"},
-            {"name": "Debug Master", "desc": "Complete 5 Debugging quests", "icon": "🐛", "xp": 30, "type": "debug_count", "val": 5, "cat": "student"},
-            {"name": "Marathon Coder", "desc": "Maintain a 30-day streak", "icon": "🏃", "xp": 100, "type": "streak", "val": 30, "cat": "student"},
-            {"name": "Perfect Score", "desc": "Get 100% on a Hard quest", "icon": "💯", "xp": 25, "type": "perfect_hard", "val": 1, "cat": "student"},
-            {"name": "Sandbox Wizard", "desc": "Run code in Sandbox 10 times", "icon": "🧪", "xp": 20, "type": "sandbox_runs", "val": 10, "cat": "student"},
-            {"name": "Leaderboard Champ", "desc": "Reach Top 10 on Leaderboard", "icon": "", "xp": 50, "type": "leaderboard", "val": 10, "cat": "student"},
+def apply_schema_and_seed():
+    """
+    Create missing tables, add missing columns, seed default rows.
+    This WRITES to the database, so it never runs on import by default. It runs only when
+    you ask for it: `python manage_schema.py upgrade` (prints the target and asks to confirm),
+    or FORGE_AUTO_SCHEMA=1 (for throwaway test/demo databases and the test suite).
+    """
+    with app.app_context():
+        # this has to run FIRST, before literally anything else in this block —
+        # everything below (seeding achievements, the teacher_assignments
+        # migrations, the problems table column check) queries or ALTERs tables
+        # that only exist after this line runs. used to be called down at the
+        # bottom of this same block instead, which only "worked" because
+        # whoever ran this locally already had the tables from a previous run.
+        # on a brand new empty database it broke immediately — the achievement
+        # seed-check below has no try/except, so it just crashed on startup.
+        db.create_all()
 
-            # --- INSTRUCTOR BADGES (15) ---
-            {"name": "First Lesson", "desc": "Create your first lesson", "icon": "📖", "xp": 25, "type": "lesson_count", "val": 1, "cat": "instructor"},
-            {"name": "Problem Architect", "desc": "Create 10 problems", "icon": "🧩", "xp": 60, "type": "problem_count", "val": 10, "cat": "instructor"},
-            {"name": "Class Starter", "desc": "Have a student complete a quest", "icon": "🚀", "xp": 20, "type": "student_quest", "val": 1, "cat": "instructor"},
-            {"name": "Engagement Booster", "desc": "80%+ students attempt a quest", "icon": "📈", "xp": 40, "type": "engagement", "val": 80, "cat": "instructor"},
-            {"name": "Curriculum Builder", "desc": "Create lessons for 3 weeks", "icon": "🗂️", "xp": 50, "type": "lesson_weeks", "val": 3, "cat": "instructor"},
-            {"name": "Resource Curator", "desc": "Attach files to 10 lessons", "icon": "📎", "xp": 30, "type": "file_count", "val": 10, "cat": "instructor"},
-            {"name": "Multimedia Master", "desc": "Add videos to 5 lessons", "icon": "🎬", "xp": 25, "type": "video_count", "val": 5, "cat": "instructor"},
-            {"name": "Clear Explainer", "desc": "Lesson with 95% completion", "icon": "🗣️", "xp": 45, "type": "lesson_completion", "val": 95, "cat": "instructor"},
-            {"name": "Problem Solver", "desc": "Problem with <10% error rate", "icon": "🔍", "xp": 40, "type": "problem_quality", "val": 10, "cat": "instructor"},
-            {"name": "Innovation Award", "desc": "Create a quest with hints", "icon": "💡", "xp": 50, "type": "hints_used", "val": 1, "cat": "instructor"},
-            {"name": "Student Success", "desc": "70%+ students pass all quests", "icon": "🎓", "xp": 75, "type": "class_pass_rate", "val": 70, "cat": "instructor"},
-            {"name": "Daily Educator", "desc": "Login and act for 14 days", "icon": "📅", "xp": 30, "type": "instructor_streak", "val": 14, "cat": "instructor"},
-            {"name": "Semester Veteran", "desc": "Teach for 16 weeks", "icon": "🎓", "xp": 100, "type": "weeks_taught", "val": 16, "cat": "instructor"},
-            {"name": "Multi-Class Maestro", "desc": "Teach 3 different subjects", "icon": "🎭", "xp": 60, "type": "subjects_taught", "val": 3, "cat": "instructor"},
-            {"name": "Platform Pioneer", "desc": "Use new features within 1 week", "icon": "🚀", "xp": 20, "type": "early_adopter", "val": 1, "cat": "instructor"}
-        ]
+            # ===== SEED ACHIEVEMENTS =====
+        if not Achievement.query.first():
+            achievements_data = [
+                # --- STUDENT BADGES (12) ---
+                {"name": "First Steps", "desc": "Complete your first quest", "icon": "🎯", "xp": 10, "type": "quest_count", "val": 1, "cat": "student"},
+                {"name": "Quest Master", "desc": "Complete 10 quests", "icon": "⚔️", "xp": 50, "type": "quest_count", "val": 10, "cat": "student"},
+                {"name": "Week Warrior", "desc": "Maintain a 7-day streak", "icon": "🔥", "xp": 20, "type": "streak", "val": 7, "cat": "student"},
+                {"name": "Python Novice", "desc": "Solve 5 Python quests", "icon": "🐍", "xp": 15, "type": "python_count", "val": 5, "cat": "student"},
+                {"name": "Java Apprentice", "desc": "Solve 5 Java quests", "icon": "☕", "xp": 15, "type": "java_count", "val": 5, "cat": "student"},
+                {"name": "C# Wizard", "desc": "Solve 5 C# quests", "icon": "🔷", "xp": 15, "type": "csharp_count", "val": 5, "cat": "student"},
+                {"name": "Hard Coder", "desc": "Complete 5 Hard quests", "icon": "💀", "xp": 40, "type": "hard_count", "val": 5, "cat": "student"},
+                {"name": "Debug Master", "desc": "Complete 5 Debugging quests", "icon": "🐛", "xp": 30, "type": "debug_count", "val": 5, "cat": "student"},
+                {"name": "Marathon Coder", "desc": "Maintain a 30-day streak", "icon": "🏃", "xp": 100, "type": "streak", "val": 30, "cat": "student"},
+                {"name": "Perfect Score", "desc": "Get 100% on a Hard quest", "icon": "💯", "xp": 25, "type": "perfect_hard", "val": 1, "cat": "student"},
+                {"name": "Sandbox Wizard", "desc": "Run code in Sandbox 10 times", "icon": "🧪", "xp": 20, "type": "sandbox_runs", "val": 10, "cat": "student"},
+                {"name": "Leaderboard Champ", "desc": "Reach Top 10 on Leaderboard", "icon": "", "xp": 50, "type": "leaderboard", "val": 10, "cat": "student"},
 
-        for data in achievements_data:
-            db.session.add(Achievement(
-                name=data["name"],
-                description=data["desc"],
-                icon=data["icon"],
-                xp_reward=data["xp"],
-                requirement_type=data["type"],
-                requirement_value=data["val"],
-                category=data["cat"]
-            ))
-        db.session.commit()
-        print("✅ Seeded 27 Achievements")
-    db.create_all()
-    
-    # Auto-migration for Problem table
-    try:
-        inspector = inspect(db.engine)
-        problem_columns = [col['name'] for col in inspector.get_columns('problems')]
-        
-        def add_col_if_missing(col_name, col_def):
-            if col_name not in problem_columns:
+                # --- INSTRUCTOR BADGES (15) ---
+                {"name": "First Module", "desc": "Create your first module", "icon": "📖", "xp": 25, "type": "lesson_count", "val": 1, "cat": "instructor"},
+                {"name": "Activity Architect", "desc": "Create 10 activities", "icon": "🧩", "xp": 60, "type": "problem_count", "val": 10, "cat": "instructor"},
+                {"name": "Class Starter", "desc": "Have a student complete a quest", "icon": "🚀", "xp": 20, "type": "student_quest", "val": 1, "cat": "instructor"},
+                {"name": "Engagement Booster", "desc": "80%+ students attempt a quest", "icon": "📈", "xp": 40, "type": "engagement", "val": 80, "cat": "instructor"},
+                {"name": "Curriculum Builder", "desc": "Create lessons for 3 weeks", "icon": "🗂️", "xp": 50, "type": "lesson_weeks", "val": 3, "cat": "instructor"},
+                {"name": "Resource Curator", "desc": "Attach files to 10 lessons", "icon": "📎", "xp": 30, "type": "file_count", "val": 10, "cat": "instructor"},
+                {"name": "Multimedia Master", "desc": "Add videos to 5 lessons", "icon": "🎬", "xp": 25, "type": "video_count", "val": 5, "cat": "instructor"},
+                {"name": "Clear Explainer", "desc": "Lesson with 95% completion", "icon": "🗣️", "xp": 45, "type": "lesson_completion", "val": 95, "cat": "instructor"},
+                {"name": "Activity Solver", "desc": "Activity with <10% error rate", "icon": "🔍", "xp": 40, "type": "problem_quality", "val": 10, "cat": "instructor"},
+                {"name": "Innovation Award", "desc": "Create a quest with hints", "icon": "💡", "xp": 50, "type": "hints_used", "val": 1, "cat": "instructor"},
+                {"name": "Student Success", "desc": "70%+ students pass all quests", "icon": "🎓", "xp": 75, "type": "class_pass_rate", "val": 70, "cat": "instructor"},
+                {"name": "Daily Educator", "desc": "Login and act for 14 days", "icon": "📅", "xp": 30, "type": "instructor_streak", "val": 14, "cat": "instructor"},
+                {"name": "Semester Veteran", "desc": "Teach for 16 weeks", "icon": "🎓", "xp": 100, "type": "weeks_taught", "val": 16, "cat": "instructor"},
+                {"name": "Multi-Class Maestro", "desc": "Teach 3 different subjects", "icon": "🎭", "xp": 60, "type": "subjects_taught", "val": 3, "cat": "instructor"},
+                {"name": "Platform Pioneer", "desc": "Use new features within 1 week", "icon": "🚀", "xp": 20, "type": "early_adopter", "val": 1, "cat": "instructor"}
+            ]
+
+            for data in achievements_data:
+                db.session.add(Achievement(
+                    name=data["name"],
+                    description=data["desc"],
+                    icon=data["icon"],
+                    xp_reward=data["xp"],
+                    requirement_type=data["type"],
+                    requirement_value=data["val"],
+                    category=data["cat"]
+                ))
+            db.session.commit()
+            print("✅ Seeded 27 Achievements")
+            # ── TeacherAssignment migration: block_id → section_id ──────────────
+        # Step 1: add section_id if missing
+        try:
+            with db.engine.connect() as conn:
+                conn.execute(text(
+                    "ALTER TABLE teacher_assignments ADD COLUMN section_id INTEGER NULL "
+                    "REFERENCES subject_sections(id) ON DELETE SET NULL"
+                ))
+                conn.commit()
+                print("✅ teacher_assignments.section_id column added")
+        except Exception:
+            pass  # Already exists
+
+        # Step 2: drop old unique constraint (handles both possible names)
+        for old_constraint in ('unique_teacher_assignment', 'uq_teacher_assignment_old'):
+            try:
                 with db.engine.connect() as conn:
-                    conn.execute(text(f"ALTER TABLE problems ADD COLUMN {col_name} {col_def}"))
+                    conn.execute(text(
+                        f"ALTER TABLE teacher_assignments DROP INDEX {old_constraint}"
+                    ))
                     conn.commit()
-                    print(f"✅ Added column '{col_name}' to problems table")
+            except Exception:
+                pass
 
-        add_col_if_missing('problem_type', "ENUM('coding', 'debugging') DEFAULT 'coding'")
-        add_col_if_missing('languages', "JSON DEFAULT ('[\"python\"]')")
-        add_col_if_missing('is_event_quest', "BOOLEAN DEFAULT 0")
-        add_col_if_missing('visible_to_blocks', "JSON DEFAULT ('[]')")
-        add_col_if_missing('hints', "JSON DEFAULT ('[]')")
-        add_col_if_missing('tags', "JSON DEFAULT ('[]')")
-        add_col_if_missing('prerequisites', "JSON DEFAULT ('[]')")
-        add_col_if_missing('estimated_time', "VARCHAR(50)")
-        add_col_if_missing('partial_credit', "INTEGER DEFAULT 100")
-        add_col_if_missing('auto_grade', "BOOLEAN DEFAULT 1")
-        add_col_if_missing('plagiarism_threshold', "FLOAT DEFAULT 0.85")
-        add_col_if_missing('due_date', "DATETIME DEFAULT NULL")  # ✅ NEW
-    except Exception as e:
-        print(f"⚠️ Migration check skipped: {e}")
-    
-    # Seed default config
-    if not SystemConfig.query.first():
-        for k,v in {'execution_timeout':'5','enabled_languages':'python,java,csharp','xp_multiplier':'1.0','plagiarism_threshold':'0.85','maintenance_mode':'false'}.items():
-            db.session.add(SystemConfig(key=k, value=v))
-        db.session.commit()
-    
-    print("✅ DB Initialized | 🔐 JWT | 🎮 Gamification | 📚 Sections | 🛡️ Admin System")
+        # Step 3: drop block_id column if it still exists
+        try:
+            with db.engine.connect() as conn:
+                # Check if column exists first (information_schema is safe to query)
+                result = conn.execute(text(
+                    "SELECT COUNT(*) FROM information_schema.COLUMNS "
+                    "WHERE TABLE_NAME='teacher_assignments' AND COLUMN_NAME='block_id' "
+                    "AND TABLE_SCHEMA=DATABASE()"
+                ))
+                if result.scalar() > 0:
+                    conn.execute(text(
+                        "ALTER TABLE teacher_assignments DROP COLUMN block_id"
+                    ))
+                    conn.commit()
+                    print("✅ teacher_assignments.block_id column removed")
+        except Exception as e:
+            print(f"⚠️  block_id removal skipped: {e}")
+
+        # Step 4: add new unique constraint if missing
+        try:
+            with db.engine.connect() as conn:
+                conn.execute(text(
+                    "ALTER TABLE teacher_assignments "
+                    "ADD CONSTRAINT uq_teacher_assignment "
+                    "UNIQUE (instructor_id, subject_id, section_id)"
+                ))
+                conn.commit()
+                print("✅ uq_teacher_assignment constraint added")
+        except Exception:
+            pass  # Already exists
+
+        # Step 5: drop stale visible_to_blocks column from problems if it still exists
+        try:
+            with db.engine.connect() as conn:
+                result = conn.execute(text(
+                    "SELECT COUNT(*) FROM information_schema.COLUMNS "
+                    "WHERE TABLE_NAME='problems' AND COLUMN_NAME='visible_to_blocks' "
+                    "AND TABLE_SCHEMA=DATABASE()"
+                ))
+                if result.scalar() > 0:
+                    conn.execute(text("ALTER TABLE problems DROP COLUMN `visible_to_blocks`"))
+                    conn.commit()
+                    print("✅ problems.visible_to_blocks stale column removed")
+        except Exception as e:
+            print(f"⚠️ visible_to_blocks removal skipped: {e}")
+
+        # db.create_all() used to be called right here — moved to the top of
+        # this same `with app.app_context():` block, see the comment up there.
+
+        # Auto-migration for users table
+        try:
+            inspector = inspect(db.engine)
+            user_columns = [col['name'] for col in inspector.get_columns('users')]
+            if 'full_name' not in user_columns:
+                with db.engine.connect() as conn:
+                    conn.execute(text("ALTER TABLE users ADD COLUMN full_name VARCHAR(200) DEFAULT NULL"))
+                    conn.commit()
+                    print("✅ Added column 'full_name' to users table")
+            # password-change support: additive, existing rows get the harmless defaults
+            # (nobody is flagged and no session is invalidated by the upgrade itself)
+            for col, ddl in (('must_change_password', "BOOLEAN NOT NULL DEFAULT 0"),
+                             ('token_version', "INT NOT NULL DEFAULT 0"),
+                             ('password_changed_at', "DATETIME NULL"),
+                             ('last_login_at', "DATETIME NULL")):
+                if col not in user_columns:
+                    with db.engine.connect() as conn:
+                        conn.execute(text(f"ALTER TABLE users ADD COLUMN {col} {ddl}"))
+                        conn.commit()
+                        print(f"✅ Added column '{col}' to users table")
+        except Exception as e:
+            print(f"⚠️ Users migration check skipped: {e}")
+
+        # recorded per-test results on submissions (additive; older rows stay NULL)
+        try:
+            _sub_cols = [col['name'] for col in inspect(db.engine).get_columns('submissions')]
+            if 'result_details' not in _sub_cols:
+                with db.engine.connect() as conn:
+                    conn.execute(text("ALTER TABLE submissions ADD COLUMN result_details JSON NULL"))
+                    conn.commit()
+                    print("✅ Added column 'result_details' to submissions table")
+        except Exception as e:
+            print(f"⚠️ Submissions migration check skipped: {e}")
+
+        # ownership token on a graded-attempt reservation (additive; older rows
+        # stay NULL -- they were never owned by a token-based claim anyway)
+        try:
+            _slot_cols = [col['name'] for col in inspect(db.engine).get_columns('submission_slots')]
+            if 'owner_token' not in _slot_cols:
+                with db.engine.connect() as conn:
+                    conn.execute(text("ALTER TABLE submission_slots ADD COLUMN owner_token VARCHAR(36) NULL"))
+                    conn.commit()
+                    print("✅ Added column 'owner_token' to submission_slots table")
+        except Exception as e:
+            print(f"⚠️ Submission_slots migration check skipped: {e}")
+
+        # one graded attempt PER LANGUAGE: add the language column, then swap the unique key
+        # (new key first, old key second, so the user_id foreign key always has an index)
+        try:
+            _slot_cols = [col['name'] for col in inspect(db.engine).get_columns('submission_slots')]
+            if 'language' not in _slot_cols:
+                with db.engine.connect() as conn:
+                    conn.execute(text("ALTER TABLE submission_slots ADD COLUMN language VARCHAR(10) NULL"))
+                    conn.commit()
+                    print("✅ Added column 'language' to submission_slots table")
+            ensure_slot_language_unique()
+        except Exception as e:
+            print(f"⚠️ Submission_slots language migration skipped: {e}")
+
+        # Auto-migration for Problem table
+        try:
+            inspector = inspect(db.engine)
+            problem_columns = [col['name'] for col in inspector.get_columns('problems')]
+
+            def add_col_if_missing(col_name, col_def):
+                if col_name not in problem_columns:
+                    with db.engine.connect() as conn:
+                        conn.execute(text(f"ALTER TABLE problems ADD COLUMN {col_name} {col_def}"))
+                        conn.commit()
+                        print(f"✅ Added column '{col_name}' to problems table")
+
+            add_col_if_missing('problem_type', "ENUM('coding', 'debugging') DEFAULT 'coding'")
+            add_col_if_missing('languages', "JSON DEFAULT ('[\"python\"]')")
+            add_col_if_missing('is_event_quest', "BOOLEAN DEFAULT 0")
+            add_col_if_missing('visible_to_sections', "JSON DEFAULT ('[]')")
+            add_col_if_missing('hints', "JSON DEFAULT ('[]')")
+            add_col_if_missing('tags', "JSON DEFAULT ('[]')")
+            add_col_if_missing('prerequisites', "JSON DEFAULT ('[]')")
+            add_col_if_missing('estimated_time', "VARCHAR(50)")
+            add_col_if_missing('partial_credit', "INTEGER DEFAULT 100")
+            add_col_if_missing('language_rule', "VARCHAR(10) NOT NULL DEFAULT 'optional'")
+            add_col_if_missing('auto_grade', "BOOLEAN DEFAULT 1")
+            add_col_if_missing('plagiarism_threshold', "FLOAT DEFAULT 0.85")
+            add_col_if_missing('due_date', "DATETIME DEFAULT NULL")
+            add_col_if_missing('login_attempts', "INT DEFAULT 0")
+            add_col_if_missing('locked_until', "DATETIME DEFAULT NULL")
+        except Exception as e:
+            print(f"⚠️ Migration check skipped: {e}")
+
+        # Seed default config
+        if not SystemConfig.query.first():
+            for k,v in {'execution_timeout':'5','enabled_languages':'python,java,csharp','xp_multiplier':'1.0','plagiarism_threshold':'0.85','maintenance_mode':'false'}.items():
+                db.session.add(SystemConfig(key=k, value=v))
+            db.session.commit()
+
+        ensure_award_pair_unique()
+
+        print("✅ DB Initialized | 🔐 JWT | 🎮 Gamification | 📚 Sections | 🛡️ Admin System")
+
+
+AWARD_PAIR = ('user_id', 'achievement_id')
+
+
+SLOT_OLD_UNIQUE = 'uq_submission_slot_user_problem'
+SLOT_NEW_UNIQUE = 'uq_submission_slot_user_problem_lang'
+
+
+def _slot_unique_names(insp):
+    names = {u['name'] for u in insp.get_unique_constraints('submission_slots')}
+    names |= {i['name'] for i in insp.get_indexes('submission_slots') if i.get('unique')}
+    return names
+
+
+def slot_language_unique_present(insp):
+    """True when the per-language unique key exists and the old one-per-quest key is gone."""
+    names = _slot_unique_names(insp)
+    # sqlite cannot drop a table-level unique key in place; only MySQL (the real database) is held to this
+    return SLOT_NEW_UNIQUE in names and (SLOT_OLD_UNIQUE not in names or db.engine.dialect.name != 'mysql')
+
+
+def ensure_slot_language_unique():
+    """Part of the EXPLICIT upgrade. Only touches submission_slots keys; no row is changed or deleted."""
+    insp = inspect(db.engine)
+    names = _slot_unique_names(insp)
+    with db.engine.connect() as conn:
+        if SLOT_NEW_UNIQUE not in names:
+            conn.execute(text(f"CREATE UNIQUE INDEX {SLOT_NEW_UNIQUE} ON submission_slots (user_id, problem_id, language)"))
+        if SLOT_OLD_UNIQUE in names and db.engine.dialect.name == 'mysql':
+            conn.execute(text(f"ALTER TABLE submission_slots DROP INDEX {SLOT_OLD_UNIQUE}"))
+        conn.commit()
+    print("✅ submission_slots: UNIQUE(user_id, problem_id, language) in place")
+
+
+def award_pair_unique_present(insp):
+    """True only when the table really enforces uniqueness of exactly (user_id, achievement_id): a unique
+    constraint, unique index or primary key over exactly those two columns, whatever it is called, and with no
+    column prefix / filter condition. Two separate unique columns, a 3-column unique index, or a plain
+    index do NOT count."""
+    want = set(AWARD_PAIR)
+    try:
+        if set((insp.get_pk_constraint('user_achievements') or {}).get('constrained_columns') or []) == want:
+            return True
+        for uc in insp.get_unique_constraints('user_achievements'):
+            if set(uc.get('column_names') or []) == want and len(uc['column_names']) == 2:
+                return True
+        for ix in insp.get_indexes('user_achievements'):
+            cols = ix.get('column_names') or []
+            opts = ix.get('dialect_options') or {}
+            if (ix.get('unique') and len(cols) == 2 and set(cols) == want
+                    and not opts.get('sqlite_where') and not opts.get('postgresql_where')
+                    and not opts.get('mysql_length')):
+                return True
+    except Exception:
+        return False
+    return False
+
+
+def award_pair_duplicate_summary():
+    """READ-ONLY, aggregate counts only (no user ids): duplicate (user, achievement) pairs in user_achievements."""
+    with app.app_context():
+        r = db.session.execute(text(
+            "SELECT COUNT(*), COALESCE(SUM(c - 1), 0) FROM ("
+            "SELECT COUNT(*) AS c FROM user_achievements GROUP BY user_id, achievement_id HAVING COUNT(*) > 1) d")).fetchone()
+        db.session.rollback()
+        return {"duplicate_pairs": int(r[0] or 0), "excess_rows": int(r[1] or 0)}
+
+
+def ensure_award_pair_unique():
+    """Part of the EXPLICIT upgrade only. Adds UNIQUE(user_id, achievement_id) when it is safe: never deletes,
+    merges or rewrites a row. If duplicate pairs exist it changes nothing and returns 'blocked_duplicates'
+    (the reviewed preservation design in docs/ACHIEVEMENT_PRESERVATION_DESIGN.md is required first).
+    DDL commits by itself on MySQL; it is a single statement, so it either exists afterwards or not at all."""
+    with app.app_context():
+        if award_pair_unique_present(inspect(db.engine)):
+            return 'present'
+        dup = award_pair_duplicate_summary()
+        if dup["duplicate_pairs"]:
+            print(f"⛔ user_achievements has {dup['duplicate_pairs']} duplicate (user, achievement) pair(s) "
+                  f"({dup['excess_rows']} extra rows). The uniqueness constraint was NOT added and no row was touched. "
+                  "See docs/ACHIEVEMENT_PRESERVATION_DESIGN.md.")
+            return 'blocked_duplicates'
+        with db.engine.connect() as conn:
+            if db.engine.dialect.name == 'sqlite':
+                conn.execute(text("CREATE UNIQUE INDEX uq_user_achievement ON user_achievements (user_id, achievement_id)"))
+            else:
+                conn.execute(text("ALTER TABLE user_achievements ADD CONSTRAINT uq_user_achievement "
+                                  "UNIQUE (user_id, achievement_id)"))
+            conn.commit()
+        print("✅ user_achievements: UNIQUE(user_id, achievement_id) added")
+        return 'added'
+
+
+def schema_status():
+    """READ-ONLY: what the database is missing compared with the models. Never writes."""
+    from sqlalchemy import inspect as _inspect
+    missing_tables, missing_columns, missing_constraints = [], {}, {}
+    with app.app_context():
+        insp = _inspect(db.engine)
+        existing = set(insp.get_table_names())
+        for name, table in db.metadata.tables.items():
+            if name not in existing:
+                missing_tables.append(name)
+                continue
+            have = {c['name'] for c in insp.get_columns(name)}
+            lacking = [c.name for c in table.columns if c.name not in have]
+            if lacking:
+                missing_columns[name] = lacking
+        if 'submission_slots' in existing and not slot_language_unique_present(insp):
+            missing_constraints['submission_slots'] = ['UNIQUE(user_id, problem_id, language)']
+        if 'user_achievements' in existing and not award_pair_unique_present(insp):
+            missing_constraints['user_achievements'] = ['UNIQUE(user_id, achievement_id)']
+    return {"up_to_date": not missing_tables and not missing_columns and not missing_constraints,
+            "missing_tables": missing_tables, "missing_columns": missing_columns,
+            "missing_constraints": missing_constraints}
+
+
+def describe_database_target():
+    """host/database of the configured database, without credentials."""
+    from sqlalchemy.engine import make_url
+    u = make_url(app.config['SQLALCHEMY_DATABASE_URI'])
+    return f"{u.drivername}://{u.host or ''}{':' + str(u.port) if u.port else ''}/{u.database or ''}"
+
+
+SCHEMA_AUTO = os.environ.get('FORGE_AUTO_SCHEMA', '').strip().lower() in ('1', 'true', 'yes')
+SCHEMA_STATE = {"checked": False, "up_to_date": None, "detail": None}
+
+if SCHEMA_AUTO:
+    # explicit opt-in (test/demo databases): the old behaviour
+    apply_schema_and_seed()
+    SCHEMA_STATE.update(checked=True, up_to_date=True)
+else:
+    try:
+        _st = schema_status()
+        SCHEMA_STATE.update(checked=True, up_to_date=_st["up_to_date"], detail=_st)
+        if _st["up_to_date"]:
+            print("DB schema is up to date (read-only check; nothing was changed).")
+        else:
+            print("DATABASE SCHEMA IS OUT OF DATE. The app did NOT change it. Missing: "
+                  f"tables={_st['missing_tables']} columns={_st['missing_columns']} constraints={_st['missing_constraints']}. "
+                  "Back up, then run: python manage_schema.py upgrade")
+    except Exception as _e:
+        SCHEMA_STATE.update(checked=False, up_to_date=None, detail={"error": type(_e).__name__})
+        print(f"Could not check the database schema (read-only): {type(_e).__name__}")
+
+
+@app.before_request
+def _block_while_schema_outdated():
+    # a stale schema would make queries fail halfway; answer clearly instead
+    if SCHEMA_STATE.get("up_to_date") is False and request.path.startswith('/api/') and request.path != '/api/health':
+        return jsonify({"error": "schema_upgrade_required",
+                        "message": "The database needs an administrator-run upgrade before the app can be used."}), 503
+    return None
+
 
 if __name__ == '__main__':
     print("🚀 Forge.dev Backend | 📊 System-Ready | 🧪 Sandbox Active")
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    # FLASK_DEBUG defaults on for local dev; the production container sets it to
+    # 'false' explicitly (the Werkzeug debugger lets anyone who can reach it run
+    # arbitrary code, so it must never be on for something exposed publicly) and
+    # runs behind gunicorn instead of this dev server anyway — see docker-compose.
+    debug_mode = os.environ.get('FLASK_DEBUG', 'true').lower() == 'true' and not IS_PRODUCTION
+    app.run(debug=debug_mode, host='0.0.0.0', port=5000)

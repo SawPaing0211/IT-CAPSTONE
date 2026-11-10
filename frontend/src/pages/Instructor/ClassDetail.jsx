@@ -1,144 +1,78 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-
-// Import your existing components (adjust paths as needed)
 import CourseMaterials from './CourseMaterials'
 import ProblemManagement from './ProblemManagement'
 import Announcements from './Announcements'
 import PlagiarismCheck from './PlagiarismCheck'
 import Analytics from './Analytics'
+import ModuleIcon from './ModuleIcon'
+import { API_BASE, authFetch } from '../../api/client'
+import './InstructorModules.css'
+import InstructorBackButton from '../../components/InstructorBackButton'
 
 export default function ClassDetail() {
   const navigate = useNavigate()
-  const { id } = useParams() 
+  const { id } = useParams()
   const [activeTab, setActiveTab] = useState('lessons')
   const [classInfo, setClassInfo] = useState(null)
-  const [students, setStudents] = useState([])
-  const [stats, setStats] = useState({ total: 0, problems: 0, avg: 0, atRisk: 0 })
+  const [atRisk, setAtRisk] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [search, setSearch] = useState('')
+  const [error, setError] = useState(false)
+  const [rosterError, setRosterError] = useState(false)
+  const [reload, setReload] = useState(0)
+  const [editing, setEditing] = useState(false)
 
   useEffect(() => {
-    const fetchClassDetail = async () => {
+    const controller = new AbortController()
+    let current = true
+    async function load() {
+      setLoading(true); setError(false); setAtRisk(null); setRosterError(false)
       try {
-        const token = localStorage.getItem('token')
-        const headers = { 'Authorization': `Bearer ${token}` }
-
-        // ✅ Fetch SINGLE class details (not all classes)
-        const classRes = await fetch(`http://localhost:5000/api/instructor/classes/${id}`, { headers })
-        if (classRes.ok) {
-          const data = await classRes.json()
-          setClassInfo(data)
-        }
-
-        // Fetch students in this class
-        const studentsRes = await fetch(`http://localhost:5000/api/admin/blocks/${id}/students`, { headers })
-        if (studentsRes.ok) {
-          const data = await studentsRes.json()
-          setStudents(data)
-          const atRisk = data.filter(s => s.xp < 100).length
-          setStats({
-            total: data.length,
-            problems: 0, // You can fetch this from backend if needed
-            avg: 0,
-            atRisk
-          })
-        }
-      } catch (err) {
-        console.error('Failed to fetch class detail:', err)
-      } finally {
-        setLoading(false)
-      }
+        const response = await authFetch(`${API_BASE}/api/instructor/classes/${id}`, { signal: controller.signal })
+        if (!response.ok) throw new Error('Class unavailable')
+        const data = await response.json()
+        if (!data?.id || data.id !== Number(id)) throw new Error('Invalid class')
+        if (current) setClassInfo(data)
+        try {
+          const roster = await authFetch(`${API_BASE}/api/admin/sections/${id}/students`, { signal: controller.signal })
+          if (!roster.ok) throw new Error('Roster unavailable')
+          const students = await roster.json()
+          if (!Array.isArray(students)) throw new Error('Invalid roster')
+          if (current) setAtRisk(students.filter(student => student.xp < 100).length)
+        } catch { if (current) setRosterError(true) }
+      } catch { if (current) setError(true) }
+      finally { if (current) setLoading(false) }
     }
-    fetchClassDetail()
-  }, [id]) // ✅ Dependency on id
+    load()
+    return () => { current = false; controller.abort() }
+  }, [id, reload])
 
-  const filtered = students.filter(s =>
-    s.username.toLowerCase().includes(search.toLowerCase()) ||
-    s.email.toLowerCase().includes(search.toLowerCase())
-  )
-
-  const getStatus = (xp) => {
-    if (xp >= 500) return 'On Track'
-    if (xp >= 100) return 'Needs Attention'
-    return 'At Risk'
-  }
-
-  // Tabs configuration
   const tabs = [
-    { id: 'lessons', label: '📚 Lessons', component: <CourseMaterials classId={id} /> },
-    { id: 'problems', label: '📝 Problems', component: <ProblemManagement classId={id} /> },
-    { id: 'announcements', label: '📢 Announcements', component: <Announcements classId={id} /> },
-    { id: 'plagiarism', label: '🔍 Plagiarism', component: <PlagiarismCheck classId={id} /> },
-    { id: 'analytics', label: '📊 Analytics', component: <Analytics classId={id} /> },
+    { id: 'lessons', label: 'Modules', icon: 'book' },
+    { id: 'problems', label: 'Activities', icon: 'file' },
+    { id: 'announcements', label: 'Announcements', icon: 'announcement' },
+    { id: 'plagiarism', label: 'Plagiarism', icon: 'search' },
+    { id: 'analytics', label: 'Analytics', icon: 'chart' },
   ]
+  if (loading) return <div className="ir-surface ir-empty" role="status">Loading class data…</div>
+  if (error || !classInfo) return <div className="ir-surface ir-empty" role="alert"><h1>Unable to load this class</h1><p>Check your connection or class assignment, then try again.</p><div className="im-inline-actions"><button className="ir-secondary" onClick={() => setReload(value => value + 1)}>Retry</button><InstructorBackButton onClick={() => navigate('/instructor/classes')}>Back to classes</InstructorBackButton></div></div>
 
-  const activeComponent = tabs.find(t => t.id === activeTab)?.component
-
-  if (loading) return (
-    <div className="text-center py-20 text-slate-400">
-      <div className="animate-spin rounded-full h-12 w-12 border-4 border-blue-600 border-t-transparent mx-auto mb-4"></div>
-      Loading class data...
-    </div>
-  )
-
-  if (!classInfo) return (
-    <div className="text-center py-20 text-red-400">
-      Failed to load class information
-    </div>
-  )
-
-  return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <button onClick={() => navigate('/instructor/classes')} className="text-slate-400 hover:text-white transition">
-            ← Back
-          </button>
-          <div>
-            <div className="flex items-center gap-3">
-              <h1 className="text-3xl font-bold text-white">
-                {classInfo.section_code}
-              </h1>
-              <span className="px-3 py-1 bg-green-600/20 text-green-400 rounded-full text-xs font-bold border border-green-600/30">
-                Active
-              </span>
-            </div>
-            <p className="text-slate-400">{classInfo.name || classInfo.subjects?.join(', ')}</p>
-          </div>
-        </div>
-        {/* ✅ Removed "+ Add Student" button */}
-        <div className="flex gap-3">
-          <button className="px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 font-medium transition">
-            📊 View Analytics
-          </button>
-        </div>
-      </div>
-
-      {/* Tabs Navigation */}
-      <div className="border-b border-slate-800">
-        <div className="flex gap-2 overflow-x-auto pb-2">
-          {tabs.map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`px-5 py-2.5 rounded-xl text-sm font-medium transition whitespace-nowrap ${
-                activeTab === tab.id 
-                  ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/30' 
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Tab Content */}
-      <div className="min-h-[400px]">
-        {activeComponent}
-      </div>
-    </div>
-  )
+  return <div className="im-class-detail">
+    {!editing && <>
+      <nav className="im-breadcrumb" aria-label="Class location"><button onClick={() => navigate('/instructor/classes')}>My Classes</button><span>/</span><span>{classInfo.section_no}</span></nav>
+      <header className="im-class-heading"><InstructorBackButton onClick={() => navigate('/instructor/classes')} /><div><h1>{classInfo.subjects?.join(' · ') || classInfo.name}</h1><p>Class {classInfo.section_no} · {classInfo.semester || 'Semester not specified'}{typeof classInfo.is_active === 'boolean' && <span className={`im-status ${classInfo.is_active ? 'published' : 'draft'}`}>{classInfo.is_active ? 'Active' : 'Inactive'}</span>}</p></div></header>
+      <dl className="ir-surface im-summary-strip">{[
+        { label: classInfo.student_count === 1 ? 'Student' : 'Students', value: classInfo.student_count, icon: 'users' },
+        { label: classInfo.problem_count === 1 ? 'Quest' : 'Quests', value: classInfo.problem_count, icon: 'file' },
+        { label: 'At risk', value: atRisk, icon: 'warning', title: 'Existing indicator: students with less than 100 XP.' },
+      ].map(item => <div key={item.label} title={item.title}><ModuleIcon name={item.icon} /><dd>{Number.isFinite(item.value) ? item.value.toLocaleString() : '—'}</dd><dt>{item.label}</dt></div>)}</dl>
+      {rosterError && <p className="im-message im-error" role="alert">At-risk data is unavailable. <button className="ir-text-action" onClick={() => setReload(value => value + 1)}>Retry</button></p>}
+      <nav className="im-class-tabs" aria-label="Class workspace">{tabs.map(tab => <button key={tab.id} aria-current={activeTab === tab.id ? 'page' : undefined} onClick={() => setActiveTab(tab.id)}><ModuleIcon name={tab.icon} />{tab.label}</button>)}</nav>
+    </>}
+    {activeTab === 'lessons' && <CourseMaterials key={id} classId={id} subjectId={classInfo.subject_id} classInfo={classInfo} onEditingChange={setEditing} />}
+    {activeTab === 'problems' && <ProblemManagement key={id} classId={id} subjectId={classInfo.subject_id} />}
+    {activeTab === 'announcements' && <Announcements classId={id} classInfo={classInfo} onEditingChange={setEditing} />}
+    {activeTab === 'plagiarism' && <PlagiarismCheck key={id} classId={id} />}
+    {activeTab === 'analytics' && <Analytics key={id} classId={id} />}
+  </div>
 }
