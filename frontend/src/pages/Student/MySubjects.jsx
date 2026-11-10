@@ -1,161 +1,164 @@
-import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+// subjects list — first thing student sees after login, shows their
+// enrolled courses as cards, click one to go into that course
+//
+// used to fetch user info (/api/auth/me) and stats (/api/student/stats)
+// itself, but StudentDashboard.jsx ALREADY has both of those (user comes
+// from App.jsx as a prop, heroStats gets fetched once in StudentDashboard).
+// so this was hitting the same 2 endpoints a second time for no reason —
+// every page load fired me/stats twice as much as needed. fixed by just
+// accepting user + stats as props instead of re-fetching. only fetch left
+// here is /api/student/subjects since nothing else already has that.
 
-export default function MySubjects({ onSelectSubject }) {
+import { useState, useEffect, useMemo } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { API_BASE, authFetch } from '../../api/client'
+import { CourseCard } from './components/CourseGrid'
+
+export default function MySubjects({ onSelectSubject, user, stats }) {
   const navigate = useNavigate()
   const [subjects, setSubjects] = useState([])
   const [loading, setLoading] = useState(true)
-  const [user, setUser] = useState(null)
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const token = localStorage.getItem('token')
-        
-        // Get current user info
-        const userRes = await fetch('http://localhost:5000/api/auth/me', {
-          headers: { 'Authorization': `Bearer ${token}` }
-        })
-        const userData = await userRes.json()
-        setUser(userData)
-        
-        // Get enrolled subjects
-        const subjectsRes = await fetch('http://localhost:5000/api/student/subjects', {
-          headers: { 'Authorization': `Bearer ${token}` }
-        })
-        const subjectsData = await subjectsRes.json()
-        setSubjects(subjectsData)
-      } catch (err) {
-        console.error('Failed to load subjects:', err)
-      } finally {
-        setLoading(false)
-      }
+  const [failed, setFailed] = useState(false)
+  const [semester, setSemester] = useState('all')
+
+  // Fetch the student's enrolled subjects. A failed request shows a retry
+  // card instead of the "not enrolled" message, which would be wrong.
+  const fetchSubjects = async () => {
+    setLoading(true)
+    setFailed(false)
+    try {
+      const token = localStorage.getItem('token')
+      const subjectsRes = await authFetch(`${API_BASE}/api/student/subjects`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      if (!subjectsRes.ok) throw new Error(`HTTP ${subjectsRes.status}`)
+      const subjectsData = await subjectsRes.json()
+      setSubjects(Array.isArray(subjectsData) ? subjectsData : [])
+    } catch (err) {
+      console.error('Failed to load subjects:', err)
+      setFailed(true)
+    } finally {
+      setLoading(false)
     }
-    fetchData()
-  }, [])
+  }
 
+  useEffect(() => { fetchSubjects() }, [])
+
+  // semester filter pills, only when the student has courses in 2+ semesters
+  const semesters = useMemo(() => [...new Set(subjects.map(s => s.semester).filter(Boolean))], [subjects])
+  const visible = semester === 'all' ? subjects : subjects.filter(s => s.semester === semester)
+
+  const openSubject = (subject) => {
+    // Build the subject payload and hand it up to the dashboard
+    const subjectData = {
+      id: subject.id,
+      name: subject.name,
+      section_id: subject.section_id,
+      section_no: subject.section_no,
+      semester: subject.semester,
+      instructor: subject.instructor,
+      quests_total: subject.quests_total,
+      quests_done: subject.quests_done,
+    }
+    if (onSelectSubject) {
+      onSelectSubject(subjectData)
+    } else {
+      navigate(`/student/subject/${subject.section_id}`)
+    }
+  }
+
+  // Show skeleton cards while subjects are loading, shaped like the real grid below
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-[60vh]">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-16 w-16 border-4 border-purple-600 border-t-transparent mx-auto mb-4"></div>
-          <p className="text-purple-300 font-mono text-lg">Loading your subjects...</p>
+      <div className="p-4 sm:p-6 max-w-6xl mx-auto space-y-6 animate-pulse" aria-busy="true">
+        <div className="h-8 w-48 bg-slate-800/80 rounded-lg" />
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {[...Array(3)].map((_, i) => <div key={i} className="h-[190px] rounded-xl bg-slate-900/70 border border-slate-800" />)}
         </div>
       </div>
     )
   }
 
+  if (failed) {
+    return (
+      <div className="p-4 sm:p-6 max-w-4xl mx-auto">
+        <div className="rounded-xl border border-amber-300/25 bg-gradient-to-br from-[#0f1836] to-[#0a1024] p-10 text-center">
+          <h2 className="font-cinzel text-2xl font-bold text-white mb-2">The scroll would not open</h2>
+          <p role="alert" className="text-slate-300 mb-5">We could not load your subjects. Check your connection and try again.</p>
+          <button onClick={fetchSubjects} className="px-5 py-2.5 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-sm font-bold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-300">Try again</button>
+        </div>
+      </div>
+    )
+  }
+
+  // Show an empty state when the student isn't enrolled in any subjects
   if (subjects.length === 0) {
     return (
-      <div className="p-6 max-w-4xl mx-auto">
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-12 text-center">
-          <div className="text-6xl mb-4">📚</div>
-          <h2 className="text-2xl font-bold text-white mb-2">No Subjects Enrolled</h2>
-          <p className="text-slate-400 mb-6">You haven't been assigned to any subjects yet.</p>
+      <div className="p-4 sm:p-6 max-w-4xl mx-auto">
+        <div className="rounded-xl border border-amber-300/25 bg-gradient-to-br from-[#0f1836] to-[#0a1024] p-10 text-center">
+          <h2 className="font-cinzel text-2xl font-bold text-white mb-2">No Subjects Enrolled</h2>
+          <p className="text-slate-300 mb-2">You haven't been assigned to any subjects yet.</p>
           <p className="text-slate-500 text-sm">Contact your administrator to be enrolled in classes.</p>
         </div>
       </div>
     )
   }
 
+  const stat = (value, label, color) => (
+    <div className="rounded-xl border border-amber-300/20 bg-gradient-to-br from-[#0f1836] to-[#0a1024] p-3 sm:p-4 text-center">
+      <div className={`font-cinzel text-xl sm:text-3xl font-bold ${color}`}>{value}</div>
+      <div className="text-[9px] sm:text-[10px] font-bold text-slate-500 uppercase tracking-[0.18em] mt-1 truncate">{label}</div>
+    </div>
+  )
+
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-6">
+    <div className="p-4 sm:p-6 max-w-6xl mx-auto space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
-          <h1 className="text-3xl font-bold text-white flex items-center gap-3">
-            <span className="text-4xl">🎓</span>
+          <h1 className="font-cinzel text-2xl sm:text-3xl font-bold text-white flex items-center gap-3">
+            <span className="w-2.5 h-2.5 rotate-45 bg-amber-300 shrink-0" aria-hidden="true" />
             My Subjects
           </h1>
-          <p className="text-slate-400 mt-1">
-            Welcome back, <span className="text-purple-400 font-semibold">{user?.username}</span>! 
-            Here are your enrolled subjects.
+          <p className="text-slate-400 mt-1 text-sm sm:text-base">
+            Welcome back, <span className="text-amber-200 font-semibold">{user?.full_name || user?.username}</span>. Here are your enrolled subjects.
           </p>
         </div>
-        <div className="bg-gradient-to-r from-purple-900/30 to-pink-900/30 border border-purple-600/30 rounded-xl px-6 py-3">
-          <p className="text-sm text-purple-300 font-bold">{subjects.length} {subjects.length === 1 ? 'Subject' : 'Subjects'} Enrolled</p>
+        <div className="self-start sm:self-auto shrink-0 rounded-full border border-amber-300/30 bg-[#0b1326] px-4 py-2">
+          <p className="text-[11px] font-bold tracking-[0.15em] uppercase text-amber-200 whitespace-nowrap">{subjects.length} {subjects.length === 1 ? 'Subject' : 'Subjects'} Enrolled</p>
         </div>
       </div>
 
-            {/* Subjects Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {subjects.map((subject) => (
-          <div
-            key={subject.id}
-            onClick={() => {
-            // Pass BOTH subject and block info
-            const subjectData = {
-              id: subject.id,              // SUBJECT ID
-              name: subject.name,          // Subject name
-              block_id: subject.block_id,  // Block ID
-              block_code: subject.block_code,
-              semester: subject.semester,
-              instructor: subject.instructor
-            }
-            
-            if (onSelectSubject) {
-              onSelectSubject(subjectData) 
-            } else {
-              navigate(`/student/subject/${subject.block_id}`)
-            }
-          }}
-            className="group bg-gradient-to-br from-slate-900 to-slate-800 border border-slate-700 rounded-2xl p-6 hover:border-purple-500 hover:shadow-lg hover:shadow-purple-600/20 transition-all duration-300 cursor-pointer transform hover:scale-105"
-          >
-            {/* Subject Icon & Badge */}
-            <div className="flex items-start justify-between mb-4">
-              <div className="w-14 h-14 bg-gradient-to-br from-purple-600 to-pink-600 rounded-xl flex items-center justify-center text-2xl shadow-lg group-hover:scale-110 transition-transform">
-                📖
-              </div>
-              <span className="px-3 py-1 bg-purple-600/20 border border-purple-600/40 rounded-full text-xs font-bold text-purple-300">
-                {subject.semester || 'Current'}
-              </span>
-            </div>
+      {semesters.length > 1 && (
+        <div className="flex flex-wrap gap-2" role="group" aria-label="Filter by semester">
+          {['all', ...semesters].map(key => (
+            <button
+              key={key}
+              onClick={() => setSemester(key)}
+              aria-pressed={semester === key}
+              className={`min-h-[44px] sm:min-h-0 px-4 py-2 rounded-full border text-xs font-bold tracking-wide transition focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-300 ${
+                semester === key
+                  ? 'bg-gradient-to-b from-violet-500 to-violet-700 border-violet-300/60 text-white shadow-[0_0_18px_-4px_rgba(139,92,246,0.7)]'
+                  : 'bg-[#0b1224] border-slate-700 text-slate-300 hover:border-amber-300/40'
+              }`}
+            >{key === 'all' ? 'All Courses' : key}</button>
+          ))}
+        </div>
+      )}
 
-            {/* Subject Name (Big Text - this is now the main heading) */}
-            <h3 className="text-xl font-bold text-white mb-2 group-hover:text-purple-300 transition">
-              {subject.name}
-            </h3>
-            
-            {/* Block Code Badge (Small Text) */}
-            <div className="mb-3">
-              <span className="px-2.5 py-0.5 bg-slate-700 rounded text-xs font-bold text-slate-300">
-                Block {subject.block_code}
-              </span>
-            </div>
-            
-            {/* Instructor */}
-            <div className="flex items-center gap-2 pt-2 border-t border-slate-700">
-              <span className="text-xs text-slate-500">👨‍🏫 Instructor</span>
-              <span className="text-xs text-slate-400">•</span>
-              <span className="text-xs text-slate-300 font-medium">
-                {subject.instructor || 'TBA'}
-              </span>
-            </div>
-
-            {/* Action Button */}
-            <div className="mt-6 pt-4 border-t border-slate-700">
-              <button className="w-full py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-lg text-white font-bold text-sm transition shadow-lg shadow-purple-600/20 group-hover:shadow-purple-600/40">
-                View Quest Log →
-              </button>
-            </div>
-          </div>
+      {/* Subjects Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+        {visible.map((subject) => (
+          <CourseCard key={subject.id} subject={subject} onOpen={openSubject} />
         ))}
       </div>
 
       {/* Quick Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-8">
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 text-center">
-          <div className="text-3xl font-bold text-purple-400">{subjects.length}</div>
-          <div className="text-xs text-slate-500 uppercase tracking-wider mt-1">Total Subjects</div>
-        </div>
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 text-center">
-          <div className="text-3xl font-bold text-green-400">0</div>
-          <div className="text-xs text-slate-500 uppercase tracking-wider mt-1">Quests Completed</div>
-        </div>
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 text-center">
-          <div className="text-3xl font-bold text-yellow-400">0</div>
-          <div className="text-xs text-slate-500 uppercase tracking-wider mt-1">Total XP Earned</div>
-        </div>
+      <div className="grid grid-cols-3 gap-2 sm:gap-4 mt-6 sm:mt-8">
+        {stat(subjects.length, 'Total Subjects', 'text-violet-300')}
+        {stat(stats?.quests_done ?? stats?.accepted_submissions ?? 0, 'Quests Done', 'text-emerald-300')}
+        {stat(stats?.total_xp ?? 0, 'Total XP', 'text-amber-300')}
       </div>
     </div>
   )

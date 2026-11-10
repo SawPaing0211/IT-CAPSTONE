@@ -1,0 +1,928 @@
+{
+  "date": "2026-10-23",
+  "status": "REVIEW CANDIDATES ONLY — not approved for integration",
+  "tool": "built-in image_gen",
+  "selectedMedalFiles": 30,
+  "selectedLandingRasterLayers": 4,
+  "semantics": "Exact category|requirement_type|requirement_value; missing/unsupported/unknown uses medal-fallback. is_earned selects variant. No earning-rule changes.",
+  "references": {
+    "medals": "../../design-references/2026-10-23/achievement-medal-approved-concept.png",
+    "landing": "../../design-references/2026-10-23/landing-party-approved-reference.png"
+  },
+  "medals": [
+    {
+      "id": "medal-first-quest",
+      "name": "First Steps",
+      "category": "student",
+      "requirement_type": "quest_count",
+      "requirement_value": 1,
+      "motif": "a single large four-point compass star",
+      "approval": "pending owner visual review",
+      "states": {
+        "earned": {
+          "file": "medals/medal-first-quest--earned.png",
+          "bytes": 1231148,
+          "sha256": "c99cce53bf302ebc3d35022315ad00eb05ddf32cc49ccb1bc0313d096de90d7b",
+          "image": {
+            "width": 1254,
+            "height": 1254,
+            "transparentPixels": 995787,
+            "partialAlphaPixels": 575983,
+            "opaquePixels": 746,
+            "nontransparentBorderPixels": 12,
+            "meaningfulBorderPixels": 0,
+            "visibleBounds": [
+              200,
+              93,
+              1049,
+              1131
+            ]
+          },
+          "fileExists": true
+        },
+        "locked": {
+          "file": "medals/medal-first-quest--locked.png",
+          "bytes": 1210364,
+          "sha256": "a076871823258b003b90f2ca9287b77ccff3c48af263ad1bf13d21a9d3f79547",
+          "image": {
+            "width": 1254,
+            "height": 1254,
+            "transparentPixels": 990037,
+            "partialAlphaPixels": 581427,
+            "opaquePixels": 1052,
+            "nontransparentBorderPixels": 101,
+            "meaningfulBorderPixels": 0,
+            "visibleBounds": [
+              199,
+              91,
+              1050,
+              1132
+            ]
+          },
+          "fileExists": true
+        }
+      }
+    },
+    {
+      "id": "medal-quest-master",
+      "name": "Quest Master",
+      "category": "student",
+      "requirement_type": "quest_count",
+      "requirement_value": 10,
+      "motif": "a bold crossed pair of small quest swords beneath a prominent central four-point star, a visibly more elaborate mastery tier than First Steps",
+      "approval": "pending owner visual review",
+      "states": {
+        "earned": {
+          "file": "medals/medal-quest-master--earned.png",
+          "bytes": 1554527,
+          "sha256": "ae94af430e310a5584e62a365f393854040117f55aa4c0f70af74f6520c6ed07",
+          "image": {
+            "width": 1254,
+            "height": 1254,
+            "transparentPixels": 832328,
+            "partialAlphaPixels": 739501,
+            "opaquePixels": 687,
+            "nontransparentBorderPixels": 79,
+            "meaningfulBorderPixels": 0,
+            "visibleBounds": [
+              153,
+              26,
+              1095,
+              1192
+            ]
+          },
+          "fileExists": true
+        },
+        "locked": {
+          "file": "medals/medal-quest-master--locked.png",
+          "bytes": 1532707,
+          "sha256": "8fcc378d26cd2e4bd1278869598f84aa58fbe2c14bc77a905519e901ea7faab6",
+          "image": {
+            "width": 1254,
+            "height": 1254,
+            "transparentPixels": 838840,
+            "partialAlphaPixels": 732493,
+            "opaquePixels": 1183,
+            "nontransparentBorderPixels": 20,
+            "meaningfulBorderPixels": 0,
+            "visibleBounds": [
+              152,
+              25,
+              1097,
+              1197
+            ]
+          },
+          "fileExists": true
+        }
+      }
+    },
+    {
+      "id": "medal-streak-week",
+      "name": "Week Warrior",
+      "category": "student",
+      "requirement_type": "streak",
+      "requirement_value": 7,
+      "motif": "one clear stylized upright flame",
+      "approval": "pending owner visual review",
+      "states": {
+        "earned": {
+          "file": "medals/medal-streak-week--earned.png",
+          "bytes": 1510312,
+          "sha256": "477225788dd2778fa482cb2a3b7c5f2d58eefffd26a566179c173fd4f19770f3",
+          "image": {
+            "width": 1254,
+            "height": 1254,
+            "transparentPixels": 833403,
+            "partialAlphaPixels": 738345,
+            "opaquePixels": 768,
+            "nontransparentBorderPixels": 0,
+            "meaningfulBorderPixels": 0,
+            "visibleBounds": [
+              138,
+              22,
+              1110,
+              1177
+            ]
+          },
+          "fileExists": true
+        },
+        "locked": {
+          "file": "medals/medal-streak-week--locked.png",
+          "bytes": 1539742,
+          "sha256": "1ef1f0ae3f9b5bd143951656027dd40f99355dfb657283985f7be31be911d15b",
+          "image": {
+            "width": 1254,
+            "height": 1254,
+            "transparentPixels": 827687,
+            "partialAlphaPixels": 744075,
+            "opaquePixels": 754,
+            "nontransparentBorderPixels": 9,
+            "meaningfulBorderPixels": 0,
+            "visibleBounds": [
+              136,
+              21,
+              1111,
+              1180
+            ]
+          },
+          "fileExists": true
+        }
+      }
+    },
+    {
+      "id": "medal-streak-month",
+      "name": "Marathon Coder",
+      "category": "student",
+      "requirement_type": "streak",
+      "requirement_value": 30,
+      "motif": "a strong twin-layer flame enclosed by a restrained laurel half-wreath, clearly more elaborate than Week Warrior",
+      "approval": "pending owner visual review",
+      "states": {
+        "earned": {
+          "file": "medals/medal-streak-month--earned.png",
+          "bytes": 1691347,
+          "sha256": "78333b7074b4928e7014b64e486f72a866969e792eab8f086d2d7dfb1eb9c82f",
+          "image": {
+            "width": 1254,
+            "height": 1254,
+            "transparentPixels": 800706,
+            "partialAlphaPixels": 770999,
+            "opaquePixels": 811,
+            "nontransparentBorderPixels": 9,
+            "meaningfulBorderPixels": 0,
+            "visibleBounds": [
+              128,
+              27,
+              1123,
+              1208
+            ]
+          },
+          "fileExists": true
+        },
+        "locked": {
+          "file": "medals/medal-streak-month--locked.png",
+          "bytes": 1686228,
+          "sha256": "ea7ce0be03caea4d6ffe67c18b9489714117f71b4cc06c97929a73ed1b6e8774",
+          "image": {
+            "width": 1254,
+            "height": 1254,
+            "transparentPixels": 792080,
+            "partialAlphaPixels": 779742,
+            "opaquePixels": 694,
+            "nontransparentBorderPixels": 34,
+            "meaningfulBorderPixels": 0,
+            "visibleBounds": [
+              124,
+              25,
+              1127,
+              1210
+            ]
+          },
+          "fileExists": true
+        }
+      }
+    },
+    {
+      "id": "medal-python",
+      "name": "Python Novice",
+      "category": "student",
+      "requirement_type": "python_count",
+      "requirement_value": 5,
+      "motif": "two elegant intertwined stylized snake silhouettes forming one clear programming emblem, no text",
+      "approval": "pending owner visual review",
+      "states": {
+        "earned": {
+          "file": "medals/medal-python--earned.png",
+          "bytes": 1340651,
+          "sha256": "50d3b26828ca1a9fd0eec2ebb40be8e60f7dd319349a2e41df9348ccfa042ee2",
+          "image": {
+            "width": 1254,
+            "height": 1254,
+            "transparentPixels": 925289,
+            "partialAlphaPixels": 646535,
+            "opaquePixels": 692,
+            "nontransparentBorderPixels": 16,
+            "meaningfulBorderPixels": 0,
+            "visibleBounds": [
+              176,
+              80,
+              1073,
+              1163
+            ]
+          },
+          "fileExists": true
+        },
+        "locked": {
+          "file": "medals/medal-python--locked.png",
+          "bytes": 1351469,
+          "sha256": "3a082d9b071673324439c488c1ec393ba25b4245b66780c144b2a9d540bef9b9",
+          "image": {
+            "width": 1254,
+            "height": 1254,
+            "transparentPixels": 920956,
+            "partialAlphaPixels": 650790,
+            "opaquePixels": 770,
+            "nontransparentBorderPixels": 73,
+            "meaningfulBorderPixels": 0,
+            "visibleBounds": [
+              176,
+              79,
+              1075,
+              1165
+            ]
+          },
+          "fileExists": true
+        }
+      }
+    },
+    {
+      "id": "medal-java",
+      "name": "Java Apprentice",
+      "category": "student",
+      "requirement_type": "java_count",
+      "requirement_value": 5,
+      "motif": "a clean cup with three rising curls of steam, no text",
+      "approval": "pending owner visual review",
+      "states": {
+        "earned": {
+          "file": "medals/medal-java--earned.png",
+          "bytes": 1498517,
+          "sha256": "df4716cb90e695ea434fed6542f3b1514f7843ac522213bf78f46d556c9afdd6",
+          "image": {
+            "width": 1254,
+            "height": 1254,
+            "transparentPixels": 834533,
+            "partialAlphaPixels": 737150,
+            "opaquePixels": 833,
+            "nontransparentBorderPixels": 29,
+            "meaningfulBorderPixels": 0,
+            "visibleBounds": [
+              152,
+              10,
+              1096,
+              1170
+            ]
+          },
+          "fileExists": true
+        },
+        "locked": {
+          "file": "medals/medal-java--locked.png",
+          "bytes": 1521277,
+          "sha256": "51525c8f169e5bed1795a5f50c38b0074fa623e4b7d5797f02fcd2d5bbd6c7b9",
+          "image": {
+            "width": 1254,
+            "height": 1254,
+            "transparentPixels": 828776,
+            "partialAlphaPixels": 742768,
+            "opaquePixels": 972,
+            "nontransparentBorderPixels": 58,
+            "meaningfulBorderPixels": 0,
+            "visibleBounds": [
+              151,
+              7,
+              1099,
+              1172
+            ]
+          },
+          "fileExists": true
+        }
+      }
+    },
+    {
+      "id": "medal-csharp",
+      "name": "C# Wizard",
+      "category": "student",
+      "requirement_type": "csharp_count",
+      "requirement_value": 5,
+      "motif": "a large sharp faceted hexagonal crystal with a simple crisp hash-symbol relief, no lettering",
+      "approval": "pending owner visual review",
+      "states": {
+        "earned": {
+          "file": "medals/medal-csharp--earned.png",
+          "bytes": 1469358,
+          "sha256": "3021864e13c23f5f63bfecdb8bcf1ce37720e8cbbc74bff35675e002bb6107d2",
+          "image": {
+            "width": 1254,
+            "height": 1254,
+            "transparentPixels": 899879,
+            "partialAlphaPixels": 671984,
+            "opaquePixels": 653,
+            "nontransparentBorderPixels": 26,
+            "meaningfulBorderPixels": 0,
+            "visibleBounds": [
+              169,
+              47,
+              1081,
+              1168
+            ]
+          },
+          "fileExists": true
+        },
+        "locked": {
+          "file": "medals/medal-csharp--locked.png",
+          "bytes": 1453703,
+          "sha256": "f867762464a340973a732d57edd2f2a9c96a2036d8f226ce4022cc1d7c4b440b",
+          "image": {
+            "width": 1254,
+            "height": 1254,
+            "transparentPixels": 893015,
+            "partialAlphaPixels": 678785,
+            "opaquePixels": 716,
+            "nontransparentBorderPixels": 1,
+            "meaningfulBorderPixels": 0,
+            "visibleBounds": [
+              168,
+              46,
+              1084,
+              1168
+            ]
+          },
+          "fileExists": true
+        }
+      }
+    },
+    {
+      "id": "medal-hard-quests",
+      "name": "Hard Coder",
+      "category": "student",
+      "requirement_type": "hard_count",
+      "requirement_value": 5,
+      "motif": "a tall angular mountain peak with a single four-point summit star, bold readable relief",
+      "approval": "pending owner visual review",
+      "states": {
+        "earned": {
+          "file": "medals/medal-hard-quests--earned.png",
+          "bytes": 1446192,
+          "sha256": "1cdc8c5b5936590fdbea9db34861f6792dc6788a031ba58dd5f00ef2a4055efa",
+          "image": {
+            "width": 1254,
+            "height": 1254,
+            "transparentPixels": 879901,
+            "partialAlphaPixels": 691934,
+            "opaquePixels": 681,
+            "nontransparentBorderPixels": 44,
+            "meaningfulBorderPixels": 0,
+            "visibleBounds": [
+              163,
+              39,
+              1088,
+              1157
+            ]
+          },
+          "fileExists": true
+        },
+        "locked": {
+          "file": "medals/medal-hard-quests--locked.png",
+          "bytes": 1444519,
+          "sha256": "d2975800134b6db989f00bd060a889b39b82f2252ae0e4cb21818bc657c685cc",
+          "image": {
+            "width": 1254,
+            "height": 1254,
+            "transparentPixels": 874427,
+            "partialAlphaPixels": 697214,
+            "opaquePixels": 875,
+            "nontransparentBorderPixels": 9,
+            "meaningfulBorderPixels": 0,
+            "visibleBounds": [
+              161,
+              36,
+              1090,
+              1158
+            ]
+          },
+          "fileExists": true
+        }
+      }
+    },
+    {
+      "id": "medal-debugging",
+      "name": "Debug Master",
+      "category": "student",
+      "requirement_type": "debug_count",
+      "requirement_value": 5,
+      "motif": "a simple six-legged bug silhouette inside a clean magnifying-glass ring",
+      "approval": "pending owner visual review",
+      "states": {
+        "earned": {
+          "file": "medals/medal-debugging--earned.png",
+          "bytes": 1519300,
+          "sha256": "f833d74d7b6e639b526fd251b2583b197ae4789e07f54aba0d7137b599903a70",
+          "image": {
+            "width": 1254,
+            "height": 1254,
+            "transparentPixels": 815668,
+            "partialAlphaPixels": 756078,
+            "opaquePixels": 770,
+            "nontransparentBorderPixels": 81,
+            "meaningfulBorderPixels": 0,
+            "visibleBounds": [
+              133,
+              15,
+              1111,
+              1200
+            ]
+          },
+          "fileExists": true
+        },
+        "locked": {
+          "file": "medals/medal-debugging--locked.png",
+          "bytes": 1523978,
+          "sha256": "ff9160628d7177583245d92df04c4cd4a07ff7072ddd705285e8ad00cbe2c268",
+          "image": {
+            "width": 1254,
+            "height": 1254,
+            "transparentPixels": 807938,
+            "partialAlphaPixels": 763437,
+            "opaquePixels": 1141,
+            "nontransparentBorderPixels": 20,
+            "meaningfulBorderPixels": 0,
+            "visibleBounds": [
+              133,
+              13,
+              1113,
+              1202
+            ]
+          },
+          "fileExists": true
+        }
+      }
+    },
+    {
+      "id": "medal-first-module",
+      "name": "First Module",
+      "category": "instructor",
+      "requirement_type": "lesson_count",
+      "requirement_value": 1,
+      "motif": "one open book with clear thick pages and a central small violet crystal",
+      "approval": "pending owner visual review",
+      "states": {
+        "earned": {
+          "file": "medals/medal-first-module--earned.png",
+          "bytes": 1454323,
+          "sha256": "ef47bf5e61d9ab2e4394ff88c713a28cdbc70f85f47cbf8afee744c32892e0ca",
+          "image": {
+            "width": 1254,
+            "height": 1254,
+            "transparentPixels": 888073,
+            "partialAlphaPixels": 683698,
+            "opaquePixels": 745,
+            "nontransparentBorderPixels": 82,
+            "meaningfulBorderPixels": 0,
+            "visibleBounds": [
+              165,
+              52,
+              1082,
+              1163
+            ]
+          },
+          "fileExists": true
+        },
+        "locked": {
+          "file": "medals/medal-first-module--locked.png",
+          "bytes": 1458322,
+          "sha256": "c90f0b291e5a59a9e4a76fd3f74b7892fb1086556f98ebc0e02568c5e9cc0e2f",
+          "image": {
+            "width": 1254,
+            "height": 1254,
+            "transparentPixels": 882330,
+            "partialAlphaPixels": 689315,
+            "opaquePixels": 871,
+            "nontransparentBorderPixels": 15,
+            "meaningfulBorderPixels": 0,
+            "visibleBounds": [
+              164,
+              49,
+              1086,
+              1166
+            ]
+          },
+          "fileExists": true
+        }
+      }
+    },
+    {
+      "id": "medal-activity-builder",
+      "name": "Activity Architect",
+      "category": "instructor",
+      "requirement_type": "problem_count",
+      "requirement_value": 10,
+      "motif": "a balanced pair of fitted architectural puzzle blocks forming a clean little arch",
+      "approval": "pending owner visual review",
+      "states": {
+        "earned": {
+          "file": "medals/medal-activity-builder--earned.png",
+          "bytes": 1471129,
+          "sha256": "8f404bed2f3b114e474133c444e2da98a0014d0c5d88eb9ea7b91c7d7ad2fa11",
+          "image": {
+            "width": 1254,
+            "height": 1254,
+            "transparentPixels": 842419,
+            "partialAlphaPixels": 729373,
+            "opaquePixels": 724,
+            "nontransparentBorderPixels": 25,
+            "meaningfulBorderPixels": 0,
+            "visibleBounds": [
+              141,
+              38,
+              1101,
+              1197
+            ]
+          },
+          "fileExists": true
+        },
+        "locked": {
+          "file": "medals/medal-activity-builder--locked.png",
+          "bytes": 1488118,
+          "sha256": "82b50d4fb0e939f431a6fdf1866f33d0bc7b08dc3ba85a32c3f5c4360bbb5014",
+          "image": {
+            "width": 1254,
+            "height": 1254,
+            "transparentPixels": 840616,
+            "partialAlphaPixels": 730819,
+            "opaquePixels": 1081,
+            "nontransparentBorderPixels": 10,
+            "meaningfulBorderPixels": 0,
+            "visibleBounds": [
+              142,
+              36,
+              1103,
+              1196
+            ]
+          },
+          "fileExists": true
+        }
+      }
+    },
+    {
+      "id": "medal-class-starter",
+      "name": "Class Starter",
+      "category": "instructor",
+      "requirement_type": "student_quest",
+      "requirement_value": 1,
+      "motif": "one small four-point star above a simple open palm, a learner's first completion",
+      "approval": "pending owner visual review",
+      "states": {
+        "earned": {
+          "file": "medals/medal-class-starter--earned.png",
+          "bytes": 1465676,
+          "sha256": "7571f0a4c740d1a607929ad680866e6429adc5a798ebedda0106ea9de544320c",
+          "image": {
+            "width": 1254,
+            "height": 1254,
+            "transparentPixels": 862306,
+            "partialAlphaPixels": 709616,
+            "opaquePixels": 594,
+            "nontransparentBorderPixels": 42,
+            "meaningfulBorderPixels": 0,
+            "visibleBounds": [
+              153,
+              46,
+              1095,
+              1181
+            ]
+          },
+          "fileExists": true
+        },
+        "locked": {
+          "file": "medals/medal-class-starter--locked.png",
+          "bytes": 1469159,
+          "sha256": "8ada5ad9323125bda2282b2dcb56d3b059e8772df045de6a78b81ef2f1c30930",
+          "image": {
+            "width": 1254,
+            "height": 1254,
+            "transparentPixels": 858906,
+            "partialAlphaPixels": 712680,
+            "opaquePixels": 930,
+            "nontransparentBorderPixels": 133,
+            "meaningfulBorderPixels": 0,
+            "visibleBounds": [
+              152,
+              43,
+              1099,
+              1182
+            ]
+          },
+          "fileExists": true
+        }
+      }
+    },
+    {
+      "id": "medal-resource-curator",
+      "name": "Resource Curator",
+      "category": "instructor",
+      "requirement_type": "file_count",
+      "requirement_value": 10,
+      "motif": "a neatly stacked trio of document sheets with a small clear paperclip",
+      "approval": "pending owner visual review",
+      "states": {
+        "earned": {
+          "file": "medals/medal-resource-curator--earned.png",
+          "bytes": 1422768,
+          "sha256": "3fde2dbc3acb90a1415ffca2b064cfd62ca1d51faac043e922728659ae71baf9",
+          "image": {
+            "width": 1254,
+            "height": 1254,
+            "transparentPixels": 907853,
+            "partialAlphaPixels": 664042,
+            "opaquePixels": 621,
+            "nontransparentBorderPixels": 82,
+            "meaningfulBorderPixels": 0,
+            "visibleBounds": [
+              169,
+              34,
+              1076,
+              1139
+            ]
+          },
+          "fileExists": true
+        },
+        "locked": {
+          "file": "medals/medal-resource-curator--locked.png",
+          "bytes": 1428898,
+          "sha256": "2b772cd627bb6942f967e52943c2e4fc41508423fd8453872f5fc442489d1518",
+          "image": {
+            "width": 1254,
+            "height": 1254,
+            "transparentPixels": 904347,
+            "partialAlphaPixels": 667152,
+            "opaquePixels": 1017,
+            "nontransparentBorderPixels": 73,
+            "meaningfulBorderPixels": 0,
+            "visibleBounds": [
+              169,
+              33,
+              1077,
+              1141
+            ]
+          },
+          "fileExists": true
+        }
+      }
+    },
+    {
+      "id": "medal-multi-subject",
+      "name": "Multi-Class Maestro",
+      "category": "instructor",
+      "requirement_type": "subjects_taught",
+      "requirement_value": 3,
+      "motif": "three simple connected upright book spines fanning outward, visually distinct from one open book",
+      "approval": "pending owner visual review",
+      "states": {
+        "earned": {
+          "file": "medals/medal-multi-subject--earned.png",
+          "bytes": 1684759,
+          "sha256": "611855a83cb1e9fc67ef32be9440475647caee5dd92e883308750b773ae0aa98",
+          "image": {
+            "width": 1254,
+            "height": 1254,
+            "transparentPixels": 777610,
+            "partialAlphaPixels": 794059,
+            "opaquePixels": 847,
+            "nontransparentBorderPixels": 6,
+            "meaningfulBorderPixels": 0,
+            "visibleBounds": [
+              119,
+              18,
+              1131,
+              1222
+            ]
+          },
+          "fileExists": true
+        },
+        "locked": {
+          "file": "medals/medal-multi-subject--locked.png",
+          "bytes": 1678521,
+          "sha256": "c5cca300a3df985e942a2e23761aa03ab6b07f3110deb3932d00aec65b0912ed",
+          "image": {
+            "width": 1254,
+            "height": 1254,
+            "transparentPixels": 773819,
+            "partialAlphaPixels": 797458,
+            "opaquePixels": 1239,
+            "nontransparentBorderPixels": 34,
+            "meaningfulBorderPixels": 0,
+            "visibleBounds": [
+              118,
+              17,
+              1132,
+              1222
+            ]
+          },
+          "fileExists": true
+        }
+      }
+    },
+    {
+      "id": "medal-fallback",
+      "name": "Generic fallback",
+      "category": null,
+      "requirement_type": null,
+      "requirement_value": null,
+      "motif": "a neutral oval violet cabochon in a thin metallic bezel, distinct from the First Steps star",
+      "approval": "pending owner visual review",
+      "states": {
+        "earned": {
+          "file": "medals/medal-fallback--earned-v2.png",
+          "bytes": 1431274,
+          "sha256": "a80cf4eb56455244af7a6cda324673831d29c75369e9cca712169249ccad1572",
+          "image": {
+            "width": 1254,
+            "height": 1254,
+            "transparentPixels": 863274,
+            "partialAlphaPixels": 708880,
+            "opaquePixels": 362,
+            "nontransparentBorderPixels": 36,
+            "meaningfulBorderPixels": 0,
+            "visibleBounds": [
+              153,
+              33,
+              1093,
+              1176
+            ]
+          },
+          "fileExists": true
+        },
+        "locked": {
+          "file": "medals/medal-fallback--locked-v2.png",
+          "bytes": 1485056,
+          "sha256": "36a3cc236374cee15831c45a720a0f86e662a08f29501aa57ab3789b8b850e49",
+          "image": {
+            "width": 1254,
+            "height": 1254,
+            "transparentPixels": 863115,
+            "partialAlphaPixels": 708839,
+            "opaquePixels": 562,
+            "nontransparentBorderPixels": 2,
+            "meaningfulBorderPixels": 0,
+            "visibleBounds": [
+              149,
+              30,
+              1097,
+              1180
+            ]
+          },
+          "fileExists": true
+        }
+      }
+    }
+  ],
+  "landing": [
+    {
+      "id": "landing-background-plate",
+      "file": "landing/landing-background-plate.png",
+      "bytes": 2244696,
+      "sha256": "caf0730ffb7ccc0b546abdc6425e3dcdd88612ebfdc3da95ae9637426f3d52a9",
+      "image": {
+        "width": 1672,
+        "height": 941,
+        "transparentPixels": 0,
+        "partialAlphaPixels": 0,
+        "opaquePixels": 1573352,
+        "nontransparentBorderPixels": 5222,
+        "meaningfulBorderPixels": 5222,
+        "visibleBounds": [
+          0,
+          0,
+          1671,
+          940
+        ]
+      },
+      "zIndex": 0,
+      "approval": "pending owner visual review",
+      "motion": "static"
+    },
+    {
+      "id": "landing-clouds",
+      "file": "landing/landing-clouds.png",
+      "bytes": 1240516,
+      "sha256": "6e47984d0679d7ff0755d938ddaeab91cf576ef4616430a20277ba75694246dc",
+      "image": {
+        "width": 1672,
+        "height": 941,
+        "transparentPixels": 827950,
+        "partialAlphaPixels": 745402,
+        "opaquePixels": 0,
+        "nontransparentBorderPixels": 321,
+        "meaningfulBorderPixels": 0,
+        "visibleBounds": [
+          33,
+          11,
+          1661,
+          636
+        ]
+      },
+      "zIndex": 1,
+      "approval": "pending owner visual review",
+      "motion": "slow cloud drift"
+    },
+    {
+      "id": "landing-mist",
+      "file": "landing/landing-mist.png",
+      "bytes": 1356250,
+      "sha256": "08f17e1acf282593d96f445b932d8d88d94d9663afad0ec8c1da0e5dc6cb0131",
+      "image": {
+        "width": 1672,
+        "height": 941,
+        "transparentPixels": 755807,
+        "partialAlphaPixels": 817545,
+        "opaquePixels": 0,
+        "nontransparentBorderPixels": 1945,
+        "meaningfulBorderPixels": 1216,
+        "visibleBounds": [
+          214,
+          326,
+          1671,
+          940
+        ]
+      },
+      "zIndex": 2,
+      "approval": "pending owner visual review",
+      "motion": "slow mist drift"
+    },
+    {
+      "id": "landing-party-foreground-v2",
+      "file": "landing/landing-party-foreground-v2.png",
+      "bytes": 1026255,
+      "sha256": "fb8148ce7f17dd2c88950e53a00779a4dc6d07bae3a2e7e4e92d12ef397e6fdf",
+      "image": {
+        "width": 1672,
+        "height": 941,
+        "transparentPixels": 1161456,
+        "partialAlphaPixels": 411286,
+        "opaquePixels": 610,
+        "nontransparentBorderPixels": 1529,
+        "meaningfulBorderPixels": 1524,
+        "visibleBounds": [
+          420,
+          374,
+          1671,
+          940
+        ]
+      },
+      "zIndex": 3,
+      "approval": "pending owner visual review",
+      "motion": "static",
+      "registration": {
+        "scale": 0.9,
+        "origin": "right bottom",
+        "status": "static alignment proposal; compare review proof"
+      }
+    }
+  ],
+  "proceduralEffects": {
+    "crystalGlints": "separate CSS/HTML light points; sparse, restrained, pause/reduced-motion",
+    "fireflies": "separate CSS/HTML particles; sparse, pause/reduced-motion"
+  },
+  "supersededCandidates": [
+    "medals/medal-fallback--earned.png",
+    "landing/landing-party-foreground.png"
+  ],
+  "verification": {
+    "allSelectedMedalsHaveAlpha": true,
+    "allSelectedMedalsHaveClearMeaningfulBorders": true,
+    "visualInspection": "all selected individual assets inspected",
+    "browserReview": "unverified; local server unreachable from automated browser",
+    "performance": "unverified; master PNGs not optimized",
+    "approval": false
+  }
+}

@@ -1,258 +1,434 @@
-import { useState } from 'react'
+import AdminActionDialog from './AdminActionDialog'
+import AdminIcon, { INLINE } from './AdminIcons'
+import backupEmblem from '../../assets/admin/database-backup.png'
+import selectedDiamond from '../../assets/instructor/quest-selected-diamond.png'
+import { useEffect, useState, useRef } from 'react'
+import { API_BASE, authFetch } from '../../api/client'
 
-const API = 'http://localhost:5000'
+// our backend base url — change this if we ever move to prod
+const API = API_BASE
 
+// these match the exact tables our backend /api/admin/backup exports
+// added subject_sections, announcements, system_config because they're in our schema too
 const TABLES = [
-  { key: 'users', label: 'Users', icon: '👥', desc: 'All user accounts' },
-  { key: 'blocks', label: 'Blocks', icon: '📚', desc: 'Class sections' },
-  { key: 'subjects', label: 'Subjects', icon: '📖', desc: 'Course subjects' },
-  { key: 'problems', label: 'Problems', icon: '🧩', desc: 'Coding quests' },
-  { key: 'submissions', label: 'Submissions', icon: '📝', desc: 'Student submissions' },
-  { key: 'audit_logs', label: 'Audit Logs', icon: '📜', desc: 'Activity history' },
-  { key: 'achievements', label: 'Achievements', icon: '🏆', desc: 'Badge definitions' },
-  { key: 'teacher_assignments', label: 'Assignments', icon: '👨‍🏫', desc: 'Instructor assignments' },
+  { key: 'users',               label: 'Users',         icon: 'users', desc: 'User records and password hashes'  },
+  { key: 'subjects',            label: 'Subjects',      icon: 'book', desc: 'IT course subjects'                },
+  { key: 'subject_sections',    label: 'Class Codes',   icon: 'layers', desc: 'Section schedules & capacity'      },
+  { key: 'problems',            label: 'Activities',    icon: 'puzzle', desc: 'Coding quests & test cases'         },
+  { key: 'submissions',         label: 'Submissions',   icon: 'filetext', desc: 'Student code submissions'           },
+  { key: 'audit_logs',          label: 'Audit Logs',    icon: 'filetext', desc: 'Admin activity history'             },
+  { key: 'achievements',        label: 'Achievements',  icon: 'trophy', desc: 'Badge definitions & XP rewards'     },
+  { key: 'teacher_assignments', label: 'Assignments',   icon: 'link', desc: 'Instructor–subject–section links'   },
+  { key: 'announcements',       label: 'Announcements', icon: 'megaphone', desc: 'Instructor announcements'            },
+  { key: 'system_config',       label: 'System Config', icon: 'gear', desc: 'Platform configuration keys'        },
 ]
 
-export default function BackupDatabaseModal({ onClose }) {
-  const [mode, setMode] = useState('full') // 'full' | 'selective'
-  const [selectedTables, setSelectedTables] = useState(TABLES.map(t => t.key))
-  const [stage, setStage] = useState('idle') // 'idle' | 'running' | 'done' | 'error'
-  const [progress, setProgress] = useState(0)
-  const [progressLabel, setProgressLabel] = useState('')
-  const [backupResult, setBackupResult] = useState(null)
+// ── checkbox row for each table in the selective list ────────────────────────
+function TableRow({ table, checked, onToggle }) {
+  return (
+    <label
+      className="flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-slate-700/40 cursor-pointer transition-colors group select-none"
+    >
+      <input type="checkbox" checked={checked} onChange={onToggle} className="peer sr-only" />
+      <span aria-hidden="true" className="grid size-6 shrink-0 place-items-center rounded-sm peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-amber-300">
+        {checked ? <img src={selectedDiamond} alt="" className="size-6 object-contain" />
+          : <span className="size-3 rotate-45 rounded-[1px] border border-amber-200" />}
+      </span>
+      <AdminIcon name={table.icon} className="size-5 shrink-0 text-amber-200" />
+      <div className="flex-1 min-w-0">
+        <p className="text-sm text-white font-medium leading-tight">{table.label}</p>
+        <p className="text-[11px] text-slate-400 mt-0.5 truncate">{table.desc}</p>
+      </div>
+    </label>
+  )
+}
 
+// ── key-value row used in the success result card ─────────────────────────────
+function ResultRow({ icon, label, children }) {
+  return (
+    <div className="flex items-start justify-between gap-3 py-2.5 border-b border-slate-700/30 last:border-0">
+      <span className="flex items-center gap-1.5 text-xs text-slate-400 flex-shrink-0">
+        <AdminIcon name={icon} className="size-3.5" />{label}
+      </span>
+      <span className="min-w-0 break-words text-xs text-right text-white">{children}</span>
+    </div>
+  )
+}
+
+// ── main modal component ──────────────────────────────────────────────────────
+export default function BackupDatabaseModal({ onClose }) {
+
+  // 'full' backs up everything, 'selective' lets admin pick tables
+  const [mode, setMode] = useState('full')
+
+  // starts fully checked so selective mode is ready without extra clicks
+  const [selectedTables, setSelectedTables] = useState(TABLES.map(t => t.key))
+
+  // controls which screen we're showing: idle → running → done or error
+  const [stage, setStage] = useState('idle')
+
+
+  // we store the backup details here after success to show in the result card
+  const [result,   setResult]   = useState(null)
+  const [errorMsg, setErrorMsg] = useState('')
+
+  // keeping the blob url in a ref so it doesn't cause extra re-renders
+  // we need this for the download button to work
+  const blobUrlRef = useRef(null)
+  useEffect(() => () => {
+    if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current)
+  }, [])
+
+  // toggle one table key in or out of our selected list
   const toggleTable = (key) => {
     setSelectedTables(prev =>
       prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]
     )
   }
 
+  // either select all or clear all depending on current state
   const toggleAll = () => {
-    setSelectedTables(selectedTables.length === TABLES.length ? [] : TABLES.map(t => t.key))
+    setSelectedTables(
+      selectedTables.length === TABLES.length ? [] : TABLES.map(t => t.key)
+    )
   }
 
   const runBackup = async () => {
-    if (mode === 'selective' && selectedTables.length === 0) return
+    if (stage !== 'idle' || (mode === 'selective' && selectedTables.length === 0)) return
 
     setStage('running')
-    setProgress(0)
+    setErrorMsg('')
 
-    const steps = [
-      { label: 'Connecting to database…', pct: 15 },
-      { label: 'Locking tables for consistency…', pct: 30 },
-      { label: 'Exporting schema…', pct: 45 },
-      { label: 'Dumping table data…', pct: 70 },
-      { label: 'Compressing backup…', pct: 85 },
-      { label: 'Verifying integrity…', pct: 95 },
-      { label: 'Finalising…', pct: 100 },
-    ]
-
-    for (const s of steps) {
-      setProgressLabel(s.label)
-      await delay(480)
-      setProgress(s.pct)
+    // send 'all' for full backup or just the selected keys for selective
+    const payload = {
+      tables: mode === 'full' ? 'all' : selectedTables,
     }
 
-    // Call real backup endpoint
     try {
-      const token = localStorage.getItem('token')
-      const res = await fetch(`${API}/api/admin/backup`, {
+      const res = await authFetch(`${API}/api/admin/backup`, {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tables: mode === 'full' ? 'all' : selectedTables })
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
       })
 
-      if (res.ok) {
-        const blob = await res.blob()
-        const url = URL.createObjectURL(blob)
-        const ts = new Date()
-        setBackupResult({
-          downloadUrl: url,
-          filename: `forge_backup_${ts.toISOString().replace(/[:.]/g, '-').slice(0, 19)}.sql`,
-          timestamp: ts.toLocaleString(),
-          tables: mode === 'full' ? TABLES.length : selectedTables.length,
-          sizeKB: Math.round(blob.size / 1024),
-        })
-        setStage('done')
-      } else {
-        // Simulate success if endpoint doesn't exist yet
-        simulateSuccess()
+      // backend returned a non-ok status — read the error message and throw
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}))
+        throw new Error(errData.error || `Server returned ${res.status}`)
       }
-    } catch {
-      // Simulate for demo/development
-      simulateSuccess()
+
+      // convert the response body into a blob so we can make a download link
+      if (res.headers.get('Content-Type')?.split(';')[0].trim() !== 'application/sql') {
+        throw new Error('The server did not return a SQL export.')
+      }
+      const blob = await res.blob()
+      if (!blob.size) throw new Error('The server returned an empty export.')
+      const url  = URL.createObjectURL(blob)
+      blobUrlRef.current = url // store it here so the download button can use it
+
+      const ts = new Date()
+
+      // build the result object we display in the done screen
+      setResult({
+        filename:  `forge_backup_${ts.toISOString().replace(/[:.]/g, '-').slice(0, 19)}.sql`,
+        timestamp: ts.toLocaleString('en-PH', {
+          year: 'numeric', month: 'long', day: 'numeric',
+          hour: '2-digit', minute: '2-digit',
+        }),
+        tableScope: mode === 'full' ? 'All application tables' : `${selectedTables.length} selected tables`,
+        // show a human-friendly size label (B / KB / MB)
+        sizeLabel: blob.size < 1024
+          ? `${blob.size} B`
+          : blob.size < 1024 * 1024
+            ? `${Math.round(blob.size / 1024)} KB`
+            : `${(blob.size / (1024 * 1024)).toFixed(2)} MB`,
+      })
+
+      setStage('done')
+
+    } catch (err) {
+      // something broke — surface the message so we know what happened
+      setErrorMsg(err.message || 'Unknown error. Check the Flask console.')
+      setStage('error')
     }
   }
 
-  const simulateSuccess = () => {
-    const ts = new Date()
-    setBackupResult({
-      downloadUrl: null,
-      filename: `forge_backup_${ts.toISOString().replace(/[:.]/g, '-').slice(0, 19)}.sql`,
-      timestamp: ts.toLocaleString(),
-      tables: mode === 'full' ? TABLES.length : selectedTables.length,
-      sizeKB: Math.floor(Math.random() * 2000) + 400,
-    })
-    setStage('done')
-  }
-
-  const delay = (ms) => new Promise(r => setTimeout(r, ms))
-
-  const downloadBackup = () => {
-    if (!backupResult?.downloadUrl) return
+  // triggers the actual browser download using the blob url we created earlier
+  const downloadFile = () => {
+    if (!blobUrlRef.current || !result) return
     const a = document.createElement('a')
-    a.href = backupResult.downloadUrl
-    a.download = backupResult.filename
+    a.href     = blobUrlRef.current
+    a.download = result.filename
+    document.body.appendChild(a)
     a.click()
+    document.body.removeChild(a)
   }
 
+  // cleanup the blob url when closing so we don't leak browser memory
+  const handleClose = () => {
+    if (blobUrlRef.current) {
+      URL.revokeObjectURL(blobUrlRef.current)
+      blobUrlRef.current = null
+    }
+    onClose()
+  }
+
+  // reset everything back to idle so they can run another backup without reopening
+  const handleReset = () => {
+    if (blobUrlRef.current) {
+      URL.revokeObjectURL(blobUrlRef.current)
+      blobUrlRef.current = null
+    }
+    setStage('idle')
+    setResult(null)
+    setErrorMsg('')
+  }
+
+  // ── render ──────────────────────────────────────────────────────────────────
   return (
-    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-slate-900 border-2 border-green-600/40 rounded-2xl w-full max-w-md shadow-2xl shadow-green-900/30 overflow-hidden">
+    <AdminActionDialog
+      title="Database Backup"
+      description="Export application data as a SQL file."
+      emblem={backupEmblem}
+      onClose={handleClose}
+      busy={stage === 'running'}
+    >
+        {/* ── scrollable content area ── */}
+        <div className="admin-action-scroll flex-1 space-y-5 p-4 sm:p-6">
 
-        {/* Header */}
-        <div className="bg-gradient-to-r from-green-900/50 to-emerald-900/40 px-6 py-5 border-b border-green-600/30 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-gradient-to-br from-green-500 to-emerald-500 rounded-xl flex items-center justify-center text-xl">💾</div>
-            <div>
-              <h2 className="text-xl font-black text-white">Database Backup</h2>
-              <p className="text-green-300/70 text-xs">Export all platform data securely</p>
-            </div>
-          </div>
-          {stage !== 'running' && (
-            <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition text-lg">×</button>
-          )}
-        </div>
-
-        <div className="p-6 space-y-5">
-
-          {/* IDLE / SELECTION */}
+          {/* ════ IDLE — the selection / config screen ════ */}
           {stage === 'idle' && (
             <>
-              {/* Backup Type */}
+              {/* backup type toggle */}
               <div>
-                <label className="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-3">Backup Type</label>
-                <div className="grid grid-cols-2 gap-3">
-                  <button onClick={() => setMode('full')}
-                    className={`p-4 rounded-xl border-2 text-left transition ${mode === 'full' ? 'bg-green-600/20 border-green-500/60 text-white' : 'bg-slate-800/50 border-slate-700 text-slate-400 hover:border-slate-600'}`}>
-                    <div className="text-2xl mb-2">🗄️</div>
-                    <p className="font-bold text-sm">Full Backup</p>
-                    <p className="text-xs opacity-70 mt-0.5">All {TABLES.length} tables included</p>
+                <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-3">
+                  Backup Type
+                </p>
+                <div className="grid gap-3 sm:grid-cols-2">
+
+                  <button
+                    type="button"
+                    aria-pressed={mode === 'full'}
+                    onClick={() => setMode('full')}
+                    className={`p-4 rounded-xl border-2 text-left transition-all ${
+                      mode === 'full'
+                        ? 'bg-violet-950/60 border-amber-300/75'
+                        : 'bg-slate-800/50 border-slate-700/60 hover:border-slate-600'
+                    }`}
+                  >
+                    <p className={`font-bold text-sm ${mode === 'full' ? 'text-white' : 'text-slate-300'}`}>
+                      Full Backup
+                    </p>
+                    <p className={`text-xs mt-0.5 ${mode === 'full' ? 'text-amber-100' : 'text-slate-400'}`}>
+                      All application tables
+                    </p>
                   </button>
-                  <button onClick={() => setMode('selective')}
-                    className={`p-4 rounded-xl border-2 text-left transition ${mode === 'selective' ? 'bg-green-600/20 border-green-500/60 text-white' : 'bg-slate-800/50 border-slate-700 text-slate-400 hover:border-slate-600'}`}>
-                    <div className="text-2xl mb-2">🗂️</div>
-                    <p className="font-bold text-sm">Selective</p>
-                    <p className="text-xs opacity-70 mt-0.5">Choose specific tables</p>
+
+                  <button
+                    type="button"
+                    aria-pressed={mode === 'selective'}
+                    onClick={() => setMode('selective')}
+                    className={`p-4 rounded-xl border-2 text-left transition-all ${
+                      mode === 'selective'
+                        ? 'bg-violet-950/60 border-amber-300/75'
+                        : 'bg-slate-800/50 border-slate-700/60 hover:border-slate-600'
+                    }`}
+                  >
+                    <p className={`font-bold text-sm ${mode === 'selective' ? 'text-white' : 'text-slate-300'}`}>
+                      Selective
+                    </p>
+                    <p className={`text-xs mt-0.5 ${mode === 'selective' ? 'text-amber-100' : 'text-slate-400'}`}>
+                      Choose specific tables
+                    </p>
                   </button>
+
                 </div>
               </div>
 
-              {/* Selective table list */}
+              {/* table checklist — only visible when selective mode is active */}
               {mode === 'selective' && (
                 <div>
                   <div className="flex items-center justify-between mb-2">
-                    <label className="text-slate-400 text-xs font-semibold uppercase tracking-wider">Select Tables</label>
-                    <button onClick={toggleAll} className="text-xs text-green-400 hover:text-green-300 transition">
+                    <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">
+                      Select Tables
+                      {/* live count so they know how many are picked */}
+                      <span className="ml-2 text-emerald-400 normal-case font-semibold">
+                        {selectedTables.length}/{TABLES.length}
+                      </span>
+                    </p>
+                    <button
+                      onClick={toggleAll}
+                      className="text-xs text-emerald-400 hover:text-emerald-300 transition font-medium"
+                    >
                       {selectedTables.length === TABLES.length ? 'Deselect All' : 'Select All'}
                     </button>
                   </div>
-                  <div className="bg-slate-800 border border-slate-700 rounded-xl p-2 max-h-52 overflow-y-auto space-y-1">
-                    {TABLES.map(t => (
-                      <label key={t.key} className="flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-slate-700 cursor-pointer transition">
-                        <input type="checkbox" checked={selectedTables.includes(t.key)} onChange={() => toggleTable(t.key)}
-                          className="w-4 h-4 rounded border-slate-600 text-green-600 focus:ring-green-500" />
-                        <span className="text-lg">{t.icon}</span>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm text-white font-medium">{t.label}</p>
-                          <p className="text-xs text-slate-500">{t.desc}</p>
-                        </div>
-                      </label>
+
+                  {/* scrollable table list */}
+                  <div className="bg-slate-800/60 border border-slate-700/50 rounded-xl p-1.5 max-h-56 overflow-y-auto space-y-0.5 overscroll-contain will-change-scroll">
+                    {TABLES.map(table => (
+                      <TableRow
+                        key={table.key}
+                        table={table}
+                        checked={selectedTables.includes(table.key)}
+                        onToggle={() => toggleTable(table.key)}
+                      />
                     ))}
                   </div>
+
+                  {/* warn if nothing is selected — the start button will also be disabled */}
                   {selectedTables.length === 0 && (
-                    <p className="text-red-400 text-xs mt-1">Select at least one table</p>
+                    <p className="text-red-400 text-xs mt-2 flex items-center gap-1.5">
+                      <AdminIcon name="alert" className="size-3.5 shrink-0" /> Select at least one table to continue
+                    </p>
                   )}
                 </div>
               )}
 
-              {/* Warning */}
-              <div className="flex items-start gap-3 p-3 bg-amber-900/20 border border-amber-600/30 rounded-xl">
-                <span className="text-amber-400 text-lg flex-shrink-0">⚠️</span>
-                <p className="text-amber-300/80 text-xs leading-relaxed">
-                  Backups may contain sensitive user data. Store the downloaded file securely and follow your institution's data retention policies.
+              {/* data sensitivity reminder — always shown */}
+              <div className="flex items-start gap-3 p-3.5 bg-amber-900/20 border border-amber-600/30 rounded-xl">
+                <AdminIcon name="alert" className="mt-0.5 size-5 shrink-0 text-amber-400" />
+                <p className="text-amber-200/70 text-xs leading-relaxed">
+                  Backups contain sensitive data including password hashes and emails.
+                  Store the file securely and follow the institution's data retention policies.
                 </p>
               </div>
 
-              <div className="flex gap-3">
-                <button onClick={onClose} className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-white font-bold transition">Cancel</button>
-                <button onClick={runBackup} disabled={mode === 'selective' && selectedTables.length === 0}
-                  className="flex-1 py-2.5 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 disabled:opacity-40 rounded-lg text-white font-bold transition shadow-lg shadow-green-600/30">
-                  💾 Start Backup
+              {/* footer buttons */}
+              <div className="flex gap-3 pt-1">
+                <button
+                  onClick={handleClose}
+                  className="admin-button flex-1 py-2.5 border rounded-xl text-white font-semibold text-sm transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={runBackup}
+                  // disable if selective mode has nothing selected
+                  disabled={mode === 'selective' && selectedTables.length === 0}
+                  className="admin-button admin-button-primary flex-1 py-2.5 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl text-white font-bold text-sm transition flex items-center justify-center gap-2"
+                >
+                  <AdminIcon name="save" className="size-4" /> Start Backup
                 </button>
               </div>
             </>
           )}
 
-          {/* RUNNING */}
+          {/* ════ RUNNING — progress animation while we wait for the response ════ */}
           {stage === 'running' && (
-            <div className="text-center space-y-5 py-4">
-              <div className="w-16 h-16 mx-auto relative">
-                <div className="w-16 h-16 rounded-full border-4 border-green-600/30 border-t-green-400 animate-spin"></div>
-                <span className="absolute inset-0 flex items-center justify-center text-2xl">💾</span>
+            <div className="text-center space-y-5 py-6">
+
+              {/* double-ring spinner with the save icon in the middle */}
+              <div className="relative w-20 h-20 mx-auto">
+                <div className="absolute inset-0 rounded-full border-4 border-emerald-900/40 border-t-emerald-400 animate-spin" />
+                <div
+                  className="absolute inset-2 rounded-full border-2 border-emerald-800/30 border-t-emerald-600/60 animate-spin"
+                  style={{ animationDirection: 'reverse', animationDuration: '1.5s' }}
+                />
+                <div className="absolute inset-0 flex items-center justify-center text-emerald-300"><AdminIcon name="save" className="size-7" /></div>
               </div>
+
               <div>
-                <p className="text-white font-bold text-lg">Backup in Progress</p>
-                <p className="text-slate-400 text-sm mt-1">{progressLabel}</p>
+                <p className="text-white font-bold text-base">Backup in Progress</p>
+                <p className="text-slate-400 text-sm mt-1" role="status">Waiting for the SQL export…</p>
               </div>
-              <div className="w-full bg-slate-800 rounded-full h-3">
-                <div className="bg-gradient-to-r from-green-500 to-emerald-400 h-3 rounded-full transition-all duration-500" style={{ width: `${progress}%` }} />
-              </div>
-              <p className="text-green-400 font-mono text-sm">{progress}%</p>
-              <p className="text-slate-500 text-xs">Do not close this window until backup completes</p>
+
+              <p className="text-slate-600 text-xs">
+                Do not close this window until the backup is complete
+              </p>
             </div>
           )}
 
-          {/* DONE */}
-          {stage === 'done' && backupResult && (
-            <div className="space-y-4">
-              <div className="text-center">
-                <div className="w-16 h-16 bg-green-600/20 border-2 border-green-500/50 rounded-full flex items-center justify-center text-3xl mx-auto mb-3">✅</div>
-                <h3 className="text-xl font-black text-white">Backup Complete!</h3>
-              </div>
-              <div className="bg-slate-800/80 rounded-xl p-4 space-y-2 border border-slate-700">
-                <BackupRow icon="📁" label="Filename" value={<span className="font-mono text-xs text-green-300 break-all">{backupResult.filename}</span>} />
-                <BackupRow icon="📅" label="Timestamp" value={backupResult.timestamp} />
-                <BackupRow icon="📊" label="Tables" value={`${backupResult.tables} tables`} />
-                <BackupRow icon="💽" label="Size" value={`~${backupResult.sizeKB} KB`} />
-              </div>
-              {backupResult.downloadUrl ? (
-                <button onClick={downloadBackup}
-                  className="w-full py-2.5 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 rounded-lg text-white font-bold transition shadow-lg shadow-green-600/30 flex items-center justify-center gap-2">
-                  ⬇️ Download Backup File
-                </button>
-              ) : (
-                <div className="p-3 bg-blue-900/20 border border-blue-600/30 rounded-xl">
-                  <p className="text-blue-300 text-xs text-center">
-                    💡 Connect the <code className="bg-slate-800 px-1 rounded">/api/admin/backup</code> endpoint to enable file download.
-                  </p>
+          {/* ════ DONE — success screen with download button ════ */}
+          {stage === 'done' && result && (
+            <div className="space-y-5">
+
+              {/* success indicator */}
+              <div className="text-center space-y-2">
+                <div className="w-16 h-16 mx-auto bg-emerald-600/15 border-2 border-emerald-500/40 rounded-full flex items-center justify-center text-emerald-300">
+                  <AdminIcon name="check" className="size-8" />
                 </div>
-              )}
-              <button onClick={onClose} className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-white font-bold transition">Close</button>
+                <h3 className="text-lg font-black text-white">SQL export ready</h3>
+                <p className="text-slate-400 text-xs">This file contains table data. Uploaded lesson files are stored separately.</p>
+              </div>
+
+              {/* result detail card */}
+              <div className="bg-slate-800/60 border border-slate-700/40 rounded-xl px-4 py-1">
+                <ResultRow icon="folder" label="Filename">
+                  <span className="font-mono text-[11px] text-emerald-300 break-all">{result.filename}</span>
+                </ResultRow>
+                <ResultRow icon="calendar" label="Generated">{result.timestamp}</ResultRow>
+                <ResultRow icon="table" label="Tables">{result.tableScope}</ResultRow>
+                <ResultRow icon="disk" label="File size">{result.sizeLabel}</ResultRow>
+              </div>
+
+              {/* this is what they actually want — download the .sql file */}
+              <button
+                onClick={downloadFile}
+                className="admin-button admin-button-primary w-full py-3 rounded-xl text-white font-bold text-sm transition flex items-center justify-center gap-2"
+              >
+                <AdminIcon name="download" className="size-4" /> Download Backup File
+              </button>
+
+              {/* secondary actions */}
+              <div className="flex gap-3">
+                <button
+                  onClick={handleReset}
+                  className="admin-button flex-1 py-2.5 border rounded-xl text-slate-300 font-semibold text-sm transition"
+                >
+                  <AdminIcon name="redo" className={INLINE} />New Backup
+                </button>
+                <button
+                  onClick={handleClose}
+                  className="admin-button flex-1 py-2.5 border rounded-xl text-slate-300 font-semibold text-sm transition"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ════ ERROR — something went wrong on the backend ════ */}
+          {stage === 'error' && (
+            <div className="space-y-5">
+
+              {/* error indicator */}
+              <div className="text-center space-y-2">
+                <div className="w-16 h-16 mx-auto bg-red-600/15 border-2 border-red-500/40 rounded-full flex items-center justify-center text-red-300">
+                  <AdminIcon name="x" className="size-8" />
+                </div>
+                <h3 className="text-lg font-black text-white">Backup Failed</h3>
+                <p className="text-slate-400 text-xs">Something went wrong on the server.</p>
+              </div>
+
+              {/* show the actual error message from the backend */}
+              <div className="p-4 bg-red-900/20 border border-red-600/30 rounded-xl">
+                <p className="text-red-300 text-xs leading-relaxed font-mono break-all">{errorMsg}</p>
+              </div>
+
+              <p className="text-slate-600 text-xs text-center">
+                Check the Flask terminal for the full traceback.
+              </p>
+
+              {/* give them the option to retry without reopening the whole modal */}
+              <div className="flex gap-3">
+                <button
+                  onClick={handleReset}
+                  className="admin-button admin-button-primary flex-1 py-2.5 rounded-xl text-white font-bold text-sm transition"
+                >
+                  <AdminIcon name="redo" className={INLINE} />Try Again
+                </button>
+                <button
+                  onClick={handleClose}
+                  className="admin-button flex-1 py-2.5 border rounded-xl text-slate-300 font-semibold text-sm transition"
+                >
+                  Close
+                </button>
+              </div>
             </div>
           )}
 
         </div>
-      </div>
-    </div>
-  )
-}
-
-function BackupRow({ icon, label, value }) {
-  return (
-    <div className="flex items-start justify-between gap-2">
-      <span className="text-slate-500 text-xs flex items-center gap-1.5"><span>{icon}</span>{label}</span>
-      <span className="text-white text-xs text-right">{value}</span>
-    </div>
+    </AdminActionDialog>
   )
 }

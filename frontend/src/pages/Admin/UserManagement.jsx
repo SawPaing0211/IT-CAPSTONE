@@ -1,637 +1,710 @@
 import { useState, useEffect } from 'react'
 import EditUserModal from './EditUserModal'
+import PasswordField from '../../components/PasswordField'
 import SubjectManagement from './SubjectsManagement'
 import RecoveryModal from './RecoveryModal'
+import AdminActionDialog from './AdminActionDialog'
+import AdminConfirmDialog from './AdminConfirmDialog'
+import FormBanner from './FormBanner'
+import AdminIcon, { INLINE } from './AdminIcons'
+import AdminToast from './AdminToast'
+import createUsersEmblem from '../../assets/admin/create-users.png'
+import studentRoleIcon from '../../assets/admin/role-student.png'
+import instructorRoleIcon from '../../assets/admin/role-instructor.png'
+import adminRoleIcon from '../../assets/admin/role-admin.png'
 import UploadCSVModal from './UploadCSVModal'
+import { API_BASE, authFetch } from '../../api/client'
+
+// same hand-drawn line icons as the Class Codes page (SectionsManagement.jsx)
+// — copied exactly, not redrawn, so both admin pages use the literal same
+// icon instead of two different ones that just look similar.
+const control = 'w-full min-w-0 min-h-11 rounded-lg border border-slate-600 bg-slate-950 px-3 text-sm text-slate-100 [color-scheme:dark] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-400'
+const Icon = {
+  Download: ({ size = 14, color = 'currentColor' }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="8 17 12 21 16 17" /><line x1="12" y1="12" x2="12" y2="21" />
+      <path d="M20.88 18.09A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.29" />
+    </svg>
+  ),
+  Upload: ({ size = 14, color = 'currentColor' }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="16 16 12 12 8 16" /><line x1="12" y1="12" x2="12" y2="21" />
+      <path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3" />
+    </svg>
+  ),
+  Users: ({ size = 14, color = 'currentColor' }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+    </svg>
+  ),
+}
 
 export default function UserManagement() {
   const [users, setUsers] = useState([])
-  const [blocks, setBlocks] = useState([])
+  const [sections, setSections] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [roleFilter, setRoleFilter] = useState('all')
-  const [blockFilter, setBlockFilter] = useState('all')
+  const [sectionFilter, setSectionFilter] = useState('all')
   const [statusFilter, setStatusFilter] = useState('all')
-  
-  // Modal states
+  const [sort, setSort] = useState('name_asc')
+
   const [manageModal, setManageModal] = useState(null)
   const [recoveryModal, setRecoveryModal] = useState(null)
   const [addUserModal, setAddUserModal] = useState(false)
-  const [addUserForm, setAddUserForm] = useState({ username: '', email: '', password: '', role: 'student', block_id: '' })
+  const [addUserForm, setAddUserForm] = useState({
+    username: '', password: '', role: 'student', section_id: ''
+  })
   const [addUserLoading, setAddUserLoading] = useState(false)
   const [addUserError, setAddUserError] = useState('')
-  const [addUserSuccess, setAddUserSuccess] = useState('')
+  const [addUserSuccess, setAddUserSuccess] = useState(null)
   const [csvModal, setCsvModal] = useState(false)
   const [activeTab, setActiveTab] = useState('users')
 
-  const isMasterAdmin = (() => {
-    try {
-      const u = JSON.parse(localStorage.getItem('user') || '{}')
-      return u.email === 'admin@adamson.edu.ph'
-    } catch { return false }
-  })()
+  // shared type-to-confirm modal for single-user delete AND the
+  // "Delete All Students" bulk action below
+  const [confirmModal, setConfirmModal] = useState(null)
+  const [confirmLoading, setConfirmLoading] = useState(false)
 
-  const resetAddUserForm = () => {
-    setAddUserForm({ username: '', email: '', password: '', role: 'student', block_id: '' })
-    setAddUserError('')
-    setAddUserSuccess('')
+  // toast — replaces every alert() in this file. alert() is that plain
+  // browser popup that doesn't match anything else in the app (purple
+  // theme, rounded corners, etc). this is just a message + a type
+  // ('success' or 'error') that auto-dismisses after a few seconds.
+  const [toast, setToast] = useState(null)
+  const showToast = (msg, type = 'success') => {
+    setToast({ msg, type })
   }
 
+  // Settings come from the server (it also enforces them): whether this admin may
+  // create administrators, and the domain of generated account identifiers.
+  const [policy, setPolicy] = useState({ can_create_admins: false, student_email_domain: 'laconsolacion.edu' })
+  const isMasterAdmin = policy.can_create_admins
+  useEffect(() => {
+    let cancelled = false
+    authFetch(`${API_BASE}/api/admin/policy`)
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => { if (d && !cancelled) setPolicy(prev => ({ ...prev, ...d })) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [])
+  const emailLocal = addUserForm.username.trim().toLowerCase()
+  const generatedEmailLocal = addUserForm.role === 'student' ? emailLocal : emailLocal.replace(/[^a-z0-9]+/g, '.').replace(/^\.|\.$/g, '')
+  const generatedEmail = generatedEmailLocal ? generatedEmailLocal + '@' + policy.student_email_domain : ''
+
+  // Clear the add-user form back to its defaults
+  const resetAddUserForm = () => {
+    setAddUserForm({ username: '', password: '', role: 'student', section_id: '' })
+    setAddUserError('')
+    setAddUserSuccess(null)
+  }
+
+  // Validate the new user form and submit it to the server
   const handleAddUser = async () => {
     setAddUserError('')
-    setAddUserSuccess('')
-    if (!addUserForm.username || !addUserForm.email || !addUserForm.password) {
-      setAddUserError('Username, email, and password are required.')
+    setAddUserSuccess(null)
+    const isStudent = addUserForm.role === 'student'
+    if (!addUserForm.username.trim() || !addUserForm.password) {
+      setAddUserError(isStudent ? 'Student ID and password are required.' : 'Username and password are required.')
       return
     }
-    if (addUserForm.password.length < 6) {
-      setAddUserError('Password must be at least 6 characters.')
+    if (addUserForm.password.length < 8 || !/[A-Za-z]/.test(addUserForm.password) || !/\d/.test(addUserForm.password)) {
+      setAddUserError('Password must be at least 8 characters, with a letter and a number.')
       return
     }
     setAddUserLoading(true)
     try {
-      const token = localStorage.getItem('token')
-      const res = await fetch('http://localhost:5000/api/admin/users', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...addUserForm,
-          block_id: addUserForm.block_id ? parseInt(addUserForm.block_id) : null
-        })
-      })
-      const data = await res.json()
-      if (res.ok) {
-        setAddUserSuccess(`✅ User "${data.user.username}" created successfully!`)
-        setAddUserForm({ username: '', email: '', password: '', role: 'student', block_id: '' })
-        fetchUsers()
-        setTimeout(() => { setAddUserModal(false); setAddUserSuccess('') }, 2000)
-      } else {
-        setAddUserError(data.error || 'Failed to create user')
+      const payload = {
+        username: addUserForm.username,
+        password: addUserForm.password,
+        role: addUserForm.role,
+        section_ids: addUserForm.role === 'student' && addUserForm.section_id ? [Number(addUserForm.section_id)] : []
       }
-    } catch (err) {
-      setAddUserError('Network error. Please try again.')
+      const res = await authFetch(`${API_BASE}/api/admin/users`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+      const data = await res.json().catch(() => null)
+      if (res.ok && data?.user) {
+        const roleLabel = { student: 'Student', instructor: 'Instructor', administrator: 'Administrator' }[payload.role]
+        setAddUserSuccess({ username: data.user.username, roleLabel })
+        setAddUserForm({ username: '', password: '', role: 'student', section_id: '' })
+        fetchUsers()
+      } else if (res.ok || res.status >= 500) {
+        setAddUserError('The server did not confirm the new account. Check the user list before trying again.')
+      } else {
+        setAddUserError(data?.error || 'Failed to create user')
+      }
+    } catch {
+      setAddUserError('Could not confirm the new account. Check your connection and the user list before trying again.')
     } finally {
       setAddUserLoading(false)
     }
   }
 
+  const [usersError, setUsersError] = useState('')
+  const [sectionError, setSectionError] = useState(false)
+  const [userListVersion, setUserListVersion] = useState(0)
+  const fetchUsers = () => setUserListVersion(version => version + 1)
+
   useEffect(() => {
-    fetchUsers()
-    fetchBlocks()
-  }, [roleFilter, blockFilter, statusFilter, search])
-
-  const fetchUsers = async () => {
-    try {
-      const token = localStorage.getItem('token')
-      let url = 'http://localhost:5000/api/admin/users?'
-      if (roleFilter !== 'all') url += `role=${roleFilter}&`
-      if (statusFilter !== 'all') url += `status=${statusFilter}&`
-      if (search) url += `search=${encodeURIComponent(search)}&`
-      
-      const res = await fetch(url, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      })
-      
-      if (res.status === 401) {
-        alert('Session expired. Please login again.')
-        localStorage.removeItem('token')
-        window.location.href = '/'
-        return
-      }
-      
-      if (res.ok) {
+    if (activeTab !== 'users') return
+    const controller = new AbortController()
+    const query = new URLSearchParams()
+    query.set('sort', sort)
+    if (search.trim()) query.set('search', search.trim())
+    if (roleFilter !== 'all') query.set('role', roleFilter)
+    if (statusFilter !== 'all') query.set('status', statusFilter)
+    if (sectionFilter !== 'all') query.set('section', sectionFilter)
+    const timer = setTimeout(async () => {
+      setUsersError('')
+      setLoading(true)
+      try {
+        const res = await authFetch(`${API_BASE}/api/admin/users?${query}`, { signal: controller.signal })
+        if (!res.ok) throw new Error('Users unavailable')
         const data = await res.json()
-        setUsers(Array.isArray(data) ? data : [])
+        if (!Array.isArray(data)) throw new Error('Unexpected user list')
+        if (!controller.signal.aborted) setUsers(data)
+      } catch {
+        if (!controller.signal.aborted) setUsersError('Could not load users. Try again.')
+      } finally {
+        if (!controller.signal.aborted) setLoading(false)
       }
-    } catch (err) {
-      console.error('Failed to fetch users:', err)
-    } finally {
-      setLoading(false)
+    }, search ? 200 : 0)
+    return () => {
+      clearTimeout(timer)
+      controller.abort()
     }
-  }
+  }, [search, roleFilter, statusFilter, sectionFilter, sort, activeTab, userListVersion])
 
-  const fetchBlocks = async () => {
-    try {
-      const token = localStorage.getItem('token')
-      const res = await fetch('http://localhost:5000/api/admin/blocks', {
-        headers: { 'Authorization': `Bearer ${token}` }
+  const [sectionsVersion, setSectionsVersion] = useState(0)
+  useEffect(() => {
+    let ignore = false
+    authFetch(API_BASE + '/api/admin/sections')
+      .then(res => {
+        if (!res.ok) throw new Error('Class codes unavailable')
+        return res.json()
       })
-      if (res.ok) {
-        const data = await res.json()
-        setBlocks(Array.isArray(data) ? data : [])
-      }
-    } catch (err) {
-      console.error('Failed to fetch blocks:', err)
-    }
-  }
+      .then(data => {
+        if (!Array.isArray(data)) throw new Error('Unexpected class list')
+        if (!ignore) setSections(data)
+      })
+      .catch(() => { if (!ignore) setSectionError(true) })
+    return () => { ignore = true }
+  }, [sectionsVersion])
 
+  // Send the edited user fields to the server
   const handleUpdateUser = async (userId, updates) => {
     try {
-      const token = localStorage.getItem('token')
-      const res = await fetch(`http://localhost:5000/api/admin/users/${userId}`, {
+      const res = await authFetch(`${API_BASE}/api/admin/users/${userId}`, {
         method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updates)
       })
-      
-      if (res.status === 401) {
-        alert('Session expired. Please login again.')
-        localStorage.removeItem('token')
-        window.location.href = '/'
-        return
-      }
-      
-      if (res.ok) {
-        await fetchUsers()
+      const data = await res.json().catch(() => null)
+      if (res.ok && data) {
         setManageModal(null)
-        alert('✅ User updated successfully!')
+        fetchUsers()
+        // backend reports skipped class codes as a "Skipped (already
+        // taken): ..." entry in changes — surface that instead of just
+        // saying "success" and burying the actual conflict info.
+        const skippedNote = (data.changes || []).find(c => c.startsWith('Skipped'))
+        if (skippedNote) {
+          showToast(`Saved, but some class codes were skipped — ${skippedNote.replace('Skipped (already taken): ', '')}`, 'warning')
+        } else {
+          showToast('User updated successfully!')
+        }
       } else {
-        const error = await res.json()
-        alert(`Failed to update user: ${error.error}`)
+        return data?.error || 'The server did not confirm the update. Check the user list before trying again.'
       }
-    } catch (err) {
-      console.error('Failed to update user:', err)
-      alert('Failed to update user')
+    } catch {
+      return 'Could not confirm the update. Check your connection and the user list before trying again.'
     }
   }
 
-  const handleDeleteUser = async (userId) => {
-    const confirmText = prompt(`Type "DELETE" to confirm deletion of user ID ${userId}:`)
-    if (confirmText !== 'DELETE') {
-      alert('Deletion cancelled.')
-      return
-    }
+  // opens the styled type-to-confirm modal instead of the old prompt()
+  const handleDeleteUser = (userId) => {
+    const target = users.find(u => u.id === userId)
     
+    setConfirmModal({
+      title: 'Delete User',
+      message: `This permanently deletes ${target?.full_name || target?.username || `user ID ${userId}`} and cannot be undone.`,
+      requiredPhrase: 'DELETE',
+      onConfirm: () => performDeleteUser(userId),
+    })
+  }
+
+  // Delete the user now that the confirmation phrase has been typed
+  const performDeleteUser = async (userId) => {
+    setConfirmLoading(true)
     try {
-      const token = localStorage.getItem('token')
-      const res = await fetch(`http://localhost:5000/api/admin/users/${userId}`, {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}` }
+      const res = await authFetch(`${API_BASE}/api/admin/users/${userId}`, {
+        method: 'DELETE'
       })
-      
-      if (res.status === 401) {
-        alert('Session expired. Please login again.')
-        localStorage.removeItem('token')
-        window.location.href = '/'
-        return
-      }
-      
-      if (res.ok) {
-        await fetchUsers()
-        alert('✅ User deleted successfully!')
-      } else {
-        const error = await res.json()
-        alert(`Failed to delete user: ${error.error}`)
-      }
+      if (res.ok) { await fetchUsers(); showToast('User deleted successfully!') }
+      else { const error = await res.json(); showToast(`Failed to delete user: ${error.error}`, 'error') }
     } catch (err) {
       console.error('Failed to delete user:', err)
-      alert('Failed to delete user')
+      showToast('Failed to delete user', 'error')
+    } finally {
+      setConfirmLoading(false)
+      setConfirmModal(null)
+      
     }
   }
 
-  const handleUnlockUser = async (userId, username) => {
+  // "Delete All Students" — same type-to-confirm modal, higher-friction
+  // phrase since this wipes every student account (and, via the backend's
+  // _cascade_delete_student_data, their submissions/progress/enrollments)
+  // in one action instead of just one user
+  const handleBulkDeleteStudents = () => {
+    
+    setConfirmModal({
+      title: 'Delete All Students',
+      message: 'This permanently deletes every student account, including accounts hidden by the filters, and their submissions, progress, and enrollments. This cannot be undone.',
+      requiredPhrase: 'DELETE ALL STUDENTS',
+      onConfirm: performBulkDeleteStudents,
+    })
+  }
+
+  // Delete every student account now that the confirmation phrase has been typed
+  const performBulkDeleteStudents = async () => {
+    setConfirmLoading(true)
     try {
-      const token = localStorage.getItem('token')
-      const res = await fetch(`http://localhost:5000/api/admin/users/${userId}/unlock`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` }
+      const res = await authFetch(`${API_BASE}/api/admin/students/bulk-delete`, {
+        method: 'DELETE'
       })
       if (res.ok) {
+        const data = await res.json()
         await fetchUsers()
-        alert(`✅ Account "${username}" has been unlocked.`)
+        showToast(`Deleted ${data.count} student account(s) successfully.`)
       } else {
-        const err = await res.json()
-        alert(`Failed: ${err.error}`)
+        const error = await res.json()
+        showToast(`Failed to delete students: ${error.error}`, 'error')
       }
     } catch (err) {
-      alert('Network error. Please try again.')
+      console.error('Failed to bulk delete students:', err)
+      showToast('Failed to delete students', 'error')
+    } finally {
+      setConfirmLoading(false)
+      setConfirmModal(null)
+      
     }
   }
 
-  // Group users by role
+  // Unlock a user account that was locked after failed login attempts
+  const handleUnlockUser = async (userId, username) => {
+    try {
+      const res = await authFetch(`${API_BASE}/api/admin/users/${userId}/unlock`, {
+        method: 'POST'
+      })
+      if (res.ok) { await fetchUsers(); showToast(`Account "${username}" has been unlocked.`) }
+      else { const err = await res.json(); showToast(`Failed: ${err.error}`, 'error') }
+    } catch { showToast('Network error. Please try again.', 'error') }
+  }
+
+  const filteredUsers = users
+
+  const classesBySubject = new Map()
+  for (const section of [...sections].sort((a, b) => (a.subject_name || '').localeCompare(b.subject_name || '') || String(a.section_no).localeCompare(String(b.section_no), undefined, { numeric: true }))) {
+    const subject = section.subject_name || section.subject_code || 'Other classes'
+    if (!classesBySubject.has(subject)) classesBySubject.set(subject, [])
+    classesBySubject.get(subject).push(section)
+  }
+  const hasFilters = Boolean(search || roleFilter !== 'all' || sectionFilter !== 'all' || statusFilter !== 'all')
+
+  // Split the user list into admin, instructor, and student groups for the tables below
   const groupedUsers = {
-    admin: users.filter(u => u.role === 'admin'),
+    admin: users.filter(u => u.role === 'administrator'),
     instructor: users.filter(u => u.role === 'instructor'),
     student: users.filter(u => u.role === 'student')
   }
 
-  // Filter users
-  const filteredUsers = users.filter(user => {
-    if (roleFilter !== 'all' && user.role !== roleFilter) return false
-    if (blockFilter !== 'all' && user.block_id != blockFilter) return false
-    if (statusFilter !== 'all') {
-      if (statusFilter === 'active' && !user.is_active) return false
-      if (statusFilter === 'inactive' && user.is_active) return false
-    }
-    if (search) {
-      const searchLower = search.toLowerCase().replace(/-/g, '')
-      const fullNameLower = (user.full_name || '').toLowerCase()
-      return user.username.toLowerCase().replace(/-/g, '').includes(searchLower) ||
-             user.email.toLowerCase().includes(searchLower) ||
-             fullNameLower.includes(searchLower) ||
-             fullNameLower.replace(/-/g, '').includes(searchLower.replace(/-/g, ''))
-    }
-    return true
-  })
-
   return (
     <div className="space-y-6">
+
+      <AdminToast toast={toast} onDone={() => setToast(null)} />
+
       {/* Tab Switcher */}
       <div className="flex gap-2 border-b border-slate-800 pb-2">
         <button
+          aria-pressed={activeTab === 'users'}
           onClick={() => setActiveTab('users')}
-          className={`px-5 py-2 rounded-t-lg font-semibold text-sm transition ${activeTab === 'users' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
+          className={`px-5 py-2 rounded-t-lg font-semibold text-sm transition ${activeTab === 'users' ? 'bg-violet-950 text-amber-100 ring-1 ring-inset ring-amber-300/35' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
         >
-          👤 Users
+          Users
         </button>
         <button
+          aria-pressed={activeTab === 'subjects'}
           onClick={() => setActiveTab('subjects')}
-          className={`px-5 py-2 rounded-t-lg font-semibold text-sm transition ${activeTab === 'subjects' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
+          className={`px-5 py-2 rounded-t-lg font-semibold text-sm transition ${activeTab === 'subjects' ? 'bg-violet-950 text-amber-100 ring-1 ring-inset ring-amber-300/35' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
         >
-          📚 Subjects
+          Subjects
         </button>
       </div>
 
       {activeTab === 'subjects' && <SubjectManagement />}
 
-      {activeTab === 'users' && <>
-
-      {/* Header Actions */}
-      <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
-        <div className="flex gap-3 flex-wrap">
-          <button className="px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg transition flex items-center gap-2">
-            <span>📥</span> Export CSV
-          </button>
-          <button
-            onClick={() => setCsvModal(true)}
-            className="px-4 py-2 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 rounded-lg transition flex items-center gap-2 font-bold shadow-lg shadow-green-600/30"
-          >
-            <span>📤</span> Upload CSV
-          </button>
-
-          <button
-            onClick={() => setAddUserModal(true)}
-            className="px-4 py-2 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-lg transition flex items-center gap-2 font-bold shadow-lg shadow-purple-600/30"
-          >
-            <span>👤</span> Add User
-          </button>
-        </div>
-      </div>
-
-      {/* Filters */}
-      <div className="bg-slate-900/80 rounded-2xl border border-purple-600/30 p-6">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="relative">
-            <input
-              type="text"
-              placeholder="Search by name, student no., or email..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              autoComplete="off"
-              name="user-search"
-              className="w-full bg-slate-800 border border-slate-700 rounded-lg pl-10 pr-4 py-2 text-white focus:border-purple-500 outline-none transition"
-            />
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">🔍</span>
+      {activeTab === 'users' && (
+        <>
+          {/* Header Actions */}
+          <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
+            <div className="flex gap-3 flex-wrap">
+              <button
+                onClick={async () => {
+                  try {
+                    const res = await authFetch(`${API_BASE}/api/admin/reports?format=csv`)
+                    if (!res.ok || !res.headers.get('Content-Type')?.startsWith('text/csv')) {
+                      throw new Error('The server did not return a submission CSV.')
+                    }
+                    const blob = await res.blob()
+                    const url = URL.createObjectURL(blob)
+                    const a = document.createElement('a')
+                    a.href = url
+                    a.download = `submissions_report_${new Date().toISOString().split('T')[0]}.csv`
+                    a.click()
+                    URL.revokeObjectURL(url)
+                  } catch {
+                    showToast('Could not export submissions. Please try again.', 'error')
+                  }
+                }}
+                className="admin-button px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2 transition border text-slate-300"
+              >
+                <Icon.Download size={14} /> Export submission CSV
+              </button>
+              <button
+                onClick={() => setCsvModal(true)}
+                className="admin-button px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2 transition border text-green-400"
+              >
+                <Icon.Upload size={16} /> Bulk Enrollment Upload
+              </button>
+              <button
+                onClick={() => setAddUserModal(true)}
+                className="admin-button admin-button-primary px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2 transition text-white"
+              >
+                <Icon.Users size={14} /> Add User
+              </button>
+              <button
+                onClick={handleBulkDeleteStudents}
+                disabled={hasFilters || loading || !!usersError || groupedUsers.student.length === 0}
+                title={hasFilters ? 'Clear filters to access the global delete action' : undefined}
+                className="admin-button admin-button-danger px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2 transition border text-red-400 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:opacity-40"
+              >
+                <AdminIcon name="trash" className={INLINE} />Delete All Students
+              </button>
+            </div>
           </div>
-          
-          <select
-            value={roleFilter}
-            onChange={(e) => setRoleFilter(e.target.value)}
-            className="bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white focus:border-purple-500 outline-none transition"
-          >
-            <option value="all">All Roles</option>
-            <option value="super_admin">Super Admin</option>
-            <option value="instructor">Instructor</option>
-            <option value="student">Student</option>
-          </select>
 
-          <select
-            value={blockFilter}
-            onChange={(e) => setBlockFilter(e.target.value)}
-            className="bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white focus:border-purple-500 outline-none transition"
-          >
-            <option value="all">All Class Codes</option>
-            {blocks.map(block => (
-              <option key={block.id} value={block.id}>{block.section_code}</option>
-            ))}
-          </select>
-
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white focus:border-purple-500 outline-none transition"
-          >
-            <option value="all">All Status</option>
-            <option value="active">Active</option>
-            <option value="inactive">Inactive</option>
-          </select>
-        </div>
-      </div>
-
-      {/* Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="bg-slate-900/80 rounded-xl border border-green-600/30 p-4">
-          <p className="text-slate-400 text-sm mb-1">Total Students</p>
-          <p className="text-2xl font-black text-green-400">{groupedUsers.student.length}</p>
-        </div>
-        <div className="bg-slate-900/80 rounded-xl border border-blue-600/30 p-4">
-          <p className="text-slate-400 text-sm mb-1">Total Instructors</p>
-          <p className="text-2xl font-black text-blue-400">{groupedUsers.instructor.length}</p>
-        </div>
-        <div className="bg-slate-900/80 rounded-xl border border-purple-600/30 p-4">
-          <p className="text-slate-400 text-sm mb-1">Super Admins</p>
-          <p className="text-2xl font-black text-purple-400">{users.filter(u => u.role === 'super_admin').length}</p>
-        </div>
-        <div className="bg-slate-900/80 rounded-xl border border-yellow-600/30 p-4">
-          <p className="text-slate-400 text-sm mb-1">Filtered Results</p>
-          <p className="text-2xl font-black text-yellow-400">{filteredUsers.length}</p>
-        </div>
-      </div>
-
-      {/* User Tables Grouped by Role */}
-      {loading ? (
-        <div className="flex justify-center py-12">
-          <div className="animate-spin rounded-full h-12 w-12 border-4 border-purple-600 border-t-transparent"></div>
-        </div>
-      ) : (
-        <div className="space-y-6">
-          {/* Super Administrators Section */}
-          {filteredUsers.filter(u => u.role === 'super_admin').length > 0 && (
-            <UserSection
-              title="Super Administrators"
-              icon="🛡️"
-              users={filteredUsers.filter(u => u.role === 'super_admin')}
-              onManage={(user) => setManageModal(user)}
-              onRecover={(user) => setRecoveryModal(user)}
-              onDelete={handleDeleteUser}
-              onUnlock={handleUnlockUser}
-            />
-          )}
-
-          {/* Instructors Section */}
-          {filteredUsers.filter(u => u.role === 'instructor').length > 0 && (
-            <UserSection
-              title="Instructors"
-              icon="👨‍🏫"
-              users={filteredUsers.filter(u => u.role === 'instructor')}
-              onManage={(user) => setManageModal(user)}
-              onRecover={(user) => setRecoveryModal(user)}
-              onDelete={handleDeleteUser}
-              onUnlock={handleUnlockUser}
-            />
-          )}
-
-          {/* Students Section */}
-          {filteredUsers.filter(u => u.role === 'student').length > 0 && (
-            <UserSection
-              title="Students"
-              icon="🎓"
-              users={filteredUsers.filter(u => u.role === 'student')}
-              onManage={(user) => setManageModal(user)}
-              onRecover={(user) => setRecoveryModal(user)}
-              onDelete={handleDeleteUser}
-              onUnlock={handleUnlockUser}
-            />
-          )}
-
-          {filteredUsers.length === 0 && (
-            <div className="text-center py-12 bg-slate-900/80 rounded-2xl border border-dashed border-slate-700">
-              <div className="text-4xl mb-3">🔍</div>
-              <p className="text-slate-400 text-lg">No users found</p>
-              <p className="text-slate-500 text-sm mt-2">Try adjusting your filters</p>
+          <section aria-label="User filters" className="rounded-xl border border-amber-300/25 bg-slate-900 p-4 sm:p-5">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+              <h2 className="font-cinzel text-lg font-semibold text-slate-100">Find users</h2>
+              {hasFilters && <button type="button" className="min-h-9 rounded px-2 text-sm font-semibold text-amber-200 hover:bg-amber-300/10 focus-visible:outline focus-visible:outline-violet-400" onClick={() => { setSearch(''); setRoleFilter('all'); setSectionFilter('all'); setStatusFilter('all') }}>Clear filters</button>}
             </div>
-          )}
-        </div>
-      )}
-
-      {/* Modals */}
-      {manageModal && (
-        <EditUserModal
-          user={manageModal}
-          blocks={blocks}
-          onClose={() => setManageModal(null)}
-          onSave={(updates) => handleUpdateUser(manageModal.id, updates)}
-        />
-      )}
-      {recoveryModal && (
-        <RecoveryModal
-          user={recoveryModal}
-          onClose={() => setRecoveryModal(null)}
-          onSuccess={() => { setRecoveryModal(null); fetchUsers(); }}
-        />
-      )}
-
-      {csvModal && (
-        <UploadCSVModal
-          blocks={blocks}
-          onClose={() => setCsvModal(false)}
-          onSuccess={() => { setCsvModal(false); fetchUsers() }}
-        />
-      )}
-
-      {/* Add User Modal */}
-      {addUserModal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-slate-900 border border-purple-600/50 rounded-2xl w-full max-w-md shadow-2xl shadow-purple-900/50">
-            {/* Modal Header */}
-            <div className="flex items-center justify-between p-6 border-b border-purple-600/30">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-gradient-to-br from-purple-600 to-pink-600 rounded-xl flex items-center justify-center text-xl">
-                  👤
-                </div>
-                <div>
-                  <h2 className="text-xl font-black text-white">Add New User</h2>
-                  <p className="text-slate-400 text-xs">Create a student or instructor account</p>
-                </div>
-              </div>
-              <button onClick={() => { setAddUserModal(false); resetAddUserForm() }}
-                className="text-slate-400 hover:text-white text-2xl transition">✕</button>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 2xl:grid-cols-[1.5fr_1fr_1.35fr_1fr_1fr]">
+              <label className="min-w-0 space-y-2 text-sm text-slate-200"><span>Search</span>
+                <input className={control} type="search" placeholder="Name, username, or email" value={search} onChange={e => setSearch(e.target.value)} />
+              </label>
+              <label className="min-w-0 space-y-2 text-sm text-slate-200"><span id="user-role-filter-label">Role</span>
+                <select aria-labelledby="user-role-filter-label" className={control} value={roleFilter} onChange={e => setRoleFilter(e.target.value)}>
+                  <option value="all">All roles</option><option value="administrator">Administrator</option><option value="instructor">Instructor</option><option value="student">Student</option>
+                </select>
+              </label>
+              <label className="min-w-0 space-y-2 text-sm text-slate-200"><span id="user-class-filter-label">Class code</span>
+                <select aria-labelledby="user-class-filter-label" className={control} value={sectionFilter} onChange={e => setSectionFilter(e.target.value)}>
+                  <option value="all">All class codes</option>
+                  {[...classesBySubject].map(([subject, codes]) => <optgroup key={subject} label={subject}>
+                    {codes.map(section => <option key={section.id} value={String(section.id)}>{section.section_no}{section.subject_code ? ' — ' + section.subject_code : ''}</option>)}
+                  </optgroup>)}
+                </select>
+              </label>
+              <label className="min-w-0 space-y-2 text-sm text-slate-200"><span id="user-status-filter-label">Status</span>
+                <select aria-labelledby="user-status-filter-label" className={control} value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+                  <option value="all">Any status</option><option value="active">Active</option><option value="inactive">Inactive</option>
+                </select>
+              </label>
+              <label className="min-w-0 space-y-2 text-sm text-slate-200"><span id="user-sort-label">Sort by</span>
+                <select aria-labelledby="user-sort-label" className={control} value={sort} onChange={e => setSort(e.target.value)}>
+                  <option value="name_asc">Name: A–Z</option>
+                  <option value="name_desc">Name: Z–A</option>
+                  <option value="newest">Newest first</option>
+                </select>
+              </label>
             </div>
+            {sectionError && <p role="alert" className="mt-3 text-sm text-amber-200">Class codes could not be loaded. <button type="button" onClick={() => { setSectionError(false); setSectionsVersion(v => v + 1) }} className="underline">Retry</button></p>}
+          </section>
 
-            {/* Modal Body */}
-            <div className="p-6 space-y-4">
-              {addUserError && (
-                <div className="flex items-center gap-2 p-3 bg-red-600/20 border border-red-600/40 rounded-lg text-red-300 text-sm">
-                  <span>❌</span> {addUserError}
+          {/* Stats */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="bg-slate-900/80 rounded-xl border border-green-600/30 p-4">
+              <p className="text-slate-400 text-sm mb-1">Students shown</p>
+              <p className="text-2xl font-black text-green-400">{groupedUsers.student.length}</p>
+            </div>
+            <div className="bg-slate-900/80 rounded-xl border border-blue-600/30 p-4">
+              <p className="text-slate-400 text-sm mb-1">Instructors shown</p>
+              <p className="text-2xl font-black text-blue-400">{groupedUsers.instructor.length}</p>
+            </div>
+            <div className="bg-slate-900/80 rounded-xl border border-purple-600/30 p-4">
+              <p className="text-slate-400 text-sm mb-1">Administrators shown</p>
+              <p className="text-2xl font-black text-purple-400">{groupedUsers.admin.length}</p>
+            </div>
+            <div className="bg-slate-900/80 rounded-xl border border-yellow-600/30 p-4">
+              <p className="text-slate-400 text-sm mb-1">Filtered Results</p>
+              <p aria-live="polite" className="text-2xl font-black text-yellow-400">{loading || usersError ? '—' : filteredUsers.length}</p>
+            </div>
+          </div>
+
+          {/* User Tables */}
+          {usersError ? (
+            <div role="alert" className="rounded-xl border border-amber-300/25 bg-slate-900 p-5 text-amber-100">{usersError} <button type="button" onClick={fetchUsers} className="underline">Retry</button></div>
+          ) : loading ? (
+            <div className="flex justify-center py-12">
+              <div className="animate-spin rounded-full h-12 w-12 border-4 border-purple-600 border-t-transparent"></div>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {filteredUsers.filter(u => u.role === 'administrator').length > 0 && (
+                <UserSection
+                  title="Administrators"
+                  icon={adminRoleIcon}
+                  users={filteredUsers.filter(u => u.role === 'administrator')}
+                  onManage={setManageModal}
+                  onRecover={setRecoveryModal}
+                  onDelete={handleDeleteUser}
+                  onUnlock={handleUnlockUser}
+                />
+              )}
+              {filteredUsers.filter(u => u.role === 'instructor').length > 0 && (
+                <UserSection
+                  title="Instructors"
+                  icon={instructorRoleIcon}
+                  users={filteredUsers.filter(u => u.role === 'instructor')}
+                  onManage={setManageModal}
+                  onRecover={setRecoveryModal}
+                  onDelete={handleDeleteUser}
+                  onUnlock={handleUnlockUser}
+                />
+              )}
+              {filteredUsers.filter(u => u.role === 'student').length > 0 && (
+                <UserSection
+                  title="Students"
+                  icon={studentRoleIcon}
+                  users={filteredUsers.filter(u => u.role === 'student')}
+                  onManage={setManageModal}
+                  onRecover={setRecoveryModal}
+                  onDelete={handleDeleteUser}
+                  onUnlock={handleUnlockUser}
+                />
+              )}
+              {filteredUsers.length === 0 && (
+                <div className="text-center py-12 bg-slate-900/80 rounded-2xl border border-dashed border-slate-700">
+                  <AdminIcon name="search" className="mx-auto mb-3 size-10 text-slate-500" />
+                  <p className="text-slate-400 text-lg">No users found</p>
+                  <p className="text-slate-500 text-sm mt-2">Try adjusting your filters</p>
                 </div>
               )}
-              {addUserSuccess && (
-                <div className="flex items-center gap-2 p-3 bg-green-600/20 border border-green-600/40 rounded-lg text-green-300 text-sm">
-                  <span>✅</span> {addUserSuccess}
-                </div>
-              )}
+            </div>
+          )}
 
-              <div>
-                <label className="block text-sm text-slate-400 mb-1.5">Username <span className="text-red-400">*</span></label>
-                <input
-                  type="text"
-                  value={addUserForm.username}
-                  onChange={e => setAddUserForm({...addUserForm, username: e.target.value})}
-                  placeholder="e.g. john_doe"
-                  className="w-full bg-slate-800 border border-slate-700 focus:border-purple-500 rounded-lg px-4 py-2.5 text-white outline-none transition placeholder-slate-500"
-                />
-              </div>
+          {/* Modals */}
+          {manageModal && (
+            <EditUserModal
+              user={manageModal}
+              sections={sections}
+              canCreateAdmins={isMasterAdmin}
+              onClose={() => setManageModal(null)}
+              onSave={updates => handleUpdateUser(manageModal.id, updates)}
+            />
+          )}
+          {recoveryModal && (
+            <RecoveryModal
+              user={recoveryModal}
+              onClose={() => setRecoveryModal(null)}
+              onSuccess={() => { setRecoveryModal(null); fetchUsers() }}
+            />
+          )}
+          {csvModal && (
+            <UploadCSVModal
+              onClose={() => setCsvModal(false)}
+              onSuccess={() => { setCsvModal(false); fetchUsers() }}
+            />
+          )}
 
-              <div>
-                <label className="block text-sm text-slate-400 mb-1.5">Email <span className="text-red-400">*</span></label>
-                <input
-                  type="email"
-                  value={addUserForm.email}
-                  onChange={e => setAddUserForm({...addUserForm, email: e.target.value})}
-                  placeholder="e.g. john@school.edu"
-                  className="w-full bg-slate-800 border border-slate-700 focus:border-purple-500 rounded-lg px-4 py-2.5 text-white outline-none transition placeholder-slate-500"
-                />
-              </div>
+          {/* Type-to-confirm modal — shared by single-user Delete and
+              "Delete All Students". Confirm button stays disabled until
+              the typed text exactly matches confirmModal.requiredPhrase. */}
+          {confirmModal && (
+            <AdminConfirmDialog
+              title={confirmModal.title}
+              message={confirmModal.message}
+              requiredPhrase={confirmModal.requiredPhrase}
+              busy={confirmLoading}
+              onConfirm={confirmModal.onConfirm}
+              onCancel={() => { setConfirmModal(null) }}
+            />
+          )}
 
-              <div>
-                <label className="block text-sm text-slate-400 mb-1.5">Password <span className="text-red-400">*</span></label>
-                <input
-                  type="password"
-                  value={addUserForm.password}
-                  onChange={e => setAddUserForm({...addUserForm, password: e.target.value})}
-                  placeholder="Min. 6 characters"
-                  className="w-full bg-slate-800 border border-slate-700 focus:border-purple-500 rounded-lg px-4 py-2.5 text-white outline-none transition placeholder-slate-500"
-                />
-                {addUserForm.password && (
-                  <div className="mt-1.5 flex gap-1">
-                    {[1,2,3,4].map(i => (
-                      <div key={i} className={`h-1 flex-1 rounded-full transition-all ${
-                        addUserForm.password.length >= i * 3
-                          ? i <= 1 ? 'bg-red-500' : i <= 2 ? 'bg-yellow-500' : i <= 3 ? 'bg-blue-500' : 'bg-green-500'
-                          : 'bg-slate-700'
-                      }`} />
-                    ))}
-                    <span className="text-xs text-slate-500 ml-1">
-                      {addUserForm.password.length < 4 ? 'Weak' : addUserForm.password.length < 7 ? 'Fair' : addUserForm.password.length < 10 ? 'Good' : 'Strong'}
-                    </span>
+          {/* Add User Modal */}
+          {addUserModal && (
+            <AdminActionDialog
+              title="Add new user"
+              description={isMasterAdmin ? 'Create a student, instructor or administrator account' : 'Create a student or instructor account'}
+              emblem={createUsersEmblem}
+              onClose={() => { setAddUserModal(false); resetAddUserForm() }}
+              busy={addUserLoading}
+            >
+                <div className="admin-action-scroll flex-1 space-y-4 p-4 sm:p-6">
+                  {addUserError && (
+                    <FormBanner tone="error" title="Could not create the account">{addUserError}</FormBanner>
+                  )}
+                  {addUserSuccess && (
+                    <FormBanner tone="success" title="Account created">
+                      <span className="font-mono font-semibold text-white">{addUserSuccess.username}</span> was added as a {addUserSuccess.roleLabel}. You can add another account or close this window.
+                    </FormBanner>
+                  )}
+
+                  <div>
+                    <label htmlFor="add-user-username" className="block text-sm text-slate-300 mb-1.5">{addUserForm.role === 'student' ? 'Student ID' : 'Username'} <span className="text-red-400">*</span></label>
+                    <input
+                      id="add-user-username"
+                      type="text"
+                      value={addUserForm.username}
+                      onChange={e => setAddUserForm({ ...addUserForm, username: e.target.value })}
+                      placeholder={addUserForm.role === 'student' ? 'e.g. 2026001' : 'e.g. jane_doe'}
+                      className="w-full bg-slate-800 border border-slate-700 focus:border-purple-500 rounded-lg px-4 py-2.5 text-white outline-none transition placeholder-slate-500"
+                    />
                   </div>
-                )}
-              </div>
 
-              <div>
-                <label className="block text-sm text-slate-400 mb-1.5 font-medium">
-                  Role <span className="text-red-400">*</span>
-                </label>
-                <div className={`grid gap-3 ${isMasterAdmin ? 'grid-cols-3' : 'grid-cols-2'}`}>
-                  {[
-                    { value: 'student',    label: 'Student',     icon: '🎓',  desc: 'Enrolled learner'    },
-                    { value: 'instructor', label: 'Instructor',  icon: '👨‍🏫', desc: 'Course facilitator'  },
-                    ...(isMasterAdmin ? [{ value: 'super_admin', label: 'Super Admin', icon: '🛡️', desc: 'Full system access' }] : []),
-                  ].map(role => (
-                    <button
-                      key={role.value}
-                      type="button"
-                      onClick={() => setAddUserForm({...addUserForm, role: role.value})}
-                      className={`flex flex-col items-center gap-1.5 p-4 rounded-xl border-2 transition ${
-                        addUserForm.role === role.value
-                          ? role.value === 'super_admin'
-                            ? 'border-yellow-500 bg-yellow-600/20 text-white shadow-lg shadow-yellow-600/20'
-                            : 'border-purple-500 bg-purple-600/20 text-white shadow-lg shadow-purple-600/20'
-                          : 'border-slate-700 bg-slate-800/60 text-slate-400 hover:border-slate-600 hover:bg-slate-800'
-                      }`}
-                    >
-                      <span className="text-2xl">{role.icon}</span>
-                      <span className={`text-sm font-bold ${addUserForm.role === role.value && role.value === 'super_admin' ? 'text-yellow-300' : ''}`}>{role.label}</span>
-                      <span className="text-xs text-slate-500">{role.desc}</span>
-                    </button>
-                  ))}
-                </div>
-                {!isMasterAdmin && (
-                  <div className="mt-2 flex items-center gap-2 p-2.5 bg-yellow-600/10 border border-yellow-600/30 rounded-lg">
-                    <span className="text-yellow-400 text-sm">🔒</span>
-                    <p className="text-yellow-300/80 text-xs">Super Admin accounts are managed exclusively by <span className="font-semibold text-yellow-300">admin@adamson.edu.ph</span></p>
+                  <label className="block space-y-2 text-sm text-slate-300">
+                    <span>Generated sign-in email</span>
+                    <input readOnly className={control} value={generatedEmail} placeholder={'@' + policy.student_email_domain} />
+                  </label>
+
+                  <div>
+                    <label htmlFor="add-user-password" className="block text-sm text-slate-400 mb-1.5">Password <span className="text-red-400">*</span></label>
+                    <PasswordField
+                      key={addUserForm.role}
+                      id="add-user-password"
+                      autoComplete="new-password"
+                      value={addUserForm.password}
+                      onChange={e => setAddUserForm({ ...addUserForm, password: e.target.value })}
+                      placeholder="8+ characters, letter and number"
+                      className="w-full bg-slate-800 border border-slate-700 focus:border-purple-500 rounded-lg px-4 py-2.5 text-white outline-none transition placeholder-slate-500"
+                    />
                   </div>
-                )}
-              </div>
 
-              {(addUserForm.role === 'student') && (
-                <div>
-                  <label className="block text-sm text-slate-400 mb-1.5">Assign to Class Code <span className="text-slate-500">(optional)</span></label>
-                  <select
-                    value={addUserForm.block_id}
-                    onChange={e => setAddUserForm({...addUserForm, block_id: e.target.value})}
-                    className="w-full bg-slate-800 border border-slate-700 focus:border-purple-500 rounded-lg px-4 py-2.5 text-white outline-none transition"
+                  <div>
+                    <label className="block text-sm text-slate-400 mb-1.5 font-medium">Role <span className="text-red-400">*</span></label>
+                    <div className={`admin-role-grid grid gap-3 ${isMasterAdmin ? 'grid-cols-3' : 'grid-cols-2'}`}>
+                      {[
+                        { value: 'student', label: 'Student', icon: studentRoleIcon, desc: 'Enrolled learner' },
+                        { value: 'instructor', label: 'Instructor', icon: instructorRoleIcon, desc: 'Course facilitator' },
+                        ...(isMasterAdmin ? [{ value: 'administrator', label: 'Administrator', icon: adminRoleIcon, desc: 'Full system access' }] : []),
+                      ].map(role => (
+                        <button
+                          key={role.value}
+                          type="button"
+                          onClick={() => setAddUserForm({ ...addUserForm, role: role.value })}
+                          className={`flex flex-col items-center gap-1.5 p-4 rounded-xl border-2 transition ${
+                            addUserForm.role === role.value
+                              ? role.value === 'administrator'
+                                ? 'border-yellow-500 bg-yellow-600/20 text-white shadow-lg shadow-yellow-600/20'
+                                : 'border-purple-500 bg-purple-600/20 text-white shadow-lg shadow-purple-600/20'
+                              : 'border-slate-700 bg-slate-800/60 text-slate-400 hover:border-slate-600 hover:bg-slate-800'
+                          }`}
+                        >
+                          <img src={role.icon} alt="" width="48" height="48" className="size-12 object-contain" />
+                          <span className={`text-sm font-bold ${addUserForm.role === role.value && role.value === 'administrator' ? 'text-yellow-300' : ''}`}>{role.label}</span>
+                          <span className="text-xs text-slate-500">{role.desc}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {addUserForm.role === 'student' && (
+                    <div>
+                      <label className="block text-sm text-slate-400 mb-1.5">
+                        Assign to Class Code <span className="text-slate-500">(optional)</span>
+                      </label>
+                      <select
+                        value={addUserForm.section_id}
+                        onChange={e => setAddUserForm({ ...addUserForm, section_id: e.target.value })}
+                        className="w-full bg-slate-800 border border-slate-700 focus:border-purple-500 rounded-lg px-4 py-2.5 text-white outline-none transition"
+                      >
+                        <option value="">No class code assigned</option>
+                        {sections.map(s => (
+                          <option key={s.id} value={s.id}>
+                            {s.section_no}{s.subject_name ? ` — ${s.subject_name}` : ''}{s.semester ? ` (${s.semester})` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex shrink-0 gap-3 border-t border-slate-700 p-4 sm:p-6">
+                  <button
+                    onClick={() => { setAddUserModal(false); resetAddUserForm() }}
+                    className="admin-button flex-1 py-2.5 rounded-lg text-slate-300 font-medium transition"
                   >
-                    <option value="">No class code assigned</option>
-                    {blocks.map(block => (
-                      <option key={block.id} value={block.id}>{block.section_code} — {block.semester || 'Current'}</option>
-                    ))}
-                  </select>
+                    {addUserSuccess ? 'Done' : 'Cancel'}
+                  </button>
+                  <button
+                    onClick={handleAddUser}
+                    disabled={addUserLoading}
+                    className="admin-button admin-button-primary flex-1 py-2.5 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-white font-semibold transition flex items-center justify-center gap-2"
+                  >
+                    {addUserLoading
+                      ? <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Creating...</>
+                      : <><AdminIcon name="user" className="size-4" /> {addUserSuccess ? 'Add another' : 'Create User'}</>}
+                  </button>
                 </div>
-              )}
-            </div>
-
-            {/* Modal Footer */}
-            <div className="flex gap-3 p-6 border-t border-purple-600/30">
-              <button
-                onClick={() => { setAddUserModal(false); resetAddUserForm() }}
-                className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 font-medium transition"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleAddUser}
-                disabled={addUserLoading}
-                className="flex-1 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-white font-black transition shadow-lg shadow-purple-600/30 flex items-center justify-center gap-2"
-              >
-                {addUserLoading ? (
-                  <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Creating...</>
-                ) : (
-                  <><span>👤</span> Create User</>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
+            </AdminActionDialog>
+          )}
+        </>
       )}
-    </>}
     </div>
   )
 }
 
-// User Section Component with 3 Buttons
 function UserSection({ title, icon, users, onManage, onRecover, onDelete, onUnlock }) {
   return (
-    <div className="bg-slate-900/80 rounded-2xl border border-purple-600/30 overflow-hidden">
-      <div className="bg-slate-800/80 border-b border-purple-600/30 px-6 py-4">
+    <div className="bg-slate-900 rounded-xl border border-amber-300/25 overflow-hidden">
+      <div className="bg-violet-950/25 border-b border-amber-300/20 px-5 py-4">
         <div className="flex items-center gap-3">
-          <span className="text-2xl">{icon}</span>
-          <h3 className="text-xl font-bold text-white">{title}</h3>
+          <img src={icon} alt="" className="size-10 shrink-0 object-contain" />
+          <h3 className="font-cinzel text-xl font-semibold text-white">{title}</h3>
           <span className="px-3 py-1 bg-purple-600/30 text-purple-300 rounded-full text-sm font-bold border border-purple-600/50">
             {users.length}
           </span>
         </div>
       </div>
-      
+
       <div className="overflow-x-auto">
-        <table className="w-full">
-          <thead className="bg-slate-800/60">
-            <tr>
-              <th className="text-left p-4 text-slate-400 font-medium text-sm">USER</th>
-              <th className="text-left p-4 text-slate-400 font-medium text-sm">CLASS CODE</th>
-              <th className="text-left p-4 text-slate-400 font-medium text-sm">LEVEL</th>
-              <th className="text-left p-4 text-slate-400 font-medium text-sm">XP</th>
-              <th className="text-left p-4 text-slate-400 font-medium text-sm">STATUS</th>
-              <th className="text-left p-4 text-slate-400 font-medium text-sm">ACTIONS</th>
+        <table role="table" aria-label={title} className="admin-record-table w-full">
+          <thead role="rowgroup" className="bg-slate-800/60">
+            <tr role="row">
+              <th scope="col" role="columnheader" className="text-left p-4 text-slate-400 font-medium text-sm">USER</th>
+              <th scope="col" role="columnheader" className="text-left p-4 text-slate-400 font-medium text-sm">CLASS CODE</th>
+              <th scope="col" role="columnheader" className="text-left p-4 text-slate-400 font-medium text-sm">LEVEL</th>
+              <th scope="col" role="columnheader" className="text-left p-4 text-slate-400 font-medium text-sm">XP</th>
+              <th scope="col" role="columnheader" className="text-left p-4 text-slate-400 font-medium text-sm">STATUS</th>
+              <th scope="col" role="columnheader" className="text-left p-4 text-slate-400 font-medium text-sm">ACTIONS</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-800">
+          <tbody role="rowgroup" className="divide-y divide-slate-800">
             {users.map(user => (
-              <tr key={user.id} className="hover:bg-slate-800/50 transition">
-                {/* USER */}
-                <td className="p-4">
+              <tr role="row" key={user.id} className="hover:bg-slate-800/50 transition">
+                <td role="cell" className="admin-record-heading p-4">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-gradient-to-br from-purple-600 to-pink-600 rounded-full flex items-center justify-center font-bold text-sm flex-shrink-0">
+                    <div className="w-10 h-10 bg-violet-800 border border-violet-400/40 rounded-full flex items-center justify-center font-bold text-sm flex-shrink-0">
                       {(user.full_name || user.username)[0].toUpperCase()}
                     </div>
                     <div>
-                      <p className="font-semibold text-white">
-                        {user.full_name || user.username}
-                      </p>
-                      <p className="text-slate-400 text-xs truncate max-w-[200px]">{user.email}</p>
+                      <p className="break-words font-semibold text-white">{user.full_name || user.username}{user.is_head_admin && <span className="ml-2 text-xs text-amber-300">Head Admin</span>}</p>
+                      <p className="text-slate-300 text-xs break-all">{user.email}</p>
                       {user.role === 'student' && (
                         <span className="font-mono text-xs text-yellow-300 bg-yellow-900/20 border border-yellow-600/30 px-1.5 py-0.5 rounded mt-0.5 inline-block">
                           {user.username}
@@ -640,81 +713,89 @@ function UserSection({ title, icon, users, onManage, onRecover, onDelete, onUnlo
                     </div>
                   </div>
                 </td>
-                {/* BLOCK */}
-                <td className="p-4">
-                  {user.blocks && user.blocks.length > 0 ? (
+
+                {/* CLASS CODE column — shows section_no values */}
+                <td role="cell" data-label="Class code" className="p-4">
+                  {user.sections && user.sections.length > 0 ? (
                     <div className="flex flex-wrap gap-1">
-                      {[...new Set(user.blocks.map(b => b.section_code))].map((code, idx) => (
+                      {[...new Set(user.sections.map(s => s.section_code))].map((code, idx) => (
                         <span
                           key={idx}
                           className="px-2.5 py-1 bg-purple-600/20 text-purple-300 rounded-lg text-sm font-bold border border-purple-600/40 shadow-sm"
-                          title={`Section ${code}`}
+                          title={`Class code ${code}`}
                         >
                           {code}
                         </span>
                       ))}
                     </div>
-                  ) : user.is_irregular ? (
-                    <span className="px-2.5 py-1 bg-orange-600/20 text-orange-300 rounded-lg text-xs font-bold border border-orange-600/40">
-                      IRR
-                    </span>
                   ) : (
                     <span className="text-slate-500 text-sm italic">Unassigned</span>
                   )}
                 </td>
-                {/* LEVEL */}
-                <td className="p-4 text-white font-mono">{user.level}</td>
-                {/* XP */}
-                <td className="p-4 text-yellow-400 font-mono">{user.xp}</td>
-                {/* STATUS */}
-                <td className="p-4">
+
+                <td role="cell" data-label="Level" className="p-4 text-white font-mono">{user.level}</td>
+                <td role="cell" data-label="XP" className="p-4 text-yellow-400 font-mono">{user.xp}</td>
+
+                <td role="cell" data-label="Status" className="p-4">
                   <div className="flex flex-col gap-1">
                     <span className={`px-3 py-1 rounded-lg text-xs font-bold w-fit ${
-                      user.is_active ? 'bg-green-600/30 text-green-300 border border-green-600/50' : 'bg-red-600/30 text-red-300 border border-red-600/50'
+                      user.is_active
+                        ? 'bg-green-600/30 text-green-300 border border-green-600/50'
+                        : 'bg-red-600/30 text-red-300 border border-red-600/50'
                     }`}>
-                      {user.is_active ? '✅ Active' : '⛔ Inactive'}
+                      {user.is_active ? <><AdminIcon name="check" className={INLINE} />Active</> : <><AdminIcon name="ban" className={INLINE} />Inactive</>}
                     </span>
                     {user.is_locked && (
                       <span className="px-3 py-1 rounded-lg text-xs font-bold w-fit bg-orange-600/30 text-orange-300 border border-orange-600/50">
-                        🔒 Locked
+                        <AdminIcon name="lock" className={INLINE} />Locked
                       </span>
                     )}
                     {!user.is_locked && user.login_attempts > 0 && (
                       <span className="px-3 py-1 rounded-lg text-xs font-bold w-fit bg-yellow-600/20 text-yellow-400 border border-yellow-600/40">
-                        ⚠️ {user.login_attempts}/3 attempts
+                        <AdminIcon name="alert" className={INLINE} />{user.login_attempts}/3 attempts
                       </span>
                     )}
                   </div>
                 </td>
-                {/* ACTIONS */}
-                <td className="p-4 w-52">
-                  <div className="flex flex-col gap-1">
-                    <div className="flex gap-1">
+
+                <td role="cell" className="admin-record-actions p-4 xl:whitespace-nowrap">
+                  <div className="flex flex-col gap-2">
+                    <div className="admin-user-actions">
                       <button
+                        type="button"
+                        disabled={user.can_manage === false}
+                        title={user.can_manage === false ? 'Administrator accounts are managed by the Head Admin; own-account editing is unavailable.' : undefined}
+                        aria-label={`Manage ${user.full_name || user.username}`}
                         onClick={() => onManage(user)}
-                        className="flex-1 px-2 py-1.5 bg-purple-600 hover:bg-purple-500 rounded text-xs transition text-white font-bold whitespace-nowrap"
+                        className="admin-button admin-button-primary text-sm"
                       >
                         Manage
                       </button>
                       <button
+                        type="button"
+                        disabled={user.can_manage === false}
+                        aria-label={`Recover ${user.full_name || user.username}`}
                         onClick={() => onRecover(user)}
-                        className="flex-1 px-2 py-1.5 bg-blue-600 hover:bg-blue-500 rounded text-xs transition text-white font-bold whitespace-nowrap"
+                        className="admin-button text-sm"
                       >
                         Recover
                       </button>
                       <button
+                        type="button"
+                        disabled={user.can_delete === false}
+                        aria-label={`Delete ${user.full_name || user.username}`}
                         onClick={() => onDelete(user.id)}
-                        className="flex-1 px-2 py-1.5 bg-red-600/20 hover:bg-red-600 rounded text-xs transition text-red-400 hover:text-white font-bold border border-red-600/50 whitespace-nowrap"
+                        className="admin-button admin-button-danger text-sm"
                       >
                         Delete
                       </button>
                     </div>
-                    {user.is_locked && (
+                    {user.is_locked && user.can_manage !== false && (
                       <button
                         onClick={() => onUnlock(user.id, user.username)}
-                        className="w-full px-2 py-1.5 bg-orange-600 hover:bg-orange-500 rounded text-xs transition text-white font-black whitespace-nowrap flex items-center justify-center gap-1"
+                        className="admin-button w-full px-2 text-xs font-semibold flex items-center justify-center gap-1"
                       >
-                        🔓 Unlock Account
+                        <AdminIcon name="unlock" className={INLINE} />Unlock Account
                       </button>
                     )}
                   </div>

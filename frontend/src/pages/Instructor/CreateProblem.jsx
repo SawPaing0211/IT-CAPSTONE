@@ -1,154 +1,218 @@
-import { useState, useEffect } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'  // changed useparams to usesearchparams
+import { useState, useEffect, useRef } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { API_BASE, authFetch } from '../../api/client'
+import InstructorBackButton from '../../components/InstructorBackButton'
+import ModuleIcon from './ModuleIcon'
+import './QuestEditor.css'
+import { QuestDifficulty, QuestReward } from './QuestRewardControls'
+import questScroll from '../../assets/instructor/quest-quill-scroll.png'
+import questGuidebook from '../../assets/instructor/quest-guidebook.png'
+import questCode from '../../assets/instructor/quest-code-emblem.png'
+import questParty from '../../assets/instructor/quest-party-shield.png'
+import questTests from '../../assets/instructor/quest-inspection-tablet.png'
+import questHint from '../../assets/instructor/quest-hint-lantern.png'
+import questReview from '../../assets/instructor/quest-approved-scroll.png'
+import questLock from '../../assets/instructor/quest-hidden-padlock.png'
+import pythonEmblem from '../../assets/instructor/quest-language-python.png'
+import javaEmblem from '../../assets/instructor/quest-language-java.png'
+import csharpEmblem from '../../assets/instructor/quest-language-csharp.png'
 
 export default function CreateProblem() {
   const navigate = useNavigate()
-  const [searchParams] = useSearchParams()  // Read query params
-  const problemId = searchParams.get('edit')  // Get problem ID from ?edit=123
-  const [blocks, setBlocks] = useState([])
-  const [isEditing, setIsEditing] = useState(!!problemId)  // Editing mode if problemId exists
+  const [searchParams] = useSearchParams()
+  const problemId = searchParams.get('edit')
+  const [isEditing, setIsEditing] = useState(!!problemId)
   const [assignedSubjects, setAssignedSubjects] = useState([])
-  const [blocksBySubject, setBlocksBySubject] = useState([])
+  const [subjectsLoading, setSubjectsLoading] = useState(true)
+  const [sectionsBySubject, setSectionsBySubject] = useState([])
   const [selectedSubjectId, setSelectedSubjectId] = useState(null)
   const [activeSection, setActiveSection] = useState(1)
-  
+  const [toast, setToast] = useState(null) // { message, type: 'success' | 'error' }
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const submitting = useRef(false)
+  const editorRef = useRef(null)
+  const [loadError, setLoadError] = useState('')
+  const [sectionsError, setSectionsError] = useState('')
+  const [sectionsLoading, setSectionsLoading] = useState(false)
+  const [loadVersion, setLoadVersion] = useState(0)
+  const [sectionsVersion, setSectionsVersion] = useState(0)
+  const subjectParam = searchParams.get('subject_id')
+  const classParam = searchParams.get('class_id')
+
+  // Automatically dismiss the toast after a few seconds
+  useEffect(() => {
+    if (!toast || toast.type !== 'success') return
+    const timer = setTimeout(() => setToast(null), 4000)
+    return () => clearTimeout(timer)
+  }, [toast])
+
+  const showToast = (message, type = 'error') => setToast({ message, type })
+
   const [formData, setFormData] = useState({
-    // Basic Info
     title: '',
     description: '',
     difficulty: 'Easy',
     xp_reward: 100,
     category: 'General',
-    
-    // NEW PRO FIELDS
     problem_type: 'coding',
     languages: ['python'],
     is_event_quest: false,
-    visible_to_blocks: [],
+    // visible_to_sections stores SubjectSection IDs, not subject IDs
+    visible_to_sections: [],
     hints: [],
     tags: [],
     prerequisites: [],
     estimated_time: '15min',
     partial_credit: 100,
+    language_rule: 'optional',
     auto_grade: true,
     plagiarism_threshold: 0.85,
-    
-    // Code & Tests
-    starter_code: {
-      python: '',
-      java: '',
-      csharp: ''
-    },
+    starter_code: { python: '', java: '', csharp: '' },
     test_cases: [{ input: '', expected: '' }]
   })
 
-  // Fetch subjects AND blocks (and problem data if editing)
-useEffect(() => {
-  const fetchData = async () => {
-    try {
-      const token = localStorage.getItem('token')
-      
-      // Check if we're editing an existing problem
-      if (problemId) {
-        setIsEditing(true)
-        // Fetch existing problem data
-        const problemRes = await fetch(`http://localhost:5000/api/instructor/problems/${problemId}`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        })
-        if (problemRes.ok) {
-          const problemData = await problemRes.json()
-          
-          // Populate form with existing data
-          setFormData({
-            ...formData,
-            title: problemData.title,
-            description: problemData.description,
-            difficulty: problemData.difficulty,
-            xp_reward: problemData.xp_reward,
-            category: problemData.category || 'General',
-            problem_type: problemData.problem_type || 'coding',
-            languages: problemData.languages || ['python'],
-            is_event_quest: problemData.is_event_quest || false,
-            visible_to_blocks: problemData.visible_to_blocks || [],
-            hints: problemData.hints || [],
-            tags: problemData.tags || [],
-            prerequisites: problemData.prerequisites || [],
-            estimated_time: problemData.estimated_time || '15min',
-            partial_credit: problemData.partial_credit || 100,
-            auto_grade: problemData.auto_grade !== undefined ? problemData.auto_grade : true,
-            plagiarism_threshold: problemData.plagiarism_threshold || 0.85,
-            starter_code: problemData.starter_code || { python: '', java: '', csharp: '' },
-            test_cases: problemData.test_cases || [{ input: '', expected: '' }]
-          })
-          
-          // Set selected subject (with delay to ensure subjects are loaded)
-          if (problemData.subject_id) {
-            // Wait a tick for assignedSubjects to populate
-            setTimeout(() => {
-              setSelectedSubjectId(problemData.subject_id)
-            }, 100)
-          }
-        }
-      }
-      
-      // Fetch assigned subjects
-      const subjectsRes = await fetch('http://localhost:5000/api/instructor/assigned-subjects', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      })
-      if (subjectsRes.ok) {
-        const subjectsData = await subjectsRes.json()
-        setAssignedSubjects(subjectsData)
-      }
-      
-      // Fetch blocks
-      const res = await fetch('http://localhost:5000/api/instructor/classes', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      })
-      if (res.ok) {
-        const data = await res.json()
-        setBlocks(data)
-      }
-    } catch (err) {
-      console.error('Failed to fetch data:', err)
-    }
-  }
-  fetchData()
-}, [problemId])  
-
+  // Fetch subjects AND sections (and problem data if editing)
   useEffect(() => {
-    if (!selectedSubjectId) {
-      setBlocksBySubject([])
-      return
-    }
-    const fetchBlocksForSubject = async () => {
+    let current = true
+    const fetchData = async () => {
+      setSubjectsLoading(true)
+      setLoadError('')
       try {
         const token = localStorage.getItem('token')
-        const res = await fetch(
-          `http://localhost:5000/api/instructor/blocks-by-subject?subject_id=${selectedSubjectId}`,
-          { headers: { Authorization: `Bearer ${token}` } }
-        )
-        if (res.ok) {
-          const data = await res.json()
-          setBlocksBySubject(data)
-          // Clear selected blocks that are no longer valid for this subject
-          setFormData(prev => ({
-            ...prev,
-            visible_to_blocks: prev.visible_to_blocks.filter(bid =>
-              data.some(b => b.id === bid)
-            )
-          }))
+
+        if (problemId) {
+          setIsEditing(true)
+          const problemRes = await authFetch(
+            `${API_BASE}/api/instructor/problems/${problemId}`,
+            { headers: { 'Authorization': `Bearer ${token}` } }
+          )
+          if (!problemRes.ok) throw new Error('Unable to load this quest. Retry before editing.')
+          if (!current) return
+          if (problemRes.ok) {
+            const problemData = await problemRes.json()
+            setFormData(prev => ({
+              ...prev,
+              title: problemData.title,
+              description: problemData.description,
+              difficulty: problemData.difficulty,
+              xp_reward: problemData.xp_reward,
+              category: problemData.category || 'General',
+              problem_type: problemData.problem_type || 'coding',
+              languages: problemData.languages || ['python'],
+              is_event_quest: problemData.is_event_quest || false,
+              visible_to_sections: problemData.visible_to_sections || [],
+              hints: problemData.hints || [],
+              tags: problemData.tags || [],
+              prerequisites: problemData.prerequisites || [],
+              estimated_time: problemData.estimated_time || '15min',
+              partial_credit: problemData.partial_credit ?? 100,
+              language_rule: problemData.language_rule || 'optional',
+              auto_grade: problemData.auto_grade !== undefined ? problemData.auto_grade : true,
+              plagiarism_threshold: problemData.plagiarism_threshold || 0.85,
+              starter_code: problemData.starter_code || { python: '', java: '', csharp: '' },
+              test_cases: problemData.test_cases || [{ input: '', expected: '' }]
+            }))
+
+            if (problemData.subject_id) {
+              setSelectedSubjectId(problemData.subject_id)
+            }
+          }
         }
+
+        const subjectsRes = await authFetch(
+          `${API_BASE}/api/instructor/assigned-subjects`,
+          { headers: { 'Authorization': `Bearer ${token}` } }
+        )
+        if (!subjectsRes.ok) throw new Error('Unable to load your assigned subjects.')
+        const subjects = await subjectsRes.json()
+        if (!current) return
+        setAssignedSubjects(subjects)
+
+        // when arriving from inside a specific class, the subject is
+        // already known — skip making the instructor pick it again
+        const preselectedSubjectId = subjectParam
+        if (preselectedSubjectId && !problemId) {
+          setSelectedSubjectId(Number(preselectedSubjectId))
+        }
+
       } catch (err) {
-        console.error('Failed to fetch blocks for subject:', err)
+        if (current) setLoadError(err.message || 'Unable to load the quest editor.')
+      } finally {
+        if (current) setSubjectsLoading(false)
       }
     }
-    fetchBlocksForSubject()
-  }, [selectedSubjectId])
+    fetchData()
+    return () => { current = false }
+  }, [problemId, subjectParam, loadVersion])
+
+  // fetch SubjectSection objects when subject changes
+  useEffect(() => {
+    if (!selectedSubjectId) {
+      setSectionsBySubject([])
+      return
+    }
+    let current = true
+    const fetchSections = async () => {
+      setSectionsLoading(true)
+      setSectionsError('')
+      try {
+        const token = localStorage.getItem('token')
+        const res = await authFetch(
+          `${API_BASE}/api/instructor/sections-by-subject?subject_id=${selectedSubjectId}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        )
+        if (!res.ok) throw new Error('Unable to load assigned classes. Retry before publishing.')
+        if (res.ok) {
+          const data = await res.json()
+          if (!current) return
+          setSectionsBySubject(data)
+          setFormData(prev => {
+            // Remove any selected sections that are no longer valid for this subject
+            const cleaned = prev.visible_to_sections.filter(sid =>
+              data.some(s => s.id === sid)
+            )
+            // A quest belongs to one specific class code -- when we arrived
+            // from inside a class (?class_id=) and nothing is picked yet,
+            // default it to that class instead of leaving it empty (empty
+            // used to silently mean "every section of this subject", which
+            // is exactly how a quest ends up leaking into class codes it
+            // was never meant for).
+            const classIdParam = classParam
+            if (!isEditing && cleaned.length === 0 && classIdParam &&
+                data.some(s => s.id === Number(classIdParam))) {
+              return { ...prev, visible_to_sections: [Number(classIdParam)] }
+            }
+            return { ...prev, visible_to_sections: cleaned }
+          })
+        }
+      } catch (err) {
+        if (current) setSectionsError(err.message || 'Unable to load assigned classes.')
+      } finally {
+        if (current) setSectionsLoading(false)
+      }
+    }
+    fetchSections()
+    return () => { current = false }
+  }, [selectedSubjectId, classParam, isEditing, sectionsVersion])
 
   const handleInputChange = (field, value) => {
     setFormData(prev => ({ ...prev, [field]: value }))
   }
 
+  // where Back / after-submit should go, this is for making sure it lands on the right class instead of just going back blind
+  const resolveBackTarget = () => {
+    const from = searchParams.get('from')
+    if (from) return from
+    if (formData.visible_to_sections.length > 0) {
+      return `/instructor/class/${formData.visible_to_sections[0]}`
+    }
+    if (sectionsBySubject.length > 0) {
+      return `/instructor/class/${sectionsBySubject[0].id}`
+    }
+    return '/instructor/problems'
+  }
+
+  // Toggle a programming language on or off in the allowed list
   const handleLanguageToggle = (language) => {
     setFormData(prev => {
       const languages = prev.languages.includes(language)
@@ -158,39 +222,31 @@ useEffect(() => {
     })
   }
 
+  // Add, edit, and remove hints for this problem
   const handleHintAdd = () => {
-    setFormData(prev => ({
-      ...prev,
-      hints: [...prev.hints, { text: '', xp_penalty: 10 }]
-    }))
+    setFormData(prev => ({ ...prev, hints: [...prev.hints, { text: '', xp_penalty: 10 }] }))
   }
-
   const handleHintUpdate = (index, field, value) => {
     const newHints = [...formData.hints]
     newHints[index][field] = value
     setFormData(prev => ({ ...prev, hints: newHints }))
   }
-
   const handleHintRemove = (index) => {
-    setFormData(prev => ({
-      ...prev,
-      hints: prev.hints.filter((_, i) => i !== index)
-    }))
+    setFormData(prev => ({ ...prev, hints: prev.hints.filter((_, i) => i !== index) }))
   }
 
+  // Add, edit, and remove test cases for this problem
   const handleTestCaseAdd = () => {
     setFormData(prev => ({
       ...prev,
       test_cases: [...prev.test_cases, { input: '', expected: '' }]
     }))
   }
-
   const handleTestCaseUpdate = (index, field, value) => {
     const newTestCases = [...formData.test_cases]
     newTestCases[index][field] = value
     setFormData(prev => ({ ...prev, test_cases: newTestCases }))
   }
-
   const handleTestCaseRemove = (index) => {
     setFormData(prev => ({
       ...prev,
@@ -198,582 +254,172 @@ useEffect(() => {
     }))
   }
 
+  // Validate the quest form, then create or update it on the server
   const handleSubmit = async (e) => {
     e.preventDefault()
-    
-    // XP Validation based on difficulty
-    const maxXP = {
-      'Easy': 100,
-      'Medium': 250,
-      'Hard': 500
+    // guards against a double-click (or an impatient re-click during the
+    // 1.2s success-toast delay below) firing this twice and creating two
+    // identical quests, since the backend has no dedup protection either
+    if (submitting.current || subjectsLoading || loadError || sectionsLoading || sectionsError) return
+    if (activeSection !== 7) return
+
+    const maxXP = { Easy: 100, Medium: 250, Hard: 500 }
+    if (!Number.isInteger(formData.xp_reward) || formData.xp_reward < 0) {
+      showToast('Enter a valid non-negative XP reward.'); setActiveSection(1); return
     }
-    
     if (formData.xp_reward > maxXP[formData.difficulty]) {
-      alert(`❌ XP reward exceeds maximum for ${formData.difficulty} difficulty.\n\nMaximum XP for ${formData.difficulty}: ${maxXP[formData.difficulty]}\nYour XP: ${formData.xp_reward}`)
+      showToast(`XP reward exceeds maximum for ${formData.difficulty} difficulty.\n\nMax: ${maxXP[formData.difficulty]}\nYours: ${formData.xp_reward}`, 'error')
       return
     }
-    
-    // Subject validation
     if (!selectedSubjectId) {
-      alert('❌ Please select a course subject for this problem.')
+      setActiveSection(1)
+      showToast('Please select an assigned subject for this quest.', 'error')
       return
     }
-    
-    // Existing validation
-    if (!formData.title || !formData.description || formData.test_cases.length === 0) {
-      alert('Please fill in all required fields and add at least one test case.')
+    if (!formData.title.trim() || !formData.description.trim() || formData.test_cases.length === 0) {
+      setActiveSection(1)
+      showToast('Enter the quest title and instructions, and define at least one test case.', 'error')
       return
     }
     if (formData.languages.length === 0) {
-      alert('Please select at least one programming language.')
+      setActiveSection(2)
+      showToast('Please select at least one programming language.', 'error')
+      return
+    }
+    if (formData.visible_to_sections.length === 0) {
+      setActiveSection(3)
+      showToast('Please select at least one class code this quest should be visible to.', 'error')
       return
     }
 
+    if (!Number.isInteger(formData.partial_credit) || formData.partial_credit < 0 || formData.partial_credit > 100) {
+      showToast('Partial credit must be a whole percentage from 0 to 100.'); setActiveSection(3); return
+    }
+    if (formData.hints.some(h => !h.text.trim() || !Number.isInteger(h.xp_penalty) || h.xp_penalty < 0)) {
+      showToast('Complete each hint and enter a non-negative XP penalty, or remove the hint.'); setActiveSection(6); return
+    }
+    submitting.current = true
+    setIsSubmitting(true)
     try {
-  const token = localStorage.getItem('token')
-  
-  // Prepare payload with subject_id
-  const payload = {
-    ...formData,
-    subject_id: selectedSubjectId,
-    starter_code: formData.starter_code, 
-    is_published: true
-  }
-  
-  // EDIT vs CREATE logic
-  const url = isEditing 
-    ? `http://localhost:5000/api/problems/${problemId}`
-    : 'http://localhost:5000/api/problems'
-  
-  const method = isEditing ? 'PUT' : 'POST'
-  
-  const res = await fetch(url, {
-    method: method,
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
+      const token = localStorage.getItem('token')
+      const payload = {
+        ...formData,
+        subject_id: selectedSubjectId,
+        // visible_to_sections holds SubjectSection IDs here too
+        is_published: true
+      }
+
+      const url = isEditing
+        ? `${API_BASE}/api/problems/${problemId}`
+        : `${API_BASE}/api/problems`
+      const method = isEditing ? 'PUT' : 'POST'
+
+      const res = await authFetch(url, {
+        method,
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       })
-      
+
       if (res.ok) {
-        alert(isEditing ? '✅ Activity updated successfully!' : '✅ Activity created successfully!')
-        navigate('/instructor/problems')
+        showToast(isEditing ? 'Quest updated successfully!' : 'Quest created successfully!', 'success')
+        // gives the toast a moment on screen before leaving the page —
+        // alert() used to force this pause automatically since it blocks
+        // until dismissed; a toast doesn't block, so this does it manually
+        setTimeout(() => navigate(resolveBackTarget()), 1200)
       } else {
-        const error = await res.json()
-        alert(`❌ Failed to create activity: ${error.error}`) 
+        const error = await res.json().catch(() => ({}))
+        const message = error.error || error.msg || error.message || `Server returned HTTP ${res.status}.`
+        showToast(`Failed to save quest: ${message}`, 'error')
+        submitting.current = false
+        setIsSubmitting(false)
       }
     } catch (err) {
-      console.error('Failed to create problem:', err)
-      alert('❌ Failed to create problem. Check console for details.')
+      console.error('Failed to save problem:', err)
+      showToast('Unable to confirm saving. Your entries are still here. Check the class quest list before trying again.', 'error')
+      submitting.current = false
+      setIsSubmitting(false)
     }
   }
 
-  const sections = [ 
-    { id: 1, title: 'Basic Information', icon: '📋' },
-    { id: 2, title: 'Problem Type & Languages', icon: '💻' },
-    { id: 3, title: 'Visibility & Settings', icon: '🔧' },
-    { id: 4, title: 'Starter Code', icon: '📝' },
-    { id: 5, title: 'Test Cases', icon: '🧪' },
-    { id: 6, title: 'Hints', icon: '💡' },
-{ id: 7, title: 'Review', icon: '📋' }
+  const steps = [
+    ['Quest details', 'Title, instructions and reward'],
+    ['Type & languages', 'How students answer'],
+    ['Classes & settings', 'Who can access this quest'],
+    ['Starter code', 'A starting point for each language'],
+    ['Test cases', 'Inputs and expected output'],
+    ['Hints', 'Optional guidance and XP cost'],
+    ['Review & publish', 'Check everything before saving'],
   ]
+  const languageNames = { python: 'Python', java: 'Java', csharp: 'C#' }
+  const languageArt = { python: pythonEmblem, java: javaEmblem, csharp: csharpEmblem }
+  const headingArt = { 1: questScroll, 2: questCode, 3: questParty, 4: questScroll, 5: questTests, 6: questHint, 7: questReview }
+  const subject = assignedSubjects.find(s => s.id === selectedSubjectId)
+  const visibleCount = formData.test_cases.filter(tc => tc.visible !== false).length
+  const number = value => value === '' ? '' : Number(value)
+  const changeStep = id => {
+    setActiveSection(id)
+    setToast(null)
+    editorRef.current?.scrollIntoView({ block: 'start' })
+  }
+  const field = (label, control, help) => <label className="qe-field"><span>{label}</span>{control}{help && <small>{help}</small>}</label>
+  const input = (key, props = {}) => <input value={formData[key]} onChange={e => handleInputChange(key, e.target.type === 'number' ? number(e.target.value) : e.target.value)} {...props} />
+  const busy = isSubmitting || subjectsLoading || !!loadError
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center gap-4">
-        <button onClick={() => navigate('/instructor/problems')} className="text-slate-400 hover:text-white transition">
-          ← Back
-        </button>
-        <div>
-          <h1 className="text-3xl font-bold text-white">
-            {isEditing ? '✏️ Edit Activity' : '➕ Create New Activity'}
-          </h1> 
-          <p className="text-slate-400">Design a coding activity for your students</p>
-        </div>
+    <div className="qe-editor" ref={editorRef}>
+      <header className="qe-header">
+        <InstructorBackButton onClick={() => { if (!isSubmitting) navigate(resolveBackTarget()) }} />
+        <div><h1>{isEditing ? 'Edit quest' : 'Create a quest'}</h1><p>Shape the challenge. Define the tests. Help your students grow.</p></div>
+      </header>
+      {toast && <div role={toast.type === 'error' ? 'alert' : 'status'} className={`qe-message qe-${toast.type}`}><span>{toast.message}</span><button type="button" aria-label="Dismiss message" onClick={() => setToast(null)}>×</button></div>}
+      {loadError && <div className="qe-message qe-error" role="alert">{loadError}<button type="button" onClick={() => setLoadVersion(v => v + 1)}>Retry loading</button></div>}
+      {subjectsLoading && <p className="qe-notice" role="status">Loading your assigned subjects and quest details…</p>}
+      <div className="qe-layout" aria-busy={subjectsLoading}>
+        <aside className="qe-rail">
+          <nav aria-label="Quest creation steps">
+            {steps.map(([title, detail], i) => <button type="button" key={title} disabled={busy} aria-current={activeSection === i + 1 ? 'step' : undefined} onClick={() => changeStep(i + 1)}><span className="qe-step-number">{i + 1}</span><span><strong>{title}</strong><small>{detail}</small></span></button>)}
+          </nav>
+          <p className="qe-rail-note"><ModuleIcon name="lock" size={16} />Nothing is published until you confirm on the final step.</p>
+        </aside>
+        <form className="qe-form" onSubmit={handleSubmit} noValidate>
+          <fieldset disabled={busy}>
+            <section className="qe-panel" aria-label={steps[activeSection - 1][0]}>
+              <div className="qe-panel-heading"><div><p>Step {activeSection} of {steps.length}</p><h2>{steps[activeSection - 1][0]}</h2></div>{headingArt[activeSection] ? <img className="qe-header-art" src={headingArt[activeSection]} alt="" decoding="async" /> : <ModuleIcon name="file" size={26} />}</div>
+              {activeSection === 1 && <div className="qe-fields">
+                {field('Subject', (subjectParam || isEditing) ? <div className="qe-context">{subject?.name || 'No assigned subject found'}</div> : <select value={selectedSubjectId || ''} onChange={e => setSelectedSubjectId(Number(e.target.value) || null)}><option value="">Select an assigned subject</option>{assignedSubjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select>, !subjectsLoading && !assignedSubjects.length ? 'No assigned subjects. Contact your administrator.' : 'The quest will belong to this subject.')}
+                {field('Quest title *', input('title', { placeholder: 'e.g. Sum of Two Numbers', required: true }))}
+                <div className="qe-columns">
+                  <QuestDifficulty value={formData.difficulty} onChange={value => handleInputChange('difficulty', value)} />
+                  <QuestReward value={formData.xp_reward} difficulty={formData.difficulty} onChange={value => handleInputChange('xp_reward', value)} />
+                </div>
+                {field('Quest instructions *', <textarea rows={9} value={formData.description} onChange={e => handleInputChange('description', e.target.value)} placeholder="Describe the task, input and output format, constraints, and examples." />, 'These instructions are shown to students. Keep hidden test data out of this description.')}
+              </div>}
+              {activeSection === 2 && <div className="qe-fields">
+                <fieldset className="qe-choice-group"><legend>Quest type</legend><div className="qe-columns">{[['coding', 'Coding', 'Students write a complete solution.'], ['debugging', 'Debugging', 'Students find and fix bugs in starter code.']].map(([value,title,description]) => <label key={value} className="qe-choice"><input type="radio" name="quest-type" checked={formData.problem_type === value} onChange={() => handleInputChange('problem_type', value)} /><span><strong>{title}</strong><small>{description}</small></span></label>)}</div></fieldset>
+                <fieldset className="qe-choice-group"><legend>Supported languages *</legend><div className="qe-languages">{Object.entries(languageNames).map(([value,title]) => <label key={value} className="qe-choice qe-language-choice"><input type="checkbox" checked={formData.languages.includes(value)} onChange={() => handleLanguageToggle(value)} /><img className="qe-language-art" src={languageArt[value]} alt="" decoding="async" /><span className="qe-language-copy"><strong>{title}</strong><small className="qe-selection-label" aria-hidden="true">{formData.languages.includes(value) ? 'Selected' : 'Not selected'}</small></span></label>)}</div></fieldset>
+                {formData.languages.length > 1 && <fieldset className="qe-choice-group"><legend>Language rule</legend>{[['required', 'All selected languages required', 'Quest XP is shared evenly between the selected languages.'], ['optional', 'Student choice + bonus XP', 'Students choose a language. Each extra language adds 25% of the quest XP (100% / 125% / 150%).']].map(([value,title,text]) => <label className="qe-choice" key={value}><input type="radio" name="language-rule" checked={formData.language_rule === value} onChange={() => handleInputChange('language_rule', value)} /><span><strong>{title}</strong><small>{text}</small></span></label>)}<p className="qe-help">Each language is graded once and locks independently.</p></fieldset>}
+              </div>}
+              {activeSection === 3 && <div className="qe-fields">
+                <fieldset className="qe-choice-group"><legend>Visible to class codes *</legend><p className="qe-help">Only the selected classes can access this quest.</p>
+                  {sectionsLoading ? <p role="status">Loading assigned classes…</p> : sectionsError ? <div role="alert" className="qe-message qe-error">{sectionsError}<button type="button" onClick={() => setSectionsVersion(v => v + 1)}>Retry</button></div> : !sectionsBySubject.length ? <p className="qe-notice">{selectedSubjectId ? 'No assigned classes found for this subject.' : 'Select a subject in Quest details first.'}</p> : sectionsBySubject.map(sec => <label className="qe-choice" key={sec.id}><input type="checkbox" checked={formData.visible_to_sections.includes(sec.id)} onChange={e => handleInputChange('visible_to_sections', e.target.checked ? [...formData.visible_to_sections, sec.id] : formData.visible_to_sections.filter(id => id !== sec.id))} /><span><strong>Class {sec.section_no}</strong><small>{[sec.semester,sec.schedule].filter(Boolean).join(' · ') || 'Assigned class'}</small></span></label>)}
+                </fieldset>
+                <label className="qe-choice"><input type="checkbox" checked={formData.is_event_quest} onChange={e => handleInputChange('is_event_quest', e.target.checked)} /><span><strong>Event quest</strong><small>Show this quest with the existing event badge.</small></span></label>
+                <div className="qe-columns">{field('Estimated time', <select value={formData.estimated_time} onChange={e => handleInputChange('estimated_time', e.target.value)}>{[['5min','5 minutes'],['10min','10 minutes'],['15min','15 minutes'],['30min','30 minutes'],['1hr','1 hour'],['1hr+','1 hour+']].map(([value,title]) => <option key={value} value={value}>{title}</option>)}</select>)}{field('Partial credit (%)', input('partial_credit', {type:'number',min:0,max:100,step:1}))}</div>
+              </div>}
+              {activeSection === 4 && <div className="qe-fields"><p className="qe-help">Optional starting code shown in the student editor. For debugging quests, include the code students should repair.</p>{!formData.languages.length && <p className="qe-notice">Select a language in Type & languages first.</p>}{formData.languages.map(lang => field(`${languageNames[lang]} starter code`, <textarea key={lang} className="qe-code" spellCheck={false} rows={12} value={formData.starter_code[lang] || ''} onChange={e => handleInputChange('starter_code', {...formData.starter_code, [lang]:e.target.value})} aria-label={`${languageNames[lang]} starter code`} />, undefined)).map((element,i) => <div key={formData.languages[i]}>{element}</div>)}</div>}
+              {activeSection === 5 && <div className="qe-fields"><div className="qe-section-intro"><p className="qe-help">Use exact input and expected output. Line breaks are preserved; leave a field empty only when empty input or output is intended.</p><button type="button" className="qe-secondary" onClick={handleTestCaseAdd}><ModuleIcon name="plus" size={16} />Add test case</button></div>
+                {formData.test_cases.map((tc,i) => <fieldset className="qe-test" key={i}><legend>Test {i + 1}</legend><div className="qe-test-toolbar"><label className="qe-hidden-toggle"><input type="checkbox" checked={tc.visible === false} onChange={e => handleTestCaseUpdate(i, 'visible', !e.target.checked)} /><img src={questLock} alt="" className="qe-hidden-art" decoding="async" />Hidden from students</label>{formData.test_cases.length > 1 && <button className="qe-remove" type="button" aria-label={`Remove test ${i+1}`} onClick={() => handleTestCaseRemove(i)}><ModuleIcon name="trash" size={16} />Remove</button>}</div><div className="qe-columns">{field('Input', <textarea aria-label={`Test ${i+1} input`} className="qe-code" spellCheck={false} rows={4} value={tc.input} onChange={e => handleTestCaseUpdate(i,'input',e.target.value)} />)}{field('Expected output', <textarea aria-label={`Test ${i+1} expected output`} className="qe-code" spellCheck={false} rows={4} value={tc.expected} onChange={e => handleTestCaseUpdate(i,'expected',e.target.value)} />)}</div><p className="qe-help">{tc.visible === false ? 'Used for grading. Test details stay hidden from students.' : 'Visible test: students may see its input and expected output.'}</p></fieldset>)}
+              </div>}
+              {activeSection === 6 && <div className="qe-fields"><div className="qe-section-intro"><p className="qe-help">Give useful guidance without revealing the solution.</p><button type="button" className="qe-secondary" onClick={handleHintAdd}><ModuleIcon name="plus" size={16} />Add hint</button></div>{!formData.hints.length && <div className="qe-empty"><img className="qe-empty-book" src={questGuidebook} alt="" decoding="async" /><h3>No hints added</h3><p>Hints are optional. Add one above, or continue to review.</p></div>}{formData.hints.map((hint,i) => <fieldset key={i} className="qe-test"><legend>Hint {i+1}</legend><div className="qe-test-toolbar"><span>Guidance for students</span><button type="button" className="qe-remove" onClick={() => handleHintRemove(i)} aria-label={`Remove hint ${i+1}`}><ModuleIcon name="trash" size={16} />Remove</button></div>{field('Hint text',<textarea rows={3} value={hint.text} onChange={e => handleHintUpdate(i,'text',e.target.value)} />)}{field('XP penalty',<input type="number" min={0} step={1} value={hint.xp_penalty} onChange={e => handleHintUpdate(i,'xp_penalty',number(e.target.value))} />, 'Deducted when the student reveals this hint.')}</fieldset>)}</div>}
+              {activeSection === 7 && <div className="qe-fields"><p className="qe-help">Review the quest before publishing it to your selected classes.</p><dl className="qe-review">{[
+                ['Title', formData.title || 'Not set',1], ['Subject', subject?.name || 'Not selected',1], ['Difficulty & reward', `${formData.difficulty} · ${formData.xp_reward} XP`,1], ['Quest type',formData.problem_type === 'debugging' ? 'Debugging' : 'Coding',2], ['Languages',formData.languages.map(l => languageNames[l]).join(' · ') || 'None selected',2], ['Language rule',formData.languages.length > 1 ? (formData.language_rule === 'required' ? 'All selected languages required' : 'Student choice + bonus XP') : 'Single language',2], ['Visible to', sectionsBySubject.filter(s => formData.visible_to_sections.includes(s.id)).map(s => `Class ${s.section_no}`).join(', ') || 'No classes selected',3], ['Test cases',`${visibleCount} visible · ${formData.test_cases.length - visibleCount} hidden`,5], ['Hints',`${formData.hints.length} optional ${formData.hints.length === 1 ? 'hint' : 'hints'}`,6],
+              ].map(([label,value,step]) => <div key={label}><dt>{label}</dt><dd>{value}</dd><button type="button" onClick={() => changeStep(step)} aria-label={`Edit ${label.toLowerCase()}`}>Edit</button></div>)}</dl><div className="qe-publish-note"><ModuleIcon name="eye" size={20} /><p>{isEditing ? 'Saving updates publishes this quest to the selected classes.' : 'Publishing makes this quest available to the selected classes.'} Nothing on this page runs student code.</p></div></div>}
+            </section>
+          </fieldset>
+          <footer className="qe-actions"><button className="qe-secondary" type="button" disabled={busy || activeSection === 1} onClick={() => changeStep(activeSection - 1)}>← Previous</button><span>Step {activeSection} / {steps.length}</span>{activeSection < 7 ? <button className="qe-primary" disabled={busy} type="button" onClick={() => changeStep(activeSection + 1)}>Continue <span aria-hidden="true">→</span></button> : <button className="qe-primary" type="submit" disabled={busy || sectionsLoading || !!sectionsError}>{isSubmitting ? 'Saving…' : isEditing ? 'Save & publish' : 'Publish quest'}<ModuleIcon name="announcement" size={17} /></button>}</footer>
+        </form>
+        <aside className="qe-summary"><h2>Quest overview</h2><h3>{formData.title || 'Your next quest'}</h3><p>{subject?.name || 'Choose an assigned subject'}</p><dl><div><dt>Reward</dt><dd className="qe-gold">{formData.xp_reward || 0} XP</dd></div><div><dt>Difficulty</dt><dd>{formData.difficulty}</dd></div><div><dt>Languages</dt><dd>{formData.languages.map(l => languageNames[l]).join(', ') || 'Not selected'}</dd></div><div><dt>Classes</dt><dd>{formData.visible_to_sections.length} selected</dd></div><div><dt>Test cases</dt><dd>{formData.test_cases.length}</dd></div></dl><p className="qe-summary-note">Your entries stay on this page as you move between steps. Leaving the editor does not save them.</p></aside>
       </div>
-
-      {/* Progress Steps */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
-        <div className="flex items-center justify-between">
-          {sections.map((section, idx) => (
-            <div key={section.id} className="flex items-center">
-              <button
-                type="button"
-                onClick={() => setActiveSection(section.id)}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg transition ${
-                  activeSection === section.id
-                    ? 'bg-blue-600 text-white'
-                    : activeSection > section.id
-                    ? 'text-green-400 hover:bg-slate-800'
-                    : 'text-slate-400 hover:bg-slate-800'
-                }`}
-              >
-                <span className="text-xl">{section.icon}</span>
-                <span className="hidden lg:inline font-medium text-sm">{section.title}</span>
-              </button>
-              {idx < sections.length - 1 && (
-                <div className={`w-16 h-0.5 mx-2 ${
-                  activeSection > section.id ? 'bg-green-600' : 'bg-slate-700'
-                }`} />
-              )}
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <form onSubmit={handleSubmit} className="space-y-6">
-        {/* Section 1: Basic Information */}
-        {activeSection === 1 && (
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6">
-            {/* Course Subject Selector */}
-            <div>
-              <label className="block text-slate-400 text-sm mb-2">Course Subject *</label>
-              <select
-                value={selectedSubjectId || ''}
-                onChange={(e) => setSelectedSubjectId(e.target.value ? parseInt(e.target.value) : null)}
-                className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white outline-none"
-                required
-              >
-                <option value="">Select a subject you teach</option>
-                {assignedSubjects.map(sub => (
-                  <option key={sub.id} value={sub.id}>{sub.name}</option>
-                ))}
-              </select>
-              {assignedSubjects.length === 0 && (
-                <p className="text-amber-400 text-xs mt-1">⚠️ No subjects assigned. Contact admin.</p>
-              )}
-            </div>
-
-            <h2 className="text-2xl font-bold text-white flex items-center gap-2">
-              <span>📋</span> Activity Details
-            </h2>
-            
-            <div>
-              <label className="block text-slate-400 text-sm mb-2">Problem Title *</label>
-              <input
-                type="text"
-                value={formData.title}
-                onChange={(e) => handleInputChange('title', e.target.value)}
-                placeholder="e.g., Sum of Two Numbers"
-                className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:border-blue-500 outline-none"
-                required
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-6">
-              <div>
-                <label className="block text-slate-400 text-sm mb-2">Difficulty *</label>
-                <select
-                  value={formData.difficulty}
-                  onChange={(e) => handleInputChange('difficulty', e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white outline-none"
-                >
-                  <option>Easy</option>
-                  <option>Medium</option>
-                  <option>Hard</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-slate-400 text-sm mb-2">XP Reward *</label>
-                <input
-                  type="number"
-                  value={formData.xp_reward}
-                  onChange={(e) => handleInputChange('xp_reward', parseInt(e.target.value))}
-                  placeholder="100"
-                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white outline-none"
-                  required
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-slate-400 text-sm mb-2">Description *</label>
-              <textarea
-                value={formData.description}
-                onChange={(e) => handleInputChange('description', e.target.value)}
-                placeholder="Describe the activity details here..."
-                rows="6"
-                className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:border-blue-500 outline-none resize-none"
-                required
-              />
-            </div>
-          </div>
-        )}
-
-        {/* Section 2: Problem Type & Languages */}
-        {activeSection === 2 && (
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6">
-            <h2 className="text-2xl font-bold text-white flex items-center gap-2">
-              <span>💻</span> Problem Type & Languages
-            </h2>
-
-            {/* Problem Type */}
-            <div>
-              <label className="block text-slate-400 text-sm mb-3">Problem Type *</label>
-              <div className="grid grid-cols-2 gap-4">
-                <button
-                  type="button"
-                  onClick={() => handleInputChange('problem_type', 'coding')}
-                  className={`p-4 rounded-xl border-2 transition ${
-                    formData.problem_type === 'coding'
-                      ? 'border-blue-600 bg-blue-600/10 text-blue-400'
-                      : 'border-slate-700 bg-slate-800 text-slate-400 hover:border-slate-600'
-                  }`}
-                >
-                  <div className="text-2xl mb-2">📝</div>
-                  <div className="font-bold">Coding</div>
-                  <div className="text-xs mt-1">Student writes complete solution</div>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleInputChange('problem_type', 'debugging')}
-                  className={`p-4 rounded-xl border-2 transition ${
-                    formData.problem_type === 'debugging'
-                      ? 'border-blue-600 bg-blue-600/10 text-blue-400'
-                      : 'border-slate-700 bg-slate-800 text-slate-400 hover:border-slate-600'
-                  }`}
-                >
-                  <div className="text-2xl mb-2">🐛</div>
-                  <div className="font-bold">Debugging</div>
-                  <div className="text-xs mt-1">Student fixes bugs in code</div>
-                </button>
-              </div>
-            </div>
-
-            {/* Programming Languages */}
-            <div>
-              <label className="block text-slate-400 text-sm mb-3">Programming Languages *</label>
-              <div className="space-y-3">
-                {['python', 'java', 'csharp'].map(lang => (
-                  <label key={lang} className="flex items-center gap-3 p-4 bg-slate-800 rounded-xl cursor-pointer hover:bg-slate-700 transition">
-                    <input
-                      type="checkbox"
-                      checked={formData.languages.includes(lang)}
-                      onChange={() => handleLanguageToggle(lang)}
-                      className="w-5 h-5 rounded border-slate-600 text-blue-600 focus:ring-blue-500"
-                    />
-                    <span className="text-lg">
-                      {lang === 'python' ? '🐍' : lang === 'java' ? '☕' : '🔷'}
-                    </span>
-                    <span className="text-white font-medium capitalize">{lang}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Section 3: Visibility & Settings */}
-        {activeSection === 3 && (
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6">
-            <h2 className="text-2xl font-bold text-white flex items-center gap-2">
-              <span>🔧</span> Visibility & Settings
-            </h2>
-
-            {/* Event Quest Toggle */}
-            <div className="p-4 bg-gradient-to-r from-purple-900/20 to-pink-900/20 border border-purple-600/30 rounded-xl">
-              <label className="flex items-center justify-between cursor-pointer">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">🎉</span>
-                    <span className="text-white font-bold text-lg">Event Quest</span>
-                  </div>
-                  <p className="text-slate-400 text-sm mt-1">
-                    Extra credit problem for at-risk students. Displays with special badge.
-                  </p>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={formData.is_event_quest}
-                  onChange={(e) => handleInputChange('is_event_quest', e.target.checked)}
-                  className="w-6 h-6 rounded border-slate-600 text-purple-600 focus:ring-purple-500"
-                />
-              </label>
-            </div>
-
-            {/* Block Visibility - Filtered by Selected Subject */}
-            <div>
-              <label className="block text-slate-400 text-sm mb-3">Visible To Blocks</label>
-              <div className="bg-slate-800 rounded-xl p-4 space-y-2 max-h-60 overflow-y-auto border border-slate-700">
-                {blocksBySubject.length === 0 ? (
-                  <p className="text-slate-500 text-center py-4">
-                    {selectedSubjectId ? 'No blocks found for this subject' : 'Select a subject first to see available blocks'}
-                  </p>
-                ) : (
-                  blocksBySubject.map(block => (
-                    <label key={block.id} className="flex items-center gap-3 p-3 rounded-lg hover:bg-slate-700 transition cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={formData.visible_to_blocks.includes(block.id)}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            handleInputChange('visible_to_blocks', [...formData.visible_to_blocks, block.id])
-                          } else {
-                            handleInputChange('visible_to_blocks', formData.visible_to_blocks.filter(id => id !== block.id))
-                          }
-                        }}
-                        className="w-5 h-5 rounded border-slate-600 text-blue-600 focus:ring-blue-500"
-                      />
-                      <div className="flex-1">
-                        <div className="text-white font-medium">
-                          {block.section_code}{block.semester ? ` — ${block.semester}` : ''}
-                        </div>
-                      </div>
-                    </label>
-                  ))
-                )}
-              </div>
-              <p className="text-slate-500 text-xs mt-2">
-                Select which blocks can see this problem. Leave empty for all blocks.
-              </p>
-            </div>
-
-            {/* Advanced Settings */}
-            <div className="grid grid-cols-2 gap-6">
-              <div>
-                <label className="block text-slate-400 text-sm mb-2">Estimated Time</label>
-                <select
-                  value={formData.estimated_time}
-                  onChange={(e) => handleInputChange('estimated_time', e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white outline-none"
-                >
-                  <option value="5min">5 minutes</option>
-                  <option value="10min">10 minutes</option>
-                  <option value="15min">15 minutes</option>
-                  <option value="30min">30 minutes</option>
-                  <option value="1hr">1 hour</option>
-                  <option value="1hr+">1 hour+</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-slate-400 text-sm mb-2">Partial Credit (%)</label>
-                <input
-                  type="number"
-                  min="0"
-                  max="100"
-                  value={formData.partial_credit}
-                  onChange={(e) => handleInputChange('partial_credit', parseInt(e.target.value))}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white outline-none"
-                />
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Section 4: Starter Code */}
-        {activeSection === 4 && (
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6">
-            <h2 className="text-2xl font-bold text-white flex items-center gap-2">
-              <span>📝</span> Starter Code
-            </h2>
-            
-            {formData.languages.map(lang => (
-              <div key={lang}>
-                <label className="block text-slate-400 text-sm mb-2 capitalize flex items-center gap-2">
-                  <span>{lang === 'python' ? '🐍' : lang === 'java' ? '☕' : '🔷'}</span>
-                  {lang} Starter Code
-                </label>
-                <textarea
-                  value={formData.starter_code[lang] || ''}
-                  onChange={(e) => {
-                    const newStarterCode = { ...formData.starter_code, [lang]: e.target.value }
-                    handleInputChange('starter_code', newStarterCode)
-                  }}
-                  placeholder={lang === 'python' ? 'def solve():\n    # Your code here\n    pass' : 
-                               lang === 'java' ? 'public class Solution {\n    public static void main(String[] args) {\n        // Your code here\n    }\n}' :
-                               'using System;\n\nclass Solution {\n    static void Main() {\n        // Your code here\n    }\n}'}
-                  rows="8"
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-green-400 font-mono text-sm focus:border-blue-500 outline-none resize-none"
-                />
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Section 5: Test Cases */}
-        {activeSection === 5 && (
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6">
-            <div className="flex justify-between items-center">
-              <h2 className="text-2xl font-bold text-white flex items-center gap-2">
-                <span>🧪</span> Test Cases
-              </h2>
-              <button
-                type="button"
-                onClick={handleTestCaseAdd}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-white font-bold transition"
-              >
-                + Add Test Case
-              </button>
-            </div>
-            
-            <div className="space-y-4">
-              {formData.test_cases.map((tc, idx) => (
-                <div key={idx} className="bg-slate-800/50 rounded-xl p-4 border border-slate-700 space-y-3">
-                  <div className="flex justify-between items-center">
-                    <span className="text-slate-400 font-bold">Test Case {idx + 1}</span>
-                    {formData.test_cases.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={() => handleTestCaseRemove(idx)}
-                        className="text-red-400 hover:text-red-300 text-sm"
-                      >
-                        Remove
-                      </button>
-                    )}
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-slate-500 text-xs mb-1">Input</label>
-                      <input
-                        type="text"
-                        value={tc.input}
-                        onChange={(e) => handleTestCaseUpdate(idx, 'input', e.target.value)}
-                        placeholder="Input..."
-                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm outline-none"
-                        required
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-slate-500 text-xs mb-1">Expected Output</label>
-                      <input
-                        type="text"
-                        value={tc.expected}
-                        onChange={(e) => handleTestCaseUpdate(idx, 'expected', e.target.value)}
-                        placeholder="Output..."
-                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm outline-none"
-                        required
-                      />
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Section 6: Hints */}
-        {activeSection === 6 && (
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6">
-            <div className="flex justify-between items-center">
-              <h2 className="text-2xl font-bold text-white flex items-center gap-2">
-                <span>💡</span> Hints (Optional)
-              </h2>
-              <button
-                type="button"
-                onClick={handleHintAdd}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-white font-bold transition"
-              >
-                + Add Hint
-              </button>
-            </div>
-            
-            <div className="space-y-4">
-              {formData.hints.map((hint, idx) => (
-                <div key={idx} className="bg-slate-800/50 rounded-xl p-4 border border-slate-700 space-y-3">
-                  <div className="flex justify-between items-center">
-                    <span className="text-slate-400 font-bold">Hint {idx + 1}</span>
-                    <button
-                      type="button"
-                      onClick={() => handleHintRemove(idx)}
-                      className="text-red-400 hover:text-red-300 text-sm"
-                    >
-                      Remove
-                    </button>
-                  </div>
-                  <div>
-                    <label className="block text-slate-500 text-xs mb-1">Hint Text</label>
-                    <textarea
-                      value={hint.text}
-                      onChange={(e) => handleHintUpdate(idx, 'text', e.target.value)}
-                      placeholder="Provide a helpful hint..."
-                      rows="2"
-                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm outline-none resize-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-slate-500 text-xs mb-1">XP Penalty</label>
-                    <input
-                      type="number"
-                      value={hint.xp_penalty}
-                      onChange={(e) => handleHintUpdate(idx, 'xp_penalty', parseInt(e.target.value))}
-                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm outline-none"
-                    />
-                    <p className="text-slate-500 text-xs mt-1">Students lose this much XP if they view the hint</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Section 7: Review */}
-        {activeSection === 7 && (
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6">
-            <h2 className="text-2xl font-bold text-white flex items-center gap-2">
-              <span>📋</span> Review Activity
-            </h2>
-            <div className="space-y-4">
-              <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700">
-                <p className="text-slate-400 text-xs uppercase tracking-wider mb-1">Title</p>
-                <p className="text-white font-semibold">{formData.title || <span className="text-slate-500 italic">Not set</span>}</p>
-              </div>
-              <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700">
-                <p className="text-slate-400 text-xs uppercase tracking-wider mb-1">Difficulty / XP</p>
-                <p className="text-white font-semibold">{formData.difficulty} — {formData.xp_reward} XP</p>
-              </div>
-              <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700">
-                <p className="text-slate-400 text-xs uppercase tracking-wider mb-1">Type / Languages</p>
-                <p className="text-white font-semibold capitalize">{formData.problem_type} · {formData.languages.join(', ')}</p>
-              </div>
-              <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700">
-                <p className="text-slate-400 text-xs uppercase tracking-wider mb-1">Test Cases</p>
-                <p className="text-white font-semibold">{formData.test_cases.length} test case(s) defined</p>
-              </div>
-              <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700">
-                <p className="text-slate-400 text-xs uppercase tracking-wider mb-1">Hints</p>
-                <p className="text-white font-semibold">{formData.hints.length} hint(s) added</p>
-              </div>
-              <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700">
-                <p className="text-slate-400 text-xs uppercase tracking-wider mb-1">Visible To Blocks</p>
-                <p className="text-white font-semibold">
-                  {formData.visible_to_blocks.length === 0 ? 'All blocks' : `${formData.visible_to_blocks.length} block(s) selected`}
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Navigation Buttons */}
-        <div className="flex justify-between pt-6 border-t border-slate-800">
-          <button
-            type="button"
-            onClick={() => setActiveSection(Math.max(1, activeSection - 1))}
-            disabled={activeSection === 1}
-            className="px-6 py-3 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl text-slate-300 font-bold transition"
-          >
-            ← Previous
-          </button>
-          
-          {activeSection < sections.length ? (
-            <button
-              type="button"
-              onClick={() => setActiveSection(Math.min(sections.length, activeSection + 1))}
-              className="px-6 py-3 bg-blue-600 hover:bg-blue-500 rounded-xl text-white font-bold transition shadow-lg shadow-blue-600/20"
-            >
-              Next →
-            </button>
-          ) : (
-            <button
-              type="submit"
-              className="px-8 py-3 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 rounded-xl text-white font-bold transition shadow-lg shadow-blue-600/20"
-            >
-              {isEditing ? '✨ Update Activity' : '✨ Create Activity'}
-            </button>
-          )}
-        </div>
-      </form>
     </div>
   )
 }

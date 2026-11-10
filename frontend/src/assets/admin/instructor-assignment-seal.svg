@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="gold" x1="0" x2="1" y2="1" gradientUnits="objectBoundingBox">
+      <stop stop-color="#fff0b5"/>
+      <stop offset=".45" stop-color="#ecc476"/>
+      <stop offset="1" stop-color="#a66530"/>
+    </linearGradient>
+    <linearGradient id="violet" x1="0" x2="1" y2="1" gradientUnits="objectBoundingBox">
+      <stop stop-color="#633aac"/>
+      <stop offset=".55" stop-color="#372365"/>
+      <stop offset="1" stop-color="#201439"/>
+    </linearGradient>
+  </defs>
+  <path d="M32 3 57 17v27L32 61 7 44V17z" fill="#181329" stroke="url(#gold)" stroke-width="2"/>
+  <path d="M32 8 52 19v22L32 55 12 41V19z" fill="url(#violet)" stroke="#ad79e0" stroke-opacity=".65"/>
+  <circle cx="25" cy="27" r="4" fill="#201638" stroke="url(#gold)" stroke-width="1.8"/>
+  <path d="M17 41c0-5 3.500-8 8-8s8 3 8 8z" fill="#201638" stroke="url(#gold)" stroke-width="1.8" stroke-linejoin="round"/>
+  <rect x="35.500" y="25" width="10" height="13" rx="1.800" fill="#201638" stroke="url(#gold)" stroke-width="1.8"/>
+  <path d="M38 29h5M38 32h5M38 35h3M31 31h4" fill="none" stroke="#ffe3a3" stroke-width="1.5" stroke-linecap="round"/>
+  <path d="m32 9 5 5-5 6-5-6z" fill="#bd70f5" stroke="#ffe3a3" stroke-width="1.2"/>
+  <path d="m32 9 1.4 5-1.4 6-1.4-6z" fill="#f0baff"/>
+  <path d="m32 47 3 3-3 3-3-3z" fill="#f3ce86"/>
+</svg>

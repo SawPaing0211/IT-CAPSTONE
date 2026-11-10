@@ -1,0 +1,24 @@
+# Used only if an image is ever built from the repository root.
+# (docker-compose.yml builds the backend from ./backend, which has its own .dockerignore.)
+# Files stay in the repository; they just never enter an image or release package.
+.git
+.env
+.env.*
+!.env.example
+node_modules/
+**/node_modules/
+design-preview/
+design-preview-v2/
+simple-adventure-preview/
+docs/ui-handoff/
+_testing/
+.forge-logs/
+backups/
+forge_full_backup_*/
+**/seed_demo.py
+**/demo_runner.py
+**/forge_demo.db
+**/demo_credentials*
+*.backup
+*.db
+*.sqlite*

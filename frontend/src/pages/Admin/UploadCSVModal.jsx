@@ -1,59 +1,78 @@
-import { useState, useRef, useCallback } from 'react'
-
-const API = 'http://localhost:5000'
+import { useState, useRef, useEffect } from 'react'
+import { REQUIRED_COLS, parseCSV, checkRows } from '../../utils/enrollmentCsv'
+import { API_BASE, authFetch } from '../../api/client'
+import guidebook from '../../assets/instructor/module-empty-book.png'
 
 // ─── Required columns for the enrollment endpoint ────────────────────
-const REQUIRED_COLS = ['student_id', 'firstname', 'lastname', 'year_level', 'student_type']
-const OPTIONAL_COLS = ['middlename', 'suffix', 'block_code', 'section_no', 'subject_code']
-
+// section_no is the actual class code (created under Class Codes) and is
+// what the backend enrolls a student into — for BOTH regular and irregular
+// students. class_code/subject_code used to be separate fields but the
+// server never reads them, so they've been dropped here to match.
+const OPTIONAL_COLS = ['middlename', 'suffix']
 const SAMPLE_CSV = [
-  'student_id,firstname,middlename,lastname,suffix,year_level,student_type,block_code,section_no,subject_code',
-  '2024-00001,Juan,Santos,Dela Cruz,,1,regular,IT101,,,',
-  '2024-00002,Maria,Reyes,Garcia,,1,regular,IT101,,,',
-  '2024-00003,Jose,Bautista,Mendoza,,1,regular,IT102,,,',
-  '2024-30001,Pedro,Jose,Reyes,,3,irregular,,29017,IT115',
-  '2024-30001,Pedro,Jose,Reyes,,3,irregular,,29018,IT115L',
+  'student_id,firstname,middlename,lastname,suffix,student_type,section_no',
+  '2024-00001,Juan,Santos,Dela Cruz,,regular,IT101',
+  '2024-00002,Maria,Reyes,Garcia,,regular,IT101',
+  '2024-00003,Jose,Bautista,Mendoza,,regular,IT102',
+  '2024-30001,Pedro,Jose,Reyes,,irregular,29017',
+  '2024-30001,Pedro,Jose,Reyes,,irregular,29018',
 ].join('\n')
 
-// ─── tiny CSV parser ──────────────────────────────────────────────────
-function parseCSV(text) {
-  const lines = text.trim().split(/\r?\n/)
-  if (lines.length < 2) return { headers: [], rows: [] }
-  const headers = lines[0].split(',').map(h => h.trim().toLowerCase())
-  const rows = []
-  for (let i = 1; i < lines.length; i++) {
-    const line = lines[i].trim()
-    if (!line) continue
-    const cells = []
-    let cur = '', inQ = false
-    for (let j = 0; j < line.length; j++) {
-      const ch = line[j]
-      if (ch === '"') { inQ = !inQ }
-      else if (ch === ',' && !inQ) { cells.push(cur.trim()); cur = '' }
-      else cur += ch
-    }
-    cells.push(cur.trim())
-    const row = {}
-    headers.forEach((h, idx) => { row[h] = cells[idx] ?? '' })
-    rows.push(row)
-  }
-  return { headers, rows }
+// ─── inline icons (no icon library — keeps this self-contained) ──────
+function Icon({ children, className = 'w-4 h-4', fill = 'none' }) {
+  return (
+    <svg viewBox="0 0 24 24" fill={fill} stroke="currentColor" strokeWidth="2"
+      strokeLinecap="round" strokeLinejoin="round" className={className}>
+      {children}
+    </svg>
+  )
 }
+const IconUpload = (p) => (
+  <Icon {...p}><polyline points="7 10 12 5 17 10" /><line x1="12" y1="5" x2="12" y2="16" />
+    <path d="M20 16v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-2" /></Icon>
+)
+const IconDownload = (p) => (
+  <Icon {...p}><polyline points="7 11 12 16 17 11" /><line x1="12" y1="4" x2="12" y2="16" />
+    <path d="M20 16v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-2" /></Icon>
+)
+const IconSend = (p) => (
+  <Icon {...p}><line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" /></Icon>
+)
+const IconCheckCircle = (p) => (
+  <Icon {...p}><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></Icon>
+)
+const IconXCircle = (p) => (
+  <Icon {...p}><circle cx="12" cy="12" r="10" /><line x1="15" y1="9" x2="9" y2="15" /><line x1="9" y1="9" x2="15" y2="15" /></Icon>
+)
+const IconLink = (p) => (
+  <Icon {...p}><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></Icon>
+)
+const IconSkip = (p) => (
+  <Icon {...p} fill="currentColor"><polygon points="5 4 15 12 5 20 5 4" /><line x1="19" y1="5" x2="19" y2="19" /></Icon>
+)
+const IconInfo = (p) => (
+  <Icon {...p}><circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" /></Icon>
+)
+const IconAlertTriangle = (p) => (
+  <Icon {...p}><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+    <line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></Icon>
+)
+const IconLock = (p) => (
+  <Icon {...p}><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></Icon>
+)
+const IconArrowLeft = (p) => (
+  <Icon {...p}><line x1="19" y1="12" x2="5" y2="12" /><polyline points="12 19 5 12 12 5" /></Icon>
+)
+const IconUsers = (p) => (
+  <Icon {...p}><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" />
+    <path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></Icon>
+)
+const IconClipboard = (p) => (
+  <Icon {...p}><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+    <rect x="8" y="2" width="8" height="4" rx="1" ry="1" /></Icon>
+)
 
-// ─── client-side row validation ──────────────────────────────────────
-function validateRow(row, idx) {
-  const errs = []
-  if (!row.student_id?.trim())    errs.push('student_id required')
-  if (!row.firstname?.trim())     errs.push('firstname required')
-  if (!row.lastname?.trim())      errs.push('lastname required')
-  const yl = parseInt(row.year_level)
-  if (!row.year_level?.trim() || isNaN(yl) || yl < 1 || yl > 6)
-                                  errs.push('year_level must be 1–6')
-  const st = row.student_type?.trim().toLowerCase()
-  if (st !== 'regular' && st !== 'irregular')
-                                  errs.push("student_type must be 'regular' or 'irregular'")
-  return errs.length ? { row: idx + 2, student_id: row.student_id, errors: errs } : null
-}
 
 // ─── status badge ─────────────────────────────────────────────────────
 function StatusBadge({ status }) {
@@ -63,14 +82,21 @@ function StatusBadge({ status }) {
     skipped:  'bg-yellow-600/20 text-yellow-300 border-yellow-600/40',
     error:    'bg-red-600/20    text-red-300    border-red-600/40',
   }
+  const icons = {
+    created:  <IconCheckCircle className="w-3.5 h-3.5" />,
+    enrolled: <IconLink className="w-3.5 h-3.5" />,
+    skipped:  <IconSkip className="w-3.5 h-3.5" />,
+    error:    <IconXCircle className="w-3.5 h-3.5" />,
+  }
   const label = {
-    created:  '✅ Created',
-    enrolled: '🔗 Enrolled',
-    skipped:  '⏭ Skipped',
-    error:    '❌ Error',
+    created:  'Created',
+    enrolled: 'Enrolled',
+    skipped:  'Skipped',
+    error:    'Error',
   }
   return (
-    <span className={`px-2 py-0.5 rounded text-xs font-bold border ${map[status] ?? map.error}`}>
+    <span className={`px-2 py-0.5 rounded text-xs font-bold border inline-flex items-center gap-1 ${map[status] ?? map.error}`}>
+      {icons[status] ?? icons.error}
       {label[status] ?? status}
     </span>
   )
@@ -90,17 +116,36 @@ function ColPill({ name, required }) {
 }
 
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────
-export default function UploadCSVModal({ blocks = [], onClose, onSuccess }) {
+export default function UploadCSVModal({ onClose, onSuccess }) {
   const fileRef = useRef(null)
+  const dialogRef = useRef(null)
+  const uploadPending = useRef(false)
+  const readGeneration = useRef(0)
+  const uploaded = useRef(false)
+
+  useEffect(() => {
+    const dialog = dialogRef.current
+    dialog.showModal()
+    return () => dialog.close()
+  }, [])
+
+  const close = () => {
+    if (uploadPending.current) return
+    if (uploaded.current || uncertain) onSuccess()
+    else onClose()
+  }
 
   // steps: 'select' | 'preview' | 'uploading' | 'done'
   const [step,       setStep]       = useState('select')
   const [file,       setFile]       = useState(null)
   const [parsed,     setParsed]     = useState(null)
   const [clientErrs, setClientErrs] = useState([])
+  const [clientWarns, setClientWarns] = useState([])
   const [isDragging, setIsDragging] = useState(false)
   const [result,     setResult]     = useState(null)
+  const [uncertain,  setUncertain]  = useState(false)
   const [toast,      setToast]      = useState(null)
+  const [showAllRows, setShowAllRows] = useState(false)
 
   // ── helpers ──────────────────────────────────────────────────────────
   const showToast = (msg, type = 'success') => {
@@ -108,6 +153,7 @@ export default function UploadCSVModal({ blocks = [], onClose, onSuccess }) {
     setTimeout(() => setToast(null), 4000)
   }
 
+  // Read the selected CSV file, parse it, and move to the preview step
   const readAndParse = (f) => {
     if (!f) return
     if (!f.name.toLowerCase().endsWith('.csv')) {
@@ -116,58 +162,81 @@ export default function UploadCSVModal({ blocks = [], onClose, onSuccess }) {
     if (f.size > 5 * 1024 * 1024) {
       showToast('File exceeds 5 MB limit', 'error'); return
     }
+    const generation = ++readGeneration.current
     setFile(f)
     const reader = new FileReader()
     reader.onload = (e) => {
+      if (generation !== readGeneration.current) return
       const { headers, rows } = parseCSV(e.target.result)
       const missing = REQUIRED_COLS.filter(h => !headers.includes(h))
       if (missing.length) {
         showToast(`Missing columns: ${missing.join(', ')}`, 'error')
         setFile(null); return
       }
-      const errs = rows.map((r, i) => validateRow(r, i)).filter(Boolean)
+      if (!rows.length || rows.length > 2000) {
+        showToast(rows.length ? 'Maximum 2,000 rows per upload' : 'Add at least one enrollment row', 'error')
+        setFile(null)
+        return
+      }
+      const { errs, warns } = checkRows(rows)
       setParsed({ headers, rows })
       setClientErrs(errs)
+      setClientWarns(warns)
       setStep('preview')
+    }
+    reader.onerror = () => {
+      if (generation !== readGeneration.current) return
+      setFile(null)
+      showToast('Could not read the file. Choose it again.', 'error')
     }
     reader.readAsText(f)
   }
 
-  const onDrop = useCallback((e) => {
+  // Handle a file dropped onto the drop zone
+  const onDrop = (e) => {
     e.preventDefault(); setIsDragging(false)
     readAndParse(e.dataTransfer.files[0])
-  }, [])
+  }
 
   // ── upload — wired to the COMPLETE enrollment endpoint ───────────────
   const handleUpload = async () => {
+    if (uploadPending.current || uncertain || !file) return
+    uploadPending.current = true
     setStep('uploading')
     try {
-      const token = localStorage.getItem('token')
       const fd    = new FormData()
       fd.append('file', file)
 
-      const res  = await fetch(`${API}/api/admin/enrollment/bulk-upload`, {
+      const res  = await authFetch(`${API_BASE}/api/admin/enrollment/bulk-upload`, {
         method:  'POST',
-        headers: { 'Authorization': `Bearer ${token}` },
         body:    fd,
       })
-      const data = await res.json()
+      const data = await res.json().catch(() => null)
 
-      if (!res.ok && res.status !== 207) {
-        showToast(data.error || 'Upload failed', 'error')
-        setStep('preview'); return
+      if ((res.ok && !data?.summary) || res.status >= 500) {
+        setUncertain(true)
+        setStep('preview')
+        return
       }
+      if (!res.ok) {
+        showToast(data?.error || `Upload failed (HTTP ${res.status})`, 'error')
+        setStep('preview')
+        return
+      }
+      uploaded.current = true
       setResult(data)
       setStep('done')
     } catch {
-      showToast('Network error — please try again', 'error')
+      setUncertain(true)
       setStep('preview')
+    } finally {
+      uploadPending.current = false
     }
   }
 
   // ── download credential CSV (base64 → file) ──────────────────────────
   const downloadCredentials = () => {
-    const bytes = atob(result.credential_csv)
+    const bytes = Uint8Array.from(atob(result.credential_csv), char => char.charCodeAt(0))
     const blob  = new Blob([bytes], { type: 'text/csv' })
     const url   = URL.createObjectURL(blob)
     const a     = document.createElement('a')
@@ -185,9 +254,10 @@ export default function UploadCSVModal({ blocks = [], onClose, onSuccess }) {
     URL.revokeObjectURL(url)
   }
 
+  // Reset the modal back to the file-select step
   const reset = () => {
     setStep('select'); setFile(null); setParsed(null)
-    setClientErrs([]); setResult(null)
+    setClientErrs([]); setClientWarns([]); setResult(null); setShowAllRows(false)
   }
 
   // ── counts for preview step ───────────────────────────────────────────
@@ -197,27 +267,29 @@ export default function UploadCSVModal({ blocks = [], onClose, onSuccess }) {
 
   // ─────────────────────────────────────────────────────────────────────
   return (
-    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+    <dialog ref={dialogRef} aria-labelledby="bulk-enrollment-title"
+      onCancel={event => { event.preventDefault(); close() }}
+      className="m-auto max-h-[calc(100dvh-1.5rem)] w-[calc(100%-1.5rem)] max-w-3xl overflow-hidden rounded-2xl border border-amber-300/40 bg-[#10162b] p-0 text-slate-100 shadow-2xl backdrop:bg-black/75"
+    >
 
       {/* Toast */}
       {toast && (
-        <div className={`fixed top-6 right-6 z-[9999] px-5 py-3 rounded-xl font-semibold text-white shadow-xl
+        <div role="alert" className={`fixed top-6 right-6 z-[9999] max-w-[calc(100%-3rem)] px-5 py-3 rounded-xl font-semibold text-white shadow-xl flex items-center gap-2
           ${toast.type === 'error' ? 'bg-red-600' : 'bg-green-600'}`}>
-          {toast.type === 'error' ? '❌' : '✅'} {toast.msg}
+          {toast.type === 'error' ? <IconXCircle className="w-4 h-4 flex-shrink-0" /> : <IconCheckCircle className="w-4 h-4 flex-shrink-0" />}
+          {toast.msg}
         </div>
       )}
 
-      <div className="bg-slate-900 border-2 border-purple-600/50 rounded-2xl w-full max-w-2xl shadow-2xl shadow-purple-900/40 overflow-hidden flex flex-col max-h-[90vh]">
+      <div className="flex max-h-[calc(100dvh-1.5rem)] flex-col overflow-hidden">
 
         {/* ── Header ───────────────────────────────────────────────────── */}
-        <div className="bg-gradient-to-r from-purple-900/60 to-pink-900/40 px-6 py-5 border-b border-purple-600/30 flex items-center justify-between flex-shrink-0">
+        <div className="bg-[#1b1834] px-4 py-4 sm:px-6 border-b border-amber-300/25 flex items-start justify-between gap-3 shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-gradient-to-br from-green-500 to-emerald-500 rounded-xl flex items-center justify-center text-xl">
-              📤
-            </div>
+            <img src={guidebook} alt="" className="hidden h-11 w-12 shrink-0 object-contain sm:block" />
             <div>
-              <h2 className="text-xl font-black text-white">Bulk Enrollment Upload</h2>
-              <p className="text-purple-300/70 text-xs">
+              <h2 id="bulk-enrollment-title" className="font-cinzel text-lg font-bold text-amber-50 sm:text-xl">Bulk Enrollment Upload</h2>
+              <p className="mt-1 text-sm text-slate-300">
                 {step === 'select'    && 'Upload the registrar CSV to create accounts and enroll students'}
                 {step === 'preview'   && `${parsed?.rows.length ?? 0} rows — ${regularCount} regular · ${irregularCount} irregular`}
                 {step === 'uploading' && 'Processing enrollment…'}
@@ -226,8 +298,11 @@ export default function UploadCSVModal({ blocks = [], onClose, onSuccess }) {
             </div>
           </div>
           <button
-            onClick={() => { onClose(); reset() }}
-            className="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition text-lg"
+            onClick={close}
+            disabled={step === 'uploading'}
+            aria-label="Close bulk enrollment"
+            type="button"
+            className="admin-button size-10 shrink-0 flex items-center justify-center rounded-lg text-slate-400 transition text-lg"
           >×</button>
         </div>
 
@@ -240,38 +315,44 @@ export default function UploadCSVModal({ blocks = [], onClose, onSuccess }) {
               onDragOver={(e) => { e.preventDefault(); setIsDragging(true) }}
               onDragLeave={() => setIsDragging(false)}
               onDrop={onDrop}
-              onClick={() => fileRef.current?.click()}
-              className={`relative border-2 border-dashed rounded-2xl p-10 text-center cursor-pointer transition-all
+              className={`relative rounded-xl border border-dashed p-5 text-center transition-colors sm:p-8
                 ${isDragging
-                  ? 'border-purple-400 bg-purple-600/10 scale-[1.01]'
-                  : 'border-slate-600 hover:border-purple-500 hover:bg-purple-600/5'}`}
+                  ? 'border-purple-400 bg-purple-600/10'
+                  : 'border-amber-300/45 bg-[#141a30]'}`}
             >
               <input
                 ref={fileRef}
                 type="file"
                 accept=".csv"
                 className="hidden"
-                onChange={(e) => readAndParse(e.target.files[0])}
+                onChange={event => {
+                  readAndParse(event.currentTarget.files[0])
+                  event.currentTarget.value = ''
+                }}
               />
-              <div className="text-5xl mb-3">📂</div>
+              <div className="w-14 h-14 mx-auto mb-3 rounded-2xl bg-purple-600/10 flex items-center justify-center">
+                <IconUpload className="w-7 h-7 text-purple-400" />
+              </div>
               <p className="text-white font-bold text-lg">
                 {isDragging ? 'Drop it!' : 'Drag & drop your registrar CSV here'}
               </p>
-              <p className="text-slate-400 text-sm mt-1">or click to browse — max 5 MB · max 2000 rows</p>
+              <p className="mt-1 text-sm text-slate-300">CSV only · up to 5 MB and 2,000 rows</p>
+              <button type="button" onClick={() => fileRef.current?.click()} className="admin-button admin-button-primary mt-4 px-5 text-sm font-semibold">
+                Choose CSV file
+              </button>
             </div>
 
             {/* How it works */}
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div className="bg-slate-800/60 rounded-xl p-4 border border-green-600/20">
-                <p className="text-green-400 font-bold text-sm mb-1">🏫 Regular Students</p>
+                <p className="text-green-400 font-bold text-sm mb-1 flex items-center gap-1.5"><IconUsers className="w-4 h-4" /> Regular Students</p>
                 <p className="text-slate-400 text-xs leading-relaxed">
-                  Set <code className="text-purple-300">student_type=regular</code> and fill <code className="text-purple-300">block_code</code>.
-                  Account is created and student is enrolled in that block.
-                  Block auto-closes when full.
+                  Set <code className="text-purple-300">student_type=regular</code> and fill <code className="text-purple-300">section_no</code> with their class code.
+                  Account is created and student is enrolled in that class.
                 </p>
               </div>
               <div className="bg-slate-800/60 rounded-xl p-4 border border-blue-600/20">
-                <p className="text-blue-400 font-bold text-sm mb-1">📋 Irregular Students</p>
+                <p className="text-blue-400 font-bold text-sm mb-1 flex items-center gap-1.5"><IconClipboard className="w-4 h-4" /> Irregular Students</p>
                 <p className="text-slate-400 text-xs leading-relaxed">
                   Set <code className="text-purple-300">student_type=irregular</code> and fill <code className="text-purple-300">section_no</code>.
                   Add multiple rows with the same <code className="text-purple-300">student_id</code> to enroll in several sections.
@@ -295,16 +376,16 @@ export default function UploadCSVModal({ blocks = [], onClose, onSuccess }) {
                 </div>
               </div>
               <p className="text-slate-500 text-xs pt-1 border-t border-slate-700">
-                Emails and passwords are auto-generated from name + student ID. Credentials are downloadable after upload.
+                New accounts use student_id@laconsolacion.edu and a generated temporary password. Download the credentials after upload.
               </p>
             </div>
 
             {/* Sample download */}
             <button
               onClick={downloadSample}
-              className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 rounded-xl text-slate-300 text-sm font-semibold border border-slate-700 hover:border-slate-600 transition flex items-center justify-center gap-2"
+              className="admin-button w-full py-2.5 rounded-xl text-slate-300 text-sm font-semibold border transition flex items-center justify-center gap-2"
             >
-              <span>⬇️</span> Download Sample CSV Template
+              <IconDownload className="w-4 h-4" /> Download Sample CSV Template
             </button>
           </div>
         )}
@@ -315,7 +396,7 @@ export default function UploadCSVModal({ blocks = [], onClose, onSuccess }) {
             <div className="p-6 space-y-4 overflow-y-auto flex-1">
 
               {/* Stats row */}
-              <div className="grid grid-cols-4 gap-3">
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                 {[
                   { label: 'Total Rows',  value: parsed.rows.length, color: 'text-white',       bg: 'bg-slate-800/60 border-slate-700' },
                   { label: 'Regular',     value: regularCount,        color: 'text-green-400',  bg: 'bg-green-900/20 border-green-600/30' },
@@ -332,7 +413,7 @@ export default function UploadCSVModal({ blocks = [], onClose, onSuccess }) {
               {/* Irregular multi-section notice */}
               {irregularCount > 0 && (
                 <div className="bg-blue-900/20 border border-blue-600/30 rounded-xl p-3 flex gap-3 items-start">
-                  <span className="text-lg flex-shrink-0">ℹ️</span>
+                  <IconInfo className="w-4 h-4 flex-shrink-0 text-blue-400 mt-0.5" />
                   <p className="text-blue-300 text-xs leading-relaxed">
                     Irregular students with the same <code>student_id</code> on multiple rows will have one account created
                     and will be enrolled in each listed section separately.
@@ -343,7 +424,9 @@ export default function UploadCSVModal({ blocks = [], onClose, onSuccess }) {
               {/* Client-side errors */}
               {clientErrs.length > 0 && (
                 <div className="bg-red-900/20 border border-red-600/30 rounded-xl p-4 space-y-1.5">
-                  <p className="text-red-300 text-sm font-bold">⚠️ Validation issues (these rows will be skipped):</p>
+                  <p className="text-red-300 text-sm font-bold flex items-center gap-1.5">
+                    <IconAlertTriangle className="w-4 h-4" /> Rows with preview issues:
+                  </p>
                   {clientErrs.slice(0, 6).map((e, i) => (
                     <p key={i} className="text-red-400 text-xs font-mono">
                       Row {e.row} · {e.student_id || '(empty)'} — {e.errors.join(', ')}
@@ -355,14 +438,35 @@ export default function UploadCSVModal({ blocks = [], onClose, onSuccess }) {
                 </div>
               )}
 
+              {clientWarns.length > 0 && (
+                <div className="bg-amber-900/20 border border-amber-600/30 rounded-xl p-4 space-y-1.5">
+                  <p className="text-amber-300 text-sm font-bold">Check these rows ({clientWarns.length}):</p>
+                  {clientWarns.slice(0, 4).map((e, i) => (
+                    <p key={i} className="text-amber-400 text-xs font-mono">Row {e.row} · {e.student_id} — {e.errors.join(', ')}</p>
+                  ))}
+                  {clientWarns.length > 4 && <p className="text-amber-500 text-xs">…and {clientWarns.length - 4} more</p>}
+                </div>
+              )}
+              <p className="text-slate-500 text-xs">
+                This preview checks the file's layout only. Class codes, existing accounts and duplicates are checked by the server when you enroll, and its result is final.
+              </p>
+
               {/* Preview table */}
               <div className="rounded-xl overflow-hidden border border-slate-700">
-                <div className="bg-slate-800/80 px-4 py-2 text-xs text-slate-400 font-semibold uppercase tracking-wider">
-                  Preview — first 8 rows
+                <div className="bg-slate-800/80 px-4 py-2 text-xs text-slate-400 font-semibold uppercase tracking-wider flex items-center justify-between">
+                  <span>{showAllRows ? `All ${parsed.rows.length} rows` : 'Preview — first 8 rows'}</span>
+                  {parsed.rows.length > 8 && (
+                    <button
+                      onClick={() => setShowAllRows(v => !v)}
+                      className="normal-case font-semibold text-purple-300 hover:text-purple-200 transition"
+                    >
+                      {showAllRows ? '▲ Show fewer' : `▼ Show all ${parsed.rows.length} rows`}
+                    </button>
+                  )}
                 </div>
-                <div className="overflow-x-auto">
+                <div className={`overflow-x-auto ${showAllRows ? 'max-h-72 overflow-y-auto' : ''}`}>
                   <table className="w-full text-sm">
-                    <thead className="bg-slate-800/60">
+                    <thead className="bg-slate-800 sticky top-0 z-10">
                       <tr>
                         <th className="text-left px-3 py-2 text-slate-400 font-medium text-xs">#</th>
                         {parsed.headers.map(h => (
@@ -371,7 +475,7 @@ export default function UploadCSVModal({ blocks = [], onClose, onSuccess }) {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800">
-                      {parsed.rows.slice(0, 8).map((row, i) => {
+                      {(showAllRows ? parsed.rows : parsed.rows.slice(0, 8)).map((row, i) => {
                         const hasErr = clientErrs.some(e => e.row === i + 2)
                         const isIrr  = row.student_type?.toLowerCase() === 'irregular'
                         return (
@@ -387,29 +491,38 @@ export default function UploadCSVModal({ blocks = [], onClose, onSuccess }) {
                       })}
                     </tbody>
                   </table>
-                  {parsed.rows.length > 8 && (
-                    <p className="text-center text-slate-500 text-xs py-2">
-                      …and {parsed.rows.length - 8} more rows
-                    </p>
+                  {!showAllRows && parsed.rows.length > 8 && (
+                    <button
+                      onClick={() => setShowAllRows(true)}
+                      className="w-full text-center text-purple-400 hover:text-purple-300 text-xs py-2 transition"
+                    >
+                      …and {parsed.rows.length - 8} more rows — click to view all
+                    </button>
                   )}
                 </div>
               </div>
             </div>
 
+            {uncertain && (
+              <p role="alert" className="mx-4 rounded-lg border border-amber-300/40 bg-amber-950/35 p-3 text-sm text-amber-100 sm:mx-6">
+                The server did not confirm the result. Close this window and check User Management before uploading again.
+              </p>
+            )}
             {/* Footer */}
             <div className="flex gap-3 p-6 border-t border-purple-600/30 flex-shrink-0">
               <button
-                onClick={reset}
-                className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-white font-bold transition"
+                onClick={uncertain ? close : reset}
+                className="admin-button flex-1 py-2.5 rounded-lg text-white font-bold transition flex items-center justify-center gap-1.5"
               >
-                ← Back
+                <IconArrowLeft className="w-4 h-4" /> {uncertain ? 'Close' : 'Back'}
               </button>
               <button
                 onClick={handleUpload}
-                disabled={validCount === 0}
-                className="flex-1 py-2.5 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-white font-black transition shadow-lg shadow-green-600/30 flex items-center justify-center gap-2"
+                disabled={uncertain || validCount === 0}
+                className="admin-button admin-button-primary flex-1 py-2.5 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-white font-black transition flex items-center justify-center gap-2"
               >
-                📤 Enroll {validCount} Student{validCount !== 1 ? 's' : ''}
+                <IconSend className="w-4 h-4" />
+                Upload and enroll
               </button>
             </div>
           </div>
@@ -417,18 +530,18 @@ export default function UploadCSVModal({ blocks = [], onClose, onSuccess }) {
 
         {/* ── Step: UPLOADING ───────────────────────────────────────────── */}
         {step === 'uploading' && (
-          <div className="flex flex-col items-center justify-center py-16 px-6 gap-5">
+          <div role="status" className="flex flex-col items-center justify-center py-12 px-6 gap-5">
             <div className="relative">
-              <div className="w-20 h-20 rounded-full border-4 border-purple-600/30 border-t-purple-500 animate-spin" />
-              <span className="absolute inset-0 flex items-center justify-center text-2xl">📤</span>
+              <div className="w-20 h-20 rounded-full border-4 border-purple-600/30 border-t-purple-500 motion-safe:animate-spin" />
+              <span className="absolute inset-0 flex items-center justify-center">
+                <IconSend className="w-7 h-7 text-purple-300" />
+              </span>
             </div>
             <div className="text-center">
               <p className="text-white font-bold text-lg">Processing enrollment…</p>
-              <p className="text-slate-400 text-sm mt-1">Creating accounts and enrolling {parsed?.rows.length} rows</p>
+              <p className="text-slate-400 text-sm mt-1">Processing {parsed?.rows.length} enrollment rows</p>
             </div>
-            <div className="w-full max-w-xs bg-slate-800 rounded-full h-2 overflow-hidden">
-              <div className="h-full bg-gradient-to-r from-purple-600 to-pink-600 animate-pulse w-2/3 rounded-full" />
-            </div>
+
           </div>
         )}
 
@@ -455,7 +568,9 @@ export default function UploadCSVModal({ blocks = [], onClose, onSuccess }) {
             {/* Server-side errors list */}
             {result.errors?.length > 0 && (
               <div className="bg-red-900/20 border border-red-600/30 rounded-xl p-4 space-y-1 max-h-32 overflow-y-auto">
-                <p className="text-red-300 text-xs font-bold mb-1">⚠️ Rows that were skipped:</p>
+                <p className="text-red-300 text-xs font-bold mb-1 flex items-center gap-1.5">
+                  <IconAlertTriangle className="w-3.5 h-3.5" /> Rows that were skipped:
+                </p>
                 {result.errors.map((e, i) => (
                   <p key={i} className="text-red-400 text-xs font-mono">{e}</p>
                 ))}
@@ -466,13 +581,12 @@ export default function UploadCSVModal({ blocks = [], onClose, onSuccess }) {
             {result.results?.length > 0 && (
               <div className="rounded-xl overflow-hidden border border-slate-700 max-h-52 overflow-y-auto">
                 <table className="w-full text-sm">
-                  <thead className="bg-slate-800/80 sticky top-0">
+                  <thead className="bg-slate-800 sticky top-0 z-10">
                     <tr>
                       <th className="text-left px-4 py-2 text-slate-400 font-medium text-xs">Row</th>
                       <th className="text-left px-4 py-2 text-slate-400 font-medium text-xs">Student ID</th>
                       <th className="text-left px-4 py-2 text-slate-400 font-medium text-xs">Status</th>
-                      <th className="text-left px-4 py-2 text-slate-400 font-medium text-xs">Block / Section</th>
-                    </tr>
+                      <th className="text-left px-4 py-2 text-slate-400 font-medium text-xs">Class Code / Section</th>                    </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800">
                     {result.results.map((r, i) => (
@@ -481,8 +595,7 @@ export default function UploadCSVModal({ blocks = [], onClose, onSuccess }) {
                         <td className="px-4 py-2 text-slate-300 font-mono text-xs">{r.student_id || '—'}</td>
                         <td className="px-4 py-2"><StatusBadge status={r.status} /></td>
                         <td className="px-4 py-2 text-slate-400 text-xs">
-                          {r.block ?? r.section ?? r.reason ?? r.errors?.join(', ') ?? ''}
-                        </td>
+                          {r.class_code ?? r.section ?? r.reason ?? r.errors?.join(', ') ?? ''}                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -491,9 +604,11 @@ export default function UploadCSVModal({ blocks = [], onClose, onSuccess }) {
             )}
 
             {/* Credential CSV download */}
-            {result.credential_csv && (
-              <div className="bg-blue-900/20 border border-blue-600/30 rounded-xl p-4 flex items-center gap-4">
-                <span className="text-3xl flex-shrink-0">🔐</span>
+            {result.credential_csv && (result.summary?.created ?? 0) > 0 && (
+              <div className="bg-blue-900/20 border border-blue-600/30 rounded-xl p-4 flex flex-wrap items-center gap-4">
+                <div className="w-10 h-10 rounded-xl bg-blue-600/20 flex items-center justify-center flex-shrink-0">
+                  <IconLock className="w-5 h-5 text-blue-300" />
+                </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-blue-300 font-bold text-sm">Auto-generated credentials ready</p>
                   <p className="text-slate-400 text-xs mt-0.5">
@@ -502,9 +617,9 @@ export default function UploadCSVModal({ blocks = [], onClose, onSuccess }) {
                 </div>
                 <button
                   onClick={downloadCredentials}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-white text-sm font-bold transition flex-shrink-0"
+                  className="admin-button admin-button-primary px-4 py-2 rounded-lg text-white text-sm font-bold transition flex-shrink-0 flex items-center gap-1.5"
                 >
-                  ⬇️ Download
+                  <IconDownload className="w-4 h-4" /> Download
                 </button>
               </div>
             )}
@@ -513,13 +628,13 @@ export default function UploadCSVModal({ blocks = [], onClose, onSuccess }) {
             <div className="flex gap-3 pt-2">
               <button
                 onClick={reset}
-                className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-white font-bold transition"
+                className="admin-button flex-1 py-2.5 rounded-lg text-white font-bold transition"
               >
                 Upload Another
               </button>
               <button
-                onClick={() => { onSuccess?.(); reset() }}
-                className="flex-1 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-lg text-white font-black transition shadow-lg shadow-purple-600/30"
+                onClick={close}
+                className="admin-button admin-button-primary flex-1 py-2.5 rounded-lg text-white font-black transition"
               >
                 Done
               </button>
@@ -528,6 +643,6 @@ export default function UploadCSVModal({ blocks = [], onClose, onSuccess }) {
         )}
 
       </div>
-    </div>
+    </dialog>
   )
 }

@@ -1,408 +1,561 @@
+import createUsers from '../../assets/admin/create-users.png'
+import AdminIcon, { INLINE } from './AdminIcons'
+import classCodes from '../../assets/admin/class-codes.png'
+import databaseBackup from '../../assets/admin/database-backup.png'
+import systemSettings from '../../assets/admin/system-settings.png'
 import { useState, useEffect } from 'react'
 import CreateUserModal from './CreateUserModal'
-import CreateBlockModal from './CreateBlockModal'
 import BackupDatabaseModal from './BackupDatabaseModal'
 import SystemSettingsModal from './SystemSettingsModal'
+import { API_BASE, authFetch } from '../../api/client'
+import { parseApiTimestamp } from '../../utils/apiTimestamp'
 
-export default function DashboardOverview() {
-  const [stats, setStats] = useState(null)
-  const [loading, setLoading] = useState(true)
+const API = API_BASE
 
-  // Modal states
-  const [showCreateUserModal, setShowCreateUserModal] = useState(false)
-  const [showCreateBlockModal, setShowCreateBlockModal] = useState(false)
-  const [showBackupModal, setShowBackupModal] = useState(false)
-  const [showSettingsModal, setShowSettingsModal] = useState(false)
+// ─── Helpers ────────────────────────────────────────────────────────────────
 
+function relativeTime(iso) {
+  const when = parseApiTimestamp(iso)
+  if (!when) return 'N/A'
+  const diff = Math.max(0, Math.floor((Date.now() - when) / 1000))
+  if (diff < 60)   return 'Just now'
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
+  return `${Math.floor(diff / 86400)}d ago`
+}
+
+// Pick a badge color based on the audit action's keyword
+function actionColor(action = '') {
+  if (!action) return 'bg-slate-700/40 text-slate-300'
+  if (action.includes('DELETE') || action.includes('CLEAR'))
+    return 'bg-red-900/30 text-red-300 border border-red-700/40'
+  if (action.includes('CREATE') || action.includes('UPLOAD') || action.includes('SEED'))
+    return 'bg-emerald-900/30 text-emerald-300 border border-emerald-700/40'
+  if (action.includes('UPDATE') || action.includes('EDIT') || action.includes('RESET'))
+    return 'bg-blue-900/30 text-blue-300 border border-blue-700/40'
+  if (action.includes('LOGIN') || action.includes('ASSIGN') || action.includes('CONFIG'))
+    return 'bg-purple-900/30 text-purple-300 border border-purple-700/40'
+  if (action.includes('BACKUP'))
+    return 'bg-emerald-900/30 text-emerald-300 border border-emerald-700/40'
+  return 'bg-slate-700/40 text-slate-400 border border-slate-600/40'
+}
+
+// ─── Main Component ──────────────────────────────────────────────────────────
+
+export default function DashboardOverview({ onNavigate, stats, loading, healthError, fetchStats }) {
+  const [sections, setSections]       = useState(null)
+  const [maintenanceError, setMaintenanceError] = useState(false)
+  const maintMode = stats?.maintenance_mode ?? false
+  const [maintLoading, setMaintLoading] = useState(false)
+  const [alertDismissed, setAlertDismissed] = useState(false)
+
+  const [showCreateUser,  setShowCreateUser]  = useState(false)
+  const [showBackup,      setShowBackup]      = useState(false)
+  const [showSettings,    setShowSettings]    = useState(false)
+
+  // ── Data fetching ────────────────────────────────────────────────────────
+
+  // Class code sections, used for the enrollment totals
   useEffect(() => {
-    fetchStats()
-    const interval = setInterval(fetchStats, 30000) // Refresh every 30s
-    return () => clearInterval(interval)
+    let ignore = false
+    authFetch(`${API}/api/admin/sections`)
+      .then(res => (res.ok ? res.json() : null))
+      .then(data => { if (!ignore && data) setSections(Array.isArray(data) ? data : []) })
+      .catch(() => {}) // non-fatal: totals fall back to the stats numbers
+    return () => { ignore = true }
   }, [])
 
-  // Keyboard shortcuts
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      if (e.ctrlKey || e.metaKey) {
-        switch (e.key) {
-          case 'u': e.preventDefault(); setShowCreateUserModal(true); break
-          case 'b': e.preventDefault(); setShowCreateBlockModal(true); break
-        }
-      }
-    }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [])
+  // ── Maintenance toggle ────────────────────────────────────────────────────
 
-  const fetchStats = async () => {
+  const toggleMaintenance = async () => {
+    setMaintenanceError(false)
+    setMaintLoading(true)
+    const next = !maintMode
     try {
-      const token = localStorage.getItem('token')
-      const res = await fetch('http://localhost:5000/api/admin/dashboard-stats', {
-        headers: { 'Authorization': `Bearer ${token}` }
+      const res = await authFetch(`${API}/api/admin/config`, {
+        method:  'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ maintenance_mode: next ? 'true' : 'false' }),
       })
-      if (res.ok) {
-        const data = await res.json()
-        setStats(data)
-      }
-    } catch (err) {
-      console.error('Failed to fetch stats:', err)
+      if (!res.ok) throw new Error("Maintenance update failed")
+      await fetchStats()
+    } catch {
+      setMaintenanceError(true)
     } finally {
-      setLoading(false)
+      setMaintLoading(false)
     }
   }
 
+  // ── Derived values ────────────────────────────────────────────────────────
+
+  const enrollmentAlerts = stats?.enrollment_alerts ?? 0
+  const activeToday      = stats?.active_users_today ?? stats?.today_logins ?? 0
+  const systemOk         = !healthError && (stats?.system_health !== 'degraded') && (stats?.system_health !== 'down')
+
+  const totalSections = sections?.length ?? '—'
+  const activeSections = stats?.total_sections ?? sections?.filter(section => section.is_active).length ?? '—'
+  const totalEnrolled  = stats?.total_enrolled  ??
+    sections?.filter(section => section.is_active).reduce((sum, section) => sum + (section.current_count ?? section.student_count ?? 0), 0) ?? '—'
+
+  // ── Loading state ─────────────────────────────────────────────────────────
+
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-96">
-        <div className="animate-spin rounded-full h-12 w-12 border-4 border-purple-600 border-t-transparent"></div>
+      <div className="flex flex-col items-center justify-center h-96 gap-4">
+        <div className="animate-spin rounded-full h-12 w-12 border-4 border-purple-600 border-t-transparent" />
+        <p className="text-slate-500 text-sm">Loading dashboard…</p>
       </div>
     )
   }
 
+  // ── Render ────────────────────────────────────────────────────────────────
+
   return (
     <div className="space-y-6">
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <StatCard
-          title="Today's Logins"
-          value={stats?.today_logins || 156}
-          icon="📈"
-          trend="+12%"
-          color="green"
-          tooltip="Number of unique user logins in the last 24 hours. Tracks platform engagement and daily active users."
-        />
-        <StatCard
-          title="Submissions"
-          value={stats?.today_submissions || 89}
-          icon="📝"
-          trend="+5%"
-          color="blue"
-          tooltip="Total code submissions across all quests and classes. Measures student activity and platform usage. Includes Python, Java, and C#."
-        />
-        <StatCard
-          title="Avg Response"
-          value="2.3s"
-          icon="⏱️"
-          trend="-8%"
-          color="yellow"
-          tooltip="Average time to execute and grade code submissions. Measures Docker sandbox performance. Excellent: <3s, Acceptable: 3-5s, Slow: >5s."
-        />
-        <StatCard
-          title="Success Rate"
-          value="98%"
-          icon="✅"
-          trend="+2%"
-          color="green"
-          tooltip="Percentage of submissions that executed without errors or timeouts. Indicates system stability and code quality."
-        />
-      </div>
-
-      {/* User Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <UserStatCard
-          title="Total Students"
-          value={stats?.total_students || 1}
-          subtitle="Active student accounts"
-          icon="🎓"
-          trend="+12%"
-        />
-        <UserStatCard
-          title="Total Instructors"
-          value={stats?.total_instructors || 2}
-          subtitle="Active instructor accounts"
-          icon="👨‍"
-          trend="+5%"
-        />
-        <UserStatCard
-          title="Total Blocks"
-          value={stats?.total_blocks || 1}
-          subtitle="Class sections"
-          icon="📚"
-          trend="+8%"
-        />
-        <UserStatCard
-          title="Active Sessions"
-          value={stats?.active_sessions || 24}
-          subtitle="Current active users"
-          icon="👥"
-          trend="-3%"
-          trendDown
-        />
-      </div>
-
-      {/* Quick Actions — FUNCTIONAL */}
-      <div className="bg-slate-900/80 rounded-2xl border border-purple-600/30 p-6">
-        <div className="flex items-center justify-between mb-5">
-          <h3 className="text-xl font-bold text-white">Quick Actions</h3>
-          <span className="text-xs text-slate-500 hidden sm:block">Keyboard: Ctrl+U (User) · Ctrl+B (Block)</span>
+      {healthError && (
+        <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-300/30 bg-[#141a30] px-4 py-3 text-sm text-amber-100">
+          <p>{stats ? "Could not refresh dashboard. Showing the last available data." : "Could not load dashboard metrics."}</p>
+          <button type="button" onClick={() => fetchStats(true)} className="min-h-10 rounded-lg border border-amber-300/35 px-4 font-semibold focus-visible:outline focus-visible:outline-amber-300">Retry</button>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          <QuickActionCard
-            icon="👤"
-            title="Create New User"
-            description="Add students or instructors"
-            color="blue"
-            shortcut="Ctrl+U"
-            onClick={() => setShowCreateUserModal(true)}
-          />
-          <QuickActionCard
-            icon="📚"
-            title="Create New Block"
-            description="Set up class sections"
-            color="purple"
-            shortcut="Ctrl+B"
-            onClick={() => setShowCreateBlockModal(true)}
-          />
-          <QuickActionCard
-            icon="💾"
-            title="Backup Database"
-            description="Create system backup"
-            color="green"
-            onClick={() => setShowBackupModal(true)}
-          />
-          <QuickActionCard
-            icon="⚙️"
-            title="System Settings"
-            description="Configure system options"
-            color="orange"
-            onClick={() => setShowSettingsModal(true)}
-          />
-        </div>
-      </div>
-
-      {/* System Status */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 bg-slate-900/80 rounded-2xl border border-purple-600/30 p-6">
-          <h3 className="text-xl font-bold text-white mb-4">Recent Activity</h3>
-          <div className="space-y-3">
-            {stats?.recent_activity?.map((activity, index) => (
-              <div key={index} className="flex items-center justify-between p-3 bg-slate-800/50 rounded-lg">
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 bg-purple-600/30 rounded-lg flex items-center justify-center">
-                    ⚙️
-                  </div>
-                  <div>
-                    <p className="font-semibold text-white">{activity.admin || activity.user}</p>
-                    <p className="text-xs text-slate-400">{activity.action}</p>
-                  </div>
-                </div>
-                <div className="text-right">
-                  <p className="text-xs text-slate-400">{activity.details}</p>
-                  <p className="text-xs text-slate-500">{new Date(activity.created_at).toLocaleString()}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="bg-slate-900/80 rounded-2xl border border-purple-600/30 p-6">
-          <h3 className="text-xl font-bold text-white mb-4">System Status</h3>
-          <div className="space-y-4">
-            <StatusItem label="Database" status="Connected" color="green" />
-            <StatusItem label="API Server" status="Operational" color="green" />
-            <StatusItem label="Last Backup" status="Apr 20, 08:59 PM" color="yellow" />
-            <StatusItem label="Uptime" status="99.9%" color="green" />
-          </div>
-        </div>
-      </div>
-
-      {/* ── MODALS ── */}
-      {showCreateUserModal && (
-        <CreateUserModal
-          onClose={() => setShowCreateUserModal(false)}
-          onSuccess={() => { setShowCreateUserModal(false); fetchStats() }}
-        />
       )}
-      {showCreateBlockModal && (
-        <CreateBlockModal
-          onClose={() => setShowCreateBlockModal(false)}
-          onSuccess={() => { setShowCreateBlockModal(false); fetchStats() }}
-        />
-      )}
-      {showBackupModal && (
-        <BackupDatabaseModal onClose={() => setShowBackupModal(false)} />
-      )}
-      {showSettingsModal && (
-        <SystemSettingsModal onClose={() => setShowSettingsModal(false)} />
-      )}
-    </div>
-  )
-}
 
-function StatCard({ title, value, icon, trend, color, trendDown, tooltip }) {
-  const colors = {
-    green: {
-      gradient: 'from-emerald-900/40 to-teal-900/40',
-      border: 'border-emerald-600/30 hover:border-emerald-500/60',
-      glow: 'shadow-emerald-600/20',
-      text: 'text-emerald-400 group-hover:text-emerald-300',
-      iconBg: 'bg-emerald-600/20',
-      tooltipBorder: 'border-emerald-600/50',
-      tooltipShadow: 'shadow-emerald-600/20'
-    },
-    blue: {
-      gradient: 'from-blue-900/40 to-indigo-900/40',
-      border: 'border-blue-600/30 hover:border-blue-500/60',
-      glow: 'shadow-blue-600/20',
-      text: 'text-blue-400 group-hover:text-blue-300',
-      iconBg: 'bg-blue-600/20',
-      tooltipBorder: 'border-blue-600/50',
-      tooltipShadow: 'shadow-blue-600/20'
-    },
-    yellow: {
-      gradient: 'from-amber-900/40 to-orange-900/40',
-      border: 'border-amber-600/30 hover:border-amber-500/60',
-      glow: 'shadow-amber-600/20',
-      text: 'text-amber-400 group-hover:text-amber-300',
-      iconBg: 'bg-amber-600/20',
-      tooltipBorder: 'border-amber-600/50',
-      tooltipShadow: 'shadow-amber-600/20'
-    },
-    purple: {
-      gradient: 'from-purple-900/40 to-pink-900/40',
-      border: 'border-purple-600/30 hover:border-purple-500/60',
-      glow: 'shadow-purple-600/20',
-      text: 'text-purple-400 group-hover:text-purple-300',
-      iconBg: 'bg-purple-600/20',
-      tooltipBorder: 'border-purple-600/50',
-      tooltipShadow: 'shadow-purple-600/20'
-    }
-  }
-
-  const theme = colors[color] || colors.blue;
-
-  // Default tooltips if not provided
-  const tooltips = {
-    "Today's Logins": "Number of unique user logins in the last 24 hours. Tracks platform engagement and daily active users.",
-    "Submissions": "Total code submissions across all quests and classes. Measures student activity and platform usage. Includes Python, Java, and C#.",
-    "Avg Response": "Average time to execute and grade code submissions. Measures Docker sandbox performance. Excellent: <3s, Acceptable: 3-5s, Slow: >5s.",
-    "Success Rate": "Percentage of submissions that executed without errors or timeouts. Indicates system stability and code quality."
-  }
-
-  const description = tooltip || tooltips[title] || "System metric for monitoring platform health.";
-
-  return (
-    <div className="group relative">
-      <div className={`relative bg-gradient-to-br ${theme.gradient} rounded-2xl border-2 ${theme.border} p-6 
-                hover:shadow-2xl ${theme.glow} transition-all duration-300 
-                hover:scale-105 hover:-translate-y-1 cursor-help overflow-visible`}>
-        
-        {/* Animated glow overlay */}
-        <div className={`absolute inset-0 bg-gradient-to-br ${theme.gradient.replace('900', '600').replace('/40', '/10')} 
-                        opacity-0 group-hover:opacity-100 transition-opacity duration-300`}></div>
-        
-        {/* Content */}
-        <div className="relative flex items-start justify-between mb-4">
-          <div>
-            <p className="text-slate-400 text-sm font-semibold mb-1">{title}</p>
-            <h3 className={`text-4xl font-black ${theme.text} transition-colors`}>
-              {value}
-            </h3>
-          </div>
-          <div className={`w-10 h-10 ${theme.iconBg} rounded-xl flex items-center justify-center 
-                          group-hover:scale-110 group-hover:rotate-12 transition-transform duration-300`}>
-            <span className="text-2xl">{icon}</span>
-          </div>
-        </div>
-        
-        {/* Trend */}
-        <div className="relative flex items-center gap-2">
-          <span className={`${trendDown ? 'text-red-400' : 'text-green-400'} font-bold text-sm flex items-center gap-1
-                          group-hover:scale-110 transition-transform`}>
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
-                    d={trendDown ? "M13 17h8m0 0V9m0 8l-8-8-4 4-6-6" : "M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"} />
-            </svg>
-            {trend}
+      {/* ── Maintenance Mode Banner ── */}
+      {maintMode && (
+        <div className="flex items-center gap-3 px-5 py-3 rounded-xl
+                        bg-red-950/60 border border-red-600/50
+                        animate-in slide-in-from-top-2 duration-300">
+          <span className="relative flex h-2.5 w-2.5 flex-shrink-0">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
+            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500" />
           </span>
-          <span className="text-slate-500 text-xs">vs yesterday</span>
+          <p className="text-red-300 text-sm font-medium flex-1">
+            <strong>Maintenance status is ON.</strong> This is a status flag only; sign-in and features are not restricted.
+          </p>
+          <button
+            onClick={toggleMaintenance}
+            disabled={maintLoading || !stats}
+            className="text-xs text-red-400 hover:text-red-200 underline transition flex-shrink-0"
+          >
+            Turn off
+          </button>
         </div>
-        
-        {/* Tooltip - Positioned BELOW card to avoid header */}
-        <div 
-          className="absolute top-full left-1/2 -translate-x-1/2 mt-2 
-                    opacity-0 invisible group-hover:opacity-100 group-hover:visible 
-                    transition-all duration-300 z-[9999] pointer-events-none"
-          style={{ 
-            filter: 'drop-shadow(0 20px 25px rgba(0,0,0,0.5))'
-          }}
-        >
-          <div className={`bg-slate-900 border ${theme.tooltipBorder} rounded-xl p-4 
-                          shadow-2xl ${theme.tooltipShadow} min-w-[300px] max-w-[400px]`}>
-            <div className="flex items-center gap-2 mb-2">
-              <span className={`${theme.text} text-lg`}>{icon}</span>
-              <p className={`${theme.text} font-bold text-sm`}>{title}</p>
-            </div>
-            <p className="text-slate-400 text-xs leading-relaxed">{description}</p>
-            <div className="mt-2 pt-2 border-t border-slate-800">
-              <p className="text-slate-500 text-xs">
-                <span className={`${theme.text} font-semibold`}>💡 Tip:</span> Monitor this metric for system health
-              </p>
-            </div>
-            {/* Arrow pointer - flipped to point UP */}
-            <div className="absolute -top-2 left-1/2 -translate-x-1/2 
-                            w-4 h-4 bg-slate-900 border-l border-t border-slate-700 
-                            rotate-45"></div>
-          </div>
+      )}
+
+      {/* ── Enrollment Alert Banner (contextual, dismissible) ── */}
+      {enrollmentAlerts > 0 && !alertDismissed && (
+        <div className="flex items-center gap-3 px-5 py-3 rounded-xl
+                        bg-amber-950/50 border border-amber-600/40">
+          <AdminIcon name="alert" className="size-5 shrink-0 text-amber-400" />
+          <p className="text-amber-300 text-sm flex-1">
+            <strong>{enrollmentAlerts} student{enrollmentAlerts !== 1 ? 's' : ''}</strong> enrolled
+            in inactive class codes — they cannot access course content.
+          </p>
+          <button
+            onClick={() => onNavigate?.('sections')}
+            className="text-xs text-amber-400 hover:text-amber-200 underline transition flex-shrink-0"
+          >
+            Review class codes →
+          </button>
+          <button
+            onClick={() => setAlertDismissed(true)}
+            className="text-slate-500 hover:text-slate-300 transition text-lg leading-none flex-shrink-0"
+            title="Dismiss"
+          >
+            ×
+          </button>
+        </div>
+      )}
+
+      {/* ════════════════════════════════════════════════════════════
+          ZONE B-1 — PRIMARY METRICS (3 cards, action-oriented)
+      ════════════════════════════════════════════════════════════ */}
+
+      <div>
+        <h3 className="font-cinzel text-lg font-semibold text-white mb-3">
+          System health
+        </h3>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+
+          {/* Platform Status */}
+          <PrimaryCard
+            label="Platform status"
+            badge={systemOk ? 'Database reachable' : 'Check failed'}
+            badgeVariant={systemOk ? 'ok' : 'alert'}
+            statusLine={
+              <span className={`flex items-center gap-2 text-lg font-semibold ${systemOk ? 'text-emerald-400' : 'text-red-400'}`}>
+                <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${systemOk ? 'bg-emerald-400' : 'bg-red-400'} animate-pulse`} />
+                {systemOk ? 'Database connected' : 'Database check failed'}
+              </span>
+            }
+            subLabel="Result of the last database connection check. Sandbox and uptime are not monitored here."
+            action={healthError ? { label: 'View activity logs →', onClick: () => onNavigate?.('activity') } : null}
+          />
+
+          {/* Active Users Today */}
+          <PrimaryCard
+            label="Active users today"
+            badge="Today"
+            badgeVariant="ok"
+            statusLine={
+              <span className="text-4xl font-black text-white tracking-tight">{stats ? activeToday : "—"}</span>
+            }
+            subLabel={stats ? `of ${stats.total_students ?? 0} students · ${stats.total_instructors ?? 0} instructors` : "User totals unavailable"}
+            action={{ label: 'View login history →', onClick: () => onNavigate?.('activity') }}
+          />
+
+          {/* Enrollment Alerts */}
+          <PrimaryCard
+            label="Enrollment alerts"
+            badge={!stats ? "Unavailable" : enrollmentAlerts > 0 ? 'Needs review' : 'All clear'}
+            badgeVariant={enrollmentAlerts > 0 ? 'warn' : 'ok'}
+            statusLine={
+              <span className={`text-4xl font-black tracking-tight ${enrollmentAlerts > 0 ? 'text-amber-400' : 'text-emerald-400'}`}>
+                {stats ? enrollmentAlerts : "—"}
+              </span>
+            }
+            subLabel="Students without active class codes"
+            action={enrollmentAlerts > 0
+              ? { label: 'Go to class codes →', onClick: () => onNavigate?.('sections') }
+              : null}
+          />
         </div>
       </div>
+
+      {/* ════════════════════════════════════════════════════════════
+          ZONE B-2 — SECONDARY METRICS (4 compact cards)
+      ════════════════════════════════════════════════════════════ */}
+
+      <div>
+        <h3 className="font-cinzel text-lg font-semibold text-white mb-3">
+          Platform overview
+        </h3>
+
+        <div className="grid grid-cols-2 divide-amber-300/20 rounded-xl border border-amber-300/25 bg-[#111832] p-1 md:grid-cols-4 md:divide-x">
+          <MiniCard
+            label="Total students"
+            value={stats?.total_students ?? "—"}
+            trend={null}
+            onClick={() => onNavigate?.('users')}
+          />
+          <MiniCard
+            label="Instructors"
+            value={stats?.total_instructors ?? "—"}
+            trend={null}
+            onClick={() => onNavigate?.('users')}
+          />
+          <MiniCard
+            label="Active class codes"
+            value={activeSections}
+            trend={null}
+            onClick={() => onNavigate?.('sections')}
+          />
+          <MiniCard
+            label="Class enrollments"
+            value={totalEnrolled}
+            trend={null}
+            onClick={() => onNavigate?.('sections')}
+          />
+        </div>
+
+      </div>
+
+      {/* ════════════════════════════════════════════════════════════
+          ZONE B-3 — MAINTENANCE TOGGLE in its own row
+          (also lives in topbar via AdminDashboard.jsx, but this
+           gives admins a second, labelled access point)
+      ════════════════════════════════════════════════════════════ */}
+      <div className="flex items-center justify-between px-5 py-3.5 rounded-xl
+                      bg-slate-900/60 border border-slate-700/40">
+        <div>
+          <p className="text-sm font-medium text-slate-300">Maintenance mode</p>
+          {maintenanceError && <p role="alert" className="mt-1 text-sm text-rose-300">Could not update maintenance mode. Try again.</p>}
+          <p className="text-xs text-slate-500 mt-0.5">
+            When ON, a Maintenance status is shown. It is a status flag only and does not block sign-in.
+          </p>
+        </div>
+        <button
+          onClick={toggleMaintenance}
+          disabled={maintLoading || !stats}
+          aria-label="Maintenance mode" aria-pressed={maintMode}
+          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200
+                      focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2
+                      focus:ring-offset-slate-900 disabled:opacity-50
+                      ${maintMode ? 'bg-red-600' : 'bg-slate-700'}`}
+        >
+          <span
+            className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform duration-200
+                        ${maintMode ? 'translate-x-6' : 'translate-x-1'}`}
+          />
+        </button>
+      </div>
+
+      {/* Divider */}
+      <div className="border-t border-slate-800/60" />
+
+      {/* ════════════════════════════════════════════════════════════
+          ZONE C — Two-column footer
+      ════════════════════════════════════════════════════════════ */}
+
+      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_320px] gap-5">
+
+        {/* Left — Recent Activity (unchanged, it works well) */}
+        <div className="bg-[#111832] rounded-xl border border-amber-300/20 overflow-hidden">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800/60">
+            <h3 className="font-cinzel text-base font-semibold text-white">Recent activity</h3>
+            <button
+              onClick={() => onNavigate?.('activity')}
+              className="text-xs text-purple-400 hover:text-purple-300 transition"
+            >
+              View all logs →
+            </button>
+          </div>
+
+          <div className="divide-y divide-slate-800/50">
+            {stats?.recent_activity?.length > 0
+              ? stats.recent_activity.slice(0, 6).map((act, i) => (
+                  <ActivityRow key={act.id ?? i} activity={act} />
+                ))
+              : (
+                <div className="flex flex-col items-center justify-center py-12 text-slate-600">
+                          <span className="text-sm text-slate-300">{stats ? "No recent activity" : "Activity unavailable"}</span>
+                </div>
+              )
+            }
+          </div>
+        </div>
+
+        {/* Right — stacked: System Status + Quick Actions + Class Code Summary */}
+        <div className="flex flex-col gap-4">
+
+          {/* System Status */}
+          <div className="bg-[#111832] rounded-xl border border-amber-300/20 overflow-hidden">
+            <div className="px-5 py-3.5 border-b border-slate-800/60">
+              <h3 className="font-cinzel text-base font-semibold text-white">System status</h3>
+            </div>
+            <div className="divide-y divide-slate-800/50 px-5">
+              <StatusRow label="Database"    value={systemOk ? 'Connected' : 'Check failed'} ok={systemOk} />
+              <StatusRow label="API server"  value={healthError ? 'Not responding' : 'Responding'} ok={!healthError} />
+              <p className="text-[11px] text-slate-500 py-2.5">The code sandbox and uptime are not monitored from this page.</p>
+            </div>
+          </div>
+
+          {/* Quick Actions */}
+          <div className="bg-[#111832] rounded-xl border border-amber-300/20 overflow-hidden">
+            <div className="px-5 py-3.5 border-b border-amber-300/15">
+              <h3 className="font-cinzel text-base font-semibold text-white">Quick actions</h3>
+            </div>
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,10rem),1fr))] gap-2 p-3">
+              <ActionBtn
+                emblem={createUsers}
+                label="Create user"
+                sub="Student / instructor"
+                onClick={() => setShowCreateUser(true)}
+              />
+              <ActionBtn
+                emblem={classCodes}
+                label="Class codes"
+                sub="Sections & enrollment"
+                onClick={() => onNavigate?.('sections')}
+              />
+              <ActionBtn
+                emblem={databaseBackup}
+                label="Database backup"
+                sub="Export SQL"
+                onClick={() => setShowBackup(true)}
+              />
+              <ActionBtn
+                emblem={systemSettings}
+                label="System settings"
+                sub="Platform configuration"
+                onClick={() => setShowSettings(true)}
+              />
+            </div>
+          </div>
+
+          {/* Class Code Summary (collapsible) */}
+          <CollapsiblePanel title="Class code summary">
+            <div className="space-y-2 px-5 pb-4 pt-1">
+              <SummaryRow label="Total sections"  value={totalSections}    color="text-slate-200" />
+              <SummaryRow label="Active sections" value={activeSections}   color="text-emerald-400" />
+              <SummaryRow label="Class enrollments"  value={totalEnrolled}    color="text-blue-400" />
+            </div>
+          </CollapsiblePanel>
+
+        </div>
+      </div>
+
+      {/* ── Modals ── */}
+      {showCreateUser && (
+        <CreateUserModal
+          sections={sections ?? []}
+          onClose={() => setShowCreateUser(false)}
+          onSuccess={() => { setShowCreateUser(false); fetchStats() }}
+        />
+      )}
+      {showBackup   && <BackupDatabaseModal onClose={() => setShowBackup(false)} />}
+      {showSettings && <SystemSettingsModal onClose={() => setShowSettings(false)} onSaved={fetchStats} />}
     </div>
   )
 }
 
-function UserStatCard({ title, value, subtitle, icon, trend, trendDown }) {
+// ─── Sub-components ──────────────────────────────────────────────────────────
+
+// Primary metric card
+function PrimaryCard({ label, badge, badgeVariant, statusLine, subLabel, action }) {
+  const badgeStyle = {
+    ok:    'bg-emerald-900/40 text-emerald-300 border-emerald-700/40',
+    warn:  'bg-amber-900/40 text-amber-300 border-amber-700/40',
+    alert: 'bg-red-900/40 text-red-300 border-red-700/40',
+  }[badgeVariant] ?? 'bg-slate-800 text-slate-400 border-slate-700/40'
+
   return (
-    <div className="bg-slate-900/80 rounded-2xl border border-purple-600/30 p-6 hover:border-purple-600/50 transition">
-      <div className="flex justify-between items-start mb-4">
-        <div className="w-12 h-12 bg-purple-600/30 rounded-xl flex items-center justify-center text-2xl">
-          {icon}
-        </div>
-        <span className={`text-sm font-bold ${trendDown ? 'text-red-400' : 'text-green-400'}`}>
-          {trendDown ? '↓' : '↑'} {trend}
+    <div className="rounded-xl border border-amber-300/20 bg-[#111832] p-5">
+      <div className="flex items-start justify-between mb-3">
+        <p className="text-sm text-slate-200 font-medium">{label}</p>
+        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${badgeStyle}`}>
+          {badge}
         </span>
       </div>
-      <p className="text-3xl font-black text-white mb-1">{value}</p>
-      <p className="text-slate-400 text-sm mb-2">{title}</p>
-      <p className="text-slate-500 text-xs">{subtitle}</p>
+
+      <div className="mb-1">{statusLine}</div>
+
+      <p className="text-xs leading-relaxed text-slate-300 mt-1">{subLabel}</p>
+
+      {action && (
+        <button
+          onClick={action.onClick}
+          className="mt-3 min-h-9 rounded text-sm text-amber-200 hover:text-amber-100 focus-visible:outline focus-visible:outline-amber-300"
+        >
+          {action.label}
+        </button>
+      )}
     </div>
   )
 }
 
-function QuickActionCard({ icon, title, description, color, shortcut, onClick }) {
-  const colors = {
-    blue:   'from-blue-600/20 to-cyan-600/20 border-blue-600/30 hover:border-blue-500/60 hover:shadow-blue-600/20',
-    purple: 'from-purple-600/20 to-pink-600/20 border-purple-600/30 hover:border-purple-500/60 hover:shadow-purple-600/20',
-    green:  'from-green-600/20 to-emerald-600/20 border-green-600/30 hover:border-green-500/60 hover:shadow-green-600/20',
-    orange: 'from-orange-600/20 to-red-600/20 border-orange-600/30 hover:border-orange-500/60 hover:shadow-orange-600/20',
-  }
+// Secondary compact metric card
+function MiniCard({ label, value, trend, onClick }) {
   return (
     <button
       onClick={onClick}
-      className={`group relative bg-gradient-to-b ${colors[color]} backdrop-blur p-5 rounded-xl border-2 cursor-pointer transition-all duration-200 hover:scale-105 hover:shadow-lg text-left w-full`}
+      className="w-full rounded-lg p-4 text-left hover:bg-violet-950/45 focus-visible:outline focus-visible:outline-amber-300"
     >
-      <div className="text-3xl mb-3 group-hover:scale-110 transition-transform duration-200">{icon}</div>
-      <h4 className="font-bold text-white mb-1">{title}</h4>
-      <p className="text-slate-400 text-sm">{description}</p>
-      {shortcut && (
-        <span className="absolute top-2 right-2 text-[10px] text-slate-600 bg-slate-800/50 px-1.5 py-0.5 rounded font-mono hidden group-hover:block">
-          {shortcut}
-        </span>
+      <p className="text-xs text-slate-300 mb-2 font-medium">{label}</p>
+      <p className="text-2xl font-semibold tabular-nums text-amber-100 leading-none">{value.toLocaleString()}</p>
+      {trend && (
+        <p className="text-[10px] text-emerald-400 mt-1.5 font-medium">↑ {trend}</p>
       )}
     </button>
   )
 }
 
-function StatusItem({ label, status, color }) {
-  const colors = {
-    green: 'text-green-400',
-    yellow: 'text-yellow-400',
-    red: 'text-red-400'
+// Activity feed row
+function ActivityRow({ activity }) {
+  // Pick an icon based on which keyword the action contains
+  const iconMap = {
+    DELETE: { bg: 'bg-red-900/30', icon: 'trash' },
+    CREATE: { bg: 'bg-emerald-900/30', icon: 'check' },
+    UPLOAD: { bg: 'bg-emerald-900/30', icon: 'download' },
+    UPDATE: { bg: 'bg-blue-900/30', icon: 'edit' },
+    ASSIGN: { bg: 'bg-purple-900/30', icon: 'link' },
+    LOGIN:  { bg: 'bg-purple-900/30', icon: 'key' },
+    CONFIG: { bg: 'bg-purple-900/30', icon: 'gear' },
+    BACKUP: { bg: 'bg-emerald-900/30', icon: 'save' },
   }
 
+  const action = activity.action ?? ''
+  const match  = Object.entries(iconMap).find(([k]) => action.includes(k))
+  const { bg, icon } = match?.[1] ?? { bg: 'bg-slate-800/50', icon: 'gear' }
+
   return (
-    <div className="flex justify-between items-center p-3 bg-slate-800/50 rounded-lg">
-      <span className="text-slate-400">{label}</span>
-      <span className={`font-bold ${colors[color]}`}>{status}</span>
+    <div className="flex items-center gap-3 px-5 py-3 hover:bg-slate-800/30 transition group cursor-default">
+      <div className={`w-8 h-8 ${bg} rounded-lg flex items-center justify-center text-sm flex-shrink-0`}>
+        <AdminIcon name={icon} className="size-4 text-slate-200" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm text-slate-300 font-medium truncate">
+          {activity.admin ?? 'System'}
+        </p>
+        <div className="flex items-center gap-2 mt-0.5">
+          <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${actionColor(action)}`}>
+            {action}
+          </span>
+        </div>
+      </div>
+      <div className="text-right flex-shrink-0 ml-2">
+        <p className="text-xs text-slate-300 max-w-56 break-words text-right">
+          {activity.details}
+        </p>
+        <p className="text-xs text-slate-300 mt-0.5">
+          {relativeTime(activity.created_at)}
+        </p>
+      </div>
+    </div>
+  )
+}
+
+// System status row
+function StatusRow({ label, value, ok }) {
+  return (
+    <div className="flex items-center justify-between py-2.5">
+      <div className="flex items-center gap-2">
+        <span className={`w-2 h-2 rounded-full ${ok ? 'bg-emerald-400' : 'bg-red-400'}`} />
+        <span className="text-sm text-slate-400">{label}</span>
+      </div>
+      <span className={`text-sm font-semibold ${ok ? 'text-emerald-400' : 'text-red-400'}`}>
+        {value}
+      </span>
+    </div>
+  )
+}
+
+// Quick action button
+function ActionBtn({ emblem, label, sub, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      type="button"
+      className="admin-button flex min-w-0 w-full items-center gap-3 p-3 text-left"
+    >
+      <img src={emblem} alt="" className="size-11 shrink-0 object-contain" width="44" height="44" />
+      <div className="min-w-0">
+        <p className="text-sm font-semibold text-amber-100">{label}</p>
+        <p className="text-xs text-slate-300">{sub}</p>
+      </div>
+    </button>
+  )
+}
+
+// Collapsible panel
+function CollapsiblePanel({ title, children }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="bg-[#111832] rounded-xl border border-amber-300/20 overflow-hidden">
+      <button
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center justify-between w-full px-5 py-3.5
+                   hover:bg-slate-800/30 transition"
+      >
+        <h3 className="font-cinzel text-base font-semibold text-white">{title}</h3>
+        <span className={`text-slate-600 text-xs transition-transform duration-200 ${open ? 'rotate-180' : ''}`}>
+          ▼
+        </span>
+      </button>
+      {open && children}
+    </div>
+  )
+}
+
+// Summary row helper
+function SummaryRow({ label, value, color }) {
+  return (
+    <div className="flex justify-between items-center text-sm">
+      <span className="text-slate-500">{label}</span>
+      <span className={`font-bold ${color}`}>{value}</span>
     </div>
   )
 }

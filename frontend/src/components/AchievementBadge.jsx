@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
+import { isUnavailable } from '../utils/achievementView'
+import MedalArt, { hasMedalArt } from './MedalArt'
 
 export default function AchievementBadge({ badge, showTooltip = true, size = 'md' }) {
   const [showTip, setShowTip] = useState(false)
@@ -16,6 +18,8 @@ export default function AchievementBadge({ badge, showTooltip = true, size = 'md
     xp_reward,
     earned_at 
   } = badge
+  const unavailable = isUnavailable(badge)
+  const art = hasMedalArt(badge)
 
   // Prepare the portal to render on the whole page body
   useEffect(() => {
@@ -36,7 +40,7 @@ export default function AchievementBadge({ badge, showTooltip = true, size = 'md
     lg: 'w-20 h-20 text-3xl'
   }
 
-  const progressPercent = Math.min((progress / max_progress) * 100, 100)
+  const progressPercent = max_progress > 0 ? Math.min((progress / max_progress) * 100, 100) : 0
   
   const badgeColor = is_earned 
     ? 'from-purple-600 to-pink-600 border-purple-400 shadow-purple-600/30' 
@@ -45,10 +49,16 @@ export default function AchievementBadge({ badge, showTooltip = true, size = 'md
   const textColor = is_earned ? 'text-white' : 'text-slate-400'
   const progressColor = is_earned ? 'bg-gradient-to-r from-purple-500 to-pink-500' : 'bg-slate-600'
 
-  // Calculate tooltip position (slightly offset from mouse so it doesn't block it)
+  // Calculate tooltip position (slightly offset from mouse/tap so it doesn't
+  // block it), clamped to the viewport — on a phone the tap is often close
+  // enough to an edge that "10px right, 10px down" alone pushes the 256px-
+  // wide tooltip half off-screen, cutting off the description/progress/reward.
+  const TOOLTIP_WIDTH = 256   // matches w-64 below
+  const TOOLTIP_HEIGHT_ESTIMATE = 200
+  const EDGE_MARGIN = 12
   const tooltipStyle = {
-    left: position.x + 10, // 10px to the right of mouse
-    top: position.y + 10,  // 10px below mouse
+    left: Math.min(position.x + 10, window.innerWidth - TOOLTIP_WIDTH - EDGE_MARGIN),
+    top: Math.min(position.y + 10, window.innerHeight - TOOLTIP_HEIGHT_ESTIMATE - EDGE_MARGIN),
   }
 
   return (
@@ -58,19 +68,30 @@ export default function AchievementBadge({ badge, showTooltip = true, size = 'md
         onMouseEnter={handleMouseEnter}
         onMouseLeave={() => setShowTip(false)}
         className={`
-          relative rounded-xl border-2 p-1 
-          bg-gradient-to-br ${badgeColor}
-          ${textColor} shadow-lg
+          relative ${art ? 'rounded-xl' : `rounded-xl border-2 p-1 bg-gradient-to-br ${badgeColor} shadow-lg`}
+          ${textColor}
           transition-all duration-300 ease-out
           hover:scale-110 hover:shadow-xl hover:border-purple-300
           focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 focus:ring-offset-slate-900
           ${sizes[size]}
-          flex items-center justify-center
-          ${!is_earned && 'grayscale hover:grayscale-0'}
+          ${!art && !is_earned ? (unavailable ? 'grayscale opacity-60' : 'grayscale hover:grayscale-0') : ''}
         `}
-        title={name}
+        title={unavailable ? `${name} — Not available yet` : name}
+        aria-label={`${name}${is_earned ? ', earned' : unavailable ? ', not available yet' : ', locked'}`}
+        data-unavailable={unavailable ? 'true' : undefined}
       >
-        <span className="drop-shadow-lg">{icon || '🔒'}</span>
+        {/* Icon sits in its own clipped, centered layer. Some devices'
+            emoji fonts swap in a glyph with different metrics than the
+            real one, and without a clip it can spill past the badge's
+            rounded corners instead of sitting in the middle of the box. */}
+        <span className="absolute inset-0 rounded-xl overflow-hidden flex items-center justify-center leading-none">
+          {/* No drop-shadow filter here — on some devices' emoji renderers a
+              filter effect on a glyph isn't clipped by the overflow-hidden
+              above, so it can still show past the corners even though the
+              glyph itself is contained. The button already has its own
+              box-shadow for depth. */}
+          {art ? <MedalArt badge={badge} earned={is_earned} unavailable={unavailable} className="h-full w-full" /> : <span>{icon || '🔒'}</span>}
+        </span>
         
         {is_earned && (
           <span className="absolute -top-1 -right-1 w-4 h-4 bg-green-500 rounded-full border-2 border-slate-900 flex items-center justify-center text-[8px]">✓</span>
@@ -94,13 +115,13 @@ export default function AchievementBadge({ badge, showTooltip = true, size = 'md
           
           <div className="relative">
             <div className="flex items-center gap-2 mb-2">
-              <span className="text-2xl">{icon || '🔒'}</span>
+              {art ? <MedalArt badge={badge} earned={is_earned} unavailable={unavailable} className="h-9 w-9" /> : <span className="text-2xl">{icon || '🔒'}</span>}
               <h4 className={`font-bold ${is_earned ? 'text-white' : 'text-slate-300'}`}>{name}</h4>
             </div>
             
             <p className="text-sm text-slate-400 mb-3 leading-relaxed">{description}</p>
             
-            {!is_earned && max_progress > 0 && (
+            {!is_earned && !unavailable && max_progress > 0 && (
               <div className="mb-2">
                 <div className="flex justify-between text-xs text-slate-500 mb-1">
                   <span>Progress</span>
@@ -116,7 +137,11 @@ export default function AchievementBadge({ badge, showTooltip = true, size = 'md
               <p className="text-xs text-green-400">🎉 Earned: {new Date(earned_at).toLocaleDateString()}</p>
             )}
             
-            {xp_reward > 0 && (
+            {unavailable && (
+              <p className="text-xs text-slate-400 font-semibold">Not available yet</p>
+            )}
+
+            {!unavailable && xp_reward > 0 && (
               <p className="text-xs text-yellow-400 font-bold mt-1">🎁 Reward: +{xp_reward} XP</p>
             )}
           </div>

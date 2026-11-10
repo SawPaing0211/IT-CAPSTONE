@@ -1,4 +1,11 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useId, useRef } from 'react'
+import './Leaderboard.css'
+import SectionTitle from './SectionTitle'
+import crown from '../../../assets/hall/crown.svg'
+import podiumSheet from '../../../assets/hall/ornate-leaderboard-frames.png'
+import { podiumFrames } from './podiumFrames'
+import MobileSheet from '../../../components/MobileSheet'
+import { API_BASE, authFetch } from '../../../api/client'
 
 const AVATAR_GRADIENTS = [
   'from-purple-600 to-blue-600',
@@ -28,43 +35,91 @@ function getDisplayName(player) {
   return player.full_name || player.username
 }
 
+function ChampionBanner({ player, position, isCurrentUser }) {
+  const clipId = useId()
+  const { viewBox, outline } = podiumFrames[position - 1]
+  const name = getDisplayName(player)
+
+  return (
+    <article className={`hall-champion hall-champion-${position}`} aria-label={`Rank ${player.rank}: ${name}`}>
+      <svg className="hall-champion-art" viewBox={viewBox} aria-hidden="true" focusable="false">
+        <defs><clipPath id={clipId}><path d={outline} /></clipPath></defs>
+        <image href={podiumSheet} width="1672" height="941" clipPath={`url(#${clipId})`} />
+      </svg>
+      <div className="hall-champion-caption">
+        <p className="hall-champion-rank">#{player.rank}</p>
+        <h3 className="hall-champion-name font-cinzel" title={name}>{name}</h3>
+        <p className="hall-champion-stats"><span>Level {player.level}</span><strong>{player.xp} XP</strong></p>
+        {isCurrentUser && <span className="hall-you mt-1.5">You</span>}
+      </div>
+    </article>
+  )
+}
+
 export default function Leaderboard({ currentUsername }) {
-  const [filter, setFilter] = useState('block')
-  const [animated, setAnimated] = useState(false)
+  const [filter, setFilter] = useState('section')
   const [leaders, setLeaders] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [subjects, setSubjects] = useState([])
+  const [selectedSectionId, setSelectedSectionId] = useState(null)
+  const [showSubjectPicker, setShowSubjectPicker] = useState(false)
+  const subjectPickerAnchorRef = useRef(null)
 
+  // Load the student's subjects once, so "My Guild" can offer a picker when
+  // they're enrolled in more than one — previously this always silently used
+  // whichever subject happened to be first
   useEffect(() => {
-    setAnimated(true)
+    const loadSubjects = async () => {
+      try {
+        const token = localStorage.getItem('token')
+        const res = await authFetch(`${API_BASE}/api/student/subjects`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        })
+        if (res.ok) {
+          const data = await res.json()
+          setSubjects(data)
+          if (data.length > 0) {
+            setSelectedSectionId(data[0].section_id)
+          } else {
+            // no subjects to scope "My Guild" to — stop waiting on a
+            // section_id that's never going to arrive
+            setLoading(false)
+          }
+        } else {
+          setLoading(false)
+        }
+      } catch (err) {
+        console.error('Failed to load subjects for leaderboard picker:', err)
+        setError('Could not load your courses. Please reopen Hall of Champions to try again.')
+        setLoading(false)
+      }
+    }
+    loadSubjects()
   }, [])
 
+  // Re-fetch the leaderboard whenever the filter or the picked subject changes
   useEffect(() => {
     fetchLeaderboard()
-  }, [filter])
+  }, [filter, selectedSectionId])
 
+  // Fetch the leaderboard for the selected filter
   const fetchLeaderboard = async () => {
+    // "My Guild" needs to know which subject before it can fetch anything —
+    // wait for that rather than briefly flashing the global board first
+    if (filter === 'section' && !selectedSectionId) return
+
     setLoading(true)
     setError(null)
     try {
       const token = localStorage.getItem('token')
 
-      // Determine block_id for "My Block" filter
-      let url = 'http://localhost:5000/api/leaderboard'
-      if (filter === 'block') {
-        // Try to get the student's block from their subjects
-        const subjRes = await fetch('http://localhost:5000/api/student/subjects', {
-          headers: { 'Authorization': `Bearer ${token}` }
-        })
-        if (subjRes.ok) {
-          const subjects = await subjRes.json()
-          if (subjects.length > 0) {
-            url += `?block_id=${subjects[0].block_id}`
-          }
-        }
+      let url = `${API_BASE}/api/leaderboard`
+      if (filter === 'section' && selectedSectionId) {
+        url += `?section_id=${selectedSectionId}`
       }
 
-      const res = await fetch(url, {
+      const res = await authFetch(url, {
         headers: { 'Authorization': `Bearer ${token}` }
       })
 
@@ -87,260 +142,77 @@ export default function Leaderboard({ currentUsername }) {
     }
   }
 
+  // Derive the podium and the logged-in student's own standing
   const topThree = leaders.slice(0, 3)
   const currentUser = leaders.find(u => u.username === currentUsername) || null
 
+  const previousRank = currentUser ? leaders[leaders.indexOf(currentUser) - 1] : null
+  const leadingXP = Math.max(1, Number(leaders[0]?.xp) || 0)
+
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className={`text-center mb-8 transition-all duration-700 ${animated ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4'}`}>
-        <h2 className="text-3xl font-bold bg-gradient-to-r from-pink-400 to-purple-400 bg-clip-text text-transparent mb-2 animate-pulse">
-          👑 Hall of Champions
-        </h2>
-        <p className="text-slate-400">The mightiest coders of the realm</p>
-      </div>
-
-      {/* Filter Tabs */}
-      <div className={`flex justify-center gap-2 mb-8 transition-all duration-700 delay-100 ${animated ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4'}`}>
-        <button
-          onClick={() => setFilter('block')}
-          className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-300 ${
-            filter === 'block'
-              ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-lg scale-105'
-              : 'bg-slate-800/60 text-slate-300 hover:text-white hover:scale-105'
-          }`}
-        >
-          🏰 My Block
-        </button>
-        <button
-          onClick={() => setFilter('global')}
-          className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-300 ${
-            filter === 'global'
-              ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-lg scale-105'
-              : 'bg-slate-800/60 text-slate-300 hover:text-white hover:scale-105'
-          }`}
-        >
-          🌍 Global
-        </button>
-      </div>
-
-      {/* Loading */}
-      {loading && (
-        <div className="flex flex-col items-center justify-center py-16 gap-4">
-          <div className="w-12 h-12 border-4 border-purple-600 border-t-transparent rounded-full animate-spin" />
-          <p className="text-slate-400 text-sm">Summoning the champions…</p>
+    <div className="champions-hall space-y-6">
+      <header className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <SectionTitle>Hall of Champions</SectionTitle>
+          <p className="text-sm text-slate-400 sm:ml-5">Ranked by total XP.</p>
         </div>
-      )}
+        <div className="flex flex-wrap gap-2" aria-label="Ranking scope">
+          {['section', 'global'].map(scope => (
+            <button key={scope} type="button" onClick={() => setFilter(scope)} aria-pressed={filter === scope}
+              className={`hall-filter ${filter === scope ? 'hall-filter-active' : ''}`}>
+              {scope === 'section' ? 'My Guild' : 'Global'}
+            </button>
+          ))}
+        </div>
+      </header>
 
-      {/* Error */}
-      {!loading && error && (
-        <div className="text-center py-12 bg-red-900/20 border border-red-600/30 rounded-2xl">
-          <p className="text-red-400 text-lg">⚠️ {error}</p>
-          <button
-            onClick={fetchLeaderboard}
-            className="mt-4 px-4 py-2 bg-red-600/30 hover:bg-red-600/50 border border-red-600/50 rounded-lg text-red-300 text-sm transition"
-          >
-            Retry
+      {filter === 'section' && subjects.length > 1 && (
+        <div ref={subjectPickerAnchorRef} className="flex justify-end">
+          <button onClick={() => setShowSubjectPicker(!showSubjectPicker)} aria-expanded={showSubjectPicker}
+            className="hall-filter flex max-w-full items-center gap-3">
+            <span className="truncate">{subjects.find(s => s.section_id === selectedSectionId)?.section_no} · {subjects.find(s => s.section_id === selectedSectionId)?.name}</span>
+            <span aria-hidden="true">⌄</span>
           </button>
+          <MobileSheet show={showSubjectPicker} onClose={() => setShowSubjectPicker(false)} widthClass="sm:w-72" anchorRef={subjectPickerAnchorRef}>
+            <p className="px-4 pt-3 pb-1 text-xs font-bold uppercase tracking-wider text-amber-200">Choose a course</p>
+            {subjects.map(s => (
+              <button key={s.section_id} onClick={() => { setSelectedSectionId(s.section_id); setShowSubjectPicker(false) }}
+                className={`w-full px-4 py-3 text-left text-sm transition hover:bg-violet-500/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-200 ${s.section_id === selectedSectionId ? 'bg-violet-600/20 text-amber-200' : 'text-slate-300'}`}>
+                {s.section_no} · {s.name}
+              </button>
+            ))}
+          </MobileSheet>
         </div>
       )}
 
-      {/* Empty state */}
-      {!loading && !error && leaders.length === 0 && (
-        <div className="text-center py-16 bg-slate-800/40 rounded-2xl border border-dashed border-slate-600">
-          <p className="text-4xl mb-3">🏆</p>
-          <p className="text-slate-400 text-lg">No rankings yet</p>
-          <p className="text-slate-500 text-sm mt-1">Be the first to earn XP!</p>
+      {loading && <div role="status" className="hall-panel flex flex-col items-center gap-4 py-16"><span aria-hidden="true" className="h-8 w-8 rounded-full border-2 border-amber-200/25 border-t-amber-200 motion-safe:animate-spin" /><p className="text-sm text-slate-300">Loading the champions…</p></div>}
+      {!loading && error && <div role="alert" className="hall-panel p-8 text-center"><p className="text-rose-300">{error}</p><button onClick={fetchLeaderboard} className="hall-filter mt-4">Retry</button></div>}
+      {!loading && !error && leaders.length === 0 && <div className="hall-panel py-16 text-center"><img src={crown} alt="" className="mx-auto mb-5 h-9 w-9 opacity-60" /><h3 className="font-cinzel text-lg text-amber-100">No rankings yet</h3><p className="mt-2 text-sm text-slate-400">{filter === 'section' && !subjects.length ? 'Enroll in a course to see your guild rankings.' : 'Earn quest XP to begin your journey.'}</p></div>}
+
+      {!loading && !error && leaders.length > 0 && <>
+        <div className="hall-podium">
+          {topThree.map((player, index) => (
+            <ChampionBanner key={player.id} player={player} position={index + 1} isCurrentUser={player.username === currentUsername} />
+          ))}
         </div>
-      )}
-
-      {/* Content — only render when we have data */}
-      {!loading && !error && leaders.length > 0 && (
-        <>
-          {/* Top 3 Podium */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-            {/* 2nd Place */}
-            {topThree[1] && (
-              <div className={`md:order-1 bg-gradient-to-br from-slate-700/40 to-slate-800/40 border-2 border-slate-500/40 rounded-2xl p-6 text-center relative overflow-hidden transition-all duration-700 delay-200 hover:scale-105 ${animated ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-10'}`}>
-                <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-slate-500/10 to-transparent pointer-events-none" />
-                <div className="relative z-10">
-                  <div className="text-slate-300 text-sm font-semibold mb-2 flex items-center justify-center gap-1 animate-bounce">
-                    <span>⚔️</span> Vice Champion
-                  </div>
-                  <div className={`w-20 h-20 mx-auto mb-3 rounded-2xl bg-gradient-to-br ${topThree[1].color} flex items-center justify-center text-3xl font-bold text-white shadow-lg shadow-slate-500/30 animate-pulse`}>
-                    {topThree[1].avatar}
-                  </div>
-                  <p className="text-white font-bold text-lg mb-1 truncate px-2" title={getDisplayName(topThree[1])}>
-                    {getDisplayName(topThree[1])}
-                  </p>
-                  <div className="flex justify-center gap-4 mt-4">
-                    <div className="bg-slate-800/60 rounded-lg px-4 py-2 transform hover:scale-110 transition-transform">
-                      <p className="text-slate-400 text-xs">Level</p>
-                      <p className="text-slate-200 font-bold">{topThree[1].level}</p>
-                    </div>
-                    <div className="bg-slate-800/60 rounded-lg px-4 py-2 transform hover:scale-110 transition-transform">
-                      <p className="text-slate-400 text-xs">XP</p>
-                      <p className="text-yellow-400 font-bold">{topThree[1].xp}</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* 1st Place */}
-            {topThree[0] && (
-              <div className={`md:order-2 bg-gradient-to-br from-yellow-600/30 to-amber-700/30 border-2 border-yellow-500/60 rounded-2xl p-8 text-center relative overflow-hidden transition-all duration-700 delay-300 hover:scale-105 ${animated ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-10'}`}>
-                <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-yellow-500/20 to-transparent pointer-events-none animate-pulse" />
-                <div className="relative z-10">
-                  <div className="text-yellow-300 text-sm font-semibold mb-2 flex items-center justify-center gap-1 animate-bounce">
-                    <span>👑</span> Grand Champion
-                  </div>
-                  <div className={`w-24 h-24 mx-auto mb-4 rounded-2xl bg-gradient-to-br ${topThree[0].color} flex items-center justify-center text-4xl font-bold text-white shadow-lg shadow-yellow-500/50`}>
-                    {topThree[0].avatar}
-                  </div>
-                  <p className="text-white font-bold text-xl mb-1 truncate px-2" title={getDisplayName(topThree[0])}>
-                    {getDisplayName(topThree[0])}
-                  </p>
-                  <div className="flex justify-center gap-4 mt-6">
-                    <div className="bg-slate-900/60 rounded-lg px-6 py-3 border border-yellow-600/30 transform hover:scale-110 transition-transform duration-300">
-                      <p className="text-slate-400 text-xs">Level</p>
-                      <p className="text-yellow-300 font-bold text-lg">{topThree[0].level}</p>
-                    </div>
-                    <div className="bg-slate-900/60 rounded-lg px-6 py-3 border border-yellow-600/30 transform hover:scale-110 transition-transform duration-300">
-                      <p className="text-slate-400 text-xs">XP</p>
-                      <p className="text-yellow-400 font-bold text-lg">{topThree[0].xp}</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* 3rd Place */}
-            {topThree[2] && (
-              <div className={`md:order-3 bg-gradient-to-br from-amber-800/30 to-orange-900/30 border-2 border-orange-600/40 rounded-2xl p-6 text-center relative overflow-hidden transition-all duration-700 delay-200 hover:scale-105 ${animated ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-10'}`}>
-                <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-orange-500/10 to-transparent pointer-events-none" />
-                <div className="relative z-10">
-                  <div className="text-orange-300 text-sm font-semibold mb-2 flex items-center justify-center gap-1 animate-bounce">
-                    <span>🥉</span> Third Place
-                  </div>
-                  <div className={`w-20 h-20 mx-auto mb-3 rounded-2xl bg-gradient-to-br ${topThree[2].color} flex items-center justify-center text-3xl font-bold text-white shadow-lg shadow-orange-500/30 animate-pulse`}>
-                    {topThree[2].avatar}
-                  </div>
-                  <p className="text-white font-bold text-lg mb-1 truncate px-2" title={getDisplayName(topThree[2])}>
-                    {getDisplayName(topThree[2])}
-                  </p>
-                  <div className="flex justify-center gap-4 mt-4">
-                    <div className="bg-slate-800/60 rounded-lg px-4 py-2 transform hover:scale-110 transition-transform">
-                      <p className="text-slate-400 text-xs">Level</p>
-                      <p className="text-orange-300 font-bold">{topThree[2].level}</p>
-                    </div>
-                    <div className="bg-slate-800/60 rounded-lg px-4 py-2 transform hover:scale-110 transition-transform">
-                      <p className="text-slate-400 text-xs">XP</p>
-                      <p className="text-yellow-400 font-bold">{topThree[2].xp}</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Full Rankings */}
-          <div className={`bg-slate-800/40 border border-slate-700 rounded-2xl p-6 transition-all duration-700 delay-500 ${animated ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-10'}`}>
-            <h3 className="text-lg font-bold text-white mb-4">Full Rankings</h3>
-            <div className="space-y-2">
-              {leaders.map((player, index) => {
-                const isCurrentUser = player.username === currentUsername
-                return (
-                  <div
-                    key={player.id}
-                    className={`flex items-center gap-4 p-4 rounded-xl border transition-all duration-500 hover:scale-[1.02] cursor-pointer ${
-                      isCurrentUser
-                        ? 'bg-gradient-to-r from-purple-900/60 to-pink-900/60 border-purple-500 shadow-lg shadow-purple-600/20'
-                        : player.rank <= 3
-                          ? 'bg-slate-800/60 border-slate-600 hover:border-purple-500/60'
-                          : 'bg-slate-800/40 border-slate-700 hover:border-purple-500/40'
-                    }`}
-                    style={{
-                      animationDelay: `${600 + index * 80}ms`,
-                      animation: animated ? 'slideIn 0.5s ease-out forwards' : 'none',
-                      opacity: 0,
-                      transform: 'translateX(-20px)',
-                    }}
-                  >
-                    {/* Rank badge */}
-                    <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-lg flex-shrink-0 transition-transform duration-300 hover:scale-125 ${
-                      player.rank === 1 ? 'bg-yellow-500 text-white animate-pulse' :
-                      player.rank === 2 ? 'bg-slate-400 text-white' :
-                      player.rank === 3 ? 'bg-orange-600 text-white' :
-                      'bg-slate-700 text-slate-300'
-                    }`}>
-                      {player.rank}
-                    </div>
-
-                    {/* Avatar */}
-                    <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${player.color} flex items-center justify-center text-xl font-bold text-white shadow-lg flex-shrink-0 transform transition-transform duration-300 hover:scale-110 hover:rotate-3`}>
-                      {player.avatar}
-                    </div>
-
-                    {/* Name */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <p className={`font-bold truncate transition-all duration-300 ${isCurrentUser ? 'text-purple-300' : 'text-white'}`}>
-                          {getDisplayName(player)}
-                          {isCurrentUser && (
-                            <span className="ml-2 px-2 py-0.5 bg-purple-600/40 text-purple-200 text-[10px] rounded-full animate-pulse">
-                              You
-                            </span>
-                          )}
-                        </p>
-                      </div>
-                      <p className="text-xs text-slate-400">Level {player.level}</p>
-                    </div>
-
-                    {/* XP */}
-                    <div className="text-right flex-shrink-0">
-                      <p className="text-yellow-400 font-bold text-lg">{player.xp} XP</p>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-
-          {/* Your Standing Card */}
-          {currentUser && (
-            <div className={`bg-gradient-to-r from-purple-900/40 to-pink-900/40 border border-purple-600/40 rounded-2xl p-6 transition-all duration-700 delay-700 hover:scale-105 ${animated ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-10'}`}>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 rounded-full bg-gradient-to-br from-purple-600 to-pink-600 flex items-center justify-center text-xl font-bold text-white animate-bounce">
-                    {currentUser.rank}
-                  </div>
-                  <div>
-                    <p className="text-white font-bold text-lg">Your Standing</p>
-                    <p className="text-slate-400 text-sm">{getDisplayName(currentUser)}</p>
-                  </div>
-                </div>
-                <div className="text-right">
-                  <p className="text-yellow-400 font-bold text-2xl animate-pulse">#{currentUser.rank}</p>
-                  <p className="text-slate-400 text-sm">{currentUser.xp} XP</p>
-                </div>
-              </div>
-            </div>
-          )}
-        </>
-      )}
-
-      {/* Animations */}
-      <style>{`
-        @keyframes slideIn {
-          from { opacity: 0; transform: translateX(-20px); }
-          to   { opacity: 1; transform: translateX(0); }
-        }
-        @keyframes shimmer {
-          0%   { transform: translateX(-100%); }
-          100% { transform: translateX(100%); }
-        }
-      `}</style>
+        {leaders.length > 3 && <section aria-label="Remaining rankings">
+          <SectionTitle>The Ranks</SectionTitle>
+          <ol start="4" className="space-y-2.5">
+            {leaders.slice(3).map(player => <li key={player.id} className={`hall-panel hall-rank-row ${player.username === currentUsername ? 'hall-own-row' : ''}`}>
+              <span className="font-cinzel font-bold text-slate-400 tabular-nums">#{player.rank}</span>
+              <span className="hall-row-avatar" aria-hidden="true">{player.avatar}</span>
+              <div className="min-w-0"><p className="truncate text-sm font-semibold text-white" title={getDisplayName(player)}>{getDisplayName(player)} {player.username === currentUsername && <span className="hall-you ml-1">You</span>}</p><p className="mt-1 text-[11px] text-amber-200 sm:hidden">Level {player.level}</p></div>
+              <span className="hall-level">Lv {player.level}</span>
+              <div className="hall-xp-track" aria-hidden="true"><span style={{ width: `${Math.min(100, Math.max(0, Number(player.xp) || 0) / leadingXP * 100)}%` }} /></div>
+              <span className="text-right font-cinzel text-sm font-bold text-white tabular-nums sm:text-lg">{player.xp} XP</span>
+            </li>)}
+          </ol>
+        </section>}
+        <section className="hall-panel hall-standing" aria-label="Your standing">
+          <div><p className="text-[10px] font-bold uppercase tracking-[0.2em] text-amber-200">Your Standing</p><p className="mt-1 font-cinzel text-2xl font-bold text-white">{currentUser ? `#${currentUser.rank}` : 'Not ranked yet'}</p></div>
+          {currentUser ? <><span className="hall-row-avatar" aria-hidden="true">{currentUser.avatar}</span><div className="min-w-0"><p className="truncate text-sm font-semibold text-white">{getDisplayName(currentUser)}</p><p className="mt-1 text-xs text-amber-200">Level {currentUser.level} · {currentUser.xp} XP</p></div><p className="text-sm text-slate-300 sm:ml-auto">{previousRank ? `${Math.max(0, Number(previousRank.xp) - Number(currentUser.xp))} XP behind ${getDisplayName(previousRank)}` : 'Leading this board'}</p></> : <p className="text-sm text-slate-300">Your account is not listed on this board.</p>}
+        </section>
+      </>}
     </div>
   )
 }

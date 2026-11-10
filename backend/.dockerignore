@@ -1,0 +1,22 @@
+# keep out of release images (files are kept in the repo folder, not deleted)
+*.backup
+__pycache__/
+.pytest_cache/
+*.pyc
+identity_migration_plan*.csv
+
+# never bake secrets, uploaded files, local databases or demo/rehearsal tooling into an image
+.env
+.env.*
+!.env.example
+uploads/
+venv/
+tests/
+*.db
+*.sqlite*
+seed_demo.py
+demo_runner.py
+rehearse_*.py
+demo_credentials*
+forge_demo.db
+demo-*

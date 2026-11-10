@@ -1,47 +1,75 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
+import { API_BASE, authFetch } from '../../api/client'
+import AdminActionDialog from './AdminActionDialog'
+import FormBanner from './FormBanner'
+import passwordEmblem from '../../assets/account-password.png'
+
+// minimalist line-art eye icons for the password show/hide toggle
+function EyeIcon({ size = 18 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  )
+}
+function EyeOffIcon({ size = 18 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+      <line x1="1" y1="1" x2="23" y2="23" />
+    </svg>
+  )
+}
 
 export default function RecoveryModal({ user, onClose, onSuccess }) {
   const [newPassword, setNewPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
+  const [issued, setIssued] = useState('')   // generated temporary password, shown once, never stored
+  const passwordId = useId()
+  const formId = useId()
+  const closeDialog = success ? onSuccess : onClose
 
-  const handleReset = async () => {
+  // Reset the user's password on the backend. With generate=true the server
+  // creates the temporary password and returns it once.
+  const handleReset = async (generate = false) => {
+    if (loading || success) return
     setError('')
-    setSuccess('')
 
-    if (!newPassword || newPassword.length < 6) {
-      setError('Password must be at least 6 characters.')
+    // Same rule the server enforces: 8+ characters with a letter and a number
+    if (!generate && (!newPassword || newPassword.length < 8 || !/[A-Za-z]/.test(newPassword) || !/\d/.test(newPassword))) {
+      setError('Password must be at least 8 characters and include a letter and a number.')
       return
     }
 
     setLoading(true)
     try {
-      const token = localStorage.getItem('token')
-      const res = await fetch(`http://localhost:5000/api/admin/users/${user.id}/reset-password`, {
+      const res = await authFetch(`${API_BASE}/api/admin/users/${user.id}/reset-password`, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ new_password: newPassword })
+        body: JSON.stringify(generate ? { generate: true } : { new_password: newPassword })
       })
-      const data = await res.json()
-      if (res.ok) {
-        setSuccess(`✅ Password reset successfully for ${user.username}.`)
-        setTimeout(() => {
-          onSuccess()
-        }, 1500)
+      const data = await res.json().catch(() => null)
+      if (res.ok && data?.message && (!generate || data.temporary_password)) {
+        setSuccess(`Password reset for ${user.username}. They must choose a new password the next time they sign in.`)
+        if (generate) setIssued(data.temporary_password)
+        setNewPassword('')
       } else {
-        setError(data.error || 'Failed to reset password.')
+        setError(data?.error || 'The server did not confirm the password reset. Check the account before trying again.')
       }
-    } catch (err) {
-      setError('Network error. Please try again.')
+    } catch {
+      setError('Could not confirm the password reset. Check your connection and the account before trying again.')
     } finally {
       setLoading(false)
     }
   }
 
+  // Rate the new password's strength by length for the meter below the field
   const passwordStrength = () => {
     const len = newPassword.length
     if (len === 0) return null
@@ -54,100 +82,111 @@ export default function RecoveryModal({ user, onClose, onSuccess }) {
   const strength = passwordStrength()
 
   return (
-    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-slate-900 border border-purple-600/50 rounded-2xl w-full max-w-md shadow-2xl shadow-purple-900/50">
+    <AdminActionDialog
+      title="Reset Password"
+      description={user.full_name || user.username}
+      emblem={passwordEmblem}
+      onClose={closeDialog}
+      busy={loading}
+    >
+        <form
+          id={formId}
+          onSubmit={event => { event.preventDefault(); void handleReset() }}
+          className="admin-action-scroll admin-account-dialog-body flex-1 space-y-4 px-4 py-5 sm:px-6"
+        >
 
-        {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-purple-600/30">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-purple-600 rounded-xl flex items-center justify-center text-xl">
-              🔐
-            </div>
-            <div>
-              <h2 className="text-xl font-black text-white">Reset Password</h2>
-              <p className="text-slate-400 text-xs">
-                Account: <span className="text-purple-300 font-semibold">{user.full_name || user.username}</span>
-              </p>
-            </div>
-          </div>
-          <button
-            onClick={onClose}
-            className="text-slate-400 hover:text-white text-2xl transition leading-none"
-          >
-            ✕
-          </button>
-        </div>
-
-        {/* Body */}
-        <div className="p-6 space-y-4">
-
-          {/* Adamson email notice */}
+          {/* Institutional email notice */}
           <div className="flex items-start gap-2 p-3 bg-blue-600/10 border border-blue-600/30 rounded-lg">
             <span className="text-blue-400 mt-0.5">ℹ️</span>
             <div>
-              <p className="text-blue-300 text-xs font-semibold">Adamson Email Address</p>
-              <p className="text-slate-400 text-xs mt-0.5">{user.email}</p>
-              <p className="text-slate-500 text-xs mt-1">Institutional emails are permanent and cannot be changed.</p>
+              <p className="text-blue-300 text-xs font-semibold">Sign-in email (identifier)</p>
+              <p className="break-all text-slate-300 text-xs mt-0.5">{user.email}</p>
+              <p className="text-slate-300 text-xs mt-1">
+                This may be a generated identifier, not a working inbox. Nothing is emailed:
+                give the temporary password to the user in person.
+              </p>
             </div>
           </div>
 
-          {error && (
-            <div className="flex items-center gap-2 p-3 bg-red-600/20 border border-red-600/40 rounded-lg text-red-300 text-sm">
-              <span>❌</span> {error}
-            </div>
-          )}
-          {success && (
-            <div className="flex items-center gap-2 p-3 bg-green-600/20 border border-green-600/40 rounded-lg text-green-300 text-sm">
-              <span>✅</span> {success}
-            </div>
-          )}
+          {error && <FormBanner tone="error" title="Could not reset the password">{error}</FormBanner>}
+          {success && <FormBanner tone="success" title="Password reset">{success}</FormBanner>}
 
-          <div>
-            <label className="block text-sm text-slate-400 mb-1.5 font-medium">
-              New Password <span className="text-red-400">*</span>
-            </label>
-            <input
-              type="password"
-              value={newPassword}
-              onChange={e => setNewPassword(e.target.value)}
-              placeholder="Enter new password (min. 6 characters)"
-              className="w-full bg-slate-800 border border-slate-700 focus:border-purple-500 rounded-lg px-4 py-2.5 text-white outline-none transition placeholder-slate-500"
-            />
-            {strength && (
-              <div className="mt-2">
-                <div className="flex items-center gap-2">
-                  <div className="flex-1 h-1.5 bg-slate-700 rounded-full overflow-hidden">
-                    <div className={`h-full rounded-full transition-all duration-300 ${strength.color} ${strength.width}`} />
-                  </div>
-                  <span className="text-xs text-slate-400 w-12 text-right">{strength.label}</span>
+          {!success && (
+            <fieldset disabled={loading} className="min-w-0 space-y-4">
+              <div>
+                <label htmlFor={passwordId} className="block text-sm text-slate-300 mb-1.5 font-medium">
+                  Temporary password
+                </label>
+                <div className="relative">
+                  <input
+                    id={passwordId}
+                    autoComplete="new-password"
+                    type={showPassword ? 'text' : 'password'}
+                    value={newPassword}
+                    onChange={e => setNewPassword(e.target.value)}
+                    aria-describedby={`${passwordId}-rules`}
+                    className="min-h-11 w-full bg-slate-800 border border-slate-600 rounded-lg px-4 py-2.5 pr-12 text-white"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(v => !v)}
+                    className="absolute inset-y-0 right-0 grid w-11 place-items-center rounded-lg text-slate-300 hover:text-white"
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showPassword ? <EyeOffIcon /> : <EyeIcon />}
+                  </button>
                 </div>
+                <p id={`${passwordId}-rules`} className="mt-2 text-xs text-slate-300">At least 8 characters with a letter and a number.</p>
+                {strength && (
+                  <div className="mt-2">
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1 h-1.5 bg-slate-700 rounded-full overflow-hidden">
+                        <div className={`h-full rounded-full transition-all duration-300 ${strength.color} ${strength.width}`} />
+                      </div>
+                      <span className="text-xs text-slate-400 w-12 text-right">{strength.label}</span>
+                    </div>
+                  </div>
+                )}
               </div>
-            )}
-          </div>
+              <button
+                type="button"
+                onClick={() => handleReset(true)}
+                className="admin-button w-full px-3 py-2 text-sm font-medium"
+              >
+                Generate a temporary password instead
+              </button>
+            </fieldset>
+          )}
 
-        </div>
+          {issued && (
+            <div className="p-3 bg-yellow-600/10 border border-yellow-600/40 rounded-lg">
+              <p className="text-yellow-300 text-xs font-semibold mb-1">Temporary password (shown once)</p>
+              <p className="break-all font-mono text-white text-lg select-all">{issued}</p>
+              <p className="text-slate-400 text-xs mt-1">Give it to the user in person. It is not stored or emailed, and they must replace it at sign-in.</p>
+            </div>
+          )}
+
+        </form>
 
         {/* Footer */}
-        <div className="flex gap-3 p-6 border-t border-purple-600/30">
+        <div className="flex shrink-0 flex-wrap gap-3 border-t border-slate-700 px-4 py-4 sm:px-6">
           <button
-            onClick={onClose}
-            className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 font-medium transition"
+            type="button"
+            onClick={closeDialog}
+            disabled={loading}
+            className="admin-button min-w-24 flex-1 px-3 py-2.5 text-sm font-medium"
           >
-            Cancel
+            {success ? 'Done' : 'Cancel'}
           </button>
-          <button
-            onClick={handleReset}
+          {!success && <button
+            type="submit"
+            form={formId}
             disabled={loading || !newPassword}
-            className="flex-1 py-2.5 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-white font-black transition shadow-lg shadow-blue-600/30 flex items-center justify-center gap-2"
+            className="admin-button admin-button-primary min-w-36 flex-1 px-3 py-2.5 text-sm font-semibold"
           >
-            {loading ? (
-              <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Resetting...</>
-            ) : (
-              <><span>🔐</span> Reset Password</>
-            )}
-          </button>
+            {loading ? 'Resetting…' : 'Reset Password'}
+          </button>}
         </div>
-      </div>
-    </div>
+    </AdminActionDialog>
   )
 }
