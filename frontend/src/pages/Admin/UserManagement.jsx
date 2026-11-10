@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import EditUserModal from './EditUserModal'
 import PasswordField from '../../components/PasswordField'
 import SubjectManagement from './SubjectsManagement'
@@ -180,19 +180,21 @@ export default function UserManagement() {
     }
   }, [search, roleFilter, statusFilter, sectionFilter, sort, activeTab, userListVersion])
 
-  const fetchSections = useCallback(async () => {
-    setSectionError(false)
-    try {
-      const res = await authFetch(API_BASE + '/api/admin/sections')
-      if (!res.ok) throw new Error('Class codes unavailable')
-      const data = await res.json()
-      if (!Array.isArray(data)) throw new Error('Unexpected class list')
-      setSections(data)
-    } catch {
-      setSectionError(true)
-    }
-  }, [])
-  useEffect(() => { fetchSections() }, [fetchSections])
+  const [sectionsVersion, setSectionsVersion] = useState(0)
+  useEffect(() => {
+    let ignore = false
+    authFetch(API_BASE + '/api/admin/sections')
+      .then(res => {
+        if (!res.ok) throw new Error('Class codes unavailable')
+        return res.json()
+      })
+      .then(data => {
+        if (!Array.isArray(data)) throw new Error('Unexpected class list')
+        if (!ignore) setSections(data)
+      })
+      .catch(() => { if (!ignore) setSectionError(true) })
+    return () => { ignore = true }
+  }, [sectionsVersion])
 
   // Send the edited user fields to the server
   const handleUpdateUser = async (userId, updates) => {
@@ -431,7 +433,7 @@ export default function UserManagement() {
                 </select>
               </label>
             </div>
-            {sectionError && <p role="alert" className="mt-3 text-sm text-amber-200">Class codes could not be loaded. <button type="button" onClick={fetchSections} className="underline">Retry</button></p>}
+            {sectionError && <p role="alert" className="mt-3 text-sm text-amber-200">Class codes could not be loaded. <button type="button" onClick={() => { setSectionError(false); setSectionsVersion(v => v + 1) }} className="underline">Retry</button></p>}
           </section>
 
           {/* Stats */}
@@ -466,7 +468,7 @@ export default function UserManagement() {
               {filteredUsers.filter(u => u.role === 'administrator').length > 0 && (
                 <UserSection
                   title="Administrators"
-                  icon="🛡️"
+                  icon={adminRoleIcon}
                   users={filteredUsers.filter(u => u.role === 'administrator')}
                   onManage={setManageModal}
                   onRecover={setRecoveryModal}
@@ -477,7 +479,7 @@ export default function UserManagement() {
               {filteredUsers.filter(u => u.role === 'instructor').length > 0 && (
                 <UserSection
                   title="Instructors"
-                  icon="👨‍🏫"
+                  icon={instructorRoleIcon}
                   users={filteredUsers.filter(u => u.role === 'instructor')}
                   onManage={setManageModal}
                   onRecover={setRecoveryModal}
@@ -488,7 +490,7 @@ export default function UserManagement() {
               {filteredUsers.filter(u => u.role === 'student').length > 0 && (
                 <UserSection
                   title="Students"
-                  icon="🎓"
+                  icon={studentRoleIcon}
                   users={filteredUsers.filter(u => u.role === 'student')}
                   onManage={setManageModal}
                   onRecover={setRecoveryModal}
@@ -672,7 +674,7 @@ function UserSection({ title, icon, users, onManage, onRecover, onDelete, onUnlo
     <div className="bg-slate-900 rounded-xl border border-amber-300/25 overflow-hidden">
       <div className="bg-violet-950/25 border-b border-amber-300/20 px-5 py-4">
         <div className="flex items-center gap-3">
-          <span className="text-2xl">{icon}</span>
+          <img src={icon} alt="" className="size-10 shrink-0 object-contain" />
           <h3 className="font-cinzel text-xl font-semibold text-white">{title}</h3>
           <span className="px-3 py-1 bg-purple-600/30 text-purple-300 rounded-full text-sm font-bold border border-purple-600/50">
             {users.length}

@@ -17,6 +17,17 @@ const YEAR_ACCENT = {
 }
 const NO_YEAR_ACCENT = { grad: 'from-slate-500 to-slate-600', bar: 'bg-slate-500', border: 'border-slate-700', hoverBorder: 'hover:border-slate-500/60', text: 'text-slate-300', chip: 'bg-slate-700/40 text-slate-300 border-slate-600/40', label: 'No Year Set' }
 const accentFor = (year) => YEAR_ACCENT[year] || (year ? { ...NO_YEAR_ACCENT, label: 'Year ' + year } : NO_YEAR_ACCENT)
+const LOAD_ERROR = 'Could not load subjects. Try again before making changes.'
+
+// Fetch the subject list; throws when the server answers with anything unusable.
+async function requestSubjects() {
+  const res = await authFetch(`${API_BASE}/api/admin/subjects`)
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  const data = await res.json()
+  if (!Array.isArray(data)) throw new Error('Unexpected subject list')
+  return data
+}
+
 const INITIAL_SUBJECT = { internal_subject_no: '', subject_code: '', name: '', description: '', units: '', department: '' }
 const DEPARTMENTS = [
   ['CCIT', 'College of Computing and Information Technology (CCIT)'],
@@ -56,26 +67,27 @@ export default function SubjectsManagement() {
   const [deleteTarget, setDeleteTarget] = useState(null) // { id, name } of the subject pending deletion
   const [newSubject, setNewSubject] = useState(INITIAL_SUBJECT)
 
-  // Load all subjects when the page mounts
-  useEffect(() => {
-    fetchSubjects()
-  }, [])
-
   // Fetch the list of subjects from the server
   const fetchSubjects = async () => {
-    setLoadError('')
     try {
-      const res = await authFetch(`${API_BASE}/api/admin/subjects`)
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const data = await res.json()
-      if (!Array.isArray(data)) throw new Error('Unexpected subject list')
-      setSubjects(data)
+      setSubjects(await requestSubjects())
+      setLoadError('')
     } catch {
-      setLoadError('Could not load subjects. Try again before making changes.')
+      setLoadError(LOAD_ERROR)
     } finally {
       setLoading(false)
     }
   }
+
+  // Load all subjects when the page mounts
+  useEffect(() => {
+    let ignore = false
+    requestSubjects()
+      .then(data => { if (!ignore) { setSubjects(data); setLoadError('') } })
+      .catch(() => { if (!ignore) setLoadError(LOAD_ERROR) })
+      .finally(() => { if (!ignore) setLoading(false) })
+    return () => { ignore = true }
+  }, [])
 
   // Send the new subject to the server and refresh the list
   const closeCreateSubject = () => {

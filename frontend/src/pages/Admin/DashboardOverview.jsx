@@ -2,7 +2,7 @@ import createUsers from '../../assets/admin/create-users.png'
 import classCodes from '../../assets/admin/class-codes.png'
 import databaseBackup from '../../assets/admin/database-backup.png'
 import systemSettings from '../../assets/admin/system-settings.png'
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import CreateUserModal from './CreateUserModal'
 import BackupDatabaseModal from './BackupDatabaseModal'
 import SystemSettingsModal from './SystemSettingsModal'
@@ -52,22 +52,15 @@ export default function DashboardOverview({ onNavigate, stats, loading, healthEr
 
   // ── Data fetching ────────────────────────────────────────────────────────
 
-  // Fetch class code sections for the enrollment totals
-  const fetchSections = useCallback(async () => {
-    try {
-      const res = await authFetch(`${API}/api/admin/sections`)
-      if (res.ok) {
-        const data = await res.json()
-        setSections(Array.isArray(data) ? data : [])
-      }
-    } catch {
-      // non-fatal
-    }
-  }, [])
-
+  // Class code sections, used for the enrollment totals
   useEffect(() => {
-    fetchSections()
-  }, [fetchSections])
+    let ignore = false
+    authFetch(`${API}/api/admin/sections`)
+      .then(res => (res.ok ? res.json() : null))
+      .then(data => { if (!ignore && data) setSections(Array.isArray(data) ? data : []) })
+      .catch(() => {}) // non-fatal: totals fall back to the stats numbers
+    return () => { ignore = true }
+  }, [])
 
   // ── Maintenance toggle ────────────────────────────────────────────────────
 
