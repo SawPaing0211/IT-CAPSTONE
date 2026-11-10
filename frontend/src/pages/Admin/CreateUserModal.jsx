@@ -71,7 +71,7 @@ function StatusBadge({ status }) {
   const styles = {
     created:  { bg: 'rgba(34,197,94,0.15)',  color: '#4ade80', label: 'Created'  },
     enrolled: { bg: 'rgba(59,130,246,0.15)', color: '#60a5fa', label: 'Enrolled' },
-    skipped:  { bg: 'rgba(234,179,8,0.15)',  color: '#facc15', label: '⏭ Skipped'  },
+    skipped:  { bg: 'rgba(234,179,8,0.15)',  color: '#facc15', label: 'Skipped'  },
     error:    { bg: 'rgba(239,68,68,0.15)',  color: '#f87171', label: 'Error'    },
   }
   const s = styles[status] ?? styles.error
@@ -304,6 +304,7 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
   }, {})
 
   // Count regular vs irregular rows for the preview summary
+  const incompleteRows = csvParsed ? csvParsed.rows.filter(r => !r.student_id || !r.firstname || !r.lastname || !r.student_type).length : 0
   const regularCount   = csvParsed?.rows.filter(r => r.student_type?.toLowerCase() === 'regular').length   ?? 0
   const irregularCount = csvParsed?.rows.filter(r => r.student_type?.toLowerCase() === 'irregular').length ?? 0
 
@@ -675,7 +676,7 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
                       { label: 'Total',      val: csvParsed.rows.length, color: 'text-white'     },
                       { label: 'Regular',    val: regularCount,           color: 'text-emerald-400' },
                       { label: 'Irregular',  val: irregularCount,         color: 'text-blue-400'  },
-                      { label: 'Ready',      val: csvParsed.rows.length,  color: 'text-purple-400' },
+                      { label: 'Ready',      val: csvParsed.rows.length - incompleteRows, color: 'text-purple-400' },
                     ].map(c => (
                       <div key={c.label} className="bg-slate-800/60 rounded-xl p-3 text-center border border-slate-700/40">
                         <p className={`text-xl font-black ${c.color}`}>{c.val}</p>
@@ -683,6 +684,12 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
                       </div>
                     ))}
                   </div>
+
+                  {incompleteRows > 0 && (
+                    <FormBanner tone="warning" title="Some rows are incomplete">
+                      {incompleteRows} {incompleteRows === 1 ? 'row is' : 'rows are'} missing a student ID, first name, last name or student type, so the server will skip {incompleteRows === 1 ? 'it' : 'them'} and list the problem after the upload.
+                    </FormBanner>
+                  )}
 
                   {/* preview table — first 6 rows */}
                   <div className="rounded-xl overflow-hidden border border-slate-700/50">
