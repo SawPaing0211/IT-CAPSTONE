@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { createPortal } from 'react-dom'
 import { API_BASE, authFetch } from '../../api/client'
 import AdminActionDialog from './AdminActionDialog'
+import UploadSectionsModal from './UploadSectionsModal'
 import classCodeSeal from '../../assets/admin/class-code-seal.svg'
 
 const API = API_BASE
@@ -212,7 +214,7 @@ function Modal({ onClose, title, subtitle, icon, iconBg = '#7c3aed', children, m
     return () => { document.body.style.overflow = prev }
   }, [])
 
-  return (
+  return createPortal(
     <div
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
       style={{
@@ -289,7 +291,8 @@ function Modal({ onClose, title, subtitle, icon, iconBg = '#7c3aed', children, m
           {children}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }
 
@@ -717,171 +720,6 @@ function SubjectGroup({ subjectName, subjectCode, sections, onStudents, onEdit, 
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// CSVUploadModal
-// ─────────────────────────────────────────────────────────────────────────────
-function CSVUploadModal({ onClose, onSuccess }) {
-  const fileRef = useRef(null)
-  const [file, setFile]           = useState(null)
-  const [uploading, setUploading] = useState(false)
-  const [result, setResult]       = useState(null)
-  const [isDrag, setIsDrag]       = useState(false)
-
-  // Accept a csv file from the file picker or drop zone
-  const handleFile = (f) => {
-    if (!f || !f.name.toLowerCase().endsWith('.csv')) return
-    setFile(f)
-  }
-  // Read the file dropped onto the drop zone
-  const onDrop = useCallback((e) => {
-    e.preventDefault(); setIsDrag(false)
-    handleFile(e.dataTransfer.files[0])
-  }, [])
-
-  // Download a sample csv so admins know the expected column format
-  const downloadTemplate = () => {
-    const csv = ['section_no,subject_code,schedule,room,capacity,semester,academic_year', '29144,IT115L,Mon 18:00-21:00,CL5,40,1st Semester,2024-2025'].join('\n')
-    const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([csv], { type: 'text/csv' })), download: 'sections_template.csv' })
-    a.click()
-  }
-
-  // Upload the csv and show the per-row results
-  const handleUpload = async () => {
-    if (!file) return
-    setUploading(true)
-    try {
-      const fd = new FormData(); fd.append('file', file)
-      const res = await authFetch(`${API}/api/admin/sections/bulk-upload`, {
-        method: 'POST', body: fd,
-      })
-      setResult(await res.json())
-    } catch { setResult({ error: 'Network error' }) }
-    finally { setUploading(false) }
-  }
-
-  return (
-    <Modal onClose={onClose} title="Upload Sections CSV" subtitle="Create multiple class codes at once"
-      icon={<Icon.Upload size={18} color="#fff" />} iconBg="#15803d">
-      {!result ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-          {/* Drop zone */}
-          <div
-            onDragOver={(e) => { e.preventDefault(); setIsDrag(true) }}
-            onDragLeave={() => setIsDrag(false)}
-            onDrop={onDrop}
-            onClick={() => fileRef.current?.click()}
-            style={{
-              border: `2px dashed ${file ? '#16a34a' : isDrag ? '#7c3aed' : 'rgba(100,116,139,0.4)'}`,
-              borderRadius: 12, padding: '2rem', textAlign: 'center', cursor: 'pointer',
-              transition: 'all 0.15s',
-              background: file ? 'rgba(22,163,74,0.05)' : isDrag ? 'rgba(124,58,237,0.05)' : 'transparent',
-            }}
-          >
-            <input ref={fileRef} type="file" accept=".csv" style={{ display: 'none' }} onChange={(e) => handleFile(e.target.files[0])} />
-            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 8 }}>
-              {file ? <Icon.FileCheck size={32} color="#4ade80" /> : <Icon.File size={32} color="#64748b" />}
-            </div>
-            <p style={{ margin: 0, color: file ? '#4ade80' : '#94a3b8', fontWeight: 600 }}>
-              {file ? file.name : 'Drop CSV here or click to browse'}
-            </p>
-          </div>
-
-          <p style={{ margin: 0, fontSize: '0.75rem', color: '#64748b' }}>
-            Required: <code style={{ color: '#a78bfa' }}>section_no</code>, <code style={{ color: '#a78bfa' }}>subject_code</code> — optional: schedule, room, capacity, semester, academic_year
-          </p>
-
-          <button onClick={downloadTemplate}
-            style={{ padding: '0.5rem', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, color: '#94a3b8', cursor: 'pointer', fontSize: '0.8rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-            <Icon.Download size={14} color="#94a3b8" /> Download Template
-          </button>
-
-          <div style={{ display: 'flex', gap: '0.75rem' }}>
-            <button onClick={onClose} className="admin-button flex-1 inline-flex items-center justify-center gap-2 px-4 text-sm font-semibold">
-              Cancel
-            </button>
-            <button onClick={handleUpload} disabled={!file || uploading}
-              className="admin-button admin-button-primary flex-1 inline-flex items-center justify-center gap-2 px-4 text-sm font-semibold">
-              {uploading ? <><Spinner size={16} color="#fff" /> Uploading…</> : 'Upload CSV'}
-            </button>
-          </div>
-        </div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-          {result.error ? (
-            // hard failure — backend never got far enough to produce a
-            // summary (missing columns, empty file, bad CSV, DB error).
-            // used to fall through to the zeros grid below with no
-            // explanation at all — this is the fix for that.
-            <div style={{ background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.3)', borderRadius: 10, padding: '1rem' }}>
-              <p style={{ margin: 0, color: '#f87171', fontWeight: 700, fontSize: '0.9rem' }}>❌ Upload failed</p>
-              <p style={{ margin: '0.35rem 0 0', color: '#fca5a5', fontSize: '0.8rem' }}>{result.error}</p>
-              {result.missing && (
-                <p style={{ margin: '0.35rem 0 0', color: '#fca5a5', fontSize: '0.75rem' }}>
-                  Missing columns: {result.missing.join(', ')}
-                </p>
-              )}
-            </div>
-          ) : (
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-              {[
-                { label: 'Total',   val: result.summary?.total_rows ?? 0, color: '#e2e8f0' },
-                { label: 'Created', val: result.summary?.created    ?? 0, color: '#4ade80' },
-                { label: 'Skipped', val: result.summary?.skipped    ?? 0, color: '#facc15' },
-                { label: 'Errors',  val: result.summary?.errors     ?? 0, color: '#f87171' },
-              ].map((c) => (
-                <div key={c.label} style={{ background: 'rgba(255,255,255,0.04)', borderRadius: 10, padding: '0.625rem', textAlign: 'center' }}>
-                  <p style={{ margin: 0, fontSize: '1.4rem', fontWeight: 700, color: c.color }}>{c.val}</p>
-                  <p style={{ margin: 0, fontSize: '0.7rem', color: '#64748b' }}>{c.label}</p>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* per-row results — the backend already sends this for every
-              row (created/skipped/error + a reason), it just wasn't being
-              shown here before. without this, "3 errors" told you nothing
-              about which 3 rows or why. */}
-          {result.results?.length > 0 && (
-            <div style={{ borderRadius: 10, border: '1px solid rgba(255,255,255,0.1)', maxHeight: 210, overflow: 'auto' }}>
-              <table style={{ width: '100%', fontSize: '0.8rem', borderCollapse: 'collapse' }}>
-                <thead style={{ background: 'rgba(255,255,255,0.06)', position: 'sticky', top: 0 }}>
-                  <tr>
-                    <th style={{ textAlign: 'left', padding: '0.5rem 0.75rem', color: '#94a3b8', fontWeight: 600, fontSize: '0.7rem' }}>Row</th>
-                    <th style={{ textAlign: 'left', padding: '0.5rem 0.75rem', color: '#94a3b8', fontWeight: 600, fontSize: '0.7rem' }}>Section</th>
-                    <th style={{ textAlign: 'left', padding: '0.5rem 0.75rem', color: '#94a3b8', fontWeight: 600, fontSize: '0.7rem' }}>Status</th>
-                    <th style={{ textAlign: 'left', padding: '0.5rem 0.75rem', color: '#94a3b8', fontWeight: 600, fontSize: '0.7rem' }}>Details</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {result.results.map((r, i) => {
-                    const statusColor = r.status === 'created' ? '#4ade80' : r.status === 'skipped' ? '#facc15' : '#f87171'
-                    return (
-                      <tr key={i} style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-                        <td style={{ padding: '0.5rem 0.75rem', color: '#64748b', fontFamily: 'monospace', fontSize: '0.75rem' }}>{r.row}</td>
-                        <td style={{ padding: '0.5rem 0.75rem', color: '#cbd5e1', fontFamily: 'monospace', fontSize: '0.75rem' }}>{r.section_no || '—'}</td>
-                        <td style={{ padding: '0.5rem 0.75rem', color: statusColor, fontWeight: 700, textTransform: 'capitalize' }}>{r.status}</td>
-                        <td style={{ padding: '0.5rem 0.75rem', color: '#94a3b8', fontSize: '0.75rem' }}>{r.subject || r.reason || ''}</td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-          <div style={{ display: 'flex', gap: '0.75rem' }}>
-            <button onClick={() => { setResult(null); setFile(null) }} className="admin-button flex-1 inline-flex items-center justify-center gap-2 px-4 text-sm font-semibold">
-              Upload Another
-            </button>
-            <button onClick={() => { onSuccess(); onClose() }} className="admin-button admin-button-primary flex-1 inline-flex items-center justify-center gap-2 px-4 text-sm font-semibold">
-              Done
-            </button>
-          </div>
-        </div>
-      )}
-    </Modal>
-  )
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // HeaderBtn — top-right action buttons
 // ─────────────────────────────────────────────────────────────────────────────
 function HeaderBtn({ icon: IconComponent, label, onClick, tone = '' }) {
@@ -1188,9 +1026,18 @@ export default function ClassCodesManagement() {
         <EnrolledStudentsModal section={enrollModal} onClose={() => setEnrollModal(null)} />
       )}
       {csvModal && (
-        <CSVUploadModal
+        <UploadSectionsModal
+          subjects={subjects}
+          sections={sections}
           onClose={() => setCSVModal(false)}
-          onSuccess={() => { fetchSections(); showToast('Sections uploaded!') }} />
+          onDone={summary => {
+            fetchSections()
+            if (!summary) return
+            const { created = 0, skipped = 0, errors = 0 } = summary
+            const extra = [skipped && `${skipped} skipped`, errors && `${errors} with errors`].filter(Boolean).join(', ')
+            if (created) showToast(`${created} class code${created === 1 ? '' : 's'} created${extra ? ` (${extra})` : ''}`)
+            else showToast(`No class codes were created${extra ? ` (${extra})` : ''}`, 'warning')
+          }} />
       )}
       {bulkDeleteModal && (
         <Modal
