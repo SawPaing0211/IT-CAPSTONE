@@ -399,3 +399,37 @@ def test_stats_difficulty_progress_counts_quests(world, monkeypatch):
     after = row(f'?subject_id={sid}')
     # two language submissions, still one quest
     assert after['completed'] == before['completed'] + 1 and after['total'] == before['total']
+
+
+def test_note_tells_the_student_how_much_xp_hints_deducted(world, monkeypatch):
+    monkeypatch.setattr(A, 'evaluate_code', _ok)
+    with A.app.app_context():
+        p = A.db.session.get(A.Problem, world['pids'][0])
+        p.hints = [{'text': 'h', 'xp_penalty': 5}]
+        A.db.session.add(A.HintReveal(user_id=world['uid'], problem_id=p.id, hint_index=0))
+        A.db.session.commit()
+    j = _post(world).get_json()
+    assert j['score'] == 95
+    assert '5 XP deducted' in j['scoring_note'] and 'Full XP' not in j['scoring_note']
+
+
+def test_note_still_says_full_xp_when_no_hint_was_used(world, monkeypatch):
+    monkeypatch.setattr(A, 'evaluate_code', _ok)
+    j = _post(world).get_json()
+    assert j['score'] == 100 and 'Full XP awarded' in j['scoring_note']
+
+
+def test_admin_delete_of_a_student_with_a_submission_clears_the_slot(world, monkeypatch):
+    monkeypatch.setattr(A, 'evaluate_code', _ok)
+    assert _post(world).status_code == 201
+    with A.app.app_context():
+        adm = A.User(username=f'adm{world["uid"]}', email=f'adm{world["uid"]}@example.com', role='administrator',
+                     password_hash=generate_password_hash('x'), full_name='A')
+        A.db.session.add(adm); A.db.session.commit()
+        ah = {'Authorization': f'Bearer {create_access_token(identity=str(adm.id))}'}
+    r = world['c'].delete(f'/api/admin/users/{world["uid"]}', headers=ah)
+    assert r.status_code == 200, r.get_json()
+    with A.app.app_context():
+        assert A.SubmissionSlot.query.filter_by(user_id=world['uid']).count() == 0
+        assert A.Submission.query.filter_by(user_id=world['uid']).count() == 0
+        assert A.db.session.get(A.User, world['uid']) is None

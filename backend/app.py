@@ -2324,6 +2324,7 @@ def create_submission():
             Submission.user_id == user_id, Submission.problem_id == problem_id,
             Submission.language != language).count()
         is_bonus_language = multi_lang and lang_rule == 'optional' and other_langs_done >= 1
+        xp_deducted = 0  # XP taken off by revealed hints, shown to the student in the note
         if is_bonus_language:
             score = int(xp_reward * LANGUAGE_BONUS_PCT * (passed / total) * (partial_pc / 100.0)) if total else 0
         else:
@@ -2331,7 +2332,9 @@ def create_submission():
             for r in HintReveal.query.filter_by(user_id=user_id, problem_id=problem_id).all():
                 if 0 <= r.hint_index < len(hints):
                     hint_penalty += hints[r.hint_index].get('xp_penalty', 0)
+            score_before_hints = score
             score = max(0, score - hint_penalty)
+            xp_deducted = score_before_hints - score
 
         # XP only for improvement over an earlier graded result (none exist under
         # the current one-attempt policy, kept for submissions from older versions)
@@ -2402,8 +2405,9 @@ def create_submission():
         "languages_done": sorted({r.language for r in Submission.query.filter_by(user_id=user_id, problem_id=problem_id).all()}),
         "scoring_note": (
             f"Language bonus: {passed}/{total} test cases passed in {language}. {score} bonus XP awarded." if is_bonus_language
+            else f"All {total} test cases passed. {score} XP awarded ({xp_deducted} XP deducted for hints used)." if status == 'accepted' and xp_deducted
             else f"All {total} test cases passed. Full XP awarded." if status == 'accepted'
-            else f"{passed}/{total} test cases passed. {score} XP awarded." if status == 'partial'
+            else f"{passed}/{total} test cases passed. {score} XP awarded" + (f" ({xp_deducted} XP deducted for hints used)." if xp_deducted else ".") if status == 'partial'
             else f"Participation credit awarded: {score} XP."
         )
     }), 201
@@ -4824,6 +4828,7 @@ def _cascade_delete_user_data(user_id):
     HintReveal.query.filter_by(user_id=user_id).delete()
     UserAchievement.query.filter_by(user_id=user_id).delete()
     CodeDraft.query.filter_by(user_id=user_id).delete()
+    SubmissionSlot.query.filter_by(user_id=user_id).delete()
 
     # PlagiarismReport rows point at submissions.id (not nullable, no
     # cascade). Any submission that was ever run through the Instructor's
