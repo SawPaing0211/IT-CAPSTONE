@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback } from 'react'
-import { createPortal } from 'react-dom'
 import EditUserModal from './EditUserModal'
 import PasswordField from '../../components/PasswordField'
 import SubjectManagement from './SubjectsManagement'
 import RecoveryModal from './RecoveryModal'
 import AdminActionDialog from './AdminActionDialog'
+import AdminConfirmDialog from './AdminConfirmDialog'
 import createUsersEmblem from '../../assets/admin/create-users.png'
 import studentRoleIcon from '../../assets/admin/role-student.png'
 import instructorRoleIcon from '../../assets/admin/role-instructor.png'
@@ -64,7 +64,6 @@ export default function UserManagement() {
   // shared type-to-confirm modal for single-user delete AND the
   // "Delete All Students" bulk action below
   const [confirmModal, setConfirmModal] = useState(null)
-  const [confirmInput, setConfirmInput] = useState('')
   const [confirmLoading, setConfirmLoading] = useState(false)
 
   // toast — replaces every alert() in this file. alert() is that plain
@@ -223,7 +222,7 @@ export default function UserManagement() {
   // opens the styled type-to-confirm modal instead of the old prompt()
   const handleDeleteUser = (userId) => {
     const target = users.find(u => u.id === userId)
-    setConfirmInput('')
+    
     setConfirmModal({
       title: 'Delete User',
       message: `This permanently deletes ${target?.full_name || target?.username || `user ID ${userId}`} and cannot be undone.`,
@@ -247,7 +246,7 @@ export default function UserManagement() {
     } finally {
       setConfirmLoading(false)
       setConfirmModal(null)
-      setConfirmInput('')
+      
     }
   }
 
@@ -256,7 +255,7 @@ export default function UserManagement() {
   // _cascade_delete_student_data, their submissions/progress/enrollments)
   // in one action instead of just one user
   const handleBulkDeleteStudents = () => {
-    setConfirmInput('')
+    
     setConfirmModal({
       title: 'Delete All Students',
       message: 'This permanently deletes every student account, including accounts hidden by the filters, and their submissions, progress, and enrollments. This cannot be undone.',
@@ -286,7 +285,7 @@ export default function UserManagement() {
     } finally {
       setConfirmLoading(false)
       setConfirmModal(null)
-      setConfirmInput('')
+      
     }
   }
 
@@ -541,56 +540,15 @@ export default function UserManagement() {
           {/* Type-to-confirm modal — shared by single-user Delete and
               "Delete All Students". Confirm button stays disabled until
               the typed text exactly matches confirmModal.requiredPhrase. */}
-          {confirmModal && createPortal(
-            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[9998] p-4">
-              <div className="bg-slate-900 border border-red-600/50 rounded-2xl max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto shadow-2xl shadow-red-900/50">
-                <div className="flex items-center gap-3 p-6 border-b border-red-600/30">
-                  <div className="w-10 h-10 bg-red-600/20 border border-red-600/40 rounded-xl flex items-center justify-center text-xl">⚠️</div>
-                  <div>
-                    <h2 className="text-xl font-black text-white">{confirmModal.title}</h2>
-                    <p className="text-slate-400 text-xs">This action cannot be undone</p>
-                  </div>
-                </div>
-
-                <div className="p-6 space-y-4">
-                  <p className="text-slate-300 text-sm leading-relaxed">{confirmModal.message}</p>
-                  <div>
-                    <label className="block text-sm text-slate-400 mb-1.5">
-                      Type <span className="font-mono text-red-400 font-bold">{confirmModal.requiredPhrase}</span> to confirm
-                    </label>
-                    <input
-                      type="text"
-                      value={confirmInput}
-                      onChange={e => setConfirmInput(e.target.value)}
-                      autoFocus
-                      autoComplete="off"
-                      placeholder={confirmModal.requiredPhrase}
-                      className="w-full bg-slate-800 border border-slate-700 focus:border-red-500 rounded-lg px-4 py-2.5 text-white outline-none transition placeholder-slate-600 font-mono"
-                    />
-                  </div>
-                </div>
-
-                <div className="flex gap-3 p-6 border-t border-red-600/30">
-                  <button
-                    onClick={() => { setConfirmModal(null); setConfirmInput('') }}
-                    disabled={confirmLoading}
-                    className="admin-button flex-1 py-2.5 disabled:opacity-50 rounded-lg text-slate-300 font-medium transition"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={confirmModal.onConfirm}
-                    disabled={confirmInput !== confirmModal.requiredPhrase || confirmLoading}
-                    className="admin-button admin-button-danger flex-1 py-2.5 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg text-white font-black transition flex items-center justify-center gap-2"
-                  >
-                    {confirmLoading
-                      ? <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Deleting...</>
-                      : <><span>🗑️</span> Confirm Delete</>}
-                  </button>
-                </div>
-              </div>
-            </div>,
-            document.body
+          {confirmModal && (
+            <AdminConfirmDialog
+              title={confirmModal.title}
+              message={confirmModal.message}
+              requiredPhrase={confirmModal.requiredPhrase}
+              busy={confirmLoading}
+              onConfirm={confirmModal.onConfirm}
+              onCancel={() => { setConfirmModal(null) }}
+            />
           )}
 
           {/* Add User Modal */}

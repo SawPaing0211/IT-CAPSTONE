@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { API_BASE, authFetch } from '../../api/client'
 import AdminActionDialog from './AdminActionDialog'
 import UploadSectionsModal from './UploadSectionsModal'
+import AdminConfirmDialog from './AdminConfirmDialog'
 import classCodeSeal from '../../assets/admin/class-code-seal.svg'
 
 const API = API_BASE
@@ -216,6 +217,7 @@ function Modal({ onClose, title, subtitle, icon, iconBg = '#7c3aed', children, m
 
   return createPortal(
     <div
+      className="admin-workspace"
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
       style={{
         position: 'fixed', inset: 0,
@@ -754,7 +756,6 @@ export default function ClassCodesManagement() {
   const [csvModal, setCSVModal]           = useState(false)
   const [deleteTarget, setDeleteTarget]   = useState(null)
   const [bulkDeleteModal, setBulkDeleteModal] = useState(false)
-  const [bulkDeleteInput, setBulkDeleteInput] = useState('')
   const [bulkDeleting, setBulkDeleting]       = useState(false)
   const [toast, setToast]                 = useState(null)
 
@@ -816,7 +817,7 @@ export default function ClassCodesManagement() {
 
   // The server skips class codes that still have people or class content.
   const performBulkDelete = async () => {
-    if (bulkDeleting || bulkDeleteInput !== 'DELETE EMPTY CLASS CODES') return
+    if (bulkDeleting) return
     setBulkDeleting(true)
     try {
       const res  = await authFetch(`${API}/api/admin/sections/bulk-delete`, {
@@ -835,7 +836,7 @@ export default function ClassCodesManagement() {
         showToast(data.error || 'Bulk delete failed', 'error')
       }
     } catch { showToast('Network error', 'error') }
-    finally { setBulkDeleting(false); setBulkDeleteModal(false); setBulkDeleteInput('') }
+    finally { setBulkDeleting(false); setBulkDeleteModal(false) }
   }
 
   // ── Filtering ────────────────────────────────────────────────────────────
@@ -1040,83 +1041,23 @@ export default function ClassCodesManagement() {
           }} />
       )}
       {bulkDeleteModal && (
-        <Modal
-          onClose={() => { setBulkDeleteModal(false); setBulkDeleteInput('') }}
+        <AdminConfirmDialog
           title="Delete All Empty Class Codes"
-          subtitle="This action cannot be undone"
-          icon={<Icon.Trash size={18} color="#fff" />}
-          iconBg="#b91c1c"
-          maxWidth={440}
-        >
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            <p style={{ margin: 0, fontSize: '0.875rem', color: '#cbd5e1', lineHeight: 1.6 }}>
-              This permanently deletes class codes only when they have no enrolled students, instructor assignment, quests, modules, or announcements.
-            </p>
-            <div>
-              <label style={{ display: 'block', fontSize: '0.8rem', color: '#94a3b8', marginBottom: 6 }}>
-                Type <span style={{ fontFamily: 'monospace', color: '#f87171', fontWeight: 700 }}>DELETE EMPTY CLASS CODES</span> to confirm
-              </label>
-              <input
-                type="text"
-                value={bulkDeleteInput}
-                onChange={(e) => setBulkDeleteInput(e.target.value)}
-                autoFocus
-                autoComplete="off"
-                placeholder="DELETE EMPTY CLASS CODES"
-                style={{ width: '100%', background: '#1e293b', border: '1px solid rgba(248,113,113,0.4)', borderRadius: 8, padding: '0.625rem 0.75rem', color: '#f1f5f9', fontSize: '0.875rem', outline: 'none', fontFamily: 'monospace' }}
-              />
-            </div>
-            <div style={{ display: 'flex', gap: '0.75rem' }}>
-              <button
-                onClick={() => { setBulkDeleteModal(false); setBulkDeleteInput('') }}
-                disabled={bulkDeleting}
-                className="admin-button flex-1 inline-flex items-center justify-center gap-2 px-4 text-sm font-semibold"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={performBulkDelete}
-                disabled={bulkDeleteInput !== 'DELETE EMPTY CLASS CODES' || bulkDeleting}
-                className="admin-button admin-button-danger flex-1 inline-flex items-center justify-center gap-2 px-4 text-sm font-semibold"
-              >
-                {bulkDeleting
-                  ? <><Spinner size={14} /> Deleting…</>
-                  : <><Icon.Trash size={14} color="#fff" /> Confirm Delete</>}
-              </button>
-            </div>
-          </div>
-        </Modal>
+          message="This permanently deletes class codes only when they have no enrolled students, instructor assignment, quests, modules, or announcements."
+          requiredPhrase="DELETE EMPTY CLASS CODES"
+          busy={bulkDeleting}
+          onConfirm={performBulkDelete}
+          onCancel={() => setBulkDeleteModal(false)}
+        />
       )}
       {deleteTarget && (
-        <Modal
-          onClose={() => setDeleteTarget(null)}
+        <AdminConfirmDialog
           title="Delete Class Code"
-          subtitle={`Section ${deleteTarget.section_no}`}
-          icon={<Icon.Trash size={18} color="#fff" />}
-          iconBg="#b91c1c"
-          maxWidth={420}
-        >
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            <p style={{ margin: 0, fontSize: '0.875rem', color: '#cbd5e1', lineHeight: 1.6 }}>
-              Delete class code <strong style={{ color: '#f1f5f9' }}>{deleteTarget.section_no}</strong>?
-              This cannot be undone.
-            </p>
-            <div style={{ display: 'flex', gap: '0.75rem' }}>
-              <button
-                onClick={() => setDeleteTarget(null)}
-                className="admin-button flex-1 inline-flex items-center justify-center gap-2 px-4 text-sm font-semibold"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={confirmDelete}
-                className="admin-button admin-button-danger flex-1 inline-flex items-center justify-center gap-2 px-4 text-sm font-semibold"
-              >
-                <Icon.Trash size={14} color="#fff" /> Delete
-              </button>
-            </div>
-          </div>
-        </Modal>
+          message={<>Delete class code <strong className="text-slate-100">{deleteTarget.section_no}</strong>? This cannot be undone.</>}
+          confirmLabel="Delete"
+          onConfirm={confirmDelete}
+          onCancel={() => setDeleteTarget(null)}
+        />
       )}
     </div>
   )

@@ -383,3 +383,59 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+.admin-confirm-dialog {
+  width: min(28rem, calc(100% - 1.5rem));
+  max-width: none;
+  max-height: calc(100dvh - 1.5rem);
+  margin: auto;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid rgb(220 38 38 / 50%);
+  border-radius: 1rem;
+  background: #0f172a;
+  color: #f1f5f9;
+  color-scheme: dark;
+  box-shadow: 0 25px 50px -12px rgb(127 29 29 / 50%);
+}
+
+.admin-confirm-dialog::backdrop {
+  background: rgb(4 6 16 / 78%);
+  backdrop-filter: blur(3px);
+}
+
+.admin-confirm-panel {
+  display: flex;
+  max-height: calc(100dvh - 1.5rem - 2px);
+  flex-direction: column;
+}
+
+.admin-confirm-header {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 0.75rem;
+  padding: clamp(1rem, 3vw, 1.5rem);
+  border-bottom: 1px solid rgb(220 38 38 / 30%);
+}
+
+.admin-confirm-icon {
+  display: grid;
+  width: 2.5rem;
+  height: 2.5rem;
+  flex: none;
+  place-items: center;
+  border: 1px solid rgb(220 38 38 / 40%);
+  border-radius: 0.75rem;
+  background: rgb(220 38 38 / 20%);
+  font-size: 1.25rem;
+}
+
+.admin-confirm-footer {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  padding: 1rem clamp(1rem, 3vw, 1.5rem);
+  border-top: 1px solid rgb(220 38 38 / 30%);
+}
