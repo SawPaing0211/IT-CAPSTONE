@@ -20,8 +20,6 @@ import CreateProblem from './pages/Instructor/CreateProblem'
 import SelectClassForQuest from './pages/Instructor/SelectClassForQuest'
 import ClassDetail from './pages/Instructor/ClassDetail'
 import Announcements from './pages/Instructor/Announcements'
-import PlagiarismCheck from './pages/Instructor/PlagiarismCheck'
-import Analytics from './pages/Instructor/Analytics'
 import CourseMaterials from './pages/Instructor/CourseMaterials'
 import ProblemSubmissions from './pages/Instructor/ProblemSubmissions'
 import InstructorAchievements from './pages/Instructor/InstructorAchievements'
@@ -162,8 +160,9 @@ function AppContent() {
         <Route path="create-problem/pick-class" element={<SelectClassForQuest />} /> {/* pick a class first when there's no class context yet */}
         <Route path="problem/:problemId/submissions" element={<ProblemSubmissions />} />
         <Route path="announcements" element={<Announcements />} /> {/* posting announcements to students */}
-        <Route path="plagiarism" element={<PlagiarismCheck />} />
-        <Route path="analytics" element={<Analytics />} />
+        {/* plagiarism + analytics live inside each class (class tabs) because they need a class; old direct links go to the class list */}
+        <Route path="plagiarism" element={<Navigate to="/instructor/classes" replace />} />
+        <Route path="analytics" element={<Navigate to="/instructor/classes" replace />} />
         <Route path="materials" element={<CourseMaterials />} /> {/* uploading modules/lessons/files */}
         <Route path="achievements" element={<InstructorAchievements />} />
       </Route>
