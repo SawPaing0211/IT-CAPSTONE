@@ -219,7 +219,7 @@ export default function UploadSectionsModal({ subjects = [], sections = [], onCl
 
   const description = {
     select: 'Upload a CSV to create many class codes at once',
-    preview: `${parsed?.rows.length ?? 0} rows · ${createCount} ready to create`,
+    preview: `${parsed?.rows.length ?? 0} row${parsed?.rows.length === 1 ? '' : 's'} · ${createCount} ready to create`,
     uploading: 'Creating class codes…',
     done: `Done · ${result?.summary?.created ?? 0} class code${result?.summary?.created === 1 ? '' : 's'} created`,
   }[step]
