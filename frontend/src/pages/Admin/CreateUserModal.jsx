@@ -1,5 +1,6 @@
 import AdminActionDialog from './AdminActionDialog'
 import FormBanner from './FormBanner'
+import AdminIcon, { INLINE } from './AdminIcons'
 import createUsers from '../../assets/admin/create-users.png'
 import classCodes from '../../assets/admin/class-codes.png'
 import studentRole from '../../assets/admin/role-student.png'
@@ -68,10 +69,10 @@ function parseCSV(text) {
 // ── status badge for the csv result table ────────────────────────────────────
 function StatusBadge({ status }) {
   const styles = {
-    created:  { bg: 'rgba(34,197,94,0.15)',  color: '#4ade80', label: '✅ Created'  },
-    enrolled: { bg: 'rgba(59,130,246,0.15)', color: '#60a5fa', label: '🔗 Enrolled' },
+    created:  { bg: 'rgba(34,197,94,0.15)',  color: '#4ade80', label: 'Created'  },
+    enrolled: { bg: 'rgba(59,130,246,0.15)', color: '#60a5fa', label: 'Enrolled' },
     skipped:  { bg: 'rgba(234,179,8,0.15)',  color: '#facc15', label: '⏭ Skipped'  },
-    error:    { bg: 'rgba(239,68,68,0.15)',  color: '#f87171', label: '❌ Error'    },
+    error:    { bg: 'rgba(239,68,68,0.15)',  color: '#f87171', label: 'Error'    },
   }
   const s = styles[status] ?? styles.error
   return (
@@ -392,7 +393,7 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
                     {/* reminder for non-head admins so they know why admin option is missing */}
                     {!headAdmin && (
                       <p className="text-xs text-slate-400 mt-2 flex items-center gap-1.5">
-                        <span>🔒</span> Administrator accounts can only be created by the Head Administrator.
+                        <AdminIcon name="lock" className="size-4 shrink-0" /> Administrator accounts can only be created by the Head Administrator.
                       </p>
                     )}
                   </div>
@@ -432,7 +433,7 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
                         disabled={loading}
                         className="text-xs text-purple-400 hover:text-purple-300 transition font-semibold flex items-center gap-1"
                       >
-                        ⚡ Auto-generate
+                        <AdminIcon name="bolt" className={INLINE} />Auto-generate
                       </button>
                     </div>
                     <PasswordField
@@ -535,8 +536,8 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
               {step === 2 && createdUser && (
                 <div className="space-y-4">
                   <div className="text-center space-y-2">
-                    <div className="w-16 h-16 mx-auto bg-emerald-600/15 border-2 border-emerald-500/40 rounded-full flex items-center justify-center text-3xl">
-                      ✅
+                    <div className="w-16 h-16 mx-auto bg-emerald-600/15 border-2 border-emerald-500/40 rounded-full flex items-center justify-center text-emerald-300">
+                      <AdminIcon name="check" className="size-8" />
                     </div>
                     <h3 className="text-lg font-black text-white">Account Created!</h3>
                     <p className="text-slate-500 text-xs">Save these credentials — the password won't be shown again.</p>
@@ -626,13 +627,13 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
                   {/* two-column explainer */}
                   <div className="grid gap-2 sm:grid-cols-2">
                     <div className="bg-slate-800/60 rounded-xl p-3 border border-emerald-600/20">
-                      <p className="text-emerald-400 font-bold text-xs mb-1">🏫 Regular</p>
+                      <p className="text-emerald-400 font-bold text-xs mb-1"><AdminIcon name="school" className={INLINE} />Regular</p>
                       <p className="text-slate-400 text-[11px] leading-relaxed">
                         Set <code className="text-purple-300">student_type=regular</code> and fill <code className="text-purple-300">section_no</code> with their class code.
                       </p>
                     </div>
                     <div className="bg-slate-800/60 rounded-xl p-3 border border-blue-600/20">
-                      <p className="text-blue-400 font-bold text-xs mb-1">📋 Irregular</p>
+                      <p className="text-blue-400 font-bold text-xs mb-1"><AdminIcon name="clipboard" className={INLINE} />Irregular</p>
                       <p className="text-slate-400 text-[11px] leading-relaxed">
                         Set <code className="text-purple-300">student_type=irregular</code> and fill <code className="text-purple-300">section_no</code>. One row per section.
                       </p>
@@ -660,7 +661,7 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
                     onClick={downloadSample}
                     className="admin-button w-full py-2.5 border rounded-xl text-slate-300 text-sm font-semibold transition flex items-center justify-center gap-2"
                   >
-                    <span>⬇️</span> Download Sample Template
+                    <AdminIcon name="download" className="size-4" /> Download Sample Template
                   </button>
                 </>
               )}
@@ -728,7 +729,7 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
                       onClick={handleCsvUpload}
                       className="admin-button admin-button-primary flex-1 py-2.5 rounded-xl text-white font-black text-sm transition flex items-center justify-center gap-2"
                     >
-                      📤 Upload {csvParsed.rows.length} Rows
+                      <AdminIcon name="upload" className={INLINE} />Upload {csvParsed.rows.length} Rows
                     </button>
                   </div>
                 </>
@@ -739,7 +740,7 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
                 <div className="flex flex-col items-center justify-center py-12 gap-4">
                   <div className="relative w-16 h-16">
                     <div className="absolute inset-0 rounded-full border-4 border-purple-600/30 border-t-purple-500 animate-spin" />
-                    <div className="absolute inset-0 flex items-center justify-center text-2xl">📤</div>
+                    <div className="absolute inset-0 flex items-center justify-center text-emerald-300"><AdminIcon name="upload" className="size-7" /></div>
                   </div>
                   <div className="text-center">
                     <p className="text-white font-bold">Processing enrollment…</p>
@@ -770,7 +771,7 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
                   {/* server-side errors if any */}
                   {csvResult.errors?.length > 0 && (
                     <div className="bg-red-900/20 border border-red-600/30 rounded-xl p-3 max-h-28 overflow-y-auto overscroll-contain">
-                      <p className="text-red-300 text-xs font-bold mb-1">⚠️ Rows skipped:</p>
+                      <p className="text-red-300 text-xs font-bold mb-1"><AdminIcon name="alert" className={INLINE} />Rows skipped:</p>
                       {csvResult.errors.map((e, i) => (
                         <p key={i} className="text-red-400 text-[11px] font-mono">{e}</p>
                       ))}
@@ -780,7 +781,7 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
                   {/* credential csv download — this is the important one */}
                   {csvResult.credential_csv && (
                     <div className="flex items-center gap-3 p-3.5 bg-blue-900/20 border border-blue-600/30 rounded-xl">
-                      <span className="text-2xl flex-shrink-0">🔐</span>
+                      <AdminIcon name="key" className="size-7 shrink-0 text-amber-300" />
                       <div className="flex-1 min-w-0">
                         <p className="text-blue-300 font-bold text-sm">Credentials ready</p>
                         <p className="text-slate-500 text-xs mt-0.5">Emails + temporary passwords for all created accounts</p>
@@ -789,7 +790,7 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
                         onClick={downloadCredentials}
                         className="admin-button admin-button-primary px-3 py-1.5 rounded-lg text-white text-xs font-bold transition flex-shrink-0"
                       >
-                        ⬇️ Download
+                        <AdminIcon name="download" className={INLINE} />Download
                       </button>
                     </div>
                   )}

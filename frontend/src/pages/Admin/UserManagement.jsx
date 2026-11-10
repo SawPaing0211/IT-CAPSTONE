@@ -6,6 +6,7 @@ import RecoveryModal from './RecoveryModal'
 import AdminActionDialog from './AdminActionDialog'
 import AdminConfirmDialog from './AdminConfirmDialog'
 import FormBanner from './FormBanner'
+import AdminIcon, { INLINE } from './AdminIcons'
 import AdminToast from './AdminToast'
 import createUsersEmblem from '../../assets/admin/create-users.png'
 import studentRoleIcon from '../../assets/admin/role-student.png'
@@ -390,7 +391,7 @@ export default function UserManagement() {
                 title={hasFilters ? 'Clear filters to access the global delete action' : undefined}
                 className="admin-button admin-button-danger px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-2 transition border text-red-400 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:opacity-40"
               >
-                🗑️ Delete All Students
+                <AdminIcon name="trash" className={INLINE} />Delete All Students
               </button>
             </div>
           </div>
@@ -497,7 +498,7 @@ export default function UserManagement() {
               )}
               {filteredUsers.length === 0 && (
                 <div className="text-center py-12 bg-slate-900/80 rounded-2xl border border-dashed border-slate-700">
-                  <div className="text-4xl mb-3">🔍</div>
+                  <AdminIcon name="search" className="mx-auto mb-3 size-10 text-slate-500" />
                   <p className="text-slate-400 text-lg">No users found</p>
                   <p className="text-slate-500 text-sm mt-2">Try adjusting your filters</p>
                 </div>
@@ -655,7 +656,7 @@ export default function UserManagement() {
                   >
                     {addUserLoading
                       ? <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Creating...</>
-                      : <><span aria-hidden="true">👤</span> {addUserSuccess ? 'Add another' : 'Create User'}</>}
+                      : <><AdminIcon name="user" className="size-4" /> {addUserSuccess ? 'Add another' : 'Create User'}</>}
                   </button>
                 </div>
             </AdminActionDialog>
@@ -740,16 +741,16 @@ function UserSection({ title, icon, users, onManage, onRecover, onDelete, onUnlo
                         ? 'bg-green-600/30 text-green-300 border border-green-600/50'
                         : 'bg-red-600/30 text-red-300 border border-red-600/50'
                     }`}>
-                      {user.is_active ? '✅ Active' : '⛔ Inactive'}
+                      {user.is_active ? <><AdminIcon name="check" className={INLINE} />Active</> : <><AdminIcon name="ban" className={INLINE} />Inactive</>}
                     </span>
                     {user.is_locked && (
                       <span className="px-3 py-1 rounded-lg text-xs font-bold w-fit bg-orange-600/30 text-orange-300 border border-orange-600/50">
-                        🔒 Locked
+                        <AdminIcon name="lock" className={INLINE} />Locked
                       </span>
                     )}
                     {!user.is_locked && user.login_attempts > 0 && (
                       <span className="px-3 py-1 rounded-lg text-xs font-bold w-fit bg-yellow-600/20 text-yellow-400 border border-yellow-600/40">
-                        ⚠️ {user.login_attempts}/3 attempts
+                        <AdminIcon name="alert" className={INLINE} />{user.login_attempts}/3 attempts
                       </span>
                     )}
                   </div>
@@ -792,7 +793,7 @@ function UserSection({ title, icon, users, onManage, onRecover, onDelete, onUnlo
                         onClick={() => onUnlock(user.id, user.username)}
                         className="admin-button w-full px-2 text-xs font-semibold flex items-center justify-center gap-1"
                       >
-                        🔓 Unlock Account
+                        <AdminIcon name="unlock" className={INLINE} />Unlock Account
                       </button>
                     )}
                   </div>

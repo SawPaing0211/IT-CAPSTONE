@@ -1,4 +1,5 @@
 import AdminActionDialog from './AdminActionDialog'
+import AdminIcon, { INLINE } from './AdminIcons'
 import backupEmblem from '../../assets/admin/database-backup.png'
 import selectedDiamond from '../../assets/instructor/quest-selected-diamond.png'
 import { useEffect, useState, useRef } from 'react'
@@ -10,16 +11,16 @@ const API = API_BASE
 // these match the exact tables our backend /api/admin/backup exports
 // added subject_sections, announcements, system_config because they're in our schema too
 const TABLES = [
-  { key: 'users',               label: 'Users',         icon: '👥', desc: 'User records and password hashes'  },
-  { key: 'subjects',            label: 'Subjects',      icon: '📖', desc: 'IT course subjects'                },
-  { key: 'subject_sections',    label: 'Class Codes',   icon: '🗂️', desc: 'Section schedules & capacity'      },
-  { key: 'problems',            label: 'Activities',    icon: '🧩', desc: 'Coding quests & test cases'         },
-  { key: 'submissions',         label: 'Submissions',   icon: '📝', desc: 'Student code submissions'           },
-  { key: 'audit_logs',          label: 'Audit Logs',    icon: '📜', desc: 'Admin activity history'             },
-  { key: 'achievements',        label: 'Achievements',  icon: '🏆', desc: 'Badge definitions & XP rewards'     },
-  { key: 'teacher_assignments', label: 'Assignments',   icon: '👨‍🏫', desc: 'Instructor–subject–section links'   },
-  { key: 'announcements',       label: 'Announcements', icon: '📢', desc: 'Instructor announcements'            },
-  { key: 'system_config',       label: 'System Config', icon: '⚙️', desc: 'Platform configuration keys'        },
+  { key: 'users',               label: 'Users',         icon: 'users', desc: 'User records and password hashes'  },
+  { key: 'subjects',            label: 'Subjects',      icon: 'book', desc: 'IT course subjects'                },
+  { key: 'subject_sections',    label: 'Class Codes',   icon: 'layers', desc: 'Section schedules & capacity'      },
+  { key: 'problems',            label: 'Activities',    icon: 'puzzle', desc: 'Coding quests & test cases'         },
+  { key: 'submissions',         label: 'Submissions',   icon: 'filetext', desc: 'Student code submissions'           },
+  { key: 'audit_logs',          label: 'Audit Logs',    icon: 'filetext', desc: 'Admin activity history'             },
+  { key: 'achievements',        label: 'Achievements',  icon: 'trophy', desc: 'Badge definitions & XP rewards'     },
+  { key: 'teacher_assignments', label: 'Assignments',   icon: 'link', desc: 'Instructor–subject–section links'   },
+  { key: 'announcements',       label: 'Announcements', icon: 'megaphone', desc: 'Instructor announcements'            },
+  { key: 'system_config',       label: 'System Config', icon: 'gear', desc: 'Platform configuration keys'        },
 ]
 
 // ── checkbox row for each table in the selective list ────────────────────────
@@ -33,7 +34,7 @@ function TableRow({ table, checked, onToggle }) {
         {checked ? <img src={selectedDiamond} alt="" className="size-6 object-contain" />
           : <span className="size-3 rotate-45 rounded-[1px] border border-amber-200" />}
       </span>
-      <span className="text-base leading-none flex-shrink-0">{table.icon}</span>
+      <AdminIcon name={table.icon} className="size-5 shrink-0 text-amber-200" />
       <div className="flex-1 min-w-0">
         <p className="text-sm text-white font-medium leading-tight">{table.label}</p>
         <p className="text-[11px] text-slate-400 mt-0.5 truncate">{table.desc}</p>
@@ -47,7 +48,7 @@ function ResultRow({ icon, label, children }) {
   return (
     <div className="flex items-start justify-between gap-3 py-2.5 border-b border-slate-700/30 last:border-0">
       <span className="flex items-center gap-1.5 text-xs text-slate-400 flex-shrink-0">
-        <span>{icon}</span>{label}
+        <AdminIcon name={icon} className="size-3.5" />{label}
       </span>
       <span className="min-w-0 break-words text-xs text-right text-white">{children}</span>
     </div>
@@ -278,7 +279,7 @@ export default function BackupDatabaseModal({ onClose }) {
                   {/* warn if nothing is selected — the start button will also be disabled */}
                   {selectedTables.length === 0 && (
                     <p className="text-red-400 text-xs mt-2 flex items-center gap-1.5">
-                      <span>⚠️</span> Select at least one table to continue
+                      <AdminIcon name="alert" className="size-3.5 shrink-0" /> Select at least one table to continue
                     </p>
                   )}
                 </div>
@@ -286,7 +287,7 @@ export default function BackupDatabaseModal({ onClose }) {
 
               {/* data sensitivity reminder — always shown */}
               <div className="flex items-start gap-3 p-3.5 bg-amber-900/20 border border-amber-600/30 rounded-xl">
-                <span className="text-amber-400 text-base flex-shrink-0 mt-0.5">⚠️</span>
+                <AdminIcon name="alert" className="mt-0.5 size-5 shrink-0 text-amber-400" />
                 <p className="text-amber-200/70 text-xs leading-relaxed">
                   Backups contain sensitive data including password hashes and emails.
                   Store the file securely and follow the institution's data retention policies.
@@ -307,7 +308,7 @@ export default function BackupDatabaseModal({ onClose }) {
                   disabled={mode === 'selective' && selectedTables.length === 0}
                   className="admin-button admin-button-primary flex-1 py-2.5 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl text-white font-bold text-sm transition flex items-center justify-center gap-2"
                 >
-                  <span>💾</span> Start Backup
+                  <AdminIcon name="save" className="size-4" /> Start Backup
                 </button>
               </div>
             </>
@@ -324,7 +325,7 @@ export default function BackupDatabaseModal({ onClose }) {
                   className="absolute inset-2 rounded-full border-2 border-emerald-800/30 border-t-emerald-600/60 animate-spin"
                   style={{ animationDirection: 'reverse', animationDuration: '1.5s' }}
                 />
-                <div className="absolute inset-0 flex items-center justify-center text-2xl">💾</div>
+                <div className="absolute inset-0 flex items-center justify-center text-emerald-300"><AdminIcon name="save" className="size-7" /></div>
               </div>
 
               <div>
@@ -344,8 +345,8 @@ export default function BackupDatabaseModal({ onClose }) {
 
               {/* success indicator */}
               <div className="text-center space-y-2">
-                <div className="w-16 h-16 mx-auto bg-emerald-600/15 border-2 border-emerald-500/40 rounded-full flex items-center justify-center text-3xl">
-                  ✅
+                <div className="w-16 h-16 mx-auto bg-emerald-600/15 border-2 border-emerald-500/40 rounded-full flex items-center justify-center text-emerald-300">
+                  <AdminIcon name="check" className="size-8" />
                 </div>
                 <h3 className="text-lg font-black text-white">SQL export ready</h3>
                 <p className="text-slate-400 text-xs">This file contains table data. Uploaded lesson files are stored separately.</p>
@@ -353,12 +354,12 @@ export default function BackupDatabaseModal({ onClose }) {
 
               {/* result detail card */}
               <div className="bg-slate-800/60 border border-slate-700/40 rounded-xl px-4 py-1">
-                <ResultRow icon="📁" label="Filename">
+                <ResultRow icon="folder" label="Filename">
                   <span className="font-mono text-[11px] text-emerald-300 break-all">{result.filename}</span>
                 </ResultRow>
-                <ResultRow icon="📅" label="Generated">{result.timestamp}</ResultRow>
-                <ResultRow icon="📊" label="Tables">{result.tableScope}</ResultRow>
-                <ResultRow icon="💽" label="File size">{result.sizeLabel}</ResultRow>
+                <ResultRow icon="calendar" label="Generated">{result.timestamp}</ResultRow>
+                <ResultRow icon="table" label="Tables">{result.tableScope}</ResultRow>
+                <ResultRow icon="disk" label="File size">{result.sizeLabel}</ResultRow>
               </div>
 
               {/* this is what they actually want — download the .sql file */}
@@ -366,7 +367,7 @@ export default function BackupDatabaseModal({ onClose }) {
                 onClick={downloadFile}
                 className="admin-button admin-button-primary w-full py-3 rounded-xl text-white font-bold text-sm transition flex items-center justify-center gap-2"
               >
-                <span>⬇️</span> Download Backup File
+                <AdminIcon name="download" className="size-4" /> Download Backup File
               </button>
 
               {/* secondary actions */}
@@ -375,7 +376,7 @@ export default function BackupDatabaseModal({ onClose }) {
                   onClick={handleReset}
                   className="admin-button flex-1 py-2.5 border rounded-xl text-slate-300 font-semibold text-sm transition"
                 >
-                  ↩ New Backup
+                  <AdminIcon name="redo" className={INLINE} />New Backup
                 </button>
                 <button
                   onClick={handleClose}
@@ -393,8 +394,8 @@ export default function BackupDatabaseModal({ onClose }) {
 
               {/* error indicator */}
               <div className="text-center space-y-2">
-                <div className="w-16 h-16 mx-auto bg-red-600/15 border-2 border-red-500/40 rounded-full flex items-center justify-center text-3xl">
-                  ❌
+                <div className="w-16 h-16 mx-auto bg-red-600/15 border-2 border-red-500/40 rounded-full flex items-center justify-center text-red-300">
+                  <AdminIcon name="x" className="size-8" />
                 </div>
                 <h3 className="text-lg font-black text-white">Backup Failed</h3>
                 <p className="text-slate-400 text-xs">Something went wrong on the server.</p>
@@ -415,7 +416,7 @@ export default function BackupDatabaseModal({ onClose }) {
                   onClick={handleReset}
                   className="admin-button admin-button-primary flex-1 py-2.5 rounded-xl text-white font-bold text-sm transition"
                 >
-                  ↩ Try Again
+                  <AdminIcon name="redo" className={INLINE} />Try Again
                 </button>
                 <button
                   onClick={handleClose}
