@@ -5,6 +5,7 @@ import SubjectManagement from './SubjectsManagement'
 import RecoveryModal from './RecoveryModal'
 import AdminActionDialog from './AdminActionDialog'
 import AdminConfirmDialog from './AdminConfirmDialog'
+import FormBanner from './FormBanner'
 import createUsersEmblem from '../../assets/admin/create-users.png'
 import studentRoleIcon from '../../assets/admin/role-student.png'
 import instructorRoleIcon from '../../assets/admin/role-instructor.png'
@@ -57,7 +58,7 @@ export default function UserManagement() {
   })
   const [addUserLoading, setAddUserLoading] = useState(false)
   const [addUserError, setAddUserError] = useState('')
-  const [addUserSuccess, setAddUserSuccess] = useState('')
+  const [addUserSuccess, setAddUserSuccess] = useState(null)
   const [csvModal, setCsvModal] = useState(false)
   const [activeTab, setActiveTab] = useState('users')
 
@@ -96,19 +97,19 @@ export default function UserManagement() {
   const resetAddUserForm = () => {
     setAddUserForm({ username: '', password: '', role: 'student', section_id: '' })
     setAddUserError('')
-    setAddUserSuccess('')
+    setAddUserSuccess(null)
   }
 
   // Validate the new user form and submit it to the server
   const handleAddUser = async () => {
     setAddUserError('')
-    setAddUserSuccess('')
+    setAddUserSuccess(null)
     const isStudent = addUserForm.role === 'student'
     if (!addUserForm.username.trim() || !addUserForm.password) {
       setAddUserError(isStudent ? 'Student ID and password are required.' : 'Username and password are required.')
       return
     }
-    if (addUserForm.password.length < 8) {
+    if (addUserForm.password.length < 8 || !/[A-Za-z]/.test(addUserForm.password) || !/\d/.test(addUserForm.password)) {
       setAddUserError('Password must be at least 8 characters, with a letter and a number.')
       return
     }
@@ -125,17 +126,19 @@ export default function UserManagement() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       })
-      const data = await res.json()
-      if (res.ok) {
-        setAddUserSuccess(`✅ User "${data.user.username}" created successfully!`)
+      const data = await res.json().catch(() => null)
+      if (res.ok && data?.user) {
+        const roleLabel = { student: 'Student', instructor: 'Instructor', administrator: 'Administrator' }[payload.role]
+        setAddUserSuccess({ username: data.user.username, roleLabel })
         setAddUserForm({ username: '', password: '', role: 'student', section_id: '' })
         fetchUsers()
-        setTimeout(() => { setAddUserModal(false); setAddUserSuccess('') }, 2000)
+      } else if (res.ok || res.status >= 500) {
+        setAddUserError('The server did not confirm the new account. Check the user list before trying again.')
       } else {
-        setAddUserError(data.error || 'Failed to create user')
+        setAddUserError(data?.error || 'Failed to create user')
       }
     } catch {
-      setAddUserError('Network error. Please try again.')
+      setAddUserError('Could not confirm the new account. Check your connection and the user list before trying again.')
     } finally {
       setAddUserLoading(false)
     }
@@ -562,14 +565,12 @@ export default function UserManagement() {
             >
                 <div className="admin-action-scroll flex-1 space-y-4 p-4 sm:p-6">
                   {addUserError && (
-                    <div className="flex items-center gap-2 p-3 bg-red-600/20 border border-red-600/40 rounded-lg text-red-300 text-sm">
-                      <span>❌</span> {addUserError}
-                    </div>
+                    <FormBanner tone="error" title="Could not create the account">{addUserError}</FormBanner>
                   )}
                   {addUserSuccess && (
-                    <div className="flex items-center gap-2 p-3 bg-green-600/20 border border-green-600/40 rounded-lg text-green-300 text-sm">
-                      <span>✅</span> {addUserSuccess}
-                    </div>
+                    <FormBanner tone="success" title="Account created">
+                      <span className="font-mono font-semibold text-white">{addUserSuccess.username}</span> was added as a {addUserSuccess.roleLabel}. You can add another account or close this window.
+                    </FormBanner>
                   )}
 
                   <div>
@@ -656,7 +657,7 @@ export default function UserManagement() {
                     onClick={() => { setAddUserModal(false); resetAddUserForm() }}
                     className="admin-button flex-1 py-2.5 rounded-lg text-slate-300 font-medium transition"
                   >
-                    Cancel
+                    {addUserSuccess ? 'Done' : 'Cancel'}
                   </button>
                   <button
                     onClick={handleAddUser}
@@ -665,7 +666,7 @@ export default function UserManagement() {
                   >
                     {addUserLoading
                       ? <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Creating...</>
-                      : <><span>👤</span> Create User</>}
+                      : <><span aria-hidden="true">👤</span> {addUserSuccess ? 'Add another' : 'Create User'}</>}
                   </button>
                 </div>
             </AdminActionDialog>

@@ -1,6 +1,7 @@
 import { useId, useState } from 'react'
 import { API_BASE, authFetch } from '../../api/client'
 import AdminActionDialog from './AdminActionDialog'
+import FormBanner from './FormBanner'
 import passwordEmblem from '../../assets/account-password.png'
 
 // minimalist line-art eye icons for the password show/hide toggle
@@ -107,16 +108,8 @@ export default function RecoveryModal({ user, onClose, onSuccess }) {
             </div>
           </div>
 
-          {error && (
-            <div role="alert" className="p-3 bg-red-600/20 border border-red-600/40 rounded-lg text-red-300 text-sm">
-              {error}
-            </div>
-          )}
-          {success && (
-            <div role="status" className="p-3 bg-green-600/20 border border-green-600/40 rounded-lg text-green-300 text-sm">
-              {success}
-            </div>
-          )}
+          {error && <FormBanner tone="error" title="Could not reset the password">{error}</FormBanner>}
+          {success && <FormBanner tone="success" title="Password reset">{success}</FormBanner>}
 
           {!success && (
             <fieldset disabled={loading} className="min-w-0 space-y-4">

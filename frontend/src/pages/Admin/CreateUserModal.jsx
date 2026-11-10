@@ -1,4 +1,5 @@
 import AdminActionDialog from './AdminActionDialog'
+import FormBanner from './FormBanner'
 import createUsers from '../../assets/admin/create-users.png'
 import classCodes from '../../assets/admin/class-codes.png'
 import studentRole from '../../assets/admin/role-student.png'
@@ -315,13 +316,7 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
   return (
     <AdminActionDialog title="Create / Enroll Users" description="Create one account or enroll students from a CSV." emblem={createUsers} onClose={onClose} busy={busy}>
       {/* single-user form toast */}
-      {toast && (
-        <div role="alert" className={`mx-3 mt-3 shrink-0 break-words px-3 py-3 rounded-xl font-semibold text-sm text-white shadow-2xl flex items-center gap-2 ${
-          toast.type === 'error' ? 'bg-red-600' : 'bg-emerald-600'
-        }`}>
-          {toast.type === 'error' ? '❌' : '✅'} {toast.message}
-        </div>
-      )}
+      {toast && <FormBanner tone={toast.type === 'error' ? 'error' : 'success'} className="mx-3 mt-3 shrink-0">{toast.message}</FormBanner>}
 
         {/* ── tab switcher ── */}
         <div className="grid shrink-0 grid-cols-2 gap-2 border-b border-amber-300/20 px-3 py-3 sm:px-6">
@@ -598,15 +593,7 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
             <div className="space-y-5 p-4 sm:p-6">
 
               {/* csv toast */}
-              {csvToast && (
-                <div className={`px-4 py-2.5 rounded-xl text-sm font-semibold flex items-center gap-2 ${
-                  csvToast.type === 'error'
-                    ? 'bg-red-600/20 border border-red-600/40 text-red-300'
-                    : 'bg-emerald-600/20 border border-emerald-600/40 text-emerald-300'
-                }`}>
-                  {csvToast.type === 'error' ? '❌' : '✅'} {csvToast.msg}
-                </div>
-              )}
+              {csvToast && <FormBanner tone={csvToast.type === 'error' ? 'error' : 'success'}>{csvToast.msg}</FormBanner>}
 
               {/* ── SELECT step: drop zone + info ── */}
               {csvStep === 'select' && (
