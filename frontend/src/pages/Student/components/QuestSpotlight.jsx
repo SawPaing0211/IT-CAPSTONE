@@ -8,6 +8,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '../../../api/client'
+import { parseApiTimestamp } from '../../../utils/apiTimestamp'
 import QuestButton from './QuestButton'
 import bannerArt from '../../../assets/landing/dashboard-spotlight-banner.webp'
 
@@ -21,7 +22,7 @@ function pickSpotlight(groups) {
   if (all.length === 0) return null
   const dated = all.filter(x => x.quest.due_date)
   if (dated.length > 0) {
-    return dated.reduce((a, b) => (new Date(b.quest.due_date) < new Date(a.quest.due_date) ? b : a))
+    return dated.reduce((a, b) => (parseApiTimestamp(b.quest.due_date) < parseApiTimestamp(a.quest.due_date) ? b : a))
   }
   return all[0]
 }

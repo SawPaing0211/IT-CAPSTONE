@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { API_BASE, authFetch } from '../../api/client'
+import { parseApiTimestamp } from '../../utils/apiTimestamp'
 import AdminActionDialog from './AdminActionDialog'
 import UploadSectionsModal from './UploadSectionsModal'
 import AdminConfirmDialog from './AdminConfirmDialog'
@@ -515,7 +516,7 @@ function EnrolledStudentsModal({ section, onClose }) {
               </div>
 
               <span style={{ fontSize: '0.7rem', color: '#475569', flexShrink: 0 }}>
-                {new Date(s.enrolled_at).toLocaleDateString()}
+                {parseApiTimestamp(s.enrolled_at)?.toLocaleDateString()}
               </span>
             </div>
           ))}

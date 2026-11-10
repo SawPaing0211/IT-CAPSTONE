@@ -7,6 +7,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { api } from '../../api/client'
+import { parseApiTimestamp } from '../../utils/apiTimestamp'
 import QuestButton from './components/QuestButton'
 import { CourseEmblem } from './components/CourseGrid'
 
@@ -43,8 +44,8 @@ function RuneIcon({ debugging }) {
 
 function dueText(d) {
   if (!d) return null
-  const t = new Date(d)
-  if (isNaN(t)) return null
+  const t = parseApiTimestamp(d)
+  if (!t) return null
   return `Due ${t.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`
 }
 

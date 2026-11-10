@@ -5,6 +5,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '../../../api/client'
+import { parseApiTimestamp } from '../../../utils/apiTimestamp'
 import QuestButton from './QuestButton'
 import SectionTitle from './SectionTitle'
 
@@ -14,8 +15,8 @@ function flatten(groups) {
   const all = []
   for (const g of groups || []) for (const q of g.quests || []) all.push({ quest: q, group: g })
   all.sort((a, b) => {
-    const da = a.quest.due_date ? new Date(a.quest.due_date).getTime() : Infinity
-    const db = b.quest.due_date ? new Date(b.quest.due_date).getTime() : Infinity
+    const da = a.quest.due_date ? (parseApiTimestamp(a.quest.due_date)?.getTime() ?? Infinity) : Infinity
+    const db = b.quest.due_date ? (parseApiTimestamp(b.quest.due_date)?.getTime() ?? Infinity) : Infinity
     return da - db
   })
   return all
@@ -23,8 +24,8 @@ function flatten(groups) {
 
 function dueText(d) {
   if (!d) return null
-  const t = new Date(d)
-  if (isNaN(t)) return null
+  const t = parseApiTimestamp(d)
+  if (!t) return null
   return `Due ${t.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`
 }
 

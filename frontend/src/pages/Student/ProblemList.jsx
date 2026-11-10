@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { API_BASE, authFetch } from '../../api/client'
+import { parseApiTimestamp } from '../../utils/apiTimestamp'
 
 const PAGE_SIZE = 6
 const DIFF_ORDER = { Easy: 0, Medium: 1, Hard: 2 }
@@ -93,7 +94,7 @@ export default function ProblemList({ onSelectQuest, currentLevel, sectionId, su
     list = [...list]
     if (sort === 'xp') list.sort((a, b) => b.xp_reward - a.xp_reward)
     else if (sort === 'difficulty') list.sort((a, b) => (DIFF_ORDER[a.difficulty] ?? 9) - (DIFF_ORDER[b.difficulty] ?? 9))
-    else if (sort === 'due') list.sort((a, b) => (a.due_date ? new Date(a.due_date) : Infinity) - (b.due_date ? new Date(b.due_date) : Infinity))
+    else if (sort === 'due') list.sort((a, b) => (a.due_date ? parseApiTimestamp(a.due_date) : Infinity) - (b.due_date ? parseApiTimestamp(b.due_date) : Infinity))
     else list.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
     return list
   }, [quests, search, langFilter, sort])
@@ -198,7 +199,7 @@ export default function ProblemList({ onSelectQuest, currentLevel, sectionId, su
                       ))}
                       {st.multi && st.started && <span>{st.done.length} of {st.total} languages</span>}
                       {quest.estimated_time ? <span>~{quest.estimated_time} min</span> : null}
-                      {quest.due_date && <span className="text-orange-300">Due {new Date(quest.due_date).toLocaleDateString()}</span>}
+                      {quest.due_date && <span className="text-orange-300">Due {parseApiTimestamp(quest.due_date)?.toLocaleDateString()}</span>}
                       {!sectionId && quest.section_names?.[0] && <span>{quest.section_names[0]}</span>}
                     </span>
                   </span>

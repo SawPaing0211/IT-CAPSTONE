@@ -8,14 +8,16 @@ import CreateUserModal from './CreateUserModal'
 import BackupDatabaseModal from './BackupDatabaseModal'
 import SystemSettingsModal from './SystemSettingsModal'
 import { API_BASE, authFetch } from '../../api/client'
+import { parseApiTimestamp } from '../../utils/apiTimestamp'
 
 const API = API_BASE
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 function relativeTime(iso) {
-  if (!iso) return 'N/A'
-  const diff = Math.floor((Date.now() - new Date(iso)) / 1000)
+  const when = parseApiTimestamp(iso)
+  if (!when) return 'N/A'
+  const diff = Math.max(0, Math.floor((Date.now() - when) / 1000))
   if (diff < 60)   return 'Just now'
   if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
   if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
