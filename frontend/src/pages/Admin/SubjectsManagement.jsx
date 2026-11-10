@@ -6,6 +6,9 @@ import AdminToast from './AdminToast'
 import AdminIcon from './AdminIcons'
 import subjectSeal from '../../assets/admin/subject-seal.svg'
 import subjectEditSeal from '../../assets/admin/subject-edit-seal.svg'
+import statSubjects from '../../assets/admin/stat-subjects.png'
+import statDepartments from '../../assets/admin/stat-departments.png'
+import statAvgUnits from '../../assets/admin/stat-avg-units.png'
 
 // Accent per year level so the list reads as four cohorts instead of one
 // repeated card — year is the one piece of structure every subject has.
@@ -390,14 +393,14 @@ export default function SubjectsManagement() {
       {/* Stats */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div className="flex items-center gap-3 bg-slate-900/60 border border-slate-800 rounded-xl px-4 py-3">
-          <div className="w-9 h-9 rounded-lg bg-purple-600/15 text-purple-300 flex items-center justify-center shrink-0"><AdminIcon name="book" className="size-5" /></div>
+          <img src={statSubjects} alt="" className="size-12 shrink-0 object-contain" />
           <div>
             <p className="text-2xl font-bold text-white leading-none">{subjects.length}</p>
             <p className="text-slate-500 text-xs mt-1">Total Subjects</p>
           </div>
         </div>
         <div className="flex items-center gap-3 bg-slate-900/60 border border-slate-800 rounded-xl px-4 py-3">
-          <div className="w-9 h-9 rounded-lg bg-blue-600/15 text-blue-300 flex items-center justify-center shrink-0"><AdminIcon name="building" className="size-5" /></div>
+          <img src={statDepartments} alt="" className="size-12 shrink-0 object-contain" />
           <div>
             <p className="text-2xl font-bold text-white leading-none">
               {new Set(subjects.map(s => s.department).filter(Boolean)).size}
@@ -406,7 +409,7 @@ export default function SubjectsManagement() {
           </div>
         </div>
         <div className="flex items-center gap-3 bg-slate-900/60 border border-slate-800 rounded-xl px-4 py-3">
-          <div className="w-9 h-9 rounded-lg bg-emerald-600/15 text-emerald-300 flex items-center justify-center shrink-0"><AdminIcon name="clock" className="size-5" /></div>
+          <img src={statAvgUnits} alt="" className="size-12 shrink-0 object-contain" />
           <div>
             <p className="text-2xl font-bold text-white leading-none">
               {subjects.length && subjects.some(s => s.units)
