@@ -24,6 +24,7 @@ import passwordEmblem from '../../assets/account-password.png'
 import progressEmblem from '../../assets/account-progress.png'
 import exitPortal from '../../assets/account-logout.png'
 import '../../components/AccountPanels.css'
+import { parseApiTimestamp } from '../../utils/apiTimestamp'
 
 // ─── Spell templates per language ─────────────────────────────────────────
 const SPELL_TEMPLATES = {
@@ -853,7 +854,7 @@ export default function StudentDashboard({ user, onLogout }) {
         const data = await api.get('/api/student/announcements')
         const readIds = loadReadIds()
         setNotifications(data.map(a => {
-          const created = new Date(a.created_at)
+          const created = parseApiTimestamp(a.created_at) || new Date(0)
           return {
             id: a.id,
             title: a.title,

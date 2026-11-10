@@ -10,6 +10,7 @@ import { splitAchievements, isUnavailable } from '../../../utils/achievementView
 import MedalArt from '../../../components/MedalArt'
 import MobileSheet from '../../../components/MobileSheet'
 import { API_BASE, authFetch } from '../../../api/client'
+import { parseApiTimestamp } from '../../../utils/apiTimestamp'
 import pythonEmblem from '../../../assets/instructor/quest-language-python.png'
 import javaEmblem from '../../../assets/instructor/quest-language-java.png'
 import csharpEmblem from '../../../assets/instructor/quest-language-csharp.png'
@@ -133,8 +134,9 @@ export default function ProgressStats({ stats, username, fullName, onOpenQuests 
     const start = new Date(today); start.setDate(today.getDate() - mondayOffset - 21)
     const counts = {}
     recentSubmissions.forEach(s => {
-      if (!s.submitted_at) return
-      const k = localKey(new Date(s.submitted_at))
+      const when = parseApiTimestamp(s.submitted_at)
+      if (!when) return
+      const k = localKey(when)
       counts[k] = (counts[k] || 0) + 1
     })
     const days = []
@@ -455,7 +457,7 @@ export default function ProgressStats({ stats, username, fullName, onOpenQuests 
                 <div className="min-w-0">
                   <p className="font-cinzel text-sm font-bold text-amber-50">{s.problem_title || 'Quest'}</p>
                   <p className="text-[11px] text-slate-500">
-                    {new Date(s.submitted_at).toLocaleDateString()}
+                    {parseApiTimestamp(s.submitted_at)?.toLocaleDateString() || ''}
                     {s.difficulty ? ` · ${s.difficulty}` : ''}
                     {s.language ? ` · ${({ python: 'Python', java: 'Java', csharp: 'C#' })[s.language] || s.language}` : ''}
                   </p>

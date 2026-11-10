@@ -112,7 +112,7 @@ return {
   const attempted = submissions.filter(s => s.status !== 'not_started').length
   const xpEarned = submissions.reduce((sum, s) => {
     if (!s.submission) return sum
-    return sum + (s.status === 'conquered' ? (s.xp_reward || 0) : (s.submission.score ?? 0))
+    return sum + (s.submission.score ?? 0)
   }, 0)
   const rate = attempted > 0 ? Math.round((conquered / attempted) * 100) : 0
 
@@ -176,7 +176,7 @@ return {
                 <span className={`rounded border px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${st.cls}`}>{st.label}</span>
                 <span className={`min-w-[84px] text-right font-cinzel text-lg font-bold ${isConquered ? 'text-amber-300' : 'text-slate-500'}`}>
                   {quest.submission
-                    ? (isConquered ? `+${quest.xp_reward} XP` : `${quest.submission.score ?? 0} / ${quest.xp_reward}`)
+                    ? (isConquered ? `+${quest.submission.score ?? 0} XP` : `${quest.submission.score ?? 0} / ${quest.xp_reward}`)
                     : `${quest.xp_reward} XP`}
                 </span>
               </div>

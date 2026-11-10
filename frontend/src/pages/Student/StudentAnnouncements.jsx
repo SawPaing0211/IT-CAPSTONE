@@ -9,6 +9,7 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import { api } from '../../api/client'
+import { parseApiTimestamp } from '../../utils/apiTimestamp'
 
 const PRIORITY = {
   low:    { label: 'Low',    cls: 'text-slate-400 border-slate-500/40 bg-slate-500/10' },
@@ -156,7 +157,7 @@ export default function StudentAnnouncements({ classId, sectionName, readIds, on
                     <span className="flex flex-wrap items-center gap-2 text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">
                       <span>Instructor · {a.instructor}</span>
                       <span aria-hidden="true">·</span>
-                      <span>{new Date(a.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                      <span>{parseApiTimestamp(a.created_at)?.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}</span>
                     </span>
                     <span className="mt-1.5 block font-cinzel text-lg font-bold leading-snug text-amber-50">{a.title}</span>
                     <span className={`mt-1.5 block whitespace-pre-line text-sm leading-relaxed text-slate-300 ${open ? '' : 'line-clamp-2'}`}>
