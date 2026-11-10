@@ -636,6 +636,22 @@ def is_head_admin(user):
     return bool(HEAD_ADMIN_EMAIL) and normalize_email(user.email) == HEAD_ADMIN_EMAIL
 
 
+def lockout_exempt(user):
+    """The head administrator is never locked out by the 3-attempt rule (it is the recovery account, so a
+    typo streak or someone else's guessing must not shut it out). Wrong passwords on it are throttled instead."""
+    return is_head_admin(user)
+
+
+def head_admin_throttled(user, max_fails=10, period=60):
+    """Counts a failed head-admin sign-in; True once there were more than max_fails in the last period seconds."""
+    key = f"head-admin-fail:{user.id}"
+    now = time.time()
+    recent = [t for t in rate_limit_store.get(key, []) if now - t < period]
+    recent.append(now)
+    rate_limit_store[key] = recent
+    return len(recent) > max_fails
+
+
 def admin_target_error(actor, target):
     # Otherwise a regular admin could reset the head's password and take over.
     if target.role == 'administrator' and not is_head_admin(actor):
@@ -1186,7 +1202,11 @@ def login():
         logger.warning("Login identifier matched more than one account; refused.")
         return jsonify({"error": "Invalid credentials"}), 401
 
-    # Check account-level lockout first
+    # Check account-level lockout first (the head administrator is exempt and any old lock is cleared)
+    if user and user.locked_until and lockout_exempt(user):
+        user.login_attempts = 0
+        user.locked_until = None
+        db.session.commit()
     if user and user.locked_until:
         if user.locked_until > datetime.utcnow():
             remaining = int((user.locked_until - datetime.utcnow()).total_seconds())
@@ -1203,6 +1223,10 @@ def login():
             db.session.commit()
 
     if not user or not check_password_hash(user.password_hash, data['password']):
+        if user and lockout_exempt(user):
+            if head_admin_throttled(user):
+                return jsonify({"error": "Too many attempts", "message": "Too many wrong passwords in a short time. Wait a minute and try again."}), 429
+            return jsonify({"error": "Invalid credentials"}), 401
         if user:
             user.login_attempts = (user.login_attempts or 0) + 1
             if user.login_attempts >= 3:
@@ -1266,10 +1290,11 @@ def change_password():
         return jsonify({"error": "Account locked", "message": "Too many failed attempts. Contact your system administrator."}), 423
     if not check_password_hash(user.password_hash, current):
         # same safeguard as sign-in: repeated wrong current passwords lock the account
-        user.login_attempts = (user.login_attempts or 0) + 1
-        if user.login_attempts >= 3:
-            user.locked_until = datetime.utcnow() + timedelta(minutes=15)
-        db.session.commit()
+        if not lockout_exempt(user):
+            user.login_attempts = (user.login_attempts or 0) + 1
+            if user.login_attempts >= 3:
+                user.locked_until = datetime.utcnow() + timedelta(minutes=15)
+            db.session.commit()
         return jsonify({"error": "Current password is incorrect."}), 400
     err = password_policy_error(new, user)
     if err:
