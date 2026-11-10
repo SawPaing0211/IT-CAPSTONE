@@ -765,7 +765,7 @@ function UserSection({ title, icon, users, onManage, onRecover, onDelete, onUnlo
                   </div>
                 </td>
 
-                <td role="cell" className="admin-record-actions p-4 xl:w-64">
+                <td role="cell" className="admin-record-actions p-4 xl:whitespace-nowrap">
                   <div className="flex flex-col gap-2">
                     <div className="admin-user-actions">
                       <button

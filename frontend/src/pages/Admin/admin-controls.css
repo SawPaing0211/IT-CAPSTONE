@@ -275,7 +275,7 @@
 }
 
 .admin-workspace .admin-user-actions {
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 
 .admin-workspace .admin-user-actions .admin-button,
@@ -301,6 +301,10 @@
 }
 
 @media (max-width: 74.99rem) {
+  .admin-workspace .admin-user-actions {
+    flex-wrap: wrap;
+  }
+
   .admin-record-table,
   .admin-record-table tbody {
     display: block;
