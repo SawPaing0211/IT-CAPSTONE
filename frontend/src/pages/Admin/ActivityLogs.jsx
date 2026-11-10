@@ -1,4 +1,5 @@
 import AdminToast from './AdminToast'
+import AdminIcon, { INLINE } from './AdminIcons'
 import { Fragment, useState, useEffect, useRef, useCallback } from 'react'
 import { API_BASE, authFetch } from '../../api/client'
 import { parseApiTimestamp } from '../../utils/apiTimestamp'
@@ -7,34 +8,34 @@ import { parseApiTimestamp } from '../../utils/apiTimestamp'
 
 const ACTION_META = {
   // 🔴 Critical / Destructive
-  USER_DELETED:       { color: 'red',    icon: '🗑️',  label: 'User Deleted',       tier: 'critical' },
-  SUBJECT_DELETED:    { color: 'red',    icon: '📚',  label: 'Subject Deleted',    tier: 'critical' },
-  SECTION_DELETED:    { color: 'red',    icon: '🏫',  label: 'Section Deleted',    tier: 'critical' },
+  USER_DELETED:       { color: 'red',    icon: 'trash',  label: 'User Deleted',       tier: 'critical' },
+  SUBJECT_DELETED:    { color: 'red',    icon: 'book',  label: 'Subject Deleted',    tier: 'critical' },
+  SECTION_DELETED:    { color: 'red',    icon: 'school',  label: 'Section Deleted',    tier: 'critical' },
 
-  DATABASE_BACKUP:    { color: 'red',    icon: '💾',  label: 'DB Backup',          tier: 'critical' },
+  DATABASE_BACKUP:    { color: 'red',    icon: 'save',  label: 'DB Backup',          tier: 'critical' },
 
   // 🟡 Important / Structural
-  INSTRUCTOR_ASSIGNED:           { color: 'amber',  icon: '👨‍🏫', label: 'Instructor Assigned',    tier: 'important' },
-  INSTRUCTOR_UNASSIGNED:         { color: 'amber',  icon: '👤',  label: 'Instructor Removed',     tier: 'important' },
-  INSTRUCTOR_ASSIGNMENT_UPDATED: { color: 'amber',  icon: '🔄',  label: 'Assignment Updated',     tier: 'important' },
-  BULK_ENROLLMENT_UPLOAD:        { color: 'amber',  icon: '📤',  label: 'Bulk Enrollment',        tier: 'important' },
-  SECTIONS_BULK_UPLOAD:          { color: 'amber',  icon: '📋',  label: 'Sections Bulk Upload',   tier: 'important' },
-  CONFIG_UPDATED:                { color: 'amber',  icon: '⚙️',  label: 'Config Updated',         tier: 'important' },
-  SUBJECTS_SEEDED:               { color: 'amber',  icon: '🌱',  label: 'Subjects Seeded',        tier: 'important' },
+  INSTRUCTOR_ASSIGNED:           { color: 'amber',  icon: 'link', label: 'Instructor Assigned',    tier: 'important' },
+  INSTRUCTOR_UNASSIGNED:         { color: 'amber',  icon: 'user',  label: 'Instructor Removed',     tier: 'important' },
+  INSTRUCTOR_ASSIGNMENT_UPDATED: { color: 'amber',  icon: 'redo',  label: 'Assignment Updated',     tier: 'important' },
+  BULK_ENROLLMENT_UPLOAD:        { color: 'amber',  icon: 'upload',  label: 'Bulk Enrollment',        tier: 'important' },
+  SECTIONS_BULK_UPLOAD:          { color: 'amber',  icon: 'clipboard',  label: 'Sections Bulk Upload',   tier: 'important' },
+  CONFIG_UPDATED:                { color: 'amber',  icon: 'gear',  label: 'Config Updated',         tier: 'important' },
+  SUBJECTS_SEEDED:               { color: 'amber',  icon: 'leaf',  label: 'Subjects Seeded',        tier: 'important' },
 
   // 🔵 Routine / User management
-  USER_CREATED:       { color: 'blue',   icon: '👤',  label: 'User Created',       tier: 'routine' },
-  USER_UPDATED:       { color: 'blue',   icon: '✏️',  label: 'User Updated',       tier: 'routine' },
-  BULK_USER_UPLOAD:   { color: 'blue',   icon: '👥',  label: 'Bulk User Upload',   tier: 'routine' },
-  PASSWORD_RESET:     { color: 'blue',   icon: '🔑',  label: 'Password Reset',     tier: 'routine' },
-  SECTION_CREATED:    { color: 'blue',   icon: '🏫',  label: 'Section Created',    tier: 'routine' },
-  SECTION_UPDATED:    { color: 'blue',   icon: '🏫',  label: 'Section Updated',    tier: 'routine' },
-  SUBJECT_CREATED:    { color: 'blue',   icon: '📚',  label: 'Subject Created',    tier: 'routine' },
-  SUBJECT_UPDATED:    { color: 'blue',   icon: '📚',  label: 'Subject Updated',    tier: 'routine' },
+  USER_CREATED:       { color: 'blue',   icon: 'user',  label: 'User Created',       tier: 'routine' },
+  USER_UPDATED:       { color: 'blue',   icon: 'edit',  label: 'User Updated',       tier: 'routine' },
+  BULK_USER_UPLOAD:   { color: 'blue',   icon: 'users',  label: 'Bulk User Upload',   tier: 'routine' },
+  PASSWORD_RESET:     { color: 'blue',   icon: 'key',  label: 'Password Reset',     tier: 'routine' },
+  SECTION_CREATED:    { color: 'blue',   icon: 'school',  label: 'Section Created',    tier: 'routine' },
+  SECTION_UPDATED:    { color: 'blue',   icon: 'school',  label: 'Section Updated',    tier: 'routine' },
+  SUBJECT_CREATED:    { color: 'blue',   icon: 'book',  label: 'Subject Created',    tier: 'routine' },
+  SUBJECT_UPDATED:    { color: 'blue',   icon: 'book',  label: 'Subject Updated',    tier: 'routine' },
 
   // 🟢 Info / Positive
-  USER_UNLOCKED:      { color: 'green',  icon: '🔓',  label: 'User Unlocked',      tier: 'info' },
-  EMAIL_UPDATED:      { color: 'green',  icon: '📧',  label: 'Email Updated',      tier: 'info' },
+  USER_UNLOCKED:      { color: 'green',  icon: 'unlock',  label: 'User Unlocked',      tier: 'info' },
+  EMAIL_UPDATED:      { color: 'green',  icon: 'mail',  label: 'Email Updated',      tier: 'info' },
 }
 
 const TIER_COLORS = {
@@ -59,7 +60,7 @@ const DATE_PRESETS = [
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function getMeta(action) {
-  return ACTION_META[action] || { color: 'unknown', icon: '⚙️', label: action, tier: 'unknown' }
+  return ACTION_META[action] || { color: 'unknown', icon: 'gear', label: action, tier: 'unknown' }
 }
 
 function getTierColors(tier) {
@@ -110,7 +111,7 @@ function StatCard({ label, value, icon, color, tooltip }) {
           <p className="text-slate-400 text-xs font-medium uppercase tracking-widest mb-1">{label}</p>
           <p className={`text-2xl font-black ${cls.split(' ')[1]}`}>{value}</p>
         </div>
-        <span className="text-xl opacity-80">{icon}</span>
+        <AdminIcon name={icon} className="size-5 opacity-80" />
       </div>
     </div>
   )
@@ -122,7 +123,7 @@ function ActionBadge({ action }) {
   return (
     <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-bold tracking-wide ${tc.badge}`}>
       <span className={`w-1.5 h-1.5 rounded-full ${tc.dot} shrink-0`} />
-      {meta.icon} {meta.label}
+      <AdminIcon name={meta.icon} className="mr-1 inline-block size-3.5 align-[-0.15em]" />{meta.label}
     </span>
   )
 }
@@ -202,7 +203,7 @@ function MultiSelect({ options, selected, onChange, placeholder }) {
           </div>
           <div className="max-h-72 overflow-y-auto py-1">
             {/* Group by tier */}
-            {[['critical','🔴 Critical'], ['important','🟡 Important'], ['routine','🔵 Routine'], ['info','🟢 Info']].map(([tier, tierLabel]) => {
+            {[['critical','Critical'], ['important','Important'], ['routine','Routine'], ['info','Info']].map(([tier, tierLabel]) => {
               const actions = options.filter(a => getMeta(a).tier === tier)
               if (!actions.length) return null
               return (
@@ -221,7 +222,7 @@ function MultiSelect({ options, selected, onChange, placeholder }) {
                         <span className={`w-4 h-4 rounded border flex items-center justify-center text-xs shrink-0 ${checked ? 'bg-purple-600 border-purple-600 text-white' : 'border-slate-600'}`}>
                           {checked && '✓'}
                         </span>
-                        <span>{meta.icon}</span>
+                        <AdminIcon name={meta.icon} className="size-4 shrink-0" />
                         <span>{meta.label}</span>
                       </button>
                     )
@@ -357,28 +358,28 @@ export default function ActivityLogs() {
         <StatCard
           label="Total Actions"
           value={stats?.total?.toLocaleString() ?? '—'}
-          icon="📋"
+          icon="clipboard"
           color="purple"
           tooltip="All-time audit log entries"
         />
         <StatCard
           label="Actions Today"
           value={stats?.today ?? '—'}
-          icon="📅"
+          icon="calendar"
           color="blue"
           tooltip="Actions logged since midnight"
         />
         <StatCard
           label="Active Admins"
           value={stats?.unique_users ?? '—'}
-          icon="🛡️"
+          icon="shield"
           color="green"
           tooltip="Unique administrator accounts that have performed at least one action"
         />
         <StatCard
           label="Critical Actions"
           value={stats?.critical_total ?? '—'}
-          icon="🚨"
+          icon="alert"
           color="red"
           tooltip="Deletions, config changes, and log clears — high-impact operations"
         />
@@ -396,7 +397,7 @@ export default function ActivityLogs() {
             onChange={e => setSearchInput(e.target.value)}
             className="w-full bg-slate-900/80 border border-slate-700 hover:border-slate-600 rounded-xl pl-10 pr-4 py-2.5 text-white text-sm focus:border-purple-500 outline-none transition"
           />
-          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm">🔍</span>
+          <AdminIcon name="search" className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-500" />
         </div>
 
         {/* Multi-select action filter */}
@@ -432,7 +433,7 @@ export default function ActivityLogs() {
           onClick={() => { setActionFilters(CRITICAL_ACTIONS); setPage(1); setExpandedId(null) }}
           className="min-h-11 px-3 py-2.5 bg-red-950/50 border border-red-600/40 text-red-300 hover:bg-red-900/40 rounded-xl text-xs font-semibold transition"
         >
-          🚨 Critical Only
+          <AdminIcon name="alert" className={INLINE} />Critical Only
         </button>
 
         {activeFilterCount > 0 && (
@@ -486,7 +487,7 @@ export default function ActivityLogs() {
           </div>
         ) : logs.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 gap-3">
-            <span className="text-5xl opacity-30">📭</span>
+            <AdminIcon name="inbox" className="size-14 text-slate-600" />
             <p className="text-slate-400 font-medium">No logs match your filters</p>
             {activeFilterCount > 0 && (
               <button onClick={clearFilters} className="text-purple-400 text-sm hover:underline">
@@ -650,10 +651,10 @@ export default function ActivityLogs() {
       {/* ── Legend ──────────────────────────────────────────────────── */}
       <div className="flex flex-wrap gap-3 text-xs text-slate-500">
         <span className="font-medium text-slate-400">Action severity:</span>
-        {[['critical','red','🔴 Critical — deletions & config changes'],
-          ['important','amber','🟡 Important — bulk ops, assignments'],
-          ['routine','blue','🔵 Routine — user & section management'],
-          ['info','green','🟢 Info — unlocks, email updates']
+        {[['critical','red','Critical — deletions & config changes'],
+          ['important','amber','Important — bulk ops, assignments'],
+          ['routine','blue','Routine — user & section management'],
+          ['info','green','Info — unlocks, email updates']
         ].map(([tier, , label]) => (
           <span key={tier} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded ${getTierColors(tier).badge}`}>
             {label}

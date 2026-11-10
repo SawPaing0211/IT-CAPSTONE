@@ -31,6 +31,18 @@ const PATHS = {
   clipboard: <><rect x="6" y="5" width="12" height="16" rx="2" /><path d="M9 3h6v4H9zM9 12h6M9 16h4" /></>,
   search: <><circle cx="11" cy="11" r="8" /><path d="m21 21-4.300-4.300" /></>,
   ban: <><circle cx="12" cy="12" r="9" /><path d="m5.600 5.600 12.800 12.800" /></>,
+  clock: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>,
+  pin: <><path d="M12 21s7-6 7-11a7 7 0 0 0-14 0c0 5 7 11 7 11z" /><circle cx="12" cy="10" r="2.500" /></>,
+  tag: <path d="m20.600 13.400-7.200 7.200a2 2 0 0 1-2.800 0L3 13V3h10l7.600 7.600a2 2 0 0 1 0 2.800zM7.500 7.500h.01" />,
+  shield: <path d="M12 3 4 6v6c0 5 3.500 8 8 9 4.500-1 8-4 8-9V6z" />,
+  mail: <><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m3 7 9 6 9-6" /></>,
+  edit: <path d="M4 20l1-4L16 5l3 3L8 19zM14 7l3 3" />,
+  leaf: <path d="M5 19c0-8 5-14 15-14 0 10-6 15-14 15zM5 19l8-8" />,
+  inbox: <path d="M3 13l3-8h12l3 8v6H3zM3 13h5l1 3h6l1-3h5" />,
+  flask: <path d="M9 3h6M10 3v6l-5 9a2 2 0 0 0 2 3h10a2 2 0 0 0 2-3l-5-9V3" />,
+  code: <path d="m16 18 6-6-6-6M8 6l-6 6 6 6" />,
+  star: <path d="m12 2 3 7 7 .500-5.300 4.700L18.500 22 12 18l-6.500 4 1.800-7.800L2 9.500 9 9z" />,
+  building: <path d="M3 21h18M5 21V7l7-4 7 4v14M9 21v-6h6v6" />,
   school: <path d="M3 9 12 4l9 5-9 5zM7 11.500V16c0 1 2.200 2.500 5 2.500s5-1.500 5-2.500v-4.500" />,
 }
 

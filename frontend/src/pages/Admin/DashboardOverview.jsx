@@ -1,4 +1,5 @@
 import createUsers from '../../assets/admin/create-users.png'
+import AdminIcon, { INLINE } from './AdminIcons'
 import classCodes from '../../assets/admin/class-codes.png'
 import databaseBackup from '../../assets/admin/database-backup.png'
 import systemSettings from '../../assets/admin/system-settings.png'
@@ -144,7 +145,7 @@ export default function DashboardOverview({ onNavigate, stats, loading, healthEr
       {enrollmentAlerts > 0 && !alertDismissed && (
         <div className="flex items-center gap-3 px-5 py-3 rounded-xl
                         bg-amber-950/50 border border-amber-600/40">
-          <span className="text-amber-400 text-base flex-shrink-0">⚠️</span>
+          <AdminIcon name="alert" className="size-5 shrink-0 text-amber-400" />
           <p className="text-amber-300 text-sm flex-1">
             <strong>{enrollmentAlerts} student{enrollmentAlerts !== 1 ? 's' : ''}</strong> enrolled
             in inactive class codes — they cannot access course content.
@@ -453,24 +454,24 @@ function MiniCard({ label, value, trend, onClick }) {
 function ActivityRow({ activity }) {
   // Pick an icon based on which keyword the action contains
   const iconMap = {
-    DELETE: { bg: 'bg-red-900/30', icon: '🗑️' },
-    CREATE: { bg: 'bg-emerald-900/30', icon: '✅' },
-    UPLOAD: { bg: 'bg-emerald-900/30', icon: '📥' },
-    UPDATE: { bg: 'bg-blue-900/30', icon: '✏️' },
-    ASSIGN: { bg: 'bg-purple-900/30', icon: '🔗' },
-    LOGIN:  { bg: 'bg-purple-900/30', icon: '🔑' },
-    CONFIG: { bg: 'bg-purple-900/30', icon: '⚙️' },
-    BACKUP: { bg: 'bg-emerald-900/30', icon: '💾' },
+    DELETE: { bg: 'bg-red-900/30', icon: 'trash' },
+    CREATE: { bg: 'bg-emerald-900/30', icon: 'check' },
+    UPLOAD: { bg: 'bg-emerald-900/30', icon: 'download' },
+    UPDATE: { bg: 'bg-blue-900/30', icon: 'edit' },
+    ASSIGN: { bg: 'bg-purple-900/30', icon: 'link' },
+    LOGIN:  { bg: 'bg-purple-900/30', icon: 'key' },
+    CONFIG: { bg: 'bg-purple-900/30', icon: 'gear' },
+    BACKUP: { bg: 'bg-emerald-900/30', icon: 'save' },
   }
 
   const action = activity.action ?? ''
   const match  = Object.entries(iconMap).find(([k]) => action.includes(k))
-  const { bg, icon } = match?.[1] ?? { bg: 'bg-slate-800/50', icon: '⚙️' }
+  const { bg, icon } = match?.[1] ?? { bg: 'bg-slate-800/50', icon: 'gear' }
 
   return (
     <div className="flex items-center gap-3 px-5 py-3 hover:bg-slate-800/30 transition group cursor-default">
       <div className={`w-8 h-8 ${bg} rounded-lg flex items-center justify-center text-sm flex-shrink-0`}>
-        {icon}
+        <AdminIcon name={icon} className="size-4 text-slate-200" />
       </div>
       <div className="flex-1 min-w-0">
         <p className="text-sm text-slate-300 font-medium truncate">

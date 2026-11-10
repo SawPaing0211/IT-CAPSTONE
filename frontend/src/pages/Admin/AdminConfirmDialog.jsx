@@ -1,4 +1,5 @@
 import { useId, useLayoutEffect, useRef, useState } from 'react'
+import AdminIcon from './AdminIcons'
 
 // One confirmation dialog for every destructive admin action (delete a user, delete all
 // students, delete a class code, delete empty class codes). Built on the native <dialog>
@@ -51,7 +52,7 @@ export default function AdminConfirmDialog({
     >
       <form onSubmit={submit} className="admin-confirm-panel">
         <header className="admin-confirm-header">
-          <div className="admin-confirm-icon" aria-hidden="true">⚠️</div>
+          <div className="admin-confirm-icon" aria-hidden="true"><AdminIcon name="alert" className="size-6" /></div>
           <div className="min-w-0">
             <h2 id={titleId} className="text-xl font-black text-white">{title}</h2>
             <p className="text-xs text-slate-400">This action cannot be undone</p>
@@ -91,7 +92,7 @@ export default function AdminConfirmDialog({
           >
             {busy
               ? <><span className="size-4 animate-spin rounded-full border-2 border-white border-t-transparent" /> {busyLabel}</>
-              : <><span aria-hidden="true">🗑️</span> {confirmLabel}</>}
+              : <><AdminIcon name="trash" className="size-4" /> {confirmLabel}</>}
           </button>
         </footer>
       </form>

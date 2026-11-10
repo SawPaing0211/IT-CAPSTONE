@@ -3,6 +3,7 @@ import { API_BASE, authFetch } from '../../api/client'
 import AdminActionDialog from './AdminActionDialog'
 import AdminConfirmDialog from './AdminConfirmDialog'
 import AdminToast from './AdminToast'
+import AdminIcon from './AdminIcons'
 import subjectSeal from '../../assets/admin/subject-seal.svg'
 import subjectEditSeal from '../../assets/admin/subject-edit-seal.svg'
 
@@ -342,7 +343,7 @@ export default function SubjectsManagement() {
                 <div>
                   <label className="block text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">Type</label>
                   <div className="w-full bg-slate-800/60 border border-slate-700 rounded-xl px-3 py-2.5 text-emerald-400 text-sm font-semibold flex items-center gap-2">
-                    🧪 Lab
+                    <AdminIcon name="flask" className="size-4" /> Lab
                   </div>
                   <p className="text-slate-500 text-[10px] mt-1">This platform is lab-only</p>
                 </div>
@@ -389,14 +390,14 @@ export default function SubjectsManagement() {
       {/* Stats */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div className="flex items-center gap-3 bg-slate-900/60 border border-slate-800 rounded-xl px-4 py-3">
-          <div className="w-9 h-9 rounded-lg bg-purple-600/15 text-purple-300 flex items-center justify-center text-lg shrink-0">📚</div>
+          <div className="w-9 h-9 rounded-lg bg-purple-600/15 text-purple-300 flex items-center justify-center shrink-0"><AdminIcon name="book" className="size-5" /></div>
           <div>
             <p className="text-2xl font-bold text-white leading-none">{subjects.length}</p>
             <p className="text-slate-500 text-xs mt-1">Total Subjects</p>
           </div>
         </div>
         <div className="flex items-center gap-3 bg-slate-900/60 border border-slate-800 rounded-xl px-4 py-3">
-          <div className="w-9 h-9 rounded-lg bg-blue-600/15 text-blue-300 flex items-center justify-center text-lg shrink-0">🏛️</div>
+          <div className="w-9 h-9 rounded-lg bg-blue-600/15 text-blue-300 flex items-center justify-center shrink-0"><AdminIcon name="building" className="size-5" /></div>
           <div>
             <p className="text-2xl font-bold text-white leading-none">
               {new Set(subjects.map(s => s.department).filter(Boolean)).size}
@@ -405,7 +406,7 @@ export default function SubjectsManagement() {
           </div>
         </div>
         <div className="flex items-center gap-3 bg-slate-900/60 border border-slate-800 rounded-xl px-4 py-3">
-          <div className="w-9 h-9 rounded-lg bg-emerald-600/15 text-emerald-300 flex items-center justify-center text-lg shrink-0">⏱️</div>
+          <div className="w-9 h-9 rounded-lg bg-emerald-600/15 text-emerald-300 flex items-center justify-center shrink-0"><AdminIcon name="clock" className="size-5" /></div>
           <div>
             <p className="text-2xl font-bold text-white leading-none">
               {subjects.length && subjects.some(s => s.units)
@@ -433,7 +434,7 @@ export default function SubjectsManagement() {
 
       {visibleSubjects.length === 0 ? (
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-12 text-center">
-          <div className="text-6xl mb-4">📚</div>
+          <AdminIcon name="book" className="mx-auto mb-4 size-14 text-slate-600" />
           <h3 className="text-xl font-bold text-white mb-2">{subjects.length ? 'No matching subjects' : 'No subjects yet'}</h3>
           <p className="text-slate-400">{subjects.length ? 'Try another search or clear the filters.' : 'Create a subject to get started.'}</p>
         </div>
@@ -469,7 +470,7 @@ export default function SubjectsManagement() {
                           <div className="flex flex-col items-start justify-between gap-3 sm:flex-row">
                             <div className="flex items-start gap-3 flex-1 min-w-0">
                               <div className={`w-10 h-10 bg-gradient-to-br ${a.grad} rounded-xl flex items-center justify-center text-lg flex-shrink-0`}>
-                                💻
+                                <AdminIcon name="code" className="size-5 text-white" />
                               </div>
                               <div className="flex-1 min-w-0">
                                 <div className="flex items-center gap-1.5 flex-wrap">

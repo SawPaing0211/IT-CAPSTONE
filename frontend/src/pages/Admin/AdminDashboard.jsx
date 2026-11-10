@@ -1,4 +1,5 @@
 import './admin-controls.css'
+import AdminIcon from './AdminIcons'
 import passwordEmblem from '../../assets/account-password.png'
 import exitPortal from '../../assets/account-logout.png'
 import adminEmblem from '../../assets/admin/role-admin.png'
@@ -365,7 +366,7 @@ export default function AdminDashboard({ user, onLogout }) {
             <div className="px-4 py-3 border-t border-slate-800/60 flex-shrink-0">
               <div className="flex items-center justify-between text-[10px] text-slate-500 mb-2">
                 <span>Platform Stats</span>
-                {statsError && <span className="text-red-400 text-[10px]">⚠ Offline</span>}
+                {statsError && <span className="inline-flex items-center gap-1 text-red-400 text-[10px]"><AdminIcon name="alert" className="size-3" />Offline</span>}
               </div>
               <div className="grid grid-cols-2 gap-1.5">
                 {[
@@ -472,7 +473,7 @@ export default function AdminDashboard({ user, onLogout }) {
               <div className="flex items-center gap-3 px-5 py-2.5 border-t border-white/5 bg-black/10">
                 <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider flex-shrink-0">Tip</span>
                 <p className="text-xs text-slate-400 flex-1">{TIPS[tipIndex]}</p>
-                <button onClick={() => setTipDismissed(true)} className="size-11 shrink-0 text-sm text-slate-300 hover:text-white" aria-label="Dismiss tip">✕</button>
+                <button onClick={() => setTipDismissed(true)} className="grid size-11 shrink-0 place-items-center text-slate-300 hover:text-white" aria-label="Dismiss tip"><AdminIcon name="x" className="size-4" /></button>
               </div>
             )}
           </div>

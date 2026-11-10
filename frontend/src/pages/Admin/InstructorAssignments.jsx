@@ -5,6 +5,7 @@
 // focus boundary while rendering outside its scrolling content.
 
 import { useState, useEffect, useRef, useCallback } from 'react'
+import AdminIcon, { INLINE } from './AdminIcons'
 import { createPortal } from 'react-dom'
 import { API_BASE, authFetch } from '../../api/client'
 import AdminActionDialog from './AdminActionDialog'
@@ -475,7 +476,7 @@ function ClassCodePicker({ value, onChange, sectionsBySubject, subjectSelected }
               {/* Schedule and room */}
               <div className="flex items-center gap-2 flex-1 min-w-0">
                 {s.schedule && (
-                  <span className="text-xs text-slate-400 flex-shrink-0">🕐 {s.schedule}</span>
+                  <span className="text-xs text-slate-400 flex-shrink-0"><AdminIcon name="clock" className={INLINE} />{s.schedule}</span>
                 )}
                 {s.semester && (
                   <span className="text-xs px-1.5 py-0.5 bg-slate-800 border border-slate-700 rounded text-slate-500 flex-shrink-0">
@@ -483,7 +484,7 @@ function ClassCodePicker({ value, onChange, sectionsBySubject, subjectSelected }
                   </span>
                 )}
                 {s.room && (
-                  <span className="text-xs text-slate-500 flex-shrink-0">📍 {s.room}</span>
+                  <span className="text-xs text-slate-500 flex-shrink-0"><AdminIcon name="pin" className={INLINE} />{s.room}</span>
                 )}
               </div>
 
@@ -657,7 +658,7 @@ function StatCard({ label, value, color, icon }) {
     <div className={`bg-slate-900/80 border rounded-2xl p-5 ${colorMap[color]}`}>
       <div className="flex items-start justify-between">
         <p className="text-slate-400 text-xs font-medium uppercase tracking-wider">{label}</p>
-        <span className="text-lg opacity-60">{icon}</span>
+        <AdminIcon name={icon} className="size-5 opacity-60" />
       </div>
       <p className="text-4xl font-bold mt-2">
         {value}
@@ -739,7 +740,7 @@ function InstructorCard({ group, onEdit, onDelete }) {
                     aria-label={`Edit assignment for ${a.section?.section_no}`}
                     className="admin-button px-2.5 py-1.5 text-slate-400 rounded-lg text-xs font-medium transition-all border flex items-center gap-1"
                   >
-                    <span>✏</span>
+                    <AdminIcon name="edit" className="size-3.5" />
                     <span className="font-mono">{a.section?.section_no}</span>
                   </button>
                   <button
@@ -747,7 +748,7 @@ function InstructorCard({ group, onEdit, onDelete }) {
                     aria-label={`Remove assignment for ${a.section?.section_no}`}
                     className="admin-button admin-button-danger px-2 py-1.5 text-slate-500 rounded-lg text-xs transition-all border"
                   >
-                    🗑
+                    <AdminIcon name="trash" className="size-3.5" />
                   </button>
                 </div>
               ))}
@@ -1068,10 +1069,10 @@ export default function InstructorAssignments() {
 
         {/* Stat cards */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <StatCard label="Total Assignments"  value={stats.total}       color="purple"  icon="📋" />
-          <StatCard label="Active Instructors" value={stats.instructors} color="blue"    icon="👨‍🏫" />
-          <StatCard label="Subjects Covered"   value={stats.subjects}    color="emerald" icon="📚" />
-          <StatCard label="Class Codes Used"   value={stats.sections}    color="amber"   icon="🏷️" />
+          <StatCard label="Total Assignments"  value={stats.total}       color="purple"  icon="clipboard" />
+          <StatCard label="Active Instructors" value={stats.instructors} color="blue"    icon="link" />
+          <StatCard label="Subjects Covered"   value={stats.subjects}    color="emerald" icon="book" />
+          <StatCard label="Class Codes Used"   value={stats.sections}    color="amber"   icon="tag" />
         </div>
 
         {/* Filter bar */}
@@ -1079,7 +1080,7 @@ export default function InstructorAssignments() {
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(0,2fr)_repeat(3,minmax(0,1fr))] [&>*]:min-w-0">
             {/* Text search */}
             <div className="relative flex-1">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm pointer-events-none">🔍</span>
+              <AdminIcon name="search" className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-500" />
               <input
                 type="text"
                 aria-label="Search instructor assignments"
@@ -1128,7 +1129,7 @@ export default function InstructorAssignments() {
         {/* Main list of instructor cards */}
         {Object.keys(grouped).length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-center">
-            <div className="w-16 h-16 bg-slate-800/60 rounded-2xl flex items-center justify-center text-3xl mb-4">📋</div>
+            <div className="w-16 h-16 bg-slate-800/60 rounded-2xl flex items-center justify-center text-slate-500 mb-4"><AdminIcon name="clipboard" className="size-8" /></div>
             <h3 className="text-white font-semibold mb-2">
               {assignments.length === 0 ? 'No assignments yet' : 'No results match your filters'}
             </h3>

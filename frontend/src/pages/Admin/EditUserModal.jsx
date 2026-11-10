@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import AdminIcon, { INLINE } from './AdminIcons'
 import AdminActionDialog from './AdminActionDialog'
 import identityEmblem from '../../assets/admin/create-users.png'
 
@@ -151,7 +152,7 @@ export default function EditUserModal({ user, sections = [], canCreateAdmins = f
 
                 {/* search input */}
                 <div className="relative mb-2">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm pointer-events-none">🔍</span>
+                  <AdminIcon name="search" className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-500" />
                   <input
                     type="text"
                     placeholder="Search section or subject..."
@@ -275,7 +276,7 @@ export default function EditUserModal({ user, sections = [], canCreateAdmins = f
             {/* just a friendly note explaining why class codes don't show here */}
             {isAdmin && (
               <div className="flex items-start gap-3 p-3.5 bg-amber-500/8 border border-amber-500/20 rounded-xl">
-                <span className="text-lg mt-0.5 flex-shrink-0">🛡️</span>
+                <AdminIcon name="shield" className="mt-0.5 size-5 shrink-0 text-amber-300" />
                 <div>
                   <p className="text-sm font-semibold text-amber-300">Administrator Account</p>
                   <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
@@ -292,7 +293,7 @@ export default function EditUserModal({ user, sections = [], canCreateAdmins = f
                 <span className="ml-2 normal-case font-normal text-slate-600">(read-only)</span>
               </label>
               <div className="flex items-center gap-2 bg-slate-800/50 border border-slate-700/50 rounded-xl px-4 py-2.5">
-                <span className="text-slate-600 text-sm">✉</span>
+                <AdminIcon name="mail" className="size-4 shrink-0 text-slate-500" />
                 <span className="text-slate-500 text-sm truncate">{user.email}</span>
               </div>
               <p className="text-slate-400 text-xs mt-1">This sign-in email is read-only here.</p>
@@ -307,7 +308,7 @@ export default function EditUserModal({ user, sections = [], canCreateAdmins = f
                   XP
                 </label>
                 <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-600 text-xs pointer-events-none">⚡</span>
+                  <AdminIcon name="bolt" className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-500" />
                   <input
                     type="number"
                     min="0"
@@ -322,7 +323,7 @@ export default function EditUserModal({ user, sections = [], canCreateAdmins = f
                   Level
                 </label>
                 <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-600 text-xs pointer-events-none">★</span>
+                  <AdminIcon name="star" className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-500" />
                   <input
                     type="number"
                     min="1"
