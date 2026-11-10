@@ -314,7 +314,7 @@ export default function CreateUserModal({ sections = [], onClose, onSuccess }) {
   // ─────────────────────────────────────────────────────────────────────────
   return (
     <AdminActionDialog title="Create / Enroll Users" description="Create one account or enroll students from a CSV." emblem={createUsers} onClose={onClose} busy={busy}>
-      {/* global toast */}
+      {/* single-user form toast */}
       {toast && (
         <div role="alert" className={`mx-3 mt-3 shrink-0 break-words px-3 py-3 rounded-xl font-semibold text-sm text-white shadow-2xl flex items-center gap-2 ${
           toast.type === 'error' ? 'bg-red-600' : 'bg-emerald-600'
