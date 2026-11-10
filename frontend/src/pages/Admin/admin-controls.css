@@ -248,6 +248,39 @@
   min-width: 44px;
 }
 
+.admin-workspace .admin-user-actions,
+.admin-workspace .admin-sidebar-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.admin-workspace .admin-user-actions {
+  flex-wrap: wrap;
+}
+
+.admin-workspace .admin-user-actions .admin-button,
+.admin-workspace .admin-sidebar-toggle {
+  min-height: 2.75rem;
+  padding: 0.5rem 0.75rem;
+  font-weight: 600;
+}
+
+.admin-workspace .admin-user-actions .admin-button {
+  flex: none;
+  white-space: nowrap;
+}
+
+.admin-workspace .admin-sidebar-toggle {
+  width: 100%;
+  justify-content: center;
+  font-size: 0.875rem;
+}
+
+.admin-action-dialog:has(.admin-account-dialog-body) {
+  width: min(34rem, calc(100% - 1.5rem));
+}
+
 @media (max-width: 74.99rem) {
   .admin-record-table,
   .admin-record-table tbody {

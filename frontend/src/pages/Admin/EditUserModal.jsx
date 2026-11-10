@@ -1,4 +1,6 @@
 import { useState } from 'react'
+import AdminActionDialog from './AdminActionDialog'
+import identityEmblem from '../../assets/admin/create-users.png'
 
 // ─── this whole thing pops up when you click "Manage" on a user ───────────────
 // props:
@@ -27,22 +29,19 @@ export default function EditUserModal({ user, sections = [], canCreateAdmins = f
 
   // just the search box text for filtering the section list
   const [sectionSearch, setSectionSearch] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState('')
 
   // ── figure out what type of user we're looking at ────────────────────────────
   // admins don't belong to class codes, so we hide that whole section for them
   const isAdmin      = form.role === 'administrator'
 
-  // ── what shows up in the top badge depending on role ────────────────────────
-  const roleMeta = {
-    student:       { label: 'Student',       color: 'from-blue-500 to-cyan-500',    dot: 'bg-blue-400'   },
-    instructor:    { label: 'Instructor',     color: 'from-violet-500 to-purple-600', dot: 'bg-violet-400' },
-    administrator: { label: 'Administrator',  color: 'from-amber-500 to-orange-500', dot: 'bg-amber-400'  },
-  }
-  const meta = roleMeta[form.role] || roleMeta.student
+  const roleLabel = { student: 'Student', instructor: 'Instructor', administrator: 'Administrator' }[form.role]
 
   // ── save handler - bundles everything into one object for the parent ─────────
-  const handleSubmit = e => {
+  const handleSubmit = async e => {
     e.preventDefault()
+    if (saving) return
     // only send section_ids if the user isn't an admin (admins have no sections)
     // Only send edited fields: a name-only change must not rewrite enrollments,
     // instructor assignments, XP, roles, or sign-in identifiers.
@@ -51,7 +50,17 @@ export default function EditUserModal({ user, sections = [], canCreateAdmins = f
     if (!isAdmin && form.full_name !== (user.full_name || '')) payload.full_name = form.full_name.trim()
     const originalSectionIds = (user.sections || []).map(section => section.id).filter(Boolean)
     if (!isAdmin && (selectedSectionIds.length !== originalSectionIds.length || selectedSectionIds.some(id => !originalSectionIds.includes(id)))) payload.section_ids = selectedSectionIds
-    onSave(payload)
+    if (Object.keys(payload).length === 0) {
+      onClose()
+      return
+    }
+    setSaving(true)
+    setSaveError('')
+    const error = await onSave(payload)
+    if (error) {
+      setSaveError(error)
+      setSaving(false)
+    }
   }
 
   // ── toggle a single section on/off in the selected list ─────────────────────
@@ -77,45 +86,17 @@ export default function EditUserModal({ user, sections = [], canCreateAdmins = f
   const displayName = user.full_name || user.username
 
   return (
-    // dark overlay backdrop
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)' }}
+    <AdminActionDialog
+      title="Manage User"
+      description={`${displayName} · ${roleLabel}`}
+      emblem={identityEmblem}
+      onClose={onClose}
+      busy={saving}
     >
-      {/* the actual modal box */}
-      <div className="bg-slate-900 border border-slate-700/60 rounded-2xl w-full max-w-md shadow-2xl max-h-[calc(100dvh-2rem)] flex flex-col overflow-hidden">
-
-        {/* ── HEADER ────────────────────────────────────────────────────────── */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 flex-shrink-0">
-          <div className="flex items-center gap-3">
-            {/* avatar circle with initials */}
-            <div className={`w-10 h-10 bg-gradient-to-br ${meta.color} rounded-xl flex items-center justify-center font-bold text-white text-sm shadow-lg`}>
-              {displayName[0].toUpperCase()}
-            </div>
-            <div>
-              <h2 className="text-base font-semibold text-white leading-tight">Manage User</h2>
-              <p className="text-slate-400 text-xs truncate max-w-[200px]">{displayName}</p>
-            </div>
-          </div>
-
-          {/* role pill in the header - updates live as you change the role dropdown */}
-          <div className="flex items-center gap-3">
-            <span className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-800 border border-slate-700 text-xs font-medium text-slate-300">
-              <span className={`w-1.5 h-1.5 rounded-full ${meta.dot}`} />
-              {meta.label}
-            </span>
-            <button
-              onClick={onClose}
-              className="admin-button w-8 h-8 flex items-center justify-center rounded-lg text-slate-500 transition-colors"
-            >
-              ✕
-            </button>
-          </div>
-        </div>
-
         {/* ── SCROLLABLE FORM BODY ──────────────────────────────────────────── */}
-        <div className="overflow-y-auto flex-1">
-          <form id="manage-user-form" onSubmit={handleSubmit} className="px-6 py-5 space-y-5">
+        <div className="admin-action-scroll admin-account-dialog-body flex-1">
+          <form id="manage-user-form" onSubmit={handleSubmit} className="px-4 py-5 sm:px-6">
+            <fieldset disabled={saving} className="min-w-0 space-y-5">
 
             {!isAdmin && <div>
               <label htmlFor="managed-full-name" className="block text-xs font-semibold text-slate-400 uppercase tracking-widest mb-2">Full Name</label>
@@ -381,28 +362,31 @@ export default function EditUserModal({ user, sections = [], canCreateAdmins = f
               </div>
             </label>
 
+            </fieldset>
           </form>
         </div>
 
         {/* ── ACTION BUTTONS - sticky at the bottom ────────────────────────── */}
-        <div className="px-6 pb-5 pt-3 border-t border-slate-800/80 flex gap-3 flex-shrink-0">
+        {saveError && <p role="alert" className="px-4 py-2 text-sm text-rose-200 sm:px-6">{saveError}</p>}
+        <div className="flex shrink-0 flex-wrap gap-3 border-t border-slate-700 px-4 py-4 sm:px-6">
           <button
             type="button"
             onClick={onClose}
-            className="admin-button flex-1 py-2.5 border rounded-xl text-slate-300 text-sm font-medium transition-colors"
+            disabled={saving}
+            className="admin-button min-w-24 flex-1 px-3 py-2.5 text-sm font-medium"
           >
             Cancel
           </button>
           <button
             type="submit"
             form="manage-user-form"
-            className="admin-button admin-button-primary flex-1 py-2.5 rounded-xl font-semibold text-white text-sm transition-all active:scale-[0.98]"
+            disabled={saving}
+            className="admin-button admin-button-primary min-w-32 flex-1 px-3 py-2.5 text-sm font-semibold"
           >
-            Save Changes
+            {saving ? 'Saving…' : 'Save Changes'}
           </button>
         </div>
 
-      </div>
-    </div>
+    </AdminActionDialog>
   )
 }

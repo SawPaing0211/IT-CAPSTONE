@@ -86,23 +86,6 @@ function healthDisplay(health, maintenanceMode) {
   return                               { color: 'bg-red-400',    text: 'Database unreachable', textColor: 'text-red-400',    border: 'border-red-600/20',    bg: 'bg-red-600/10',    pulse: false }
 }
 
-// ─── TOOLTIP ─────────────────────────────────────────────────────────────────
-// A small label that pops up to the right when you hover.
-// Used on collapsed sidebar icons so you know what each one does.
-function Tooltip({ text, children }) {
-  const [show, setShow] = useState(false)
-  return (
-    <span className="relative inline-flex" onMouseEnter={() => setShow(true)} onMouseLeave={() => setShow(false)}>
-      {children}
-      {show && (
-        <span className="absolute left-full ml-3 top-1/2 -translate-y-1/2 z-[9999] whitespace-nowrap rounded-lg bg-slate-800 border border-purple-600/40 px-3 py-1.5 text-xs font-medium text-white shadow-xl pointer-events-none">
-          {text}
-        </span>
-      )}
-    </span>
-  )
-}
-
 // ─── PROFILE DROPDOWN ─────────────────────────────────────────────────────────
 // Avatar button in the top-right header.
 // Click it to see your username, open keyboard shortcuts, or sign out.
@@ -317,17 +300,18 @@ export default function AdminDashboard({ user, onLogout }) {
   const health        = healthDisplay(dashStats?.system_health, dashStats?.maintenance_mode)
 
   // ── SIDEBAR NAV ITEM ─────────────────────────────────────────────────────
-  // Single button in the sidebar list. Wraps in Tooltip when collapsed.
   const renderSidebarNavItem = tab => {
     const isActive = activeTab === tab.id
-    const btn = (
+    return (
       <button
         key={tab.id}
         onClick={() => handleTabChange(tab.id)}
         aria-label={tab.badge ? `${tab.label}, ${tab.badge}` : tab.label}
         aria-current={isActive ? 'page' : undefined}
+        title={sidebarCollapsed ? tab.label : undefined}
         className={`
-          relative min-h-11 w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200
+          relative min-h-11 w-full flex items-center rounded-xl transition-all duration-200
+          ${sidebarCollapsed ? 'justify-center p-2' : 'gap-3 px-3 py-2.5'}
           focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-1 focus:ring-offset-slate-900
           ${isActive
             ? 'bg-violet-950 text-amber-50 ring-1 ring-inset ring-violet-400/45'
@@ -352,7 +336,6 @@ export default function AdminDashboard({ user, onLogout }) {
         )}
       </button>
     )
-    return sidebarCollapsed ? <Tooltip key={tab.id} text={tab.label}>{btn}</Tooltip> : btn
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -370,7 +353,7 @@ export default function AdminDashboard({ user, onLogout }) {
           </div>
 
           {/* Tab links */}
-          <nav className="flex-1 px-3 py-2 space-y-1 overflow-y-auto" role="navigation" aria-label="Main navigation">
+          <nav id="admin-sidebar-navigation" className="flex-1 px-3 py-2 space-y-1 overflow-y-auto" role="navigation" aria-label="Main navigation">
             {tabs.map(renderSidebarNavItem)}
           </nav>
 
@@ -407,18 +390,22 @@ export default function AdminDashboard({ user, onLogout }) {
 
           {/* Collapse / expand toggle */}
           <div className="px-3 py-3 border-t border-slate-800/60 flex-shrink-0">
-            <Tooltip text={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
-              <button
-                onClick={() => setSidebarCollapsed(c => !c)}
-                aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-                className="admin-button w-full flex items-center justify-center gap-2 py-2 rounded-xl text-slate-500 transition text-xs focus:outline-none focus:ring-2 focus:ring-purple-500"
-              >
-                <svg viewBox="0 0 20 20" fill="currentColor" className={`w-4 h-4 transition-transform duration-300 ${sidebarCollapsed ? 'rotate-0' : 'rotate-180'}`}>
-                  <path fillRule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clipRule="evenodd" />
-                </svg>
-                {!sidebarCollapsed && <span>Collapse</span>}
-              </button>
-            </Tooltip>
+            <button
+              type="button"
+              onClick={() => setSidebarCollapsed(c => !c)}
+              aria-expanded={!sidebarCollapsed}
+              aria-controls="admin-sidebar-navigation"
+              aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              title={sidebarCollapsed ? 'Expand sidebar' : undefined}
+              className="admin-button admin-sidebar-toggle"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" className="size-5 shrink-0" aria-hidden="true">
+                <rect x="3" y="5" width="18" height="14" rx="2" />
+                <path d="M9 5v14" />
+                <path d={sidebarCollapsed ? 'm14 9 3 3-3 3' : 'm17 9-3 3 3 3'} strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              {!sidebarCollapsed && <span>Collapse sidebar</span>}
+            </button>
           </div>
         </aside>
         <nav className="admin-mobile-nav fixed inset-x-0 bottom-0 z-30 flex border-t border-amber-300/25 bg-[#080b1d] lg:hidden" role="navigation" aria-label="Bottom navigation">

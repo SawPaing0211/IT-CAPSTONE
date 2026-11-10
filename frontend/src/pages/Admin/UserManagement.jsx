@@ -193,10 +193,10 @@ export default function UserManagement() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updates)
       })
-      if (res.ok) {
-        const data = await res.json()
-        await fetchUsers()
+      const data = await res.json().catch(() => null)
+      if (res.ok && data) {
         setManageModal(null)
+        fetchUsers()
         // backend reports skipped class codes as a "Skipped (already
         // taken): ..." entry in changes — surface that instead of just
         // saying "success" and burying the actual conflict info.
@@ -207,12 +207,10 @@ export default function UserManagement() {
           showToast('User updated successfully!')
         }
       } else {
-        const error = await res.json()
-        showToast(`Failed to update user: ${error.error}`, 'error')
+        return data?.error || 'The server did not confirm the update. Check the user list before trying again.'
       }
-    } catch (err) {
-      console.error('Failed to update user:', err)
-      showToast('Failed to update user', 'error')
+    } catch {
+      return 'Could not confirm the update. Check your connection and the user list before trying again.'
     }
   }
 
@@ -810,28 +808,34 @@ function UserSection({ title, icon, users, onManage, onRecover, onDelete, onUnlo
                   </div>
                 </td>
 
-                <td role="cell" className="admin-record-actions p-4 w-52">
-                  <div className="flex flex-col gap-1">
-                    <div className="flex flex-wrap gap-2">
+                <td role="cell" className="admin-record-actions p-4 xl:w-64">
+                  <div className="flex flex-col gap-2">
+                    <div className="admin-user-actions">
                       <button
+                        type="button"
                         disabled={user.can_manage === false}
                         title={user.can_manage === false ? 'Administrator accounts are managed by the Head Admin; own-account editing is unavailable.' : undefined}
+                        aria-label={`Manage ${user.full_name || user.username}`}
                         onClick={() => onManage(user)}
-                        className="admin-button admin-button-primary flex-1 px-2 py-1.5 rounded text-xs transition text-white font-bold whitespace-nowrap"
+                        className="admin-button admin-button-primary text-sm"
                       >
                         Manage
                       </button>
                       <button
+                        type="button"
                         disabled={user.can_manage === false}
+                        aria-label={`Recover ${user.full_name || user.username}`}
                         onClick={() => onRecover(user)}
-                        className="admin-button flex-1 px-2 py-1.5 rounded text-xs transition text-white font-bold whitespace-nowrap"
+                        className="admin-button text-sm"
                       >
                         Recover
                       </button>
                       <button
+                        type="button"
                         disabled={user.can_delete === false}
+                        aria-label={`Delete ${user.full_name || user.username}`}
                         onClick={() => onDelete(user.id)}
-                        className="admin-button admin-button-danger flex-1 px-2 py-1.5 rounded text-xs transition text-red-400 font-bold border whitespace-nowrap"
+                        className="admin-button admin-button-danger text-sm"
                       >
                         Delete
                       </button>
