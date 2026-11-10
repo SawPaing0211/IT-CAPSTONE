@@ -1,8 +1,14 @@
 import { useState, useEffect, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import EditUserModal from './EditUserModal'
 import PasswordField from '../../components/PasswordField'
 import SubjectManagement from './SubjectsManagement'
 import RecoveryModal from './RecoveryModal'
+import AdminActionDialog from './AdminActionDialog'
+import createUsersEmblem from '../../assets/admin/create-users.png'
+import studentRoleIcon from '../../assets/admin/role-student.png'
+import instructorRoleIcon from '../../assets/admin/role-instructor.png'
+import adminRoleIcon from '../../assets/admin/role-admin.png'
 import UploadCSVModal from './UploadCSVModal'
 import { API_BASE, authFetch } from '../../api/client'
 
@@ -535,7 +541,7 @@ export default function UserManagement() {
           {/* Type-to-confirm modal — shared by single-user Delete and
               "Delete All Students". Confirm button stays disabled until
               the typed text exactly matches confirmModal.requiredPhrase. */}
-          {confirmModal && (
+          {confirmModal && createPortal(
             <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[9998] p-4">
               <div className="bg-slate-900 border border-red-600/50 rounded-2xl max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto shadow-2xl shadow-red-900/50">
                 <div className="flex items-center gap-3 p-6 border-b border-red-600/30">
@@ -583,26 +589,20 @@ export default function UserManagement() {
                   </button>
                 </div>
               </div>
-            </div>
+            </div>,
+            document.body
           )}
 
           {/* Add User Modal */}
           {addUserModal && (
-            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-              <div role="dialog" aria-modal="true" aria-labelledby="add-user-title" className="max-h-[calc(100dvh-2rem)] overflow-y-auto bg-slate-900 border border-amber-300/35 rounded-2xl w-full max-w-md shadow-2xl">
-                <div className="flex items-center justify-between p-6 border-b border-purple-600/30">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-violet-800 border border-violet-400/40 rounded-xl flex items-center justify-center text-xl">👤</div>
-                    <div>
-                      <h2 id="add-user-title" className="font-cinzel text-xl font-semibold text-white">Add new user</h2>
-                      <p className="text-slate-400 text-xs">{isMasterAdmin ? 'Create a student, instructor or administrator account' : 'Create a student or instructor account'}</p>
-                    </div>
-                  </div>
-                  <button aria-label="Close add user" onClick={() => { setAddUserModal(false); resetAddUserForm() }}
-                    className="text-slate-400 hover:text-white text-2xl transition">✕</button>
-                </div>
-
-                <div className="p-6 space-y-4">
+            <AdminActionDialog
+              title="Add new user"
+              description={isMasterAdmin ? 'Create a student, instructor or administrator account' : 'Create a student or instructor account'}
+              emblem={createUsersEmblem}
+              onClose={() => { setAddUserModal(false); resetAddUserForm() }}
+              busy={addUserLoading}
+            >
+                <div className="admin-action-scroll flex-1 space-y-4 p-4 sm:p-6">
                   {addUserError && (
                     <div className="flex items-center gap-2 p-3 bg-red-600/20 border border-red-600/40 rounded-lg text-red-300 text-sm">
                       <span>❌</span> {addUserError}
@@ -648,9 +648,9 @@ export default function UserManagement() {
                     <label className="block text-sm text-slate-400 mb-1.5 font-medium">Role <span className="text-red-400">*</span></label>
                     <div className={`admin-role-grid grid gap-3 ${isMasterAdmin ? 'grid-cols-3' : 'grid-cols-2'}`}>
                       {[
-                        { value: 'student', label: 'Student', icon: '🎓', desc: 'Enrolled learner' },
-                        { value: 'instructor', label: 'Instructor', icon: '👨‍🏫', desc: 'Course facilitator' },
-                        ...(isMasterAdmin ? [{ value: 'administrator', label: 'Administrator', icon: '🛡️', desc: 'Full system access' }] : []),
+                        { value: 'student', label: 'Student', icon: studentRoleIcon, desc: 'Enrolled learner' },
+                        { value: 'instructor', label: 'Instructor', icon: instructorRoleIcon, desc: 'Course facilitator' },
+                        ...(isMasterAdmin ? [{ value: 'administrator', label: 'Administrator', icon: adminRoleIcon, desc: 'Full system access' }] : []),
                       ].map(role => (
                         <button
                           key={role.value}
@@ -664,7 +664,7 @@ export default function UserManagement() {
                               : 'border-slate-700 bg-slate-800/60 text-slate-400 hover:border-slate-600 hover:bg-slate-800'
                           }`}
                         >
-                          <span className="text-2xl">{role.icon}</span>
+                          <img src={role.icon} alt="" width="48" height="48" className="size-12 object-contain" />
                           <span className={`text-sm font-bold ${addUserForm.role === role.value && role.value === 'administrator' ? 'text-yellow-300' : ''}`}>{role.label}</span>
                           <span className="text-xs text-slate-500">{role.desc}</span>
                         </button>
@@ -693,7 +693,7 @@ export default function UserManagement() {
                   )}
                 </div>
 
-                <div className="flex gap-3 p-6 border-t border-purple-600/30">
+                <div className="flex shrink-0 gap-3 border-t border-slate-700 p-4 sm:p-6">
                   <button
                     onClick={() => { setAddUserModal(false); resetAddUserForm() }}
                     className="admin-button flex-1 py-2.5 rounded-lg text-slate-300 font-medium transition"
@@ -710,8 +710,7 @@ export default function UserManagement() {
                       : <><span>👤</span> Create User</>}
                   </button>
                 </div>
-              </div>
-            </div>
+            </AdminActionDialog>
           )}
         </>
       )}
