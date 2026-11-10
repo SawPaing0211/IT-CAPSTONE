@@ -1,0 +1,20 @@
+# Normalize line endings to LF for everything git treats as text, regardless
+# of which OS someone's editor is running on. Without this, Windows editors
+# (VS Code in particular) can silently flip a file's line endings on save
+# with zero real content change, and git then reports the whole file as
+# "modified" — cluttering diffs and reviews with pure whitespace noise.
+* text=auto eol=lf
+
+# Windows batch files genuinely need CRLF to run correctly on Windows
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary files — never touch these
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.pyc binary

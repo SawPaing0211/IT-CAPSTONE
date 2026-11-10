@@ -1,0 +1,25 @@
+-- Achievement integrity: one award per user per achievement.
+-- Applied by `python manage_schema.py upgrade` (explicit, after a backup) ONLY when no duplicate pair exists.
+-- It is a single, additive DDL statement. It does not read-modify, delete, merge or re-award any row, and it
+-- touches no XP or level.
+--
+-- 1) READ-ONLY pre-check. If this returns any row, the ALTER below FAILS with error 1062 and changes nothing,
+--    and `manage_schema.py upgrade` refuses to try. Do NOT delete or merge rows by hand: follow
+--    docs/ACHIEVEMENT_PRESERVATION_DESIGN.md (original history is kept; a reviewed plan is required).
+--      SELECT user_id, achievement_id, COUNT(*) AS copies FROM user_achievements
+--      GROUP BY user_id, achievement_id HAVING COUNT(*) > 1;
+--    Aggregate version without ids:  python manage_schema.py audit-achievements
+--
+-- 2) The change:
+ALTER TABLE user_achievements
+    ADD CONSTRAINT uq_user_achievement UNIQUE (user_id, achievement_id);
+--
+-- DDL on MySQL/MariaDB commits by itself: there is no transaction to roll back. The statement either completes
+-- (index exists) or fails (nothing changed). Run it with writes to user_achievements quiet (maintenance
+-- window): a duplicate created while the index builds makes the ALTER fail safely with 1062.
+--
+-- Reversal (removes only the index; every row is untouched). The unique index also serves the user_id foreign key,
+-- so give the foreign key its own index first or MySQL refuses with error 1553:
+--      CREATE INDEX ix_user_achievements_user_id ON user_achievements (user_id);
+--      ALTER TABLE user_achievements DROP INDEX uq_user_achievement;
+-- Do not reverse while the app is accepting writes: the reversal removes the final integrity guard.

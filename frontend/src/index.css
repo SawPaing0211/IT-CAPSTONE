@@ -2,6 +2,16 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Cinzel (SIL OFL), served from our own files so it works offline. Used for display titles. */
+@font-face {
+  font-family: 'Cinzel';
+  font-style: normal;
+  font-weight: 400 900;
+  font-display: swap;
+  src: url('./assets/fonts/cinzel-latin-wght-normal.woff2') format('woff2-variations');
+}
+.font-cinzel { font-family: 'Cinzel', Georgia, 'Times New Roman', serif; }
+
 /* ========================================= */
 /* ROOT LAYOUT — LOCK TO VIEWPORT            */
 /* ========================================= */
@@ -52,27 +62,18 @@ body.editor-active {
 }
 
 /* ========================================= */
-/* CUSTOM SCROLLBARS — GLOBAL                */
+/* SCROLLBARS: thin and quiet, no accent color */
 /* ========================================= */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-
-::-webkit-scrollbar-track {
-  background: #0f172a;
-}
-
-::-webkit-scrollbar-thumb {
-  background: linear-gradient(to bottom, #7c3aed, #db2777);
-  border-radius: 10px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: linear-gradient(to bottom, #9333ea, #ec4899);
-}
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(148, 163, 184, 0.22); border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(148, 163, 184, 0.4); }
 
 * {
   scrollbar-width: thin;
-  scrollbar-color: #7c3aed #0f172a;
+  scrollbar-color: rgba(148, 163, 184, 0.25) transparent;
 }
+
+/* no visible scrollbar at all (scrolling still works) */
+.quiet-scroll { scrollbar-width: none !important; -ms-overflow-style: none; }
+.quiet-scroll::-webkit-scrollbar { display: none; }

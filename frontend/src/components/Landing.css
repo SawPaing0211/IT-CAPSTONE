@@ -1,0 +1,85 @@
+.fl-page { position: relative; isolation: isolate; display: flex; flex-direction: column; min-height: 100vh; min-height: 100svh; overflow: clip; background: #060b17; color: #f4f5fa; }
+.fl-scene { position: absolute; inset: 0; overflow: hidden; container-type: size; background: #080e1c; pointer-events: none; }
+.fl-art-plane { position: absolute; left: 50%; top: 50%; width: max(100%,177.684vh); aspect-ratio: 1672 / 941; transform: translate(-50%,-50%); }
+@supports (width: 1cqw) { .fl-art-plane { width: max(100cqw,177.684cqh); } }
+.fl-layer { position: absolute; inset: 0; width: 100%; height: 100%; max-width: none; object-fit: contain; }
+.fl-static { z-index: 0; }
+.fl-layered-art { visibility: hidden; }
+.has-motion .fl-layered-art { visibility: visible; }
+.has-motion .fl-static { visibility: hidden; }
+.fl-landscape { z-index: 1; }
+.fl-sky { position: absolute; z-index: 2; left: 0; top: 0; width: 74%; height: 29%; overflow: hidden; mask-image: linear-gradient(90deg,#000 0%,#000 72%,transparent),linear-gradient(#000,#000); mask-composite: intersect; }
+.fl-clouds { position: absolute; left: -10%; top: -4%; width: 125%; height: 100%; max-width: none; opacity: .38; mask-image: linear-gradient(180deg,transparent,#000 18%,#000 70%,transparent); animation: fl-cloud-drift 55s ease-in-out infinite alternate; }
+.fl-cave-light { position: absolute; z-index: 2; left: 75%; top: 24%; width: 15%; height: 18%; background: radial-gradient(ellipse at 50% 76%,#e0b9ff70, #9d45eb30 40%,transparent 70%); mix-blend-mode: screen; animation: fl-cave-breathe 8s ease-in-out infinite; }
+.fl-mist { position: absolute; z-index: 2; max-width: none; pointer-events: none; mask-image: radial-gradient(ellipse,#000 25%,transparent 72%); }
+.fl-mist-far { left: 25%; top: 35%; width: 57%; height: 18%; opacity: .12; animation: fl-mist-drift 38s ease-in-out infinite alternate; }
+.fl-mist-near { left: 48%; top: 54%; width: 43%; height: 13%; opacity: .075; animation: fl-mist-drift 31s ease-in-out -11s infinite alternate-reverse; }
+.fl-cloak { z-index: 3; animation: fl-cloak-sway 7.2s ease-in-out infinite; }
+.fl-bodies { z-index: 4; }
+.fl-glint,.fl-firefly { position: absolute; z-index: 5; border-radius: 50%; pointer-events: none; }
+.fl-glint { width: 4px; height: 4px; background: #e9d2ff; box-shadow: 0 0 9px 3px #bc89ff77; animation: fl-glint 8s ease-in-out infinite; }
+.fl-firefly { width: 3px; height: 3px; background: #ffe6aa; box-shadow: 0 0 7px 2px #f4d78966; animation: fl-firefly-drift 10s ease-in-out infinite; }
+.fl-moving { animation-play-state: paused; }
+.has-motion:not(.is-paused) .fl-moving { animation-play-state: running; }
+.fl-shade { position: absolute; inset: 0; z-index: 6; background: linear-gradient(90deg,#050b18b8, #050b184d 37%,transparent 58%),linear-gradient(180deg,#050b1855,transparent 18%,transparent 78%,#050b1877); }
+.fl-nav { position: relative; z-index: 10; display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 24px clamp(24px,4vw,64px); }
+.fl-logo { display: flex; align-items: center; gap: 10px; font-size: 22px; font-weight: 750; letter-spacing: -.02em; }
+.fl-logo img { width: 28px; height: 36px; object-fit: contain; filter: drop-shadow(0 0 6px #b078ff66); }
+.fl-login-btn { min-height: 44px; padding: 10px 26px; border: 1px solid #d4a94a66; border-radius: 10px; background: #0b1023aa; color: #f3e3b0; font-size: 14px; font-weight: 650; transition: background .15s,border-color .15s; }
+.fl-login-btn:hover { background: #33244eaa; border-color: #e8ce87; }
+.fl-main { position: relative; z-index: 8; flex: 1; display: flex; align-items: center; padding: 60px 5vw 90px; }
+.fl-copy { max-width: min(550px,43vw); }
+.fl-eyebrow { margin: 0 0 20px; color: #d9c9ff; font-size: 11px; font-weight: 650; letter-spacing: .23em; text-transform: uppercase; }
+.fl-copy h1 { font-size: clamp(48px,5.8vw,90px); line-height: 1.03; font-weight: 800; letter-spacing: -.045em; margin: 0 0 24px; }
+.fl-copy h1 em { color: #bd91ff; font-style: normal; }
+.fl-intro { margin-bottom: 28px; color: #d5dbee; font-size: clamp(16px,1.4vw,21px); line-height: 1.65; }
+.fl-cta { display: inline-flex; min-height: 54px; align-items: center; justify-content: center; gap: 20px; padding: 14px 28px; border: 1px solid #d4a94a99; border-radius: 10px; background: linear-gradient(#a164f5,#7328d4); box-shadow: inset 0 1px #ffffff33,0 8px 28px -12px #a855f7; color: #fff; font-size: 16px; font-weight: 750; transition: filter .15s; }
+.fl-cta:hover { filter: brightness(1.12); }
+.fl-cta > span { font-size: 22px; font-weight: 400; }
+.fl-signin-caption { margin-top: 14px; font-size: 12px; line-height: 1.5; color: #abb5ce; }
+.fl-bottombar { position: relative; z-index: 8; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; padding: 16px clamp(24px,4vw,64px) max(16px,env(safe-area-inset-bottom)); border-top: 1px solid #d4a94a33; background: #050b1840; }
+.fl-langs { display: flex; flex-wrap: wrap; gap: 10px; margin: 0; list-style: none; padding: 0; }
+.fl-langs li { color: #d2d8e9; font-size: 12px; padding: 6px 12px; border: 1px solid #d4a94a40; border-radius: 999px; background: #0a1022bb; }
+.fl-about { min-height: 44px; padding: 8px; color: #b8c1d8; font-size: 12px; border-radius: 6px; }
+.fl-about:hover { color: #f3e3b0; }
+.fl-pause { min-height: 44px; border: 1px solid #d4a94a66; border-radius: 9px; padding: 10px 16px; background: #0b1023b8; color: #d5dbee; font-size: 12px; }
+.fl-pause:hover:not(:disabled) { background: #33244eaa; color: #fff; }
+.fl-pause:disabled { cursor: default; }
+.fl-page button { cursor: pointer; }
+.fl-page button:focus-visible,.fl-about-dialog button:focus-visible { outline: 2px solid #f3d78a; outline-offset: 4px; }
+.fl-about-dialog { width: min(540px,calc(100vw - 32px)); max-height: calc(100dvh - 32px); margin: auto; padding: 36px; overflow-y: auto; overscroll-behavior: contain; border: 1px solid #d4a94a99; border-radius: 18px; color: #cbd5e1; background: linear-gradient(#171b37,#0b1021); box-shadow: 0 24px 80px #0009; }
+.fl-about-dialog::backdrop { background: #030713cc; backdrop-filter: blur(5px); }
+.fl-about-dialog h2 { margin-bottom: 18px; color: #f3e3b0; font: 700 26px/1.4 Cinzel,Georgia,serif; }
+.fl-about-dialog h2:focus { outline: none; }
+.fl-about-dialog p:not(.fl-eyebrow) { margin-bottom: 16px; font-size: 14px; line-height: 1.75; }
+.fl-about-dialog .fl-eyebrow { padding-right: 30px; }
+.fl-about-close { position: absolute; top: 12px; right: 12px; width: 44px; height: 44px; border: 1px solid #d4a94a66; border-radius: 50%; color: #f3e3b0; background: #0b1023; }
+.fl-about-note { color: #a8b4cf; }
+@keyframes fl-cloak-sway { 0%,100% { transform: rotate(0deg); } 25% { transform: rotate(-2deg); } 75% { transform: rotate(2deg); } }
+@keyframes fl-cloud-drift { from { transform: translateX(-2%); } to { transform: translateX(2%); } }
+@keyframes fl-mist-drift { from { transform: translateX(-1%); } to { transform: translateX(1.5%); } }
+@keyframes fl-cave-breathe { 0%,100% { opacity: .25; } 50% { opacity: .55; } }
+@keyframes fl-glint { 0%,100% { opacity: .12; } 50% { opacity: .65; } }
+@keyframes fl-firefly-drift { 0%,100% { opacity: .15; transform: translate(0,0); } 50% { opacity: .7; transform: translate(7px,-10px); } }
+/* Motion is opt-in after an OS reduce request. JS initialises from that
+   preference before first paint; the static scene remains the default until
+   all layers decode. No unconditional media rule defeats explicit Enable. */
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  .fl-page { overflow: clip; }
+  .fl-nav { position: absolute; top: 0; left: 0; right: 0; padding: 16px 22px; background: linear-gradient(#050b18aa,transparent); }
+  .fl-logo { font-size: 19px; }
+  .fl-scene { position: relative; inset: auto; width: 100%; height: clamp(360px,calc(96vw + 24px),505px); flex-shrink: 0; }
+  .fl-art-plane { top: -24px; left: 50%; width: clamp(760px,220vw,1100px); transform: translateX(-75%); }
+  @supports (width: 1cqw) { .fl-art-plane { width: clamp(760px,220cqw,1100px); } }
+  .fl-shade { background: linear-gradient(180deg,#050b1866,transparent 24%,transparent 75%,#060b17); }
+  .fl-main { flex: 1; justify-content: center; align-items: flex-start; padding: 8px 24px 34px; }
+  .fl-copy { width: 100%; max-width: 560px; }
+  .fl-eyebrow { font-size: 10px; letter-spacing: .18em; margin-bottom: 16px; }
+  .fl-copy h1 { font-size: clamp(42px,10vw,62px); line-height: 1.04; margin-bottom: 18px; }
+  .fl-intro { font-size: 16px; line-height: 1.65; margin-bottom: 22px; }
+  .fl-cta { width: 100%; }
+  .fl-bottombar { padding: 16px 22px max(18px,env(safe-area-inset-bottom)); gap: 12px; background: #080e1c; }
+  .fl-about { order: 3; flex-basis: 100%; }
+  .fl-about-dialog { padding: 52px 24px 24px; }
+}
+@media (max-width: 360px) { .fl-main { padding-inline: 20px; }.fl-bottombar { padding-inline: 20px; }.fl-pause { padding-inline: 10px; }.fl-langs { gap: 5px; }.fl-langs li { padding-inline: 8px; } }

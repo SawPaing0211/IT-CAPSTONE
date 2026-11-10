@@ -1,0 +1,259 @@
+{
+  "date": "2026-10-23",
+  "method": "Built-in image_gen; no API/CLI fallback; no application integration.",
+  "approval": "All new assets pending owner visual review.",
+  "records": [
+    {
+      "id": "medal-first-quest--earned",
+      "tool": "built-in image_gen",
+      "prompt": "Use case: stylized-concept. Create ONE individual transparent achievement medal PNG asset for Forge.Dev: medal-first-quest, earned state, real achievement First Steps. Use the attached medal concept board ONLY as style reference, ignoring every label/UI element. Match its premium ornate frontal circular medal: warm polished gold double ring, deep faceted amethyst violet inner face, small diamond violet crystal at top, symmetrical tiny star details at left/right/bottom and two short violet ribbon tails. Central relief is a clear large four-point compass star, expressing a first quest. Exactly one centered medal, square canvas, generous transparent margin all around, full silhouette/ribbons intact. Clean silhouette readable at 56px. Keep illustration detail elegant, consistent with the reference, no surroundings. TRUE ALPHA TRANSPARENT BACKGROUND. No text, no letters, no UI, no checkmark, no lock, no watermark, no rectangular backing. This is a design candidate for review, not a new earning rule.",
+      "originalOutput": "C:\\Users\\Christian\\.codex\\generated_images\\01a166ef-f832-7393-b67f-0a7e8c00ec9d\\exec-182e435d-3400-4862-8f89-1dac2afb9ae9.png",
+      "status": "review candidate"
+    },
+    {
+      "id": "medal-first-quest--locked",
+      "tool": "built-in image_gen",
+      "prompt": "Use case: lighting-weather / precise-object-edit. Edit target: the supplied single First Steps gold/violet earned medal. Produce its LOCKED variant as ONE transparent PNG. Preserve EXACTLY the same geometry, frontal composition, compass-star relief, decorative mounts, amethyst crystal, ribbon shape, canvas proportions, framing and transparent margins. Change ONLY materials/colors: every warm gold metal surface becomes cool polished slate/silver gunmetal; violet inner face becomes desaturated deep slate-violet; ribbon tails subdued slate with a restrained violet trace; top crystal still muted violet. Match the cool-slate locked medals on the approved concept board. Clearly lower saturation and brightness but keep readable metallic edges and facets. Genuine alpha transparency preserved. No text, no status lock glyph, no tick, no background, no new ornament. A distinct locked material state, not a dark overlay.",
+      "originalOutput": "C:\\Users\\Christian\\.codex\\generated_images\\01a166ef-f832-7393-b67f-0a7e8c00ec9d\\exec-9c80df5a-0744-4bf5-8cc9-ac7252f3725e.png",
+      "status": "review candidate"
+    },
+    {
+      "id": "medal-quest-master--earned",
+      "tool": "built-in image_gen",
+      "prompt": "Use case: stylized-concept. Asset type: one transparent achievement medal PNG for Forge.Dev, medal-quest-master, earned state (Quest Master). The supplied concept board is an approved STYLE reference only; ignore all its text and demo names. Produce exactly ONE frontal centered circular medal, square canvas, full unobstructed silhouette. Match the reference closely: polished warm gold double circular ring, dark faceted amethyst violet face, one small diamond-shaped violet crystal in a gold setting at twelve o'clock, tiny symmetric gold four-point star mounts at three/nine/six o'clock, two short violet ribbon tails below, subtle premium metallic highlights. Central raised gold relief: a bold crossed pair of small quest swords beneath a prominent central four-point star, a visibly more elaborate mastery tier than First Steps. Strong simple center emblem readable at 56px; ornamental complexity and visual weight consistent with the reference. True alpha transparent background, generous clear margins, no external scenery, no text, no labels, no status checks or locks, no watermark. Gold and violet earned state. Do not invent product rules. Candidate for visual review.",
+      "originalOutput": "C:\\Users\\Christian\\.codex\\generated_images\\01a166ef-f832-7393-b67f-0a7e8c00ec9d\\exec-06bc9777-3ef0-42d1-9b2c-b529986b2f91.png",
+      "status": "review candidate"
+    },
+    {
+      "id": "medal-quest-master--locked",
+      "tool": "built-in image_gen",
+      "prompt": "Use case: precise-object-edit. Edit target: supplied individual gold/violet Quest Master medal (medal-quest-master), earned state. Create its matching LOCKED-state asset. Preserve EXACTLY the source canvas size, object scale, framing, full circular silhouette, center relief motif, faceted background, mount details, top crystal, and two ribbon tails. Change ONLY material/color: all warm gold surfaces become cool silver/slate gunmetal; purple face becomes low-saturation dark slate-violet; ribbons become subdued slate with a faint violet edge; top crystal stays muted violet. Match the approved concept board's cool-slate locked material treatment, clearly cooler/less saturated than earned. Do not make it invisible or apply an opaque dark overlay. One medal, genuine transparent alpha background and transparent margins. No text, no lock glyph/check, no background, no new details, no cropping, no watermark. Candidate for visual review.",
+      "originalOutput": "C:\\Users\\Christian\\.codex\\generated_images\\01a166ef-f832-7393-b67f-0a7e8c00ec9d\\exec-03cbbb86-6148-4331-b63f-807268f41d23.png",
+      "status": "review candidate"
+    },
+    {
+      "id": "medal-streak-week--earned",
+      "tool": "built-in image_gen",
+      "prompt": "Use case: stylized-concept. Asset type: one transparent achievement medal PNG for Forge.Dev, medal-streak-week, earned state (Week Warrior). The supplied concept board is an approved STYLE reference only; ignore all its text and demo names. Produce exactly ONE frontal centered circular medal, square canvas, full unobstructed silhouette. Match the reference closely: polished warm gold double circular ring, dark faceted amethyst violet face, one small diamond-shaped violet crystal in a gold setting at twelve o'clock, tiny symmetric gold four-point star mounts at three/nine/six o'clock, two short violet ribbon tails below, subtle premium metallic highlights. Central raised gold relief: one clear stylized upright flame. Strong simple center emblem readable at 56px; ornamental complexity and visual weight consistent with the reference. True alpha transparent background, generous clear margins, no external scenery, no text, no labels, no status checks or locks, no watermark. Gold and violet earned state. Do not invent product rules. Candidate for visual review.",
+      "originalOutput": "C:\\Users\\Christian\\.codex\\generated_images\\01a166ef-f832-7393-b67f-0a7e8c00ec9d\\exec-a111dc3b-dd3e-4d53-9baa-4657511974a4.png",
+      "status": "review candidate"
+    },
+    {
+      "id": "medal-streak-week--locked",
+      "tool": "built-in image_gen",
+      "prompt": "Use case: precise-object-edit. Edit target: supplied individual gold/violet Week Warrior medal (medal-streak-week), earned state. Create its matching LOCKED-state asset. Preserve EXACTLY the source canvas size, object scale, framing, full circular silhouette, center relief motif, faceted background, mount details, top crystal, and two ribbon tails. Change ONLY material/color: all warm gold surfaces become cool silver/slate gunmetal; purple face becomes low-saturation dark slate-violet; ribbons become subdued slate with a faint violet edge; top crystal stays muted violet. Match the approved concept board's cool-slate locked material treatment, clearly cooler/less saturated than earned. Do not make it invisible or apply an opaque dark overlay. One medal, genuine transparent alpha background and transparent margins. No text, no lock glyph/check, no background, no new details, no cropping, no watermark. Candidate for visual review.",
+      "originalOutput": "C:\\Users\\Christian\\.codex\\generated_images\\01a166ef-f832-7393-b67f-0a7e8c00ec9d\\exec-f27a08bf-0988-4e5f-94d6-f93eadb22208.png",
+      "status": "review candidate"
+    },
+    {
+      "id": "medal-streak-month--earned",
+      "tool": "built-in image_gen",
+      "prompt": "Use case: stylized-concept. Asset type: one transparent achievement medal PNG for Forge.Dev, medal-streak-month, earned state (Marathon Coder). The supplied concept board is an approved STYLE reference only; ignore all its text and demo names. Produce exactly ONE frontal centered circular medal, square canvas, full unobstructed silhouette. Match the reference closely: polished warm gold double circular ring, dark faceted amethyst violet face, one small diamond-shaped violet crystal in a gold setting at twelve o'clock, tiny symmetric gold four-point star mounts at three/nine/six o'clock, two short violet ribbon tails below, subtle premium metallic highlights. Central raised gold relief: a strong twin-layer flame enclosed by a restrained laurel half-wreath, clearly more elaborate than Week Warrior. Strong simple center emblem readable at 56px; ornamental complexity and visual weight consistent with the reference. True alpha transparent background, generous clear margins, no external scenery, no text, no labels, no status checks or locks, no watermark. Gold and violet earned state. Do not invent product rules. Candidate for visual review.",
+      "originalOutput": "C:\\Users\\Christian\\.codex\\generated_images\\01a166ef-f832-7393-b67f-0a7e8c00ec9d\\exec-a0969fec-289d-4969-9e71-7464474807c1.png",
+      "status": "review candidate"
+    },
+    {
+      "id": "medal-streak-month--locked",
+      "tool": "built-in image_gen",
+      "prompt": "Use case: precise-object-edit. Edit target: supplied individual gold/violet Marathon Coder medal (medal-streak-month), earned state. Create its matching LOCKED-state asset. Preserve EXACTLY the source canvas size, object scale, framing, full circular silhouette, center relief motif, faceted background, mount details, top crystal, and two ribbon tails. Change ONLY material/color: all warm gold surfaces become cool silver/slate gunmetal; purple face becomes low-saturation dark slate-violet; ribbons become subdued slate with a faint violet edge; top crystal stays muted violet. Match the approved concept board's cool-slate locked material treatment, clearly cooler/less saturated than earned. Do not make it invisible or apply an opaque dark overlay. One medal, genuine transparent alpha background and transparent margins. No text, no lock glyph/check, no background, no new details, no cropping, no watermark. Candidate for visual review.",
+      "originalOutput": "C:\\Users\\Christian\\.codex\\generated_images\\01a166ef-f832-7393-b67f-0a7e8c00ec9d\\exec-9be85e02-98ed-447c-976e-6fe4a5903349.png",
+      "status": "review candidate"
+    },
+    {
+      "id": "medal-python--earned",
+      "tool": "built-in image_gen",
+      "prompt": "Use case: stylized-concept. Asset type: one transparent achievement medal PNG for Forge.Dev, medal-python, earned state (Python Novice). The supplied concept board is an approved STYLE reference only; ignore all its text and demo names. Produce exactly ONE frontal centered circular medal, square canvas, full unobstructed silhouette. Match the reference closely: polished warm gold double circular ring, dark faceted amethyst violet face, one small diamond-shaped violet crystal in a gold setting at twelve o'clock, tiny symmetric gold four-point star mounts at three/nine/six o'clock, two short violet ribbon tails below, subtle premium metallic highlights. Central raised gold relief: two elegant intertwined stylized snake silhouettes forming one clear programming emblem, no text. Strong simple center emblem readable at 56px; ornamental complexity and visual weight consistent with the reference. True alpha transparent background, generous clear margins, no external scenery, no text, no labels, no status checks or locks, no watermark. Gold and violet earned state. Do not invent product rules. Candidate for visual review.",
+      "originalOutput": "C:\\Users\\Christian\\.codex\\generated_images\\01a166ef-f832-7393-b67f-0a7e8c00ec9d\\exec-988a8dfb-0912-4ccb-b143-5d8e3128f6c8.png",
+      "status": "review candidate"
+    },
+    {
+      "id": "medal-python--locked",
+      "tool": "built-in image_gen",
+      "prompt": "Use case: precise-object-edit. Edit target: supplied individual gold/violet Python Novice medal (medal-python), earned state. Create its matching LOCKED-state asset. Preserve EXACTLY the source canvas size, object scale, framing, full circular silhouette, center relief motif, faceted background, mount details, top crystal, and two ribbon tails. Change ONLY material/color: all warm gold surfaces become cool silver/slate gunmetal; purple face becomes low-saturation dark slate-violet; ribbons become subdued slate with a faint violet edge; top crystal stays muted violet. Match the approved concept board's cool-slate locked material treatment, clearly cooler/less saturated than earned. Do not make it invisible or apply an opaque dark overlay. One medal, genuine transparent alpha background and transparent margins. No text, no lock glyph/check, no background, no new details, no cropping, no watermark. Candidate for visual review.",
+      "originalOutput": "C:\\Users\\Christian\\.codex\\generated_images\\01a166ef-f832-7393-b67f-0a7e8c00ec9d\\exec-2b8cd0be-1291-418f-bb43-00b9971372ee.png",
+      "status": "review candidate"
+    },
+    {
+      "id": "medal-java--earned",
+      "tool": "built-in image_gen",
+      "prompt": "Use case: stylized-concept. Asset type: one transparent achievement medal PNG for Forge.Dev, medal-java, earned state (Java Apprentice). The supplied concept board is an approved STYLE reference only; ignore all its text and demo names. Produce exactly ONE frontal centered circular medal, square canvas, full unobstructed silhouette. Match the reference closely: polished warm gold double circular ring, dark faceted amethyst violet face, one small diamond-shaped violet crystal in a gold setting at twelve o'clock, tiny symmetric gold four-point star mounts at three/nine/six o'clock, two short violet ribbon tails below, subtle premium metallic highlights. Central raised gold relief: a clean cup with three rising curls of steam, no text. Strong simple center emblem readable at 56px; ornamental complexity and visual weight consistent with the reference. True alpha transparent background, generous clear margins, no external scenery, no text, no labels, no status checks or locks, no watermark. Gold and violet earned state. Do not invent product rules. Candidate for visual review.",
+      "originalOutput": "C:\\Users\\Christian\\.codex\\generated_images\\01a166ef-f832-7393-b67f-0a7e8c00ec9d\\exec-c81ad6ad-084f-436b-9e84-f9f3076a27b9.png",
+      "status": "review candidate"
+    },
+    {
+      "id": "medal-java--locked",
+      "tool": "built-in image_gen",
+      "prompt": "Use case: precise-object-edit. Edit target: supplied individual gold/violet Java Apprentice medal (medal-java), earned state. Create its matching LOCKED-state asset. Preserve EXACTLY the source canvas size, object scale, framing, full circular silhouette, center relief motif, faceted background, mount details, top crystal, and two ribbon tails. Change ONLY material/color: all warm gold surfaces become cool silver/slate gunmetal; purple face becomes low-saturation dark slate-violet; ribbons become subdued slate with a faint violet edge; top crystal stays muted violet. Match the approved concept board's cool-slate locked material treatment, clearly cooler/less saturated than earned. Do not make it invisible or apply an opaque dark overlay. One medal, genuine transparent alpha background and transparent margins. No text, no lock glyph/check, no background, no new details, no cropping, no watermark. Candidate for visual review.",
+      "originalOutput": "C:\\Users\\Christian\\.codex\\generated_images\\01a166ef-f832-7393-b67f-0a7e8c00ec9d\\exec-e3c2014d-024f-44a5-bc75-791a6116e8ae.png",
+      "status": "review candidate"
+    },
+    {
+      "id": "medal-csharp--earned",
+      "tool": "built-in image_gen",
+      "prompt": "Use case: stylized-concept. Asset type: one transparent achievement medal PNG for Forge.Dev, medal-csharp, earned state (C# Wizard). The supplied concept board is an approved STYLE reference only; ignore all its text and demo names. Produce exactly ONE frontal centered circular medal, square canvas, full unobstructed silhouette. Match the reference closely: polished warm gold double circular ring, dark faceted amethyst violet face, one small diamond-shaped violet crystal in a gold setting at twelve o'clock, tiny symmetric gold four-point star mounts at three/nine/six o'clock, two short violet ribbon tails below, subtle premium metallic highlights. Central raised gold relief: a large sharp faceted hexagonal crystal with a simple crisp hash-symbol relief, no lettering. Strong simple center emblem readable at 56px; ornamental complexity and visual weight consistent with the reference. True alpha transparent background, generous clear margins, no external scenery, no text, no labels, no status checks or locks, no watermark. Gold and violet earned state. Do not invent product rules. Candidate for visual review.",
+      "originalOutput": "C:\\Users\\Christian\\.codex\\generated_images\\01a166ef-f832-7393-b67f-0a7e8c00ec9d\\exec-e6de7e03-270f-4a88-9df1-53f79fb842a2.png",
+      "status": "review candidate"
+    },
+    {
+      "id": "medal-csharp--locked",
+      "tool": "built-in image_gen",
+      "prompt": "Use case: precise-object-edit. Edit target: supplied individual gold/violet C# Wizard medal (medal-csharp), earned state. Create its matching LOCKED-state asset. Preserve EXACTLY the source canvas size, object scale, framing, full circular silhouette, center relief motif, faceted background, mount details, top crystal, and two ribbon tails. Change ONLY material/color: all warm gold surfaces become cool silver/slate gunmetal; purple face becomes low-saturation dark slate-violet; ribbons become subdued slate with a faint violet edge; top crystal stays muted violet. Match the approved concept board's cool-slate locked material treatment, clearly cooler/less saturated than earned. Do not make it invisible or apply an opaque dark overlay. One medal, genuine transparent alpha background and transparent margins. No text, no lock glyph/check, no background, no new details, no cropping, no watermark. Candidate for visual review.",
+      "originalOutput": "C:\\Users\\Christian\\.codex\\generated_images\\01a166ef-f832-7393-b67f-0a7e8c00ec9d\\exec-13bf5aba-d252-42fa-94e3-77b3e796897e.png",
+      "status": "review candidate"
+    },
+    {
+      "id": "medal-hard-quests--earned",
+      "tool": "built-in image_gen",
+      "prompt": "Use case: stylized-concept. Asset type: one transparent achievement medal PNG for Forge.Dev, medal-hard-quests, earned state (Hard Coder). The supplied concept board is an approved STYLE reference only; ignore all its text and demo names. Produce exactly ONE frontal centered circular medal, square canvas, full unobstructed silhouette. Match the reference closely: polished warm gold double circular ring, dark faceted amethyst violet face, one small diamond-shaped violet crystal in a gold setting at twelve o'clock, tiny symmetric gold four-point star mounts at three/nine/six o'clock, two short violet ribbon tails below, subtle premium metallic highlights. Central raised gold relief: a tall angular mountain peak with a single four-point summit star, bold readable relief. Strong simple center emblem readable at 56px; ornamental complexity and visual weight consistent with the reference. True alpha transparent background, generous clear margins, no external scenery, no text, no labels, no status checks or locks, no watermark. Gold and violet earned state. Do not invent product rules. Candidate for visual review.",
+      "originalOutput": "C:\\Users\\Christian\\.codex\\generated_images\\01a166ef-f832-7393-b67f-0a7e8c00ec9d\\exec-74280a47-9a76-4d9c-a069-bddd16a7de88.png",
+      "status": "review candidate"
+    },
+    {
+      "id": "medal-hard-quests--locked",
+      "tool": "built-in image_gen",
+      "prompt": "Use case: precise-object-edit. Edit target: supplied individual gold/violet Hard Coder medal (medal-hard-quests), earned state. Create its matching LOCKED-state asset. Preserve EXACTLY the source canvas size, object scale, framing, full circular silhouette, center relief motif, faceted background, mount details, top crystal, and two ribbon tails. Change ONLY material/color: all warm gold surfaces become cool silver/slate gunmetal; purple face becomes low-saturation dark slate-violet; ribbons become subdued slate with a faint violet edge; top crystal stays muted violet. Match the approved concept board's cool-slate locked material treatment, clearly cooler/less saturated than earned. Do not make it invisible or apply an opaque dark overlay. One medal, genuine transparent alpha background and transparent margins. No text, no lock glyph/check, no background, no new details, no cropping, no watermark. Candidate for visual review.",
+      "originalOutput": "C:\\Users\\Christian\\.codex\\generated_images\\01a166ef-f832-7393-b67f-0a7e8c00ec9d\\exec-81ced45d-65ab-4759-9220-0cb65fdd8b39.png",
+      "status": "review candidate"
+    },
+    {
+      "id": "medal-debugging--earned",
+      "tool": "built-in image_gen",
+      "prompt": "Use case: stylized-concept. Asset type: one transparent achievement medal PNG for Forge.Dev, medal-debugging, earned state (Debug Master). The supplied concept board is an approved STYLE reference only; ignore all its text and demo names. Produce exactly ONE frontal centered circular medal, square canvas, full unobstructed silhouette. Match the reference closely: polished warm gold double circular ring, dark faceted amethyst violet face, one small diamond-shaped violet crystal in a gold setting at twelve o'clock, tiny symmetric gold four-point star mounts at three/nine/six o'clock, two short violet ribbon tails below, subtle premium metallic highlights. Central raised gold relief: a simple six-legged bug silhouette inside a clean magnifying-glass ring. Strong simple center emblem readable at 56px; ornamental complexity and visual weight consistent with the reference. True alpha transparent background, generous clear margins, no external scenery, no text, no labels, no status checks or locks, no watermark. Gold and violet earned state. Do not invent product rules. Candidate for visual review.",
+      "originalOutput": "C:\\Users\\Christian\\.codex\\generated_images\\01a166ef-f832-7393-b67f-0a7e8c00ec9d\\exec-0f52204b-e5d2-493a-9ed4-868da2052b75.png",
+      "status": "review candidate"
+    },
+    {
+      "id": "medal-debugging--locked",
+      "tool": "built-in image_gen",
+      "prompt": "Use case: precise-object-edit. Edit target: supplied individual gold/violet Debug Master medal (medal-debugging), earned state. Create its matching LOCKED-state asset. Preserve EXACTLY the source canvas size, object scale, framing, full circular silhouette, center relief motif, faceted background, mount details, top crystal, and two ribbon tails. Change ONLY material/color: all warm gold surfaces become cool silver/slate gunmetal; purple face becomes low-saturation dark slate-violet; ribbons become subdued slate with a faint violet edge; top crystal stays muted violet. Match the approved concept board's cool-slate locked material treatment, clearly cooler/less saturated than earned. Do not make it invisible or apply an opaque dark overlay. One medal, genuine transparent alpha background and transparent margins. No text, no lock glyph/check, no background, no new details, no cropping, no watermark. Candidate for visual review.",
+      "originalOutput": "C:\\Users\\Christian\\.codex\\generated_images\\01a166ef-f832-7393-b67f-0a7e8c00ec9d\\exec-ae9bf9f6-1ddf-4c79-8824-382a74f8afde.png",
+      "status": "review candidate"
+    },
+    {
+      "id": "medal-first-module--earned",
+      "tool": "built-in image_gen",
+      "prompt": "Use case: stylized-concept. Asset type: one transparent achievement medal PNG for Forge.Dev, medal-first-module, earned state (First Module). The supplied concept board is an approved STYLE reference only; ignore all its text and demo names. Produce exactly ONE frontal centered circular medal, square canvas, full unobstructed silhouette. Match the reference closely: polished warm gold double circular ring, dark faceted amethyst violet face, one small diamond-shaped violet crystal in a gold setting at twelve o'clock, tiny symmetric gold four-point star mounts at three/nine/six o'clock, two short violet ribbon tails below, subtle premium metallic highlights. Central raised gold relief: one open book with clear thick pages and a central small violet crystal. Strong simple center emblem readable at 56px; ornamental complexity and visual weight consistent with the reference. True alpha transparent background, generous clear margins, no external scenery, no text, no labels, no status checks or locks, no watermark. Gold and violet earned state. Do not invent product rules. Candidate for visual review.",
+      "originalOutput": "C:\\Users\\Christian\\.codex\\generated_images\\01a166ef-f832-7393-b67f-0a7e8c00ec9d\\exec-f032d00f-4601-4623-a7e2-40fb0766e34b.png",
+      "status": "review candidate"
+    },
+    {
+      "id": "medal-first-module--locked",
+      "tool": "built-in image_gen",
+      "prompt": "Use case: precise-object-edit. Edit target: supplied individual gold/violet First Module medal (medal-first-module), earned state. Create its matching LOCKED-state asset. Preserve EXACTLY the source canvas size, object scale, framing, full circular silhouette, center relief motif, faceted background, mount details, top crystal, and two ribbon tails. Change ONLY material/color: all warm gold surfaces become cool silver/slate gunmetal; purple face becomes low-saturation dark slate-violet; ribbons become subdued slate with a faint violet edge; top crystal stays muted violet. Match the approved concept board's cool-slate locked material treatment, clearly cooler/less saturated than earned. Do not make it invisible or apply an opaque dark overlay. One medal, genuine transparent alpha background and transparent margins. No text, no lock glyph/check, no background, no new details, no cropping, no watermark. Candidate for visual review.",
+      "originalOutput": "C:\\Users\\Christian\\.codex\\generated_images\\01a166ef-f832-7393-b67f-0a7e8c00ec9d\\exec-97068f70-fc5e-40f6-bbae-b9cbdbc96d63.png",
+      "status": "review candidate"
+    },
+    {
+      "id": "medal-activity-builder--earned",
+      "tool": "built-in image_gen",
+      "prompt": "Use case: stylized-concept. Asset type: one transparent achievement medal PNG for Forge.Dev, medal-activity-builder, earned state (Activity Architect). The supplied concept board is an approved STYLE reference only; ignore all its text and demo names. Produce exactly ONE frontal centered circular medal, square canvas, full unobstructed silhouette. Match the reference closely: polished warm gold double circular ring, dark faceted amethyst violet face, one small diamond-shaped violet crystal in a gold setting at twelve o'clock, tiny symmetric gold four-point star mounts at three/nine/six o'clock, two short violet ribbon tails below, subtle premium metallic highlights. Central raised gold relief: a balanced pair of fitted architectural puzzle blocks forming a clean little arch. Strong simple center emblem readable at 56px; ornamental complexity and visual weight consistent with the reference. True alpha transparent background, generous clear margins, no external scenery, no text, no labels, no status checks or locks, no watermark. Gold and violet earned state. Do not invent product rules. Candidate for visual review.",
+      "originalOutput": "C:\\Users\\Christian\\.codex\\generated_images\\01a166ef-f832-7393-b67f-0a7e8c00ec9d\\exec-127f972f-fc20-468f-8375-d1ec15f72ea4.png",
+      "status": "review candidate"
+    },
+    {
+      "id": "medal-activity-builder--locked",
+      "tool": "built-in image_gen",
+      "prompt": "Use case: precise-object-edit. Edit target: supplied individual gold/violet Activity Architect medal (medal-activity-builder), earned state. Create its matching LOCKED-state asset. Preserve EXACTLY the source canvas size, object scale, framing, full circular silhouette, center relief motif, faceted background, mount details, top crystal, and two ribbon tails. Change ONLY material/color: all warm gold surfaces become cool silver/slate gunmetal; purple face becomes low-saturation dark slate-violet; ribbons become subdued slate with a faint violet edge; top crystal stays muted violet. Match the approved concept board's cool-slate locked material treatment, clearly cooler/less saturated than earned. Do not make it invisible or apply an opaque dark overlay. One medal, genuine transparent alpha background and transparent margins. No text, no lock glyph/check, no background, no new details, no cropping, no watermark. Candidate for visual review.",
+      "originalOutput": "C:\\Users\\Christian\\.codex\\generated_images\\01a166ef-f832-7393-b67f-0a7e8c00ec9d\\exec-f5e85814-6821-4030-b600-fcaefe386a1d.png",
+      "status": "review candidate"
+    },
+    {
+      "id": "medal-class-starter--earned",
+      "tool": "built-in image_gen",
+      "prompt": "Use case: stylized-concept. Asset type: one transparent achievement medal PNG for Forge.Dev, medal-class-starter, earned state (Class Starter). The supplied concept board is an approved STYLE reference only; ignore all its text and demo names. Produce exactly ONE frontal centered circular medal, square canvas, full unobstructed silhouette. Match the reference closely: polished warm gold double circular ring, dark faceted amethyst violet face, one small diamond-shaped violet crystal in a gold setting at twelve o'clock, tiny symmetric gold four-point star mounts at three/nine/six o'clock, two short violet ribbon tails below, subtle premium metallic highlights. Central raised gold relief: one small four-point star above a simple open palm, a learner's first completion. Strong simple center emblem readable at 56px; ornamental complexity and visual weight consistent with the reference. True alpha transparent background, generous clear margins, no external scenery, no text, no labels, no status checks or locks, no watermark. Gold and violet earned state. Do not invent product rules. Candidate for visual review.",
+      "originalOutput": "C:\\Users\\Christian\\.codex\\generated_images\\01a166ef-f832-7393-b67f-0a7e8c00ec9d\\exec-f27071af-0809-41f8-9049-dbe7a647f259.png",
+      "status": "review candidate"
+    },
+    {
+      "id": "medal-class-starter--locked",
+      "tool": "built-in image_gen",
+      "prompt": "Use case: precise-object-edit. Edit target: supplied individual gold/violet Class Starter medal (medal-class-starter), earned state. Create its matching LOCKED-state asset. Preserve EXACTLY the source canvas size, object scale, framing, full circular silhouette, center relief motif, faceted background, mount details, top crystal, and two ribbon tails. Change ONLY material/color: all warm gold surfaces become cool silver/slate gunmetal; purple face becomes low-saturation dark slate-violet; ribbons become subdued slate with a faint violet edge; top crystal stays muted violet. Match the approved concept board's cool-slate locked material treatment, clearly cooler/less saturated than earned. Do not make it invisible or apply an opaque dark overlay. One medal, genuine transparent alpha background and transparent margins. No text, no lock glyph/check, no background, no new details, no cropping, no watermark. Candidate for visual review.",
+      "originalOutput": "C:\\Users\\Christian\\.codex\\generated_images\\01a166ef-f832-7393-b67f-0a7e8c00ec9d\\exec-7f4ce0f4-0fb9-48ef-afc7-7b84f031921f.png",
+      "status": "review candidate"
+    },
+    {
+      "id": "medal-resource-curator--earned",
+      "tool": "built-in image_gen",
+      "prompt": "Use case: stylized-concept. Asset type: one transparent achievement medal PNG for Forge.Dev, medal-resource-curator, earned state (Resource Curator). The supplied concept board is an approved STYLE reference only; ignore all its text and demo names. Produce exactly ONE frontal centered circular medal, square canvas, full unobstructed silhouette. Match the reference closely: polished warm gold double circular ring, dark faceted amethyst violet face, one small diamond-shaped violet crystal in a gold setting at twelve o'clock, tiny symmetric gold four-point star mounts at three/nine/six o'clock, two short violet ribbon tails below, subtle premium metallic highlights. Central raised gold relief: a neatly stacked trio of document sheets with a small clear paperclip. Strong simple center emblem readable at 56px; ornamental complexity and visual weight consistent with the reference. True alpha transparent background, generous clear margins, no external scenery, no text, no labels, no status checks or locks, no watermark. Gold and violet earned state. Do not invent product rules. Candidate for visual review.",
+      "originalOutput": "C:\\Users\\Christian\\.codex\\generated_images\\01a166ef-f832-7393-b67f-0a7e8c00ec9d\\exec-f70a89b5-f293-4e4f-8350-aff62d7d2de9.png",
+      "status": "review candidate"
+    },
+    {
+      "id": "medal-resource-curator--locked",
+      "tool": "built-in image_gen",
+      "prompt": "Use case: precise-object-edit. Edit target: supplied individual gold/violet Resource Curator medal (medal-resource-curator), earned state. Create its matching LOCKED-state asset. Preserve EXACTLY the source canvas size, object scale, framing, full circular silhouette, center relief motif, faceted background, mount details, top crystal, and two ribbon tails. Change ONLY material/color: all warm gold surfaces become cool silver/slate gunmetal; purple face becomes low-saturation dark slate-violet; ribbons become subdued slate with a faint violet edge; top crystal stays muted violet. Match the approved concept board's cool-slate locked material treatment, clearly cooler/less saturated than earned. Do not make it invisible or apply an opaque dark overlay. One medal, genuine transparent alpha background and transparent margins. No text, no lock glyph/check, no background, no new details, no cropping, no watermark. Candidate for visual review.",
+      "originalOutput": "C:\\Users\\Christian\\.codex\\generated_images\\01a166ef-f832-7393-b67f-0a7e8c00ec9d\\exec-21ce1301-d4d7-4af6-baee-5c4e6e1ff386.png",
+      "status": "review candidate"
+    },
+    {
+      "id": "medal-multi-subject--earned",
+      "tool": "built-in image_gen",
+      "prompt": "Use case: stylized-concept. Asset type: one transparent achievement medal PNG for Forge.Dev, medal-multi-subject, earned state (Multi-Class Maestro). The supplied concept board is an approved STYLE reference only; ignore all its text and demo names. Produce exactly ONE frontal centered circular medal, square canvas, full unobstructed silhouette. Match the reference closely: polished warm gold double circular ring, dark faceted amethyst violet face, one small diamond-shaped violet crystal in a gold setting at twelve o'clock, tiny symmetric gold four-point star mounts at three/nine/six o'clock, two short violet ribbon tails below, subtle premium metallic highlights. Central raised gold relief: three simple connected upright book spines fanning outward, visually distinct from one open book. Strong simple center emblem readable at 56px; ornamental complexity and visual weight consistent with the reference. True alpha transparent background, generous clear margins, no external scenery, no text, no labels, no status checks or locks, no watermark. Gold and violet earned state. Do not invent product rules. Candidate for visual review.",
+      "originalOutput": "C:\\Users\\Christian\\.codex\\generated_images\\01a166ef-f832-7393-b67f-0a7e8c00ec9d\\exec-744c4b1c-9759-4d2c-8644-57c83bdf1186.png",
+      "status": "review candidate"
+    },
+    {
+      "id": "medal-multi-subject--locked",
+      "tool": "built-in image_gen",
+      "prompt": "Use case: precise-object-edit. Edit target: supplied individual gold/violet Multi-Class Maestro medal (medal-multi-subject), earned state. Create its matching LOCKED-state asset. Preserve EXACTLY the source canvas size, object scale, framing, full circular silhouette, center relief motif, faceted background, mount details, top crystal, and two ribbon tails. Change ONLY material/color: all warm gold surfaces become cool silver/slate gunmetal; purple face becomes low-saturation dark slate-violet; ribbons become subdued slate with a faint violet edge; top crystal stays muted violet. Match the approved concept board's cool-slate locked material treatment, clearly cooler/less saturated than earned. Do not make it invisible or apply an opaque dark overlay. One medal, genuine transparent alpha background and transparent margins. No text, no lock glyph/check, no background, no new details, no cropping, no watermark. Candidate for visual review.",
+      "originalOutput": "C:\\Users\\Christian\\.codex\\generated_images\\01a166ef-f832-7393-b67f-0a7e8c00ec9d\\exec-eac4ea66-9448-4d8d-91d1-1d9cd6158c5e.png",
+      "status": "review candidate"
+    },
+    {
+      "id": "medal-fallback--earned",
+      "tool": "built-in image_gen",
+      "prompt": "Use case: stylized-concept. Asset type: one transparent achievement medal PNG for Forge.Dev, medal-fallback, earned state (Generic fallback). The supplied concept board is an approved STYLE reference only; ignore all its text and demo names. Produce exactly ONE frontal centered circular medal, square canvas, full unobstructed silhouette. Match the reference closely: polished warm gold double circular ring, dark faceted amethyst violet face, one small diamond-shaped violet crystal in a gold setting at twelve o'clock, tiny symmetric gold four-point star mounts at three/nine/six o'clock, two short violet ribbon tails below, subtle premium metallic highlights. Central raised gold relief: a neutral single faceted diamond, no subject-specific symbols, no question mark. Strong simple center emblem readable at 56px; ornamental complexity and visual weight consistent with the reference. True alpha transparent background, generous clear margins, no external scenery, no text, no labels, no status checks or locks, no watermark. Gold and violet earned state. Do not invent product rules. Candidate for visual review.",
+      "originalOutput": "C:\\Users\\Christian\\.codex\\generated_images\\01a166ef-f832-7393-b67f-0a7e8c00ec9d\\exec-66f99907-43dd-4581-9753-5cdac9dd9576.png",
+      "status": "superseded candidate, retained"
+    },
+    {
+      "id": "medal-fallback--earned-v2",
+      "tool": "built-in image_gen",
+      "prompt": "Use case: precise-object-edit. Edit the supplied generic medal candidate ONLY at its central emblem. Keep gold ring, top violet crystal, violet faceted face, mounts, ribbon tails, camera, canvas size and framing identical. REPLACE the central four-point star/diamond with a simple smooth OVAL violet cabochon gem in a thin gold bezel, no points, no star, no compass, no code, no flame, no question mark. The neutral oval must be clearly distinct from the First Steps compass-star medal. A generic neutral fallback medal, gold/violet earned state. All pixels outside the full medal silhouette must remain genuine alpha transparency. No text/UI/check/lock/watermark. Preserve the full transparent margins.",
+      "originalOutput": "C:\\Users\\Christian\\.codex\\generated_images\\01a166ef-f832-7393-b67f-0a7e8c00ec9d\\exec-43d3977f-26e2-469d-a14a-0bc7ebb9e0ff.png",
+      "status": "review candidate"
+    },
+    {
+      "id": "medal-fallback--locked-v2",
+      "tool": "built-in image_gen",
+      "prompt": "Use case: precise-object-edit. Create LOCKED material variant of the supplied generic fallback medal with OVAL central cabochon. Preserve precisely its oval gem shape, complete ring/ribbon silhouette, all ornament, canvas, size/framing and true transparent background. Change ONLY warm gold metal to cool silver/gunmetal slate; deep violet background/ribbons desaturate to cool slate-violet; oval center gem becomes a muted low-saturation slate-lavender gem, top diamond muted violet. No new symbol; retain oval center, never substitute a star/compass. Cool subdued locked material state matching approved board, readable polished edges, no flat black overlay. Genuine alpha, no UI/text/check/lock/watermark, full uncut margins.",
+      "originalOutput": "C:\\Users\\Christian\\.codex\\generated_images\\01a166ef-f832-7393-b67f-0a7e8c00ec9d\\exec-c7c8da37-43ab-4e1a-ac14-e2c914d1d4f1.png",
+      "status": "review candidate"
+    },
+    {
+      "id": "landing-background-plate",
+      "tool": "built-in image_gen",
+      "prompt": "Use case: precise-object-edit. Input is the exact approved Forge.Dev landing visual reference, a flattened 16:9 concept. Create a CLEAN BACKGROUND PLATE for layered animation, landscape 16:9 canvas. Preserve the original composition and positions as accurately as possible: full moon upper center-left, dark blue distant mountain valley, waterfalls and lake, monumental violet crystal cave on right, night sky and subtle blue-violet palette. Left 43 percent must stay very dark and calm for real HTML copy. Remove ALL typography, logo, buttons, footer rules, pause icon and watermark, seamlessly reconstruct landscape behind. Remove the four adventurers and their near foreground cliff platform (these will be a separate foreground layer), reconstruct the valley behind their silhouettes. Remove foreground firefly specks and decorative crystal glints; keep actual crystal geometry and natural ambient cave glow. Reduce foreground wispy mist and distinct moving cloud wisps into a calm static night atmosphere, since separate moving cloud/mist layers will be composited. No new characters or architecture, no UI. Keep approved camera/cave size/position; no redesign. OPAQUE background full canvas. Production asset candidate only, visual review pending.",
+      "originalOutput": "C:\\Users\\Christian\\.codex\\generated_images\\01a166ef-f832-7393-b67f-0a7e8c00ec9d\\exec-eb0221bc-885d-40b1-b8f0-72201a6f536c.png",
+      "status": "review candidate"
+    },
+    {
+      "id": "landing-party-foreground",
+      "tool": "built-in image_gen",
+      "prompt": "Use case: background-extraction, identity-preserve. The supplied image is the exact APPROVED Forge.Dev landing composition, flattened 16:9. Extract its FOUR-PERSON ANIME PARTY AND THE NEAR FOREGROUND CLIFF/ROCK PLATFORM onto TRUE ALPHA TRANSPARENCY as a separate registered full-canvas foreground layer. Use full landscape 16:9 canvas; keep all four people, their silhouettes, costumes, hair, backpacks, stable standing poses and positions IDENTICAL to reference. They are seen from the back: blonde woman at party-left, taller black-haired violet-cloak man left-center, red-haired woman right-center, brown-haired dark-teal-cloak man party-right. Keep the natural cliff under their feet and the nearest purple crystal clusters at lower right and bottom. Preserve their scale, relative positions and original location in the right/lower portion; DO NOT recenter or enlarge. Left 43% and the entire sky/valley/cave background must become completely transparent. Include ONLY these foreground objects; no mountain background, lake, sky, moon, clouds or mist. Remove all typography, logo, UI, buttons, footer rules, pause symbol and watermark. No added glow sheet or black background. No animation or walking; all four remain stable. High-quality precise silhouettes and transparent hair/cape edges. Preserve original illustration style, lighting and blue/violet rimlight. Candidate for registration/visual review.",
+      "originalOutput": "C:\\Users\\Christian\\.codex\\generated_images\\01a166ef-f832-7393-b67f-0a7e8c00ec9d\\exec-8665c5c4-67ed-4f38-9891-e0e95ddc5d99.png",
+      "status": "superseded candidate, retained"
+    },
+    {
+      "id": "landing-party-foreground-v2",
+      "tool": "built-in image_gen",
+      "prompt": "Use case: precise-object-edit / identity-preserve. Image 1 is the extracted transparent party foreground candidate; image 2 is the approved flattened landing reference and controls composition. CORRECT REGISTRATION ONLY. Keep the full 1672x941 landscape canvas and alpha. The candidate party is currently too large and too high/left. Reduce all four characters together to about 76% of their current size and place them so their head centers match the reference: blonde near (1075,492), black-haired man near (1192,451), red-haired woman near (1310,501), brown-haired man near (1412,451), on this exact 1672x941 canvas. Preserve four identities, costumes, exact standing poses, stable cloaks and all relative proportions. Rebuild/extend the foreground cliff naturally to cover the bottom edge and right edge, so no horizontal or rectangular cut edge appears after resizing the party. Keep crystal clusters low at right and bottom as reference. Everything outside the foreground cliff and party remains genuinely transparent. No sky/valley/cave/mist, no UI or text. Do not recenter the party, do not fill the canvas with people, do not change aspect ratio. This is a foreground layer, not a standalone hero.",
+      "originalOutput": "C:\\Users\\Christian\\.codex\\generated_images\\01a166ef-f832-7393-b67f-0a7e8c00ec9d\\exec-954c3690-8e36-4b07-b3f9-5459c80787af.png",
+      "status": "review candidate"
+    },
+    {
+      "id": "landing-clouds",
+      "tool": "built-in image_gen",
+      "prompt": "Use case: stylized-concept, supporting compositing layer. Create ONE wide horizontal semi-transparent nocturnal cloud-bank layer for the exact supplied Forge.Dev moonlit landing reference. True alpha transparent background, landscape 16:9 canvas. Only soft detailed dark blue/slate moonlit clouds with very restrained cool silver edges, concentrated in the upper third and tapering to total transparency on all sides. Match the reference's illustrated anime-fantasy sky style and midnight navy color. No moon, no stars, no landscape, no people, no text or UI, no opaque blue rectangle, no fog covering the whole frame. This is an independent slowly drifting cloud layer; keep edges soft and unobtrusive, with a calm dark left-side copy zone. Do not bake in violet lightning or excessive glow. Full genuine alpha.",
+      "originalOutput": "C:\\Users\\Christian\\.codex\\generated_images\\01a166ef-f832-7393-b67f-0a7e8c00ec9d\\exec-099b4c88-6012-426c-aabd-73f91764be2c.png",
+      "status": "review candidate"
+    },
+    {
+      "id": "landing-mist",
+      "tool": "built-in image_gen",
+      "prompt": "Use case: stylized-concept, supporting compositing layer. Create ONE wide horizontal valley mist layer to composite on the supplied approved Forge.Dev moonlit valley landing. Genuine alpha transparent background, landscape 16:9 canvas. Only delicate wisps and low banks of cool blue-silver translucent fog, concentrated around middle/lower third and tapering to transparency at all edges. Extremely subtle, airy, irregular, hand-painted anime-fantasy atmosphere matching the approved moonlit valley. Leave the left 43 percent especially sparse for readable live copy. No mountains, no cliff, no party, no moon, no crystals, no particles, no text, no UI, no opaque backdrop or smoky rectangle. No aggressive white glow or contrast. Suitable for a very slow tiny horizontal drift behind the stable foreground party. Preserve real alpha gradients.",
+      "originalOutput": "C:\\Users\\Christian\\.codex\\generated_images\\01a166ef-f832-7393-b67f-0a7e8c00ec9d\\exec-1c31e065-b90d-4f1f-a2e8-752b291f56a4.png",
+      "status": "review candidate"
+    }
+  ]
+}

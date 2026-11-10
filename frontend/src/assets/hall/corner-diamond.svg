@@ -1,0 +1,11 @@
+<svg preserveAspectRatio="none" overflow="visible" style="display: block;" width="11" height="11" viewBox="0 0 11 11" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g id="Diamond" clip-path="url(#clip0_0_11)">
+<path id="Vector" d="M5.5 0L11 5.5L5.5 11L0 5.5L5.5 0Z" fill="#F3D78A"/>
+<path id="Vector_2" d="M5.5 3.11667L7.88333 5.5L5.5 7.88333L3.11667 5.5L5.5 3.11667Z" fill="#0B1224"/>
+</g>
+<defs>
+<clipPath id="clip0_0_11">
+<rect width="11" height="11" fill="white"/>
+</clipPath>
+</defs>
+</svg>

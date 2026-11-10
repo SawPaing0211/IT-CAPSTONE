@@ -1,92 +1,101 @@
-# Forge.Dev - Interactive Coding Learning Platform
+# Forge.Dev
 
-## 🚀 Project Overview
-An interactive platform for learning programming languages (Python, Java, C#) with gamified elements. Features include a coding sandbox, quest system, block/subject management, and admin controls.
+Forge.Dev is a programming-learning platform for Python, Java, and C#. Students work through lessons and coding quests, instructors manage classes and review submissions, and administrators manage accounts and enrollment.
 
-## 🛠️ Tech Stack
-- **Frontend**: React, Vite, TailwindCSS
-- **Backend**: Python Flask, MySQL
-- **Infrastructure**: Docker (for Database & Code Sandbox)
+## Download the project
 
----
+The current application is on the **`master`** branch.
 
-## 📦 Prerequisites
-Before running the project, ensure you have installed:
-1.  **Node.js** (LTS version recommended)
-2.  **Python 3.10+**
-3.  **Git**
-4.  **Docker Desktop** (Crucial for Database & Sandbox)
+- **Download a ZIP.** Open the [current branch](https://github.com/SawPaing0211/IT-CAPSTONE/tree/master), choose **Code → Download ZIP**, and extract it. Open the extracted `IT-CAPSTONE-master` folder, which contains `backend` and `frontend`.
+- **Clone with Git.** Use this option if you want to pull updates or contribute.
 
----
+  ```powershell
+  git clone --branch master https://github.com/SawPaing0211/IT-CAPSTONE.git
+  cd IT-CAPSTONE
+  ```
 
-## ⚙️ Setup Instructions
+If GitHub denies access, sign in with the GitHub account that has been granted access to the repo. If you only need to use the hosted app, ask the group for the current link and your account.
 
-### 1. Clone the Repository
-```bash
-git clone https://github.com/SawPaing0211/IT-CAPSTONE.git
-cd IT-CAPSTONE
+## Run locally on Windows
 
-2. Database Setup (Docker)
-The project uses a MySQL database running in Docker.
-Open your terminal and run:
+Install **Node.js 24**, **Python 3.12**, and **Docker Desktop** with Linux containers enabled. Git is needed only for the clone option. Run the commands in PowerShell from the project folder unless a step says otherwise.
 
-docker run --name forge-mysql -p 3306:3306 -e MYSQL_ALLOW_EMPTY_PASSWORD=yes -d mysql:8.0
+### 1. Start a local MySQL database
 
-Wait about 30 seconds for the database to initialize.
+Start Docker Desktop and wait for its engine. Replace both password placeholders below with different local passwords made of letters and numbers. Keep the user password handy for step 2. The container and its named volume are for your local copy.
 
+```powershell
+docker run -d --name forge-dev-local-db -p 127.0.0.1:3307:3306 -e MYSQL_DATABASE=forge_local -e MYSQL_USER=forge_local -e MYSQL_PASSWORD=REPLACE_LOCAL_USER_PASSWORD -e MYSQL_ROOT_PASSWORD=REPLACE_LOCAL_ROOT_PASSWORD -v forge-dev-local-db-data:/var/lib/mysql mysql:8.0
+docker logs --tail 30 forge-dev-local-db
+```
 
-3. Backend Setup
-Navigate to the backend folder and set up the Python environment:
+Wait for MySQL to finish initializing and report that it is ready on port 3306 **inside** the container. Run the `docker logs` command again if needed. On later sessions, reuse the container with `docker start forge-dev-local-db`.
+
+### 2. Set up the backend
+
+```powershell
 cd backend
+py -3.12 -m venv venv
+.\venv\Scripts\python.exe -m pip install -r requirements.txt
+Copy-Item .env.example .env
+notepad .env
+```
 
-# Create virtual environment (Windows)
-python -m venv venv
-.\venv\Scripts\activate
+In `backend/.env`, replace these settings. Use the MySQL **user** password from step 1. For each secret, run `.\venv\Scripts\python.exe -c "import secrets; print(secrets.token_hex(32))"` and paste the output.
 
-# Install dependencies
-pip install -r requirements.txt
-# OR if requirements.txt is missing, run:
-# pip install flask flask-cors flask-jwt-extended flask-sqlalchemy pymysql cryptography requests
+```dotenv
+DATABASE_URL=mysql+pymysql://forge_local:REPLACE_LOCAL_USER_PASSWORD@127.0.0.1:3307/forge_local
+SECRET_KEY=REPLACE_WITH_RANDOM_SECRET
+JWT_SECRET_KEY=REPLACE_WITH_ANOTHER_RANDOM_SECRET
+CORS_ORIGINS=http://localhost:5300
+FLASK_DEBUG=false
+```
 
-# Run the backend server
-python app.py
+Keep `.env` private. `GEMINI_API_KEY` is optional for local setup and is used for AI-assisted similarity analysis.
 
-Backend will run on http://localhost:5000
+```powershell
+.\venv\Scripts\python.exe manage_schema.py status
+.\venv\Scripts\python.exe manage_schema.py upgrade
+.\venv\Scripts\waitress-serve.exe --host=127.0.0.1 --port=5000 app:app
+```
 
+On the first run, missing tables are expected. Check that the schema tool shows your local `forge_local` database before typing `forge_local` to confirm the upgrade. Keep the backend terminal open.
 
-4. Frontend Setup
-Open a new terminal window in the root folder:
+### 3. Start the frontend
 
+Open a second PowerShell window in the project folder.
+
+```powershell
 cd frontend
+npm.cmd ci
+npm.cmd run dev -- --strictPort
+```
 
-# Install dependencies
-npm install
+Open [http://localhost:5300](http://localhost:5300). The backend listens at [http://localhost:5000](http://localhost:5000). For local work, use these two terminals. The `start-forge.bat` launcher is for tunnel-based sharing and starts public Cloudflare tunnels.
 
-# Run the development server
-npm run dev
+### 4. Enable code execution and sign in
 
-Frontend will run on http://localhost:5173
+To use the Sandbox or run and submit quests, open a third terminal in the project folder and build the Python, Java, and C# sandbox images. The first build downloads the base images and dependencies.
 
-
-5. Sandbox Setup (Optional - For Code Execution)
-If you want the code execution feature (Python/Java/C# sandbox) to work, build the Docker images:
-
-cd backend/forge-sandbox
+```powershell
+cd backend\forge-sandbox
 .\build_images.bat
+```
 
-How to Use
-Login/Register: Go to http://localhost:5173 and create an account.
+Public registration is disabled. A fresh local database has no sign-in accounts. Ask the project maintainer to provision the first local administrator, who can then create test accounts and set up classes. For an existing installation, use the account your administrator gave you. Keep school data and shared credentials out of personal copies.
 
-Admin Panel: If you are an admin, go to the Admin Dashboard to manage users and blocks.
+## What each role can do
 
-Instructor: Create blocks, assign subjects, and create problems/quests.
+| Role | Workflows |
+| --- | --- |
+| Student | Open enrolled subjects, read lessons, practice in the Sandbox, run and submit quests, and view XP and achievements. |
+| Instructor | Open assigned classes, manage modules and quests, post announcements, and review submissions and class analytics. |
+| Administrator | Manage subjects, class codes, users, enrollments, and instructor assignments. Only the configured head administrator can create other administrators. |
 
-Student: View subjects, attempt quests, and check progress.
+The React/Vite frontend is in `frontend/`, the Flask/MySQL API is in `backend/`, and the sandbox Dockerfiles are in `backend/forge-sandbox/`.
 
-Folder Structure
-backend/: Flask API server
-frontend/: React Client application
-backend/forge-sandbox/: Dockerfiles for code execution
-
+- [Schema upgrade guide](docs/SCHEMA_UPGRADE.md)
+- [Head administrator setup and recovery](docs/HEAD_ADMIN_SETUP_AND_RECOVERY.md)
+- [Backup and recovery](docs/BACKUP_AND_RECOVERY.md)
 
 Rejano, Paul Christian Caleb I.

@@ -1,0 +1,38 @@
+# Parallel design preparation — 24 October 2026
+
+Codex design work while Claude completes Batch B. **No application, approved preview, artwork master, export, or existing HTML proof was modified.** No independent Batch B review was started. This pass verifies files/mapping and inspects the existing documentation proof; it is not browser, responsive, motion, device or performance acceptance.
+
+## Current authority and verified files
+
+Owner visual feedback remains recorded in [APPROVAL_AND_VERIFICATION.md](C:/Users/Christian/forge-dev/docs/design-assets/2026-10-23/APPROVAL_AND_VERIFICATION.md). The original README/manifests' earlier "owner review pending" fields are historical production metadata, superseded for visual feedback by that addendum. **Technical integration approval remains pending.** Do not reinterpret owner visual acceptance as completed phone/performance/accessibility testing.
+
+- **34 selected PNG masters:** 30 medals (14 specific designs plus fallback, earned/locked) and four landing layers. Every recorded SHA-256 and byte count matches.
+- **34 native lossless WebP exports:** every recorded SHA-256 and byte count matches. The prior lossless export's decoded alpha/visible-RGB comparison remains its recorded evidence; no fresh pixel decode was performed today.
+- **14 semantic mappings:** exact ID, real name, category, requirement type and requirement value match ARTWORK_MAPPING.md inside the original achievement ZIP. One selected fallback pair is present. No row IDs, emoji, demo labels or nearest-tier substitutions.
+- Masters total **50,331,059 bytes**; exports **32,600,330 bytes**, of which the four landing exports are **4,184,874 bytes**. These are native review intermediates, not a measured production download budget.
+
+Fresh checks and detector output: [asset/hash/mapping evidence](C:/Users/Christian/forge-dev/docs/reviews/evidence/design-preparation-2026-10-24/asset-hash-mapping-checks.json), [static token contrast](C:/Users/Christian/forge-dev/docs/reviews/evidence/design-preparation-2026-10-24/static-token-contrast.json), [raw detector suggestions](C:/Users/Christian/forge-dev/docs/reviews/evidence/design-preparation-2026-10-24/detector.json).
+
+## Concrete proof findings — source/static evidence
+
+These concern [REVIEW_LOSSLESS.html](C:/Users/Christian/forge-dev/docs/design-assets/2026-10-23/REVIEW_LOSSLESS.html), a documentation proof. They are not reproduced production application defects. No rendered UI quality score is assigned without the missing browser evidence.
+
+| Item | Evidence and impact | Next design pass / acceptance |
+|---|---|---|
+| **P2 — sample CTA contrast** | The display-only sample CTA inherits `#f4f5fa` on `#8754ec`: static sRGB contrast **4.277:1**, below the normal-text 4.5:1 target. The proof can render this small. It is explicitly a noninteractive sample, so this is not a claim about the actual sign-in button. | Select a violet/text combination meeting normal-text contrast in the next proof; `#ffffff` on the existing toolbar's `#7553e8` calculates **5.049:1**. Preserve approved visual identity; verify rendered hover/focus/disabled states for real interface buttons later. |
+| **P2 — fitted landing proof is not a phone composition** | Copy remains an absolute overlay with max-width 38%; clamps permit **8px eyebrow / 10px body / 10px CTA**. The mobile rule changes margins, not composition. Source alone establishes those possible sizes, not a measured clipping failure. | Prepare 360/390px art-and-copy composition with normal readable text sizes and all four people preserved, using one registered scene transform. A separately stacked artwork region is already permitted by the handoff. Capture actual rendered widths and 200% text zoom; no independent cover crops per layer. |
+| **P2 — locked medals absent from small-size row** | Each `.small` row references earned art only at 72/56/48px. Locked art appears in the large pair, so small-size earned/locked comparison is incomplete. | Next standalone proof shows **both** states at all three sizes, with adjacent real names/state labels and fallback. Inspect on actual navy surfaces at normal/high density; CSS source does not establish legibility. |
+| **P2 — offscreen motion is not paused** | Proof handles `visibilitychange`, a pause button and CSS reduced-motion media query; no offscreen/intersection handling is present. Landing sits below the medal gallery and can animate while offscreen. No runtime CPU or playback behavior was measured. | In the next proof, pause all decorative animations when offscreen as well as hidden, respecting the user's manual pause and OS reduced motion. Verify keyboard pause/resume, runtime preference changes and no catch-up jump. Party remains static. Document pause-state persistence scope. |
+| **Pending performance gate** | Native artwork is substantially larger than final responsive needs; current proof references native-size exports. Browser download/decoding/memory/paint/layout-shift evidence is absent. A review gallery's full set must not be copied as a production-loading strategy. | Prepare measured size-specific derivatives after the visual sizing/crop pass, preserve masters and alpha, record tools/dimensions/hashes/bytes, and test actual agreed device/network conditions. No performance acceptance from lossless conversion alone. |
+
+Positive source observations to retain: fixed common canvas for the four layers, static party registration, real HTML proof copy, explicit sample-only CTA, 44px-minimum toolbar buttons, focus-visible styling, restrained approved cloud/mist/glint/firefly intent and CSS reduced-motion suppression before JavaScript.
+
+The mechanical detector returned **41 suggestions**, not 41 verified defects. Its low-contrast examples assume white backgrounds/black inherited text that do not match the proof's actual inherited dark tokens: measured body **17.140:1**, muted card text **8.979:1**, notice on body **11.550:1**. Do not report those examples as actual contrast failures. Full-bleed scene edges, transparency-grid stripes, low-opacity atmosphere and sparse glints/fireflies follow this review surface and approved brief; generic style warnings do not override that direction. Actual artwork-overlay contrast and flashing/playback remain unverified.
+
+## Next concrete deliverable
+
+Prepare a **separate** documentation proof revision, preserving both existing HTML proofs: earned/locked size matrix, common-transform desktop/tablet/360/390px landing compositions, readable live copy, static/reduced-motion states and complete pause/offscreen behavior. Render one bounded desktop/mobile round and at most one correction confirmation; record captures, browser/device and failures honestly. Previous localhost/file access limitations remain respected; do not bypass browser policy or publish assets just to obtain screenshots.
+
+Only after that visual/technical review should the measured derivative manifest and integration package be finalized. Keep Pack02 dashboard static artwork, all four people in the 130px phone hero, semantic fallback, real HTML labels and historical unsupported awards unchanged. Unknown/unavailable semantics get fallback; unearned unsupported definitions are "not available yet", not fabricated attainable goals. No new achievement rules or source-level authoring permission changes are part of design work.
+
+No new instruction is needed for Claude while Batch B is running. He keeps application-edit ownership and returns the completed package before independent readiness review. This report is Codex's own preparation queue; do not ask Claude to integrate artwork or change the running tunnel in the middle of Batch B.

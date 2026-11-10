@@ -1,230 +1,163 @@
-import { useState } from 'react'
-import Auth from "./Auth";
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import crystalIcon from '../assets/landing/forge-crystal-icon.webp'
+import staticScene from '../assets/landing/motion/static-fallback.webp'
+import landscape from '../assets/landing/motion/landscape.webp'
+import bodies from '../assets/landing/motion/party-bodies.webp'
+import cloakOne from '../assets/landing/motion/cloak-01.webp'
+import cloakTwo from '../assets/landing/motion/cloak-02.webp'
+import cloakThree from '../assets/landing/motion/cloak-03.webp'
+import cloakFour from '../assets/landing/motion/cloak-04.webp'
+import clouds from '../assets/landing/motion/clouds.webp'
+import mistFar from '../assets/landing/motion/mist-far.webp'
+import mistNear from '../assets/landing/motion/mist-near.webp'
+import './Landing.css'
 
-export default function Landing({ onLogin }) {
-  const [showAuth, setShowAuth] = useState(false)
-  const [authMode, setAuthMode] = useState('login')
+// All party layers share the original 1672 × 941 canvas. These are the
+// reviewed shoulder pivots; do not independently crop/scale a cloak.
+const CLOAKS = [
+  { src: cloakOne, origin: '64.593301% 54.303932%', delay: '0s' },
+  { src: cloakTwo, origin: '70.095694% 51.859724%', delay: '-1.1s' },
+  { src: cloakThree, origin: '77.811005% 55.047821%', delay: '-2.3s' },
+  { src: cloakFour, origin: '85.167464% 51.434644%', delay: '-3.6s' },
+]
+const GLINTS = [
+  { x: 79.2, y: 28.6, delay: '-1s' }, { x: 82.7, y: 22.7, delay: '-4s' },
+  { x: 85.1, y: 35.5, delay: '-6s' }, { x: 91.9, y: 73.5, delay: '-2s' },
+]
+const FIREFLIES = [
+  { x: 57.2, y: 65.2, delay: '-2s' }, { x: 62.3, y: 72.5, delay: '-5s' },
+  { x: 89.4, y: 65.1, delay: '-7s' }, { x: 94.1, y: 77.4, delay: '-1s' },
+  { x: 74.2, y: 43.8, delay: '-4s' },
+]
 
-  if (showAuth) {
-    return (
-      <div className="relative">
-        <button 
-          onClick={() => setShowAuth(false)}
-          className="absolute top-6 left-6 text-purple-300 hover:text-white transition z-10 font-bold text-lg"
-        >
-          ⬅ Back
-        </button>
-        <Auth onLogin={onLogin} initialMode={authMode} />
-      </div>
-    )
+function AboutForge({ onClose, onSignIn }) {
+  const ref = useRef(null)
+  const title = useRef(null)
+  useLayoutEffect(() => {
+    const dialog = ref.current
+    const opener = document.activeElement
+    const overflow = document.body.style.overflow
+    dialog.showModal()
+    title.current.focus()
+    document.body.style.overflow = 'hidden'
+    return () => {
+      dialog.close()
+      document.body.style.overflow = overflow
+      if (opener?.isConnected) opener.focus({ preventScroll: true })
+    }
+  }, [])
+  return <dialog ref={ref} className="fl-about-dialog" aria-labelledby="fl-about-title"
+    onCancel={e => { e.preventDefault(); onClose() }}
+    onClick={e => {
+      if (e.target !== e.currentTarget) return
+      const r = ref.current.getBoundingClientRect()
+      if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) onClose()
+    }}
+    onKeyDown={e => {
+      if (e.key !== 'Tab') return
+      const buttons = ref.current.querySelectorAll('button')
+      const first = buttons[0], last = buttons[buttons.length - 1]
+      if (e.shiftKey && (document.activeElement === first || document.activeElement === title.current)) { e.preventDefault(); last.focus() }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus() }
+    }}>
+    <button className="fl-about-close" aria-label="Close about Forge.Dev" onClick={onClose}>✕</button>
+    <p className="fl-eyebrow">Your coding journey</p>
+    <h2 id="fl-about-title" ref={title} tabIndex={-1}>About Forge.Dev</h2>
+    <p>Forge.Dev is a gamified coding-learning platform. Practice introductory programming through quests, lessons and achievements.</p>
+    <p>Learn in Python, Java or C#. Your instructor prepares the learning content, and your progress grows as you complete quests.</p>
+    <p className="fl-about-note">Use your assigned account to sign in. Need access or a password reset? Contact your instructor or administrator.</p>
+    <button className="fl-cta" onClick={onSignIn}>Go to sign in <span aria-hidden="true">→</span></button>
+  </dialog>
+}
+
+export default function Landing() {
+  const navigate = useNavigate()
+  const [paused, setPaused] = useState(false)
+  const [aboutOpen, setAboutOpen] = useState(false)
+  const [hidden, setHidden] = useState(() => typeof document !== 'undefined' && document.hidden)
+  const [reducedMotion, setReducedMotion] = useState(() => typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches)
+  const [motionForced, setMotionForced] = useState(false)
+  const [sceneReady, setSceneReady] = useState(false)
+  const [sceneFailed, setSceneFailed] = useState(false)
+  const effectiveReduced = reducedMotion && !motionForced
+  const layered = sceneReady && !sceneFailed && !effectiveReduced
+
+  useEffect(() => {
+    if (!window.matchMedia) return
+    const query = window.matchMedia('(prefers-reduced-motion: reduce)')
+    const change = e => { setReducedMotion(e.matches); setMotionForced(false) }
+    query.addEventListener('change', change)
+    return () => query.removeEventListener('change', change)
+  }, [])
+
+  useEffect(() => {
+    const change = () => setHidden(document.hidden)
+    document.addEventListener('visibilitychange', change)
+    return () => document.removeEventListener('visibilitychange', change)
+  }, [])
+
+  // Keep the original complete still until every layer is decoded. A missing
+  // layer must never expose a clean-plate hole or a doubled/partial character.
+  useEffect(() => {
+    let active = true
+    const sources = [landscape, bodies, ...CLOAKS.map(c => c.src), clouds, mistFar, mistNear]
+    const images = sources.map(src => {
+      const image = new Image()
+      image.src = src
+      return image
+    })
+    Promise.all(images.map(image => image.decode()))
+      .then(() => { if (active) setSceneReady(true) })
+      .catch(() => { if (active) setSceneFailed(true) })
+    return () => { active = false }
+  }, [])
+
+  const toggleMotion = () => {
+    if (effectiveReduced) { setMotionForced(true); setPaused(false) }
+    else setPaused(value => !value)
   }
+  const label = sceneFailed ? 'Static artwork' : effectiveReduced ? 'Enable animation' : paused ? 'Resume animation' : 'Pause animation'
+  const sceneClass = ['fl-scene', layered ? 'has-motion' : '', paused || hidden || aboutOpen ? 'is-paused' : ''].filter(Boolean).join(' ')
+  const signIn = () => navigate('/auth')
 
-  return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-950 via-purple-950/30 to-slate-950 text-white relative overflow-hidden">
-      {/* Animated background particles */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        {[...Array(20)].map((_, i) => (
-          <div
-            key={i}
-            className="absolute w-2 h-2 bg-purple-500/30 rounded-full animate-float"
-            style={{
-              left: `${Math.random() * 100}%`,
-              top: `${Math.random() * 100}%`,
-              animationDelay: `${Math.random() * 5}s`,
-              animationDuration: `${5 + Math.random() * 10}s`
-            }}
-          ></div>
-        ))}
+  return <div className="fl-page">
+    <div id="forge-landing-scene" className={sceneClass} data-artwork="layered-party-v2.5" data-scene-state={layered ? 'layered' : 'static'} aria-hidden="true">
+      <div className="fl-art-plane">
+        <img className="fl-layer fl-static" src={staticScene} alt="" width="1672" height="941" fetchPriority="high" />
+        <div className="fl-layered-art">
+          <img className="fl-layer fl-landscape" src={landscape} alt="" width="1672" height="941" />
+          <div className="fl-sky"><img className="fl-clouds fl-moving" src={clouds} alt="" /></div>
+          <div className="fl-cave-light fl-moving" />
+          <img className="fl-mist fl-mist-far fl-moving" src={mistFar} alt="" />
+          <img className="fl-mist fl-mist-near fl-moving" src={mistNear} alt="" />
+          {CLOAKS.map((cloak,i) => <img key={cloak.src} className={`fl-layer fl-cloak fl-cloak-${i + 1} fl-moving`} src={cloak.src} alt="" width="1672" height="941" style={{ transformOrigin: cloak.origin, animationDelay: cloak.delay }} />)}
+          <img className="fl-layer fl-bodies" src={bodies} alt="" width="1672" height="941" />
+          {GLINTS.map((g,i) => <i key={i} className="fl-glint fl-moving" style={{left:`${g.x}%`,top:`${g.y}%`,animationDelay:g.delay}} />)}
+          {FIREFLIES.map((g,i) => <i key={i} className="fl-firefly fl-moving" style={{left:`${g.x}%`,top:`${g.y}%`,animationDelay:g.delay}} />)}
+        </div>
       </div>
-
-      <div className="relative z-10">
-        {/* Navigation - Game Header Style */}
-        <nav className="container mx-auto px-6 py-6 flex justify-between items-center">
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 bg-gradient-to-br from-purple-600 to-pink-600 rounded-lg flex items-center justify-center text-2xl shadow-lg shadow-purple-600/50">
-              ⚡
-            </div>
-            <div>
-              <span className="text-2xl font-bold bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent">
-                Forge.dev
-              </span>
-              <div className="text-xs text-purple-300 font-mono">v1.0.0</div>
-            </div>
-          </div>
-          <div className="flex gap-3">
-            <button 
-              onClick={() => { setAuthMode('login'); setShowAuth(true) }}
-              className="px-6 py-3 bg-slate-800/80 hover:bg-slate-700 border-2 border-slate-600 hover:border-purple-500 rounded-lg transition font-bold shadow-lg"
-            >
-              🎮 Login
-            </button>
-            <button 
-              onClick={() => { setAuthMode('register'); setShowAuth(true) }}
-              className="px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 rounded-lg transition font-bold shadow-xl shadow-purple-600/50 transform hover:scale-105"
-            >
-              Start Quest ➜
-            </button>
-          </div>
-        </nav>
-
-        {/* Hero Section - RPG Style */}
-        <main className="container mx-auto px-6 py-16 text-center">
-          <div className="max-w-6xl mx-auto">
-            {/* Server Status Badge */}
-            <div className="inline-flex items-center gap-3 bg-gradient-to-r from-green-600/20 to-emerald-600/20 border-2 border-green-500/50 rounded-lg px-6 py-3 mb-12 shadow-lg shadow-green-500/20">
-              <span className="w-3 h-3 bg-green-400 rounded-full animate-pulse"></span>
-              <span className="text-sm font-bold text-green-300 font-mono">SERVER ONLINE</span>
-              <span className="text-slate-500">|</span>
-              <span className="text-sm text-purple-300 font-mono">Python • Java • C#</span>
-            </div>
-            
-            {/* Main Title - Epic Game Style */}
-            <div className="mb-8">
-              <h1 className="text-7xl md:text-8xl lg:text-9xl font-black mb-4 drop-shadow-2xl">
-                <span className="bg-gradient-to-r from-purple-400 via-pink-400 to-purple-400 bg-clip-text text-transparent animate-pulse">
-                  FORGE
-                </span>
-                <span className="text-white">.DEV</span>
-              </h1>
-              <div className="text-3xl md:text-4xl font-bold text-slate-300 mb-6">
-                Code Your Legend 🗡️
-              </div>
-            </div>
-            
-            <p className="text-xl md:text-2xl text-slate-300 mb-12 max-w-3xl mx-auto leading-relaxed">
-              Embark on epic coding quests, defeat bugs, and level up your skills in the ultimate 
-              <span className="text-purple-400 font-bold"> gamified programming arena</span>.
-            </p>
-            
-            {/* CTA Buttons - Game Menu Style */}
-            <div className="flex flex-col sm:flex-row gap-5 justify-center mb-20">
-              <button 
-                onClick={() => { setAuthMode('register'); setShowAuth(true) }}
-                className="group relative px-12 py-6 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 rounded-xl font-black text-xl transition transform hover:scale-105 shadow-2xl shadow-purple-600/50 border-4 border-purple-400/30"
-              >
-                <span className="flex items-center justify-center gap-3">
-                  <span className="text-2xl">⚔️</span>
-                  START YOUR QUEST
-                  <span className="text-2xl">⚔️</span>
-                </span>
-                <div className="absolute inset-0 bg-white/20 rounded-xl blur opacity-0 group-hover:opacity-100 transition"></div>
-              </button>
-              <button className="px-12 py-6 bg-slate-800/90 hover:bg-slate-700/90 rounded-xl font-bold text-xl transition border-4 border-slate-600 hover:border-purple-500 shadow-xl backdrop-blur">
-                📜 View Leaderboard
-              </button>
-            </div>
-
-            {/* ✅ COMMUNITY STATS - Server Wide (Not Personal) */}
-            <div className="grid md:grid-cols-3 gap-6 mb-16 max-w-4xl mx-auto">
-              <div className="bg-gradient-to-b from-purple-900/40 to-slate-900/80 p-6 rounded-xl border-2 border-purple-600/30 shadow-lg">
-                <div className="text-4xl mb-3">🗡️</div>
-                <div className="text-purple-300 font-mono text-sm mb-1">QUESTS SOLVED</div>
-                <div className="text-3xl font-bold text-white">12,847</div>
-                <div className="text-xs text-green-400 mt-2 font-mono">+124 today</div>
-              </div>
-              <div className="bg-gradient-to-b from-pink-900/40 to-slate-900/80 p-6 rounded-xl border-2 border-pink-600/30 shadow-lg">
-                <div className="text-4xl mb-3">⚡</div>
-                <div className="text-pink-300 font-mono text-sm mb-1">TOTAL XP EARNED</div>
-                <div className="text-3xl font-bold text-white">2.4M</div>
-                <div className="text-xs text-green-400 mt-2 font-mono">+8.5k today</div>
-              </div>
-              <div className="bg-gradient-to-b from-blue-900/40 to-slate-900/80 p-6 rounded-xl border-2 border-blue-600/30 shadow-lg">
-                <div className="text-4xl mb-3">👥</div>
-                <div className="text-blue-300 font-mono text-sm mb-1">ACTIVE PLAYERS</div>
-                <div className="text-3xl font-bold text-white">847</div>
-                <div className="text-xs text-green-400 mt-2 font-mono">142 online now</div>
-              </div>
-            </div>
-
-            {/* Feature Cards - RPG Inventory Style */}
-            <div className="grid md:grid-cols-3 gap-6 mb-20">
-              {[
-                {
-                  icon: '🎮',
-                  rarity: 'legendary',
-                  title: 'GAMIFIED LEARNING',
-                  desc: 'Earn XP, unlock achievements, and dominate leaderboards',
-                  color: 'from-yellow-600/20 to-orange-600/20',
-                  border: 'border-yellow-500/50',
-                  glow: 'shadow-yellow-500/30'
-                },
-                {
-                  icon: '⚡',
-                  rarity: 'epic',
-                  title: 'INSTANT FEEDBACK',
-                  desc: 'Real-time code execution with secure sandbox testing',
-                  color: 'from-purple-600/20 to-pink-600/20',
-                  border: 'border-purple-500/50',
-                  glow: 'shadow-purple-500/30'
-                },
-                {
-                  icon: '👥',
-                  rarity: 'rare',
-                  title: 'THREE CLASSES',
-                  desc: 'Student • Instructor • Admin - Choose your role',
-                  color: 'from-blue-600/20 to-cyan-600/20',
-                  border: 'border-blue-500/50',
-                  glow: 'shadow-blue-500/30'
-                }
-              ].map((feature, i) => (
-                <div 
-                  key={i} 
-                  className={`bg-gradient-to-b ${feature.color} backdrop-blur p-8 rounded-2xl border-2 ${feature.border} shadow-lg ${feature.glow} hover:transform hover:scale-105 transition group cursor-pointer`}
-                >
-                  <div className="flex justify-between items-start mb-4">
-                    <div className="text-6xl group-hover:scale-110 transition-transform">{feature.icon}</div>
-                    <span className={`text-xs font-bold px-3 py-1 rounded-full border ${feature.border} uppercase tracking-wider`}>
-                      {feature.rarity}
-                    </span>
-                  </div>
-                  <h3 className="text-2xl font-black mb-3 text-white tracking-wide">{feature.title}</h3>
-                  <p className="text-slate-300 leading-relaxed">{feature.desc}</p>
-                  <div className="mt-6 pt-6 border-t border-white/10">
-                    <div className="text-xs text-slate-400 font-mono">+100 XP | +1 LEVEL</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {/* Supported Languages - Like Game Platforms */}
-            <div className="bg-slate-900/60 backdrop-blur p-8 rounded-2xl border-2 border-slate-700 inline-block">
-              <div className="text-sm text-slate-400 mb-4 font-mono uppercase tracking-widest">Supported Languages</div>
-              <div className="flex gap-8">
-                {['🐍 Python', '☕ Java', '💻 C#'].map((lang) => (
-                  <div key={lang} className="flex items-center gap-3 bg-slate-800/80 px-6 py-3 rounded-lg border-2 border-slate-600 hover:border-purple-500 transition">
-                    <span className="text-2xl">{lang.split(' ')[0]}</span>
-                    <span className="font-bold text-slate-300">{lang.split(' ')[1]}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </main>
-
-        {/* Footer */}
-        <footer className="container mx-auto px-6 py-8 text-center text-slate-500 text-sm border-t border-slate-800">
-          <p className="font-mono">⚔️ Forge.dev • Capstone Project • Adamson University ⚔️</p>
-        </footer>
-      </div>
-
-      {/* Custom CSS for floating animation */}
-      <style>{`
-        @keyframes float {
-          0%, 100% { transform: translateY(0px); }
-          50% { transform: translateY(-20px); }
-        }
-        .animate-float {
-          animation: float 6s ease-in-out infinite;
-        }
-        @keyframes gradient {
-          0%, 100% { background-position: 0% 50%; }
-          50% { background-position: 100% 50%; }
-        }
-        .animate-gradient {
-          background-size: 200% 200%;
-          animation: gradient 3s ease infinite;
-        }
-      `}</style>
+      <div className="fl-shade" />
     </div>
-  )
+    <header className="fl-nav">
+      <div className="fl-logo"><img src={crystalIcon} alt="" width="28" height="36" /><span>Forge.Dev</span></div>
+      <button className="fl-login-btn" onClick={signIn}>Log in</button>
+    </header>
+    <main className="fl-main">
+      <div className="fl-copy">
+        <p className="fl-eyebrow">Your coding adventure starts here</p>
+        <h1>Code your<br /><em>legend.</em></h1>
+        <p className="fl-intro">Learn programming through quests,<br className="fl-desktop-break" /> practice, and discovery.</p>
+        <button className="fl-cta" onClick={signIn}>Start your journey <span aria-hidden="true">→</span></button>
+        <p className="fl-signin-caption">Sign in with your assigned account.</p>
+      </div>
+    </main>
+    <footer className="fl-bottombar">
+      <ul className="fl-langs" aria-label="Supported programming languages"><li>Python</li><li>Java</li><li>C#</li></ul>
+      <button className="fl-about" onClick={() => setAboutOpen(true)}>About Forge.Dev</button>
+      <button className="fl-pause" onClick={toggleMotion} aria-label="Decorative animation" aria-pressed={!effectiveReduced && !paused && !sceneFailed} aria-describedby="fl-motion-status" disabled={sceneFailed}>{label}</button>
+      <span id="fl-motion-status" className="sr-only" role="status">{sceneFailed ? 'Animation unavailable; the complete static artwork is shown.' : effectiveReduced ? 'Reduced motion: static artwork is shown.' : !sceneReady ? 'Static artwork is shown while motion layers load.' : paused ? 'Decorative animation is paused.' : 'Decorative animation is enabled.'}</span>
+    </footer>
+    {aboutOpen && <AboutForge onClose={() => setAboutOpen(false)} onSignIn={signIn} />}
+  </div>
 }

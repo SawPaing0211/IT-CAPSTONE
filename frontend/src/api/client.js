@@ -1,5 +1,6 @@
 // src/api/client.js
-const BASE = 'http://localhost:5000'
+export const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000'
+const BASE = API_BASE
 
 async function request(path, options = {}) {
   const token = localStorage.getItem('token')
@@ -43,10 +44,37 @@ async function request(path, options = {}) {
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: 'Unknown error' }))
-    throw new Error(err.error || `HTTP ${res.status}`)
+    const error = new Error(err.error || `HTTP ${res.status}`)
+    error.status = res.status
+    error.data = err
+    throw error
   }
 
   return res.json()
+}
+
+// fetch() for the pages that still build their own requests: adds the access
+// token and, like api.* above, silently refreshes it once when it has expired,
+// so a long-open tab keeps working instead of showing a load error.
+export async function authFetch(url, options = {}) {
+  const send = (t) => fetch(url, {
+    ...options,
+    headers: { ...(options.headers || {}), ...(t ? { Authorization: `Bearer ${t}` } : {}) },
+  })
+  const res = await send(localStorage.getItem('token'))
+  if (res.status !== 401) return res
+
+  const refreshToken = localStorage.getItem('refresh_token')
+  if (!refreshToken) { localStorage.clear(); window.location.href = '/'; return res }
+  const refreshRes = await fetch(`${BASE}/api/auth/refresh`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ refresh_token: refreshToken }),
+  })
+  if (!refreshRes.ok) { localStorage.clear(); window.location.href = '/'; return res }
+  const { access_token } = await refreshRes.json()
+  localStorage.setItem('token', access_token)
+  return send(access_token)
 }
 
 export const api = {

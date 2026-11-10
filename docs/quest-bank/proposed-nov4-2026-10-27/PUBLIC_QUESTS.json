@@ -1,0 +1,42 @@
+[
+  {
+    "id": "Q01",
+    "title": "Combine Two Integers",
+    "concept": "Input, integer arithmetic and output",
+    "statement": "Read two integers and print their sum.",
+    "constraints": "Two integers a and b, each from -1,000,000,000 through 1,000,000,000.",
+    "format": "Input: two whitespace-separated integers a b. Output: their sum as one integer.",
+    "example_input": "3 4\n",
+    "example_output": "7\n"
+  },
+  {
+    "id": "Q02",
+    "title": "Greatest of Three",
+    "concept": "Comparisons and selection",
+    "statement": "Read three integers and print the greatest value. Equal greatest values are allowed.",
+    "constraints": "Three integers a, b and c, each from -1,000,000,000 through 1,000,000,000.",
+    "format": "Input: three whitespace-separated integers a b c. Output: the greatest value, once.",
+    "example_input": "3 8 5\n",
+    "example_output": "8\n"
+  },
+  {
+    "id": "Q03",
+    "title": "Sum the Even Numbers",
+    "concept": "Bounded loops and accumulation; alternative arithmetic formula",
+    "statement": "Print the sum of all even integers from 1 through n, including n when it is even. If there are no such integers, print 0.",
+    "constraints": "One integer n from 0 through 100,000. Use a 64-bit integer in Java/C#; the sum can exceed a 32-bit signed integer.",
+    "format": "Input: one integer n. Output: the sum as one integer.",
+    "example_input": "6\n",
+    "example_output": "12\n"
+  },
+  {
+    "id": "Q04",
+    "title": "Sum the Digits",
+    "concept": "Repetition, division/remainder and sign handling",
+    "statement": "Print the sum of the decimal digits of the absolute value of n. The digit sum of 0 is 0.",
+    "constraints": "One integer n from -1,000,000,000 through 1,000,000,000. Ignore its sign; leading zeroes do not change its numeric value.",
+    "format": "Input: one integer n. Output: its digit sum as one integer.",
+    "example_input": "482\n",
+    "example_output": "14\n"
+  }
+]

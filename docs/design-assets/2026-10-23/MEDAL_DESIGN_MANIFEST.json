@@ -1,0 +1,154 @@
+{
+  "status": "Design specification retained; all selected candidates now generated and inspected. Use ASSET_MANIFEST.json for selected filenames/QA. Owner approval pending.",
+  "date": "2026-10-23",
+  "source": "ARTWORK_MAPPING.md in docs/ui-handoff/ForgeDev_Simple_Adventure_Achievements_Batch.zip",
+  "reference": "../../design-references/2026-10-23/achievement-medal-approved-concept.png",
+  "variants": [
+    "earned",
+    "locked"
+  ],
+  "format": "PNG with true alpha transparency; identical canvas/framing for each state pair",
+  "filenames": "<asset-id>--<state>.png",
+  "display": {
+    "desktop": 72,
+    "mobile": 56,
+    "toast": 48
+  },
+  "medals": [
+    {
+      "id": "medal-first-quest",
+      "name": "First Steps",
+      "category": "student",
+      "requirement_type": "quest_count",
+      "requirement_value": 1,
+      "motif": "a single large four-point compass star",
+      "status": "generated, visually inspected, alpha checked; pending owner review"
+    },
+    {
+      "id": "medal-quest-master",
+      "name": "Quest Master",
+      "category": "student",
+      "requirement_type": "quest_count",
+      "requirement_value": 10,
+      "motif": "a bold crossed pair of small quest swords beneath a prominent central four-point star, a visibly more elaborate mastery tier than First Steps",
+      "status": "generated, visually inspected, alpha checked; pending owner review"
+    },
+    {
+      "id": "medal-streak-week",
+      "name": "Week Warrior",
+      "category": "student",
+      "requirement_type": "streak",
+      "requirement_value": 7,
+      "motif": "one clear stylized upright flame",
+      "status": "generated, visually inspected, alpha checked; pending owner review"
+    },
+    {
+      "id": "medal-streak-month",
+      "name": "Marathon Coder",
+      "category": "student",
+      "requirement_type": "streak",
+      "requirement_value": 30,
+      "motif": "a strong twin-layer flame enclosed by a restrained laurel half-wreath, clearly more elaborate than Week Warrior",
+      "status": "generated, visually inspected, alpha checked; pending owner review"
+    },
+    {
+      "id": "medal-python",
+      "name": "Python Novice",
+      "category": "student",
+      "requirement_type": "python_count",
+      "requirement_value": 5,
+      "motif": "two elegant intertwined stylized snake silhouettes forming one clear programming emblem, no text",
+      "status": "generated, visually inspected, alpha checked; pending owner review"
+    },
+    {
+      "id": "medal-java",
+      "name": "Java Apprentice",
+      "category": "student",
+      "requirement_type": "java_count",
+      "requirement_value": 5,
+      "motif": "a clean cup with three rising curls of steam, no text",
+      "status": "generated, visually inspected, alpha checked; pending owner review"
+    },
+    {
+      "id": "medal-csharp",
+      "name": "C# Wizard",
+      "category": "student",
+      "requirement_type": "csharp_count",
+      "requirement_value": 5,
+      "motif": "a large sharp faceted hexagonal crystal with a simple crisp hash-symbol relief, no lettering",
+      "status": "generated, visually inspected, alpha checked; pending owner review"
+    },
+    {
+      "id": "medal-hard-quests",
+      "name": "Hard Coder",
+      "category": "student",
+      "requirement_type": "hard_count",
+      "requirement_value": 5,
+      "motif": "a tall angular mountain peak with a single four-point summit star, bold readable relief",
+      "status": "generated, visually inspected, alpha checked; pending owner review"
+    },
+    {
+      "id": "medal-debugging",
+      "name": "Debug Master",
+      "category": "student",
+      "requirement_type": "debug_count",
+      "requirement_value": 5,
+      "motif": "a simple six-legged bug silhouette inside a clean magnifying-glass ring",
+      "status": "generated, visually inspected, alpha checked; pending owner review"
+    },
+    {
+      "id": "medal-first-module",
+      "name": "First Module",
+      "category": "instructor",
+      "requirement_type": "lesson_count",
+      "requirement_value": 1,
+      "motif": "one open book with clear thick pages and a central small violet crystal",
+      "status": "generated, visually inspected, alpha checked; pending owner review"
+    },
+    {
+      "id": "medal-activity-builder",
+      "name": "Activity Architect",
+      "category": "instructor",
+      "requirement_type": "problem_count",
+      "requirement_value": 10,
+      "motif": "a balanced pair of fitted architectural puzzle blocks forming a clean little arch",
+      "status": "generated, visually inspected, alpha checked; pending owner review"
+    },
+    {
+      "id": "medal-class-starter",
+      "name": "Class Starter",
+      "category": "instructor",
+      "requirement_type": "student_quest",
+      "requirement_value": 1,
+      "motif": "one small four-point star above a simple open palm, a learner's first completion",
+      "status": "generated, visually inspected, alpha checked; pending owner review"
+    },
+    {
+      "id": "medal-resource-curator",
+      "name": "Resource Curator",
+      "category": "instructor",
+      "requirement_type": "file_count",
+      "requirement_value": 10,
+      "motif": "a neatly stacked trio of document sheets with a small clear paperclip",
+      "status": "generated, visually inspected, alpha checked; pending owner review"
+    },
+    {
+      "id": "medal-multi-subject",
+      "name": "Multi-Class Maestro",
+      "category": "instructor",
+      "requirement_type": "subjects_taught",
+      "requirement_value": 3,
+      "motif": "three simple connected upright book spines fanning outward, visually distinct from one open book",
+      "status": "generated, visually inspected, alpha checked; pending owner review"
+    },
+    {
+      "id": "medal-fallback",
+      "name": "Generic fallback",
+      "category": null,
+      "requirement_type": null,
+      "requirement_value": null,
+      "motif": "neutral oval cabochon in a thin gold/silver bezel",
+      "status": "generated, visually inspected, alpha checked; pending owner review"
+    }
+  ]
+}
